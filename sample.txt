@@ -1,3 +1,6 @@
 type tuple (int, int, float);
 type trailing (int, int,);
 type nested ((int, int), (int, int));
+type fn int -> bool;
+type fn int -> int -> bool;
+type fn int -> (int -> bool);
