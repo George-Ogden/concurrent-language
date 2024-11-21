@@ -1,0 +1,3 @@
+type tuple (int, int, float);
+type trailing (int, int,);
+type nested ((int, int), (int, int));
