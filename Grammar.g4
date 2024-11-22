@@ -11,6 +11,8 @@ PIPE : '|' ;
 RIGHTARROW: '->' ;
 NEGATE: '-' ;
 
+IF : 'if' ;
+ELSE : 'else' ;
 TYPE : 'type' ;
 
 OPERATOR: [&|=!/*+^$<>]+ ;
@@ -23,10 +25,7 @@ program : imports defs EOF ;
 
 imports: ;
 
-defs
-    : def (';' def)*  ';'?
-    |
-    ;
+defs : | def (';' def)*  ';'? ;
 
 def
     : type_def
@@ -68,7 +67,8 @@ fn_type_tail
     | '(' fn_type ')'
     ;
 
-assignment: assignee '=' expr ;
+assignment : assignee '=' expr ;
+assignment_list : | assignment (';' assignment) * ';'? ;
 
 assignee
     : ID
@@ -78,14 +78,15 @@ assignee
 
 infix_free_expr
     : value
-//    | if_expr
-//    | match_expr
-   | tuple
-//    | record
-//    | '(' expr ')'
-//    | fn_def
-//    | access
-   | fn_call
+    | if_expr
+//     | match_expr
+//     | switch_expr
+    | tuple
+//     | record
+//     | '(' expr ')'
+//     | fn_def
+//     | access
+    | fn_call
     ;
 
 expr : infix_free_expr | infix_call ;
@@ -103,3 +104,6 @@ infix_call : infix_free_expr (OPERATOR | INFIX_ID) expr;
 tuple: '(' expr_list ')';
 
 expr_list : | expr (',' expr)* ','? ;
+
+if_expr : IF '(' expr ')' block ELSE block ;
+block : '{' assignment_list expr '}' ;
