@@ -80,7 +80,7 @@ infix_free_expr
     : value
 //    | if_expr
 //    | match_expr
-//    | tuple
+   | tuple
 //    | record
 //    | '(' expr ')'
 //    | fn_def
@@ -100,4 +100,6 @@ int: '-'? UINT;
 
 fn_call : ID '(' expr_list ')' ;
 infix_call : infix_free_expr (OPERATOR | INFIX_ID) expr;
+tuple: '(' expr_list ')';
+
 expr_list : | expr (',' expr)* ','? ;
