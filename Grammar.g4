@@ -58,12 +58,12 @@ union_type
 
 fn_type : fn_type_head fn_type_tail ;
 
-fn_type_head
-    : return_type RIGHTARROW fn_type_head
+fn_type_tail
+    : RIGHTARROW return_type fn_type_tail
     |   /* epsilon */
     ;
 
-fn_type_tail
+fn_type_head
     : return_type
     | '(' fn_type ')'
     ;
