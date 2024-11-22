@@ -17,8 +17,8 @@ ELSE : 'else' ;
 TYPE : 'type' ;
 MATCH : 'match' ;
 
-OPERATOR: [&|=!/*+^$<>@]+ ;
-OPERATOR_ID: '_' '_' [&|=!/*+^$<>@]+ '_' '_';
+OPERATOR: [&|=!/*+^$<>@:]+ ;
+OPERATOR_ID: '_' '_' [&|=!/*+^$<>@:]+ '_' '_';
 INFIX_ID: '_' '_' [a-zA-Z_][a-zA-Z_0-9]* '_' '_' ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
 UINT: '0' | [1-9][0-9]* ;
