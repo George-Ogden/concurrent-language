@@ -10,16 +10,17 @@ RCURLY : '}' ;
 PIPE : '|' ;
 RIGHTARROW: '->' ;
 NEGATE: '-' ;
+DOT: '.' ;
 
 IF : 'if' ;
 ELSE : 'else' ;
 TYPE : 'type' ;
 MATCH : 'match' ;
 
-OPERATOR: [&|=!/*+^$<>]+ ;
+OPERATOR: [&|=!/*+^$<>@]+ ;
 INFIX_ID: '_' '_' [a-zA-Z_][a-zA-Z_0-9]* '_' '_' ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
-UINT: [1-9][0-9]* ;
+UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+ -> skip ;
 
 program : imports defs EOF ;
@@ -75,7 +76,7 @@ assignee
 //    | record_assignee
     ;
 
-infix_free_expr
+infix_access_free_expr
     : value
     | if_expr
     | match_expr
@@ -84,11 +85,10 @@ infix_free_expr
     | '(' expr ')'
     | tuple
     | fn_def
-//     | access
     | fn_call
     ;
 
-expr : infix_free_expr | infix_call ;
+expr : infix_access_free_expr | infix_call | access;
 
 value
     : int
@@ -99,7 +99,16 @@ value
 int: '-'? UINT;
 
 fn_call : ID '(' (expr | expr_list) ')' ;
-infix_call : infix_free_expr (OPERATOR | INFIX_ID) expr;
+
+infix_operator
+    : INFIX_ID
+    | OPERATOR
+    | DOT
+    | NEGATE
+    | PIPE
+    ;
+
+infix_call : infix_access_free_expr infix_operator expr;
 tuple: '(' expr_list ')';
 expr_list : | (expr ',' )+ expr? ;
 
@@ -111,5 +120,8 @@ fn_def : '(' typed_assignee_list ')' RIGHTARROW type block;
 typed_assignee_list : | (typed_assignee ',')+ typed_assignee ?;
 typed_assignee : assignee ':' type ;
 
+access: access_head access_tail;
 
+access_tail : DOT (ID | UINT | access_tail);
+access_head : infix_access_free_expr | infix_call ;
 block : '{' assignment_list expr '}' ;

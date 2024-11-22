@@ -54,3 +54,10 @@ a = (x: int, b: bool,) -> int -> int {
 a = (x: int, b: bool,) -> (int -> int) {
     ()
 };
+y = z | a;
+h = f @ g;
+t = a.b.c;
+f = a.0.0;
+t = a.b.c;
+f = a.1.1;
+j = t._b;
