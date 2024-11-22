@@ -1,9 +1,11 @@
 type tuple (int, int, float);
 type trailing (int, int,);
 type nested ((int, int), (int, int));
-type fn int -> bool;
-type fn int -> int -> bool;
-type fn (int -> int) -> bool;
+type f (int -> int) -> int;
+type g int -> (int -> int);
+type h int -> int -> int;
+type i (int) -> int -> int;
+type j ((int) -> ((int))) -> int;
 type maybe {some int | none};
 type list {cons (list, int) | nil};
 type tree { Node (tree, int, tree) | Leaf};
@@ -42,4 +44,13 @@ m = match (f) {
     Some x | None: {
         t
     };
+};
+a = () -> () {
+    ()
+};
+a = (x: int, b: bool,) -> int -> int {
+    ()
+};
+a = (x: int, b: bool,) -> (int -> int) {
+    ()
 };
