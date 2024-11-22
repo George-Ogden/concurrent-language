@@ -9,16 +9,34 @@ LCURLY : '{' ;
 RCURLY : '}' ;
 PIPE : '|' ;
 RIGHTARROW: '->' ;
+NEGATE: '-' ;
 
 TYPE : 'type' ;
+TRUE : 'true' ;
+FALSE : 'false';
 
+OPERATOR: [&|=!/*+\^\$<>]+ ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
+UINT: [1-9][0-9]+ ;
+INT: NEGATE? UINT ;
+BOOL: TRUE | FALSE ;
 WS: [ \t\n\r\f]+ -> skip ;
 
 
-program
-    : type_def (';' type_def)*  ';'? EOF
-    | EOF
+program : imports defs EOF ;
+
+imports: ;
+
+defs
+    : def (';' def)*  ';'?
+    |
+    ;
+
+def
+    : type_def
+    | assignment
+//    | trait_def
+//    | trait_impl
     ;
 
 type_def: TYPE ID type_expr;
@@ -30,6 +48,7 @@ return_type
     : ID
     | tuple_type
     | union_type
+//     | record_type
     ;
 
 tuple_type
@@ -51,4 +70,29 @@ fn_type_head
 fn_type_tail
     : return_type
     | '(' fn_type ')'
+    ;
+
+assignment: assignee '=' expr ;
+
+assignee
+    : ID
+//    | tuple_assignee
+//    | record_assignee
+    ;
+
+expr
+    : value
+//    | if_expr
+//    | tuple
+//    | record
+//    | '(' expr ')'
+//    | fn_def
+//    | access
+//    | fn_call
+    ;
+
+value
+    : INT
+//    | STRING
+    | BOOL
     ;

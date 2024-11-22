@@ -4,3 +4,4 @@ type nested ((int, int), (int, int));
 type fn int -> bool;
 type fn int -> int -> bool;
 type fn int -> (int -> bool);
+a = 10;
