@@ -14,6 +14,7 @@ NEGATE: '-' ;
 TYPE : 'type' ;
 
 OPERATOR: [&|=!/*+^$<>]+ ;
+INFIX_ID: '_' '_' [a-zA-Z_][a-zA-Z_0-9]* '_' '_' ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
 UINT: [1-9][0-9]* ;
 WS: [ \t\n\r\f]+ -> skip ;
@@ -75,7 +76,7 @@ assignee
 //    | record_assignee
     ;
 
-expr
+infix_free_expr
     : value
 //    | if_expr
 //    | match_expr
@@ -87,6 +88,8 @@ expr
    | fn_call
     ;
 
+expr : infix_free_expr | infix_call ;
+
 value
     : int
 //    | STRING
@@ -95,10 +98,6 @@ value
 
 int: '-'? UINT;
 
-fn_call
-    : prefix_call
-//     | infix_call
-    ;
-
-prefix_call : ID '(' expr_list ')' ;
+fn_call : ID '(' expr_list ')' ;
+infix_call : infix_free_expr (OPERATOR | INFIX_ID) expr;
 expr_list : | expr (',' expr)* ','? ;
