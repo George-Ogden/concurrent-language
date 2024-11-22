@@ -64,3 +64,9 @@ j = t._b;
 __+__ = f;
 __<=>__ = if (g) { 1 } else { 2 };
 __::__ = cons;
+this /*
+is a multiline *
+comment
+*/ = this;
+this = this; // is a single line comment
+not = the_end;

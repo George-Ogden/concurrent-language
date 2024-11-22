@@ -1,5 +1,8 @@
 grammar Grammar;
 
+MULTILINE_COMMENT : '/*' .*? '*/' -> skip ;
+SINGLE_LINE_COMMENT : '//' ~[\r\n]* -> skip ;
+
 EQ : '=' ;
 COMMA : ',' ;
 SEMI : ';' ;
@@ -18,8 +21,8 @@ TYPE : 'type' ;
 MATCH : 'match' ;
 
 OPERATOR: [&|=!/*+^$<>@:]+ ;
-OPERATOR_ID: '_' '_' [&|=!/*+^$<>@:]+ '_' '_';
-INFIX_ID: '_' '_' [a-zA-Z_][a-zA-Z_0-9]* '_' '_' ;
+OPERATOR_ID: '__' [&|=!/*+^$<>@:]+ '__';
+INFIX_ID: '__' [a-zA-Z_][a-zA-Z_0-9]* '__' ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+ -> skip ;
