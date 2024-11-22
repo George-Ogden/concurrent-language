@@ -12,16 +12,11 @@ RIGHTARROW: '->' ;
 NEGATE: '-' ;
 
 TYPE : 'type' ;
-TRUE : 'true' ;
-FALSE : 'false';
 
-OPERATOR: [&|=!/*+\^\$<>]+ ;
+OPERATOR: [&|=!/*+^$<>]+ ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
-UINT: [1-9][0-9]+ ;
-INT: NEGATE? UINT ;
-BOOL: TRUE | FALSE ;
+UINT: [1-9][0-9]* ;
 WS: [ \t\n\r\f]+ -> skip ;
-
 
 program : imports defs EOF ;
 
@@ -83,16 +78,27 @@ assignee
 expr
     : value
 //    | if_expr
+//    | match_expr
 //    | tuple
 //    | record
 //    | '(' expr ')'
 //    | fn_def
 //    | access
-//    | fn_call
+   | fn_call
     ;
 
 value
-    : INT
+    : int
 //    | STRING
-    | BOOL
+    | ID
     ;
+
+int: '-'? UINT;
+
+fn_call
+    : prefix_call
+//     | infix_call
+    ;
+
+prefix_call : ID '(' expr_list ')' ;
+expr_list : | expr (',' expr)* ','? ;
