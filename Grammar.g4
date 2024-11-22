@@ -35,26 +35,27 @@ def
 //    | trait_impl
     ;
 
-type_def: TYPE ID type_expr;
-
-
-type_expr : return_type | fn_type;
-
+type : return_type | fn_type ;
 return_type
     : ID
     | tuple_type
-    | union_type
-//     | record_type
     ;
 
-tuple_type
-    : '(' (type_expr ',')+ type_expr? ')'
-    | '(' ')'
-    ;
+type_def: TYPE ID (
+    union_def |
+    type |
+//     record_def |
+    empty_def
+);
 
-union_type
-    : '{' ID type_expr ? ('|' ID type_expr ? )* '}'
-    ;
+empty_def : ;
+
+union_def : '{' type_item ('|' type_item )* '}' ;
+type_item: ID type ? ;
+tuple_def : '(' type_list ')' ;
+
+tuple_type : '(' type_list ')' ;
+type_list : | (type ',')+ type?;
 
 fn_type : fn_type_head fn_type_tail ;
 
@@ -69,7 +70,7 @@ fn_type_head
     ;
 
 assignment : assignee '=' expr ;
-assignment_list : | assignment (';' assignment) * ';'? ;
+assignment_list : | (assignment ';')+ assignment? ;
 
 assignee
     : ID
@@ -82,10 +83,10 @@ infix_free_expr
     | if_expr
     | match_expr
 //     | switch_expr
-    | tuple
 //     | record
-//     | '(' expr ')'
-//     | fn_def
+    | '(' expr ')'
+    | tuple
+    | fn_def
 //     | access
     | fn_call
     ;
@@ -100,11 +101,10 @@ value
 
 int: '-'? UINT;
 
-fn_call : ID '(' expr_list ')' ;
+fn_call : ID '(' (expr | expr_list) ')' ;
 infix_call : infix_free_expr (OPERATOR | INFIX_ID) expr;
 tuple: '(' expr_list ')';
-
-expr_list : | expr (',' expr)* ','? ;
+expr_list : | (expr ',' )+ expr? ;
 
 if_expr : IF '(' expr ')' block ELSE block ;
 match_expr : MATCH '(' expr ')' '{' match_block (';' match_block)* ';' '}' ;

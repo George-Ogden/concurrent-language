@@ -3,8 +3,20 @@ type trailing (int, int,);
 type nested ((int, int), (int, int));
 type fn int -> bool;
 type fn int -> int -> bool;
-type fn int -> (int -> bool);
+type fn (int -> int) -> bool;
 type maybe {some int | none};
+type list {cons (list, int) | nil};
+type tree { Node (tree, int, tree) | Leaf};
+type direction { left | right};
+type grid { lower direction | higher direction};
+type parity {even | odd};
+type t (parity, direction);
+x = left;
+y = right;
+g = (a, b);
+g = (one, odd (5));
+g = (one, odd(5));
+g = f(one, odd(5));
 c = true;
 a = 10;
 b = foo();
@@ -30,4 +42,4 @@ m = match (f) {
     Some x | None: {
         t
     };
-}
+};
