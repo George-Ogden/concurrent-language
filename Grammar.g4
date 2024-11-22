@@ -14,6 +14,7 @@ NEGATE: '-' ;
 IF : 'if' ;
 ELSE : 'else' ;
 TYPE : 'type' ;
+MATCH : 'match' ;
 
 OPERATOR: [&|=!/*+^$<>]+ ;
 INFIX_ID: '_' '_' [a-zA-Z_][a-zA-Z_0-9]* '_' '_' ;
@@ -52,7 +53,7 @@ tuple_type
     ;
 
 union_type
-    : '{' ID type_expr ('|' ID type_expr)* '}'
+    : '{' ID type_expr ? ('|' ID type_expr ? )* '}'
     ;
 
 fn_type : fn_type_head fn_type_tail ;
@@ -79,7 +80,7 @@ assignee
 infix_free_expr
     : value
     | if_expr
-//     | match_expr
+    | match_expr
 //     | switch_expr
     | tuple
 //     | record
@@ -106,4 +107,7 @@ tuple: '(' expr_list ')';
 expr_list : | expr (',' expr)* ','? ;
 
 if_expr : IF '(' expr ')' block ELSE block ;
+match_expr : MATCH '(' expr ')' '{' match_block (';' match_block)* ';' '}' ;
+match_block : ID assignee ? ('|' ID assignee ?)* ':' block ;
+
 block : '{' assignment_list expr '}' ;

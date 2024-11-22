@@ -4,6 +4,7 @@ type nested ((int, int), (int, int));
 type fn int -> bool;
 type fn int -> int -> bool;
 type fn int -> (int -> bool);
+type maybe {some int | none};
 c = true;
 a = 10;
 b = foo();
@@ -17,3 +18,16 @@ t = if (a > 4) {
     b = 8;
     c
 };
+e = match (maybe()) {
+    Some x: {
+        t
+    };
+    None : {
+        y
+    };
+};
+m = match (f) {
+    Some x | None: {
+        t
+    };
+}
