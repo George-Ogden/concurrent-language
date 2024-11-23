@@ -10,8 +10,10 @@ LPAREN : '(' ;
 RPAREN : ')' ;
 LCURLY : '{' ;
 RCURLY : '}' ;
-PIPE : '|' ;
 RIGHTARROW: '->' ;
+LANGLE : '<' ;
+RANGLE : '>' ;
+PIPE : '|' ;
 NEGATE: '-' ;
 DOT: '.' ;
 
@@ -31,7 +33,7 @@ program : imports defs EOF ;
 
 imports: ;
 
-defs : | def (';' def)*  ';'? ;
+defs : | (def ';')+ def? ;
 
 def
     : type_def
@@ -40,13 +42,17 @@ def
 //    | trait_impl
     ;
 
+generic : '<' generic_list '>' ;
+generic_list : | ID (',' ID)* ','? ;
+generic_id : ID generic? ;
+
 type : return_type | fn_type | '(' type ')';
 return_type
-    : ID
+    : generic_id
     | tuple_type
     ;
 
-type_def: TYPE ID (
+type_def: TYPE generic_id (
     union_def |
     type |
 //     record_def |
@@ -72,16 +78,16 @@ fn_type_head
     ;
 
 assignment : assignee '=' expr ;
-assignment_list : | (assignment ';')+ assignment? ;
+assignment_list : | (assignment ';')*;
 
 assignee
-    : ID
+    : generic_id
     | OPERATOR_ID
 //    | tuple_assignee
 //    | record_assignee
     ;
 
-infix_access_free_expr
+infix_free_expr
     : value
     | if_expr
     | match_expr
@@ -93,17 +99,17 @@ infix_access_free_expr
     | fn_call
     ;
 
-expr : infix_access_free_expr | infix_call | access;
+expr : infix_free_expr | infix_call;
 
 value
     : int
 //    | STRING
-    | ID
+    | generic_id
     ;
 
 int: '-'? UINT;
 
-fn_call : ID '(' (expr | expr_list) ')' ;
+fn_call : generic_id '(' (expr | expr_list) ')' ;
 
 infix_operator
     : INFIX_ID
@@ -111,9 +117,11 @@ infix_operator
     | DOT
     | NEGATE
     | PIPE
+    | LANGLE
+    | RANGLE
     ;
 
-infix_call : infix_access_free_expr infix_operator expr;
+infix_call : infix_free_expr infix_operator expr;
 tuple: '(' expr_list ')';
 expr_list : | (expr ',' )+ expr? ;
 
@@ -122,11 +130,7 @@ match_expr : MATCH '(' expr ')' '{' match_block (';' match_block)* ';' '}' ;
 match_block : ID assignee ? ('|' ID assignee ?)* ':' block ;
 
 fn_def : '(' typed_assignee_list ')' RIGHTARROW type block;
-typed_assignee_list : | (typed_assignee ',')+ typed_assignee ?;
+typed_assignee_list : | typed_assignee (',' typed_assignee)* ',' ?;
 typed_assignee : assignee ':' type ;
 
-access: access_head access_tail;
-
-access_tail : DOT (ID | UINT | access_tail);
-access_head : infix_access_free_expr | infix_call ;
 block : '{' assignment_list expr '}' ;

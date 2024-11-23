@@ -7,8 +7,10 @@ type h int -> int -> int;
 type i (int) -> int -> int;
 type j ((int) -> ((int))) -> int;
 type maybe {some int | none};
-type list {cons (list, int) | nil};
-type tree { Node (tree, int, tree) | Leaf};
+type list<T> {cons (list<T>, T) | nil};
+type generic_tuple (f<T>, g<T>);
+type same_fn<T> fn<T, T>;
+type tree<T> { Node (tree<T>, T, tree<T>) | Leaf};
 type direction { left | right};
 type grid { lower direction | higher direction};
 type parity {even | odd};
@@ -48,7 +50,7 @@ m = match (f) {
 a = () -> () {
     ()
 };
-a = (x: int, b: bool,) -> int -> int {
+a = (x: int) -> int -> int {
     ()
 };
 a = (x: int, b: bool,) -> (int -> int) {
@@ -56,11 +58,13 @@ a = (x: int, b: bool,) -> (int -> int) {
 };
 y = z | a;
 h = f @ g;
+y = a.b + 4;
 t = a.b.c;
 f = a.0.0;
-t = a.b.c;
-f = a.1.1;
+t = a.b.1;
+f = a.1.c;
 j = t._b;
+j = t.(5 + 3);
 __+__ = f;
 __<=>__ = if (g) { 1 } else { 2 };
 __::__ = cons;
@@ -70,3 +74,5 @@ comment
 */ = this;
 this = this; // is a single line comment
 not = the_end;
+smap<T> = map<T,T,>;
+t = f<int>(4);
