@@ -19,7 +19,8 @@ DOT: '.' ;
 
 IF : 'if' ;
 ELSE : 'else' ;
-TYPE : 'type' ;
+TYPEDEF : 'typedef' ;
+TYPEALIAS : 'typealias' ;
 MATCH : 'match' ;
 
 OPERATOR: [&|=!/*+^$<>@:]+ ;
@@ -38,6 +39,7 @@ defs : | (def ';')+ def? ;
 def
     : type_def
     | assignment
+    | type_alias
 //    | trait_def
 //    | trait_impl
     ;
@@ -52,7 +54,8 @@ return_type
     | tuple_type
     ;
 
-type_def: TYPE generic_id (
+type_alias: TYPEALIAS generic_id type;
+type_def: TYPEDEF generic_id (
     union_def |
     type |
 //     record_def |
