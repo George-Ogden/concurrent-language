@@ -1,18 +1,20 @@
-type tuple (int, int, float);
-type trailing (int, int,);
-type nested ((int, int), (int, int));
-type f (int -> int) -> int;
-type g int -> (int -> int);
-type h int -> int -> int;
-type i (int) -> int -> int;
-type j ((int) -> ((int))) -> int;
-type maybe {some int | none};
-type list {cons (list, int) | nil};
-type tree { Node (tree, int, tree) | Leaf};
-type direction { left | right};
-type grid { lower direction | higher direction};
-type parity {even | odd};
-type t (parity, direction);
+typedef tuple (int, int, float);
+typedef trailing (int, int,);
+typedef nested ((int, int), (int, int));
+typedef f (int -> int) -> int;
+typedef g int -> (int -> int);
+typedef h int -> int -> int;
+typedef i (int) -> int -> int;
+typedef j ((int) -> ((int))) -> int;
+typedef maybe {some int | none};
+typedef list<T> {cons (list<T>, T) | nil};
+typedef generic_tuple (f<T>, g<T>);
+typedef same_fn<T> fn<T, T>;
+typedef tree<T> { Node (tree<T>, T, tree<T>) | Leaf};
+typedef direction { left | right};
+typedef grid { lower direction | higher direction};
+typedef parity {even | odd};
+typedef t (parity, direction);
 x = left;
 y = right;
 g = (a, b);
@@ -48,7 +50,7 @@ m = match (f) {
 a = () -> () {
     ()
 };
-a = (x: int, b: bool,) -> int -> int {
+a = (x: int) -> int -> int {
     ()
 };
 a = (x: int, b: bool,) -> (int -> int) {
@@ -56,8 +58,22 @@ a = (x: int, b: bool,) -> (int -> int) {
 };
 y = z | a;
 h = f @ g;
+y = a.b + 4;
 t = a.b.c;
 f = a.0.0;
-t = a.b.c;
-f = a.1.1;
+t = a.b.1;
+f = a.1.c;
 j = t._b;
+j = t.(5 + 3);
+__+__ = f;
+__<=>__ = if (g) { 1 } else { 2 };
+__::__ = cons;
+this /*
+is a multiline *
+comment
+*/ = this;
+this = this; // is a single line comment
+not = the_end;
+smap<T> = map<T,T,>;
+t = f<int>(4);
+typealias map<T> smap<T>;
