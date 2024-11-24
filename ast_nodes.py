@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import TypeAlias, Union
+from typing import ClassVar, TypeAlias, Union
 
 
 class ASTNode: ...
@@ -16,8 +16,8 @@ class Import(ASTNode): ...
 
 
 @dataclass
-class FnType(ASTNode):
-    arg_types: list[TypeInstance]
+class FunctionType(ASTNode):
+    argument_type: TypeInstance
     return_type: TypeInstance
 
 
@@ -40,9 +40,14 @@ class AtomicTypeEnum(enum.IntEnum):
 @dataclass
 class AtomicType(ASTNode):
     type: AtomicTypeEnum
+    INT: ClassVar[AtomicType]
+    BOOL: ClassVar[AtomicType]
 
 
-TypeInstance: TypeAlias = Union[FnType, GenericType, TupleType, AtomicType]
+AtomicType.INT = AtomicType(AtomicTypeEnum.INT)
+AtomicType.BOOL = AtomicType(AtomicTypeEnum.BOOL)
+
+TypeInstance: TypeAlias = Union[FunctionType, GenericType, TupleType, AtomicType]
 
 
 @dataclass
@@ -77,8 +82,8 @@ class TypedAssignee(ASTNode):
 
 
 @dataclass
-class FnCall(ASTNode):
-    fn: Expression
+class FunctionCall(ASTNode):
+    function: Expression
     type_variables: list[TypeInstance]
     args: list[Expression]
 
@@ -125,21 +130,21 @@ class TupleExpression(ASTNode):
 
 
 @dataclass
-class FnDef(ASTNode):
+class FunctionDef(ASTNode):
     assignees: list[TypedAssignee]
     return_type: TypeInstance
     body: Block
 
 
 Expression: TypeAlias = Union[
-    FnCall,
+    FunctionCall,
     Integer,
     ElementAccess,
     GenericVariable,
     IfExpression,
     MatchExpression,
     TupleExpression,
-    FnDef,
+    FunctionDef,
 ]
 
 

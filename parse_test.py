@@ -5,7 +5,7 @@ import pytest
 from ast_nodes import (
     ASTNode,
     AtomicType,
-    AtomicTypeEnum,
+    FunctionType,
     GenericVariable,
     Integer,
     TupleType,
@@ -26,27 +26,23 @@ from parse import Parser
         ("x", GenericVariable("x", []), "expr"),
         ("foo", GenericVariable("foo", []), "expr"),
         ("r2d2", GenericVariable("r2d2", []), "expr"),
-        ("map<int>", GenericVariable("map", [AtomicType(AtomicTypeEnum.INT)]), "expr"),
-        ("map<int,>", GenericVariable("map", [AtomicType(AtomicTypeEnum.INT)]), "expr"),
+        ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
+        ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
         (
             "map<int,bool>",
-            GenericVariable(
-                "map", [AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]
-            ),
+            GenericVariable("map", [AtomicType.INT, AtomicType.BOOL]),
             "expr",
         ),
-        ("int", AtomicType(AtomicTypeEnum.INT), "type_instance"),
-        ("bool", AtomicType(AtomicTypeEnum.BOOL), "type_instance"),
-        ("(int)", AtomicType(AtomicTypeEnum.INT), "type_instance"),
-        ("((int))", AtomicType(AtomicTypeEnum.INT), "type_instance"),
+        ("int", AtomicType.INT, "type_instance"),
+        ("bool", AtomicType.BOOL, "type_instance"),
+        ("(int)", AtomicType.INT, "type_instance"),
+        ("((int))", AtomicType.INT, "type_instance"),
         ("foo", GenericVariable("foo", []), "type_instance"),
-        ("foo<int>", GenericVariable("foo", [AtomicType(AtomicTypeEnum.INT)]), "type_instance"),
-        ("foo<int,>", GenericVariable("foo", [AtomicType(AtomicTypeEnum.INT)]), "type_instance"),
+        ("foo<int>", GenericVariable("foo", [AtomicType.INT]), "type_instance"),
+        ("foo<int,>", GenericVariable("foo", [AtomicType.INT]), "type_instance"),
         (
             "foo<int,bool>",
-            GenericVariable(
-                "foo", [AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]
-            ),
+            GenericVariable("foo", [AtomicType.INT, AtomicType.BOOL]),
             "type_instance",
         ),
         (
@@ -54,25 +50,25 @@ from parse import Parser
             GenericVariable(
                 "foo",
                 [
-                    GenericVariable("bar", [AtomicType(AtomicTypeEnum.INT)]),
-                    AtomicType(AtomicTypeEnum.BOOL),
+                    GenericVariable("bar", [AtomicType.INT]),
+                    AtomicType.BOOL,
                 ],
             ),
             "type_instance",
         ),
         (
             "(int,bool)",
-            TupleType([AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]),
+            TupleType([AtomicType.INT, AtomicType.BOOL]),
             "type_instance",
         ),
         (
             "(int,bool)",
-            TupleType([AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]),
+            TupleType([AtomicType.INT, AtomicType.BOOL]),
             "type_instance",
         ),
         (
             "(int,)",
-            TupleType([AtomicType(AtomicTypeEnum.INT)]),
+            TupleType([AtomicType.INT]),
             "type_instance",
         ),
         (
@@ -84,8 +80,8 @@ from parse import Parser
             "((int,int),(bool,bool))",
             TupleType(
                 [
-                    TupleType([AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.INT)]),
-                    TupleType([AtomicType(AtomicTypeEnum.BOOL), AtomicType(AtomicTypeEnum.BOOL)]),
+                    TupleType([AtomicType.INT, AtomicType.INT]),
+                    TupleType([AtomicType.BOOL, AtomicType.BOOL]),
                 ]
             ),
             "type_instance",
@@ -93,6 +89,53 @@ from parse import Parser
         (
             "((),)",
             TupleType([TupleType([])]),
+            "type_instance",
+        ),
+        (
+            "(int,bool)->int",
+            FunctionType(TupleType([AtomicType.INT, AtomicType.BOOL]), AtomicType.INT),
+            "type_instance",
+        ),
+        (
+            "(int,bool,)->int",
+            FunctionType(TupleType([AtomicType.INT, AtomicType.BOOL]), AtomicType.INT),
+            "type_instance",
+        ),
+        ("(int,)->int", FunctionType(TupleType([AtomicType.INT]), AtomicType.INT), "type_instance"),
+        ("(int)->int", FunctionType(AtomicType.INT, AtomicType.INT), "type_instance"),
+        ("int->int", FunctionType(AtomicType.INT, AtomicType.INT), "type_instance"),
+        ("()->()", FunctionType(TupleType([]), TupleType([])), "type_instance"),
+        (
+            "int->bool->()",
+            FunctionType(AtomicType.INT, FunctionType(AtomicType.BOOL, TupleType([]))),
+            "type_instance",
+        ),
+        (
+            "(int->bool->())",
+            FunctionType(AtomicType.INT, FunctionType(AtomicType.BOOL, TupleType([]))),
+            "type_instance",
+        ),
+        (
+            "int->(bool->())",
+            FunctionType(AtomicType.INT, FunctionType(AtomicType.BOOL, TupleType([]))),
+            "type_instance",
+        ),
+        (
+            "(int)->(bool->())",
+            FunctionType(AtomicType.INT, FunctionType(AtomicType.BOOL, TupleType([]))),
+            "type_instance",
+        ),
+        (
+            "(int->bool)->()",
+            FunctionType(FunctionType(AtomicType.INT, AtomicType.BOOL), TupleType([])),
+            "type_instance",
+        ),
+        (
+            "(int->(int,),)->(())",
+            FunctionType(
+                TupleType([FunctionType(AtomicType.INT, TupleType([AtomicType.INT]))]),
+                TupleType([]),
+            ),
             "type_instance",
         ),
     ],

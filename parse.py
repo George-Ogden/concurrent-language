@@ -11,6 +11,7 @@ from ast_nodes import (
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
+    FunctionType,
     GenericVariable,
     Integer,
     TupleType,
@@ -43,7 +44,7 @@ class Visitor(GrammarVisitor):
 
     def visitType_instance(self, ctx: GrammarParser.Type_instanceContext):
         if ctx.type_instance() is not None:
-            return self.visitType_instance(ctx.type_instance())
+            return self.visit(ctx.type_instance())
         return super().visitType_instance(ctx)
 
     def visitGeneric_list(self, ctx: GrammarParser.Generic_listContext):
@@ -52,9 +53,7 @@ class Visitor(GrammarVisitor):
 
     def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext):
         id = self.visitId(ctx.id_())
-        generic_list = (
-            [] if ctx.generic_list() is None else self.visitGeneric_list(ctx.generic_list())
-        )
+        generic_list = [] if ctx.generic_list() is None else self.visit(ctx.generic_list())
         return GenericVariable(id, generic_list)
 
     def visitType_list(self, ctx: GrammarParser.Type_listContext):
@@ -63,6 +62,17 @@ class Visitor(GrammarVisitor):
 
     def visitTuple_type(self, ctx: GrammarParser.Tuple_typeContext):
         return TupleType(self.visit(ctx.type_list()))
+
+    def visitFn_type_head(self, ctx: GrammarParser.Fn_type_headContext):
+        if ctx.return_type() is not None:
+            return self.visit(ctx.return_type())
+        else:
+            return self.visit(ctx.type_instance())
+
+    def visitFn_type(self, ctx: GrammarParser.Fn_typeContext):
+        argument_types = self.visit(ctx.fn_type_head())
+        return_type = self.visit(ctx.fn_type_tail())
+        return FunctionType(argument_types, return_type)
 
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
         [child] = ctx.getChildren()
