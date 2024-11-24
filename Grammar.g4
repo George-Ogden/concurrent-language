@@ -30,13 +30,13 @@ ID: [a-zA-Z_][a-zA-Z_0-9]* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+ -> skip ;
 
-program : imports defs EOF ;
+program : imports definitions EOF ;
 
 imports: ;
 
-defs : | (def ';')+ def? ;
+definitions : | (definition ';')+ definition? ;
 
-def
+definition
     : type_def
     | assignment
     | type_alias
@@ -48,16 +48,16 @@ generic : '<' generic_list '>' ;
 generic_list : | ID (',' ID)* ','? ;
 generic_id : ID generic? ;
 
-type : return_type | fn_type | '(' type ')';
+type_instance : return_type | fn_type | '(' type_instance ')';
 return_type
     : generic_id
     | tuple_type
     ;
 
-type_alias: TYPEALIAS generic_id type;
+type_alias: TYPEALIAS generic_id type_instance;
 type_def: TYPEDEF generic_id (
     union_def |
-    type |
+    type_instance |
 //     record_def |
     empty_def
 );
@@ -65,19 +65,19 @@ type_def: TYPEDEF generic_id (
 empty_def : ;
 
 union_def : '{' type_item ('|' type_item )* '}' ;
-type_item: ID type ? ;
+type_item: ID type_instance ? ;
 tuple_def : '(' type_list ')' ;
 
 tuple_type : '(' type_list ')' ;
-type_list : | (type ',')+ type?;
+type_list : | (type_instance ',')+ type_instance?;
 
 fn_type : fn_type_head fn_type_tail ;
 
-fn_type_tail : RIGHTARROW type ;
+fn_type_tail : RIGHTARROW type_instance ;
 
 fn_type_head
     : return_type
-    | '(' type ')'
+    | '(' type_instance ')'
     ;
 
 assignment : assignee '=' expr ;
@@ -95,9 +95,9 @@ infix_free_expr
     | if_expr
     | match_expr
 //     | switch_expr
-//     | record
+//     | record_expr
     | '(' expr ')'
-    | tuple
+    | tuple_expr
     | fn_def
     | fn_call
     ;
@@ -105,12 +105,12 @@ infix_free_expr
 expr : infix_free_expr | infix_call;
 
 value
-    : int
+    : integer
 //    | STRING
     | generic_id
     ;
 
-int: '-'? UINT;
+integer: '-'? UINT;
 
 fn_call : generic_id '(' (expr | expr_list) ')' ;
 
@@ -125,15 +125,15 @@ infix_operator
     ;
 
 infix_call : infix_free_expr infix_operator expr;
-tuple: '(' expr_list ')';
+tuple_expr: '(' expr_list ')';
 expr_list : | (expr ',' )+ expr? ;
 
 if_expr : IF '(' expr ')' block ELSE block ;
 match_expr : MATCH '(' expr ')' '{' match_block (';' match_block)* ';' '}' ;
 match_block : ID assignee ? ('|' ID assignee ?)* ':' block ;
 
-fn_def : '(' typed_assignee_list ')' RIGHTARROW type block;
+fn_def : '(' typed_assignee_list ')' RIGHTARROW type_instance block;
 typed_assignee_list : | typed_assignee (',' typed_assignee)* ',' ?;
-typed_assignee : assignee ':' type ;
+typed_assignee : assignee ':' type_instance ;
 
 block : '{' assignment_list expr '}' ;
