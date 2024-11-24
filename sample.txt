@@ -1,0 +1,63 @@
+type tuple (int, int, float);
+type trailing (int, int,);
+type nested ((int, int), (int, int));
+type f (int -> int) -> int;
+type g int -> (int -> int);
+type h int -> int -> int;
+type i (int) -> int -> int;
+type j ((int) -> ((int))) -> int;
+type maybe {some int | none};
+type list {cons (list, int) | nil};
+type tree { Node (tree, int, tree) | Leaf};
+type direction { left | right};
+type grid { lower direction | higher direction};
+type parity {even | odd};
+type t (parity, direction);
+x = left;
+y = right;
+g = (a, b);
+g = (one, odd (5));
+g = (one, odd(5));
+g = f(one, odd(5));
+c = true;
+a = 10;
+b = foo();
+g = foo(5, 10,);
+g = foo(10, 5);
+y = 8 + 8 + 7 + 3 __add__ 4 __minus__ 6;
+z = (3, 4);
+t = if (a > 4) {
+    3
+} else {
+    b = 8;
+    c
+};
+e = match (maybe()) {
+    Some x: {
+        t
+    };
+    None : {
+        y
+    };
+};
+m = match (f) {
+    Some x | None: {
+        t
+    };
+};
+a = () -> () {
+    ()
+};
+a = (x: int, b: bool,) -> int -> int {
+    ()
+};
+a = (x: int, b: bool,) -> (int -> int) {
+    ()
+};
+y = z | a;
+h = f @ g;
+t = a.b.c;
+f = a.0.0;
+t = a.b.c;
+f = a.1.1;
+j = t._b;
