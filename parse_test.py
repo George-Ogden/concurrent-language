@@ -2,7 +2,14 @@ from typing import Optional
 
 import pytest
 
-from ast_nodes import ASTNode, AtomicType, AtomicTypeEnum, GenericVariable, Integer
+from ast_nodes import (
+    ASTNode,
+    AtomicType,
+    AtomicTypeEnum,
+    GenericVariable,
+    Integer,
+    TupleType,
+)
 from parse import Parser
 
 
@@ -51,6 +58,41 @@ from parse import Parser
                     AtomicType(AtomicTypeEnum.BOOL),
                 ],
             ),
+            "type_instance",
+        ),
+        (
+            "(int,bool)",
+            TupleType([AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]),
+            "type_instance",
+        ),
+        (
+            "(int,bool)",
+            TupleType([AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]),
+            "type_instance",
+        ),
+        (
+            "(int,)",
+            TupleType([AtomicType(AtomicTypeEnum.INT)]),
+            "type_instance",
+        ),
+        (
+            "()",
+            TupleType([]),
+            "type_instance",
+        ),
+        (
+            "((int,int),(bool,bool))",
+            TupleType(
+                [
+                    TupleType([AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.INT)]),
+                    TupleType([AtomicType(AtomicTypeEnum.BOOL), AtomicType(AtomicTypeEnum.BOOL)]),
+                ]
+            ),
+            "type_instance",
+        ),
+        (
+            "((),)",
+            TupleType([TupleType([])]),
             "type_instance",
         ),
     ],

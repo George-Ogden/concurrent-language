@@ -7,7 +7,14 @@ from typing import Optional
 from antlr4 import *
 from antlr4.tree.Trees import Trees
 
-from ast_nodes import ASTNode, AtomicType, AtomicTypeEnum, GenericVariable, Integer
+from ast_nodes import (
+    ASTNode,
+    AtomicType,
+    AtomicTypeEnum,
+    GenericVariable,
+    Integer,
+    TupleType,
+)
 
 
 def main(argv):
@@ -49,6 +56,13 @@ class Visitor(GrammarVisitor):
             [] if ctx.generic_list() is None else self.visitGeneric_list(ctx.generic_list())
         )
         return GenericVariable(id, generic_list)
+
+    def visitType_list(self, ctx: GrammarParser.Type_listContext):
+        children = (self.visit(child) for child in ctx.getChildren())
+        return [child for child in children if child is not None]
+
+    def visitTuple_type(self, ctx: GrammarParser.Tuple_typeContext):
+        return TupleType(self.visit(ctx.type_list()))
 
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
         [child] = ctx.getChildren()
