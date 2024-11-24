@@ -7,7 +7,7 @@ from typing import Optional
 from antlr4 import *
 from antlr4.tree.Trees import Trees
 
-from ast_nodes import ASTNode
+from ast_nodes import ASTNode, Integer
 
 
 def main(argv):
@@ -23,7 +23,7 @@ def main(argv):
 
 class Visitor(GrammarVisitor):
     def visitInteger(self, ctx: GrammarParser.IntegerContext):
-        return int(ctx.getText())
+        return Integer(int(ctx.getText()))
 
 
 class Parser:
