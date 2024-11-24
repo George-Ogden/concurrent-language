@@ -113,7 +113,7 @@ class Visitor(GrammarVisitor):
 
     def visitAssignee(self, ctx: GrammarParser.AssigneeContext):
         if ctx.OPERATOR_ID() is not None:
-            id = re.match(r"^\((.*)\)$").group(1)
+            id = re.match(r"^__(.*)__$", ctx.getText()).group(1)
             return Assignee(id, [])
         return super().visit(ctx.generic_target())
 

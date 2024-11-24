@@ -190,6 +190,10 @@ from parse import Parser
             "expr",
         ),
         ("a = 3", Assignment(Assignee("a", []), Integer(3)), "assignment"),
+        ("__&&__ = 3", Assignment(Assignee("&&", []), Integer(3)), "assignment"),
+        ("__>>__ = 3", Assignment(Assignee(">>", []), Integer(3)), "assignment"),
+        ("__>__ = 3", Assignment(Assignee(">", []), Integer(3)), "assignment"),
+        ("__$__ = 3", Assignment(Assignee("$", []), Integer(3)), "assignment"),
         ("a = b = 3", None, "assignment"),
         (
             "a<T> = f<T>",
