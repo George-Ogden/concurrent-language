@@ -7,6 +7,7 @@ from ast_nodes import (
     Assignment,
     ASTNode,
     AtomicType,
+    Block,
     Boolean,
     FunctionType,
     GenericVariable,
@@ -139,6 +140,15 @@ from parse import Parser
         ("r2d2", GenericVariable("r2d2", []), "expr"),
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
+        ("map<T>", GenericVariable("map", [GenericVariable("T", [])]), "expr"),
+        ("map<f<int>>", GenericVariable("map", [GenericVariable("f", [AtomicType.INT])]), "expr"),
+        (
+            "map<f<g<T>>>",
+            GenericVariable(
+                "map", [GenericVariable("f", [GenericVariable("g", [GenericVariable("T", [])])])]
+            ),
+            "expr",
+        ),
         (
             "map<int,bool>",
             GenericVariable("map", [AtomicType.INT, AtomicType.BOOL]),
@@ -181,10 +191,57 @@ from parse import Parser
         ),
         ("a = 3", Assignment(Assignee("a", []), Integer(3)), "assignment"),
         ("a = b = 3", None, "assignment"),
-        ("a<T> = 3", Assignment(Assignee("a", ["T"]), Integer(3)), "assignment"),
-        ("a<T,> = true", Assignment(Assignee("a", ["T"]), Boolean(True)), "assignment"),
+        (
+            "a<T> = f<T>",
+            Assignment(Assignee("a", ["T"]), GenericVariable("f", [GenericVariable("T", [])])),
+            "assignment",
+        ),
+        (
+            "a<T> = f<T>",
+            Assignment(Assignee("a", ["T"]), GenericVariable("f", [GenericVariable("T", [])])),
+            "assignment",
+        ),
+        (
+            "a<T,> = t<T,>",
+            Assignment(Assignee("a", ["T"]), GenericVariable("t", [GenericVariable("T", [])])),
+            "assignment",
+        ),
         ("a<T,U> = -4", Assignment(Assignee("a", ["T", "U"]), Integer(-4)), "assignment"),
+        (
+            "a<T,U> = f<U,T>",
+            Assignment(
+                Assignee("a", ["T", "U"]),
+                GenericVariable("f", [GenericVariable("U", []), GenericVariable("T", [])]),
+            ),
+            "assignment",
+        ),
         ("a<T,U,> = 0", Assignment(Assignee("a", ["T", "U"]), Integer(0)), "assignment"),
+        ("{5}", Block([], Integer(5)), "block"),
+        ("{}", None, "block"),
+        ("{a = -9; 8}", Block([Assignment(Assignee("a", []), Integer(-9))], Integer(8)), "block"),
+        ("{a = -9}", None, "block"),
+        ("{a = -9;}", None, "block"),
+        ("{; 8}", None, "block"),
+        ("{w = x;; 8}", None, "block"),
+        (
+            "{w = x;y<T> = x<T,T>; -8}",
+            Block(
+                [
+                    Assignment(Assignee("w", []), GenericVariable("x", [])),
+                    Assignment(
+                        Assignee("y", ["T"]),
+                        GenericVariable("x", [GenericVariable("T", []), GenericVariable("T", [])]),
+                    ),
+                ],
+                Integer(-8),
+            ),
+            "block",
+        ),
+        (
+            "{w = x; ()}",
+            Block([Assignment(Assignee("w", []), GenericVariable("x", []))], TupleExpression([])),
+            "block",
+        ),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

@@ -27,7 +27,8 @@ TRUE: 'true';
 FALSE: 'false';
 BOOL: 'bool';
 
-OPERATOR: [&|=!/*+^$<>@:]+ ;
+OPERATOR_SYMBOL: [&|=!/*+^$<>@:];
+
 OPERATOR_ID: '__' [&|=!/*+^$<>@:]+ '__';
 INFIX_ID: '__' [a-zA-Z_][a-zA-Z_0-9]* '__' ;
 ID: [a-zA-Z_][a-zA-Z_0-9]* ;
@@ -49,6 +50,7 @@ definition
     ;
 
 id: ID;
+operator: OPERATOR_SYMBOL+;
 
 id_list : | id (',' id)* ','? ;
 generic_target : id ('<' id_list '>')? ;
@@ -127,7 +129,7 @@ fn_call : generic_instance '(' (expr | expr_list) ')' ;
 
 infix_operator
     : INFIX_ID
-    | OPERATOR
+    | operator
     | DOT
     | NEGATE
     | PIPE

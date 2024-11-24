@@ -14,6 +14,7 @@ from ast_nodes import (
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
+    Block,
     Boolean,
     FunctionType,
     GenericVariable,
@@ -121,6 +122,14 @@ class Visitor(GrammarVisitor):
         expression = self.visit(ctx.expr())
         return Assignment(assignee, expression)
 
+    def visitAssignment_list(self, ctx: GrammarParser.Assignment_listContext):
+        return self.visitList(ctx)
+
+    def visitBlock(self, ctx: GrammarParser.BlockContext):
+        assignments = self.visit(ctx.assignment_list())
+        expression = self.visit(ctx.expr())
+        return Block(assignments, expression)
+
 
 class Parser:
     @staticmethod
@@ -131,7 +140,7 @@ class Parser:
         parser = GrammarParser(stream)
         if target in parser.ruleNames:
             tree = getattr(parser, target).__call__()
-            if stream.LA(1) != Token.EOF:
+            if parser.getNumberOfSyntaxErrors() > 0 or stream.LA(1) != Token.EOF:
                 return None
             visitor = Visitor()
             return visitor.visit(tree)
