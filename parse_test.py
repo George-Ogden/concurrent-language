@@ -180,6 +180,7 @@ from parse import Parser
             "expr",
         ),
         ("a = 3", Assignment(Assignee("a", []), Integer(3)), "assignment"),
+        ("a = b = 3", None, "assignment"),
         ("a<T> = 3", Assignment(Assignee("a", ["T"]), Integer(3)), "assignment"),
         ("a<T,> = true", Assignment(Assignee("a", ["T"]), Boolean(True)), "assignment"),
         ("a<T,U> = -4", Assignment(Assignee("a", ["T", "U"]), Integer(-4)), "assignment"),
