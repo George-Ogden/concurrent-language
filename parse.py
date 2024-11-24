@@ -11,6 +11,7 @@ from ast_nodes import (
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
+    Boolean,
     FunctionType,
     GenericVariable,
     Integer,
@@ -31,10 +32,6 @@ def main(argv):
 
 
 class Visitor(GrammarVisitor):
-    def visitInteger(self, ctx: GrammarParser.IntegerContext):
-        value = int(ctx.getText())
-        return Integer(value)
-
     def visitId(self, ctx: GrammarParser.IdContext):
         return ctx.getText()
 
@@ -74,6 +71,16 @@ class Visitor(GrammarVisitor):
         argument_types = self.visit(ctx.fn_type_head())
         return_type = self.visit(ctx.fn_type_tail())
         return FunctionType(argument_types, return_type)
+
+    def visitInteger(self, ctx: GrammarParser.IntegerContext):
+        value = int(ctx.getText())
+        return Integer(value)
+
+    def visitBoolean(self, ctx: GrammarParser.BooleanContext):
+        if ctx.getText().lower() == "true":
+            return Boolean(True)
+        else:
+            return Boolean(False)
 
     def visitExpr_list(self, ctx: GrammarParser.Expr_listContext):
         children = (self.visit(child) for child in ctx.getChildren())

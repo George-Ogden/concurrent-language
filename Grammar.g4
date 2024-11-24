@@ -23,6 +23,8 @@ TYPEDEF : 'typedef' ;
 TYPEALIAS : 'typealias' ;
 MATCH : 'match' ;
 INT: 'int';
+TRUE: 'true';
+FALSE: 'false';
 BOOL: 'bool';
 
 OPERATOR: [&|=!/*+^$<>@:]+ ;
@@ -104,6 +106,7 @@ assignee
 
 infix_free_expr
     : integer
+    | boolean
     | generic_instance
     | if_expr
     | match_expr
@@ -118,6 +121,7 @@ infix_free_expr
 expr : infix_free_expr | infix_call;
 
 integer: '-'? UINT;
+boolean: TRUE | FALSE;
 
 fn_call : generic_instance '(' (expr | expr_list) ')' ;
 

@@ -5,6 +5,7 @@ import pytest
 from ast_nodes import (
     ASTNode,
     AtomicType,
+    Boolean,
     FunctionType,
     GenericVariable,
     Integer,
@@ -129,6 +130,8 @@ from parse import Parser
         ("05", None, "expr"),
         ("-07", None, "expr"),
         ("00", None, "expr"),
+        ("true", Boolean(True), "expr"),
+        ("false", Boolean(False), "expr"),
         ("x", GenericVariable("x", []), "expr"),
         ("foo", GenericVariable("foo", []), "expr"),
         ("r2d2", GenericVariable("r2d2", []), "expr"),

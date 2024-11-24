@@ -94,6 +94,11 @@ class Integer(ASTNode):
 
 
 @dataclass
+class Boolean(ASTNode):
+    value: bool
+
+
+@dataclass
 class ElementAccess(ASTNode):
     expression: Expression
     index: int
@@ -139,6 +144,7 @@ class FunctionDef(ASTNode):
 Expression: TypeAlias = Union[
     FunctionCall,
     Integer,
+    Boolean,
     ElementAccess,
     GenericVariable,
     IfExpression,
