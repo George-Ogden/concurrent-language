@@ -91,7 +91,8 @@ assignee
     ;
 
 infix_free_expr
-    : value
+    : integer
+    | generic_id
     | if_expr
     | match_expr
 //     | switch_expr
@@ -103,12 +104,6 @@ infix_free_expr
     ;
 
 expr : infix_free_expr | infix_call;
-
-value
-    : integer
-//    | STRING
-    | generic_id
-    ;
 
 integer: '-'? UINT;
 
