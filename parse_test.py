@@ -32,6 +32,27 @@ from parse import Parser
         ("bool", AtomicType(AtomicTypeEnum.BOOL), "type_instance"),
         ("(int)", AtomicType(AtomicTypeEnum.INT), "type_instance"),
         ("((int))", AtomicType(AtomicTypeEnum.INT), "type_instance"),
+        ("foo", GenericVariable("foo", []), "type_instance"),
+        ("foo<int>", GenericVariable("foo", [AtomicType(AtomicTypeEnum.INT)]), "type_instance"),
+        ("foo<int,>", GenericVariable("foo", [AtomicType(AtomicTypeEnum.INT)]), "type_instance"),
+        (
+            "foo<int,bool>",
+            GenericVariable(
+                "foo", [AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]
+            ),
+            "type_instance",
+        ),
+        (
+            "foo<bar<int>,bool>",
+            GenericVariable(
+                "foo",
+                [
+                    GenericVariable("bar", [AtomicType(AtomicTypeEnum.INT)]),
+                    AtomicType(AtomicTypeEnum.BOOL),
+                ],
+            ),
+            "type_instance",
+        ),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

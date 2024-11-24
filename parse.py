@@ -43,7 +43,7 @@ class Visitor(GrammarVisitor):
         children = (self.visit(child) for child in ctx.getChildren())
         return [child for child in children if child is not None]
 
-    def visitGenericVariable(self, ctx: GrammarParser.Generic_instanceContext):
+    def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext):
         id = self.visitId(ctx.id_())
         generic_list = (
             [] if ctx.generic_list() is None else self.visitGeneric_list(ctx.generic_list())
@@ -52,9 +52,8 @@ class Visitor(GrammarVisitor):
 
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
         [child] = ctx.getChildren()
-        match child.getRuleIndex():
-            case GrammarParser.RULE_generic_instance:
-                return self.visitGenericVariable(child)
+        if ctx.generic_instance() is not None:
+            return self.visitGeneric_instance(child)
         return super().visitInfix_free_expr(ctx)
 
 
