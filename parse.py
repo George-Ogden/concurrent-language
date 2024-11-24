@@ -11,11 +11,13 @@ from ast_nodes import ASTNode
 
 
 def main(argv):
-    input_stream = FileStream(argv[1])
+    input_stream = InputStream(argv[1])
+    target = sys.argv[2]
     lexer = GrammarLexer(input_stream)
     stream = CommonTokenStream(lexer)
     parser = GrammarParser(stream)
-    tree = parser.program()
+    assert target in parser.ruleNames
+    tree = getattr(parser, target).__call__()
     print(Trees.toStringTree(tree, None, parser))
 
 
@@ -33,6 +35,8 @@ class Parser:
         parser = GrammarParser(stream)
         if target in parser.ruleNames:
             tree = getattr(parser, target).__call__()
+            if stream.LA(1) != Token.EOF:
+                return None
             visitor = Visitor()
             return visitor.visit(tree)
 
