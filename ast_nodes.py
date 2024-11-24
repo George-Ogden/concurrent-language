@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import enum
+from dataclasses import dataclass
 from typing import TypeAlias, Union
 
 
@@ -31,12 +32,17 @@ class TupleType(ASTNode):
     types: list[TypeInstance]
 
 
+class AtomicTypeEnum(enum.IntEnum):
+    INT = enum.auto()
+    BOOL = enum.auto()
+
+
 @dataclass
-class NamedType(ASTNode):
-    name: Id
+class AtomicType(ASTNode):
+    type: AtomicTypeEnum
 
 
-TypeInstance: TypeAlias = Union[FnType, GenericType, TupleType, NamedType]
+TypeInstance: TypeAlias = Union[FnType, GenericType, TupleType, AtomicType]
 
 
 @dataclass
@@ -91,7 +97,7 @@ class ElementAccess(ASTNode):
 @dataclass
 class GenericVariable(ASTNode):
     name: Id
-    type_variables: list[TypeInstance] = field(default_factory=list)
+    type_variables: list[TypeInstance]
 
 
 @dataclass

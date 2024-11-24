@@ -7,7 +7,7 @@ from typing import Optional
 from antlr4 import *
 from antlr4.tree.Trees import Trees
 
-from ast_nodes import ASTNode, GenericVariable, Integer
+from ast_nodes import ASTNode, AtomicType, AtomicTypeEnum, GenericVariable, Integer
 
 
 def main(argv):
@@ -23,26 +23,37 @@ def main(argv):
 
 class Visitor(GrammarVisitor):
     def visitInteger(self, ctx: GrammarParser.IntegerContext):
-        return Integer(int(ctx.getText()))
+        value = int(ctx.getText())
+        return Integer(value)
 
     def visitId(self, ctx: GrammarParser.IdContext):
         return ctx.getText()
+
+    def visitAtomic_type(self, ctx: GrammarParser.Atomic_typeContext):
+        type_name = ctx.getText().upper()
+        type = AtomicTypeEnum[type_name]
+        return AtomicType(type)
+
+    def visitType_instance(self, ctx: GrammarParser.Type_instanceContext):
+        if ctx.type_instance() is not None:
+            return self.visitType_instance(ctx.type_instance())
+        return super().visitType_instance(ctx)
 
     def visitGeneric_list(self, ctx: GrammarParser.Generic_listContext):
         children = (self.visit(child) for child in ctx.getChildren())
         return [child for child in children if child is not None]
 
-    def visitGeneric(self, ctx: GrammarParser.GenericContext):
-        return self.visitGeneric_list(ctx.generic_list())
-
-    def visitGenericVariable(self, ctx: GrammarParser.Generic_idContext):
-        children = [self.visit(child) for child in ctx.getChildren()]
-        return GenericVariable(*children)
+    def visitGenericVariable(self, ctx: GrammarParser.Generic_instanceContext):
+        id = self.visitId(ctx.id_())
+        generic_list = (
+            [] if ctx.generic_list() is None else self.visitGeneric_list(ctx.generic_list())
+        )
+        return GenericVariable(id, generic_list)
 
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
         [child] = ctx.getChildren()
         match child.getRuleIndex():
-            case GrammarParser.RULE_generic_id:
+            case GrammarParser.RULE_generic_instance:
                 return self.visitGenericVariable(child)
         return super().visitInfix_free_expr(ctx)
 

@@ -2,7 +2,7 @@ from typing import Optional
 
 import pytest
 
-from ast_nodes import ASTNode, GenericVariable, Integer
+from ast_nodes import ASTNode, AtomicType, AtomicTypeEnum, GenericVariable, Integer
 from parse import Parser
 
 
@@ -19,9 +19,19 @@ from parse import Parser
         ("x", GenericVariable("x", []), "expr"),
         ("foo", GenericVariable("foo", []), "expr"),
         ("r2d2", GenericVariable("r2d2", []), "expr"),
-        ("map<int>", GenericVariable("map", ["int"]), "expr"),
-        ("map<int,>", GenericVariable("map", ["int"]), "expr"),
-        ("map<int,bool>", GenericVariable("map", ["int", "bool"]), "expr"),
+        ("map<int>", GenericVariable("map", [AtomicType(AtomicTypeEnum.INT)]), "expr"),
+        ("map<int,>", GenericVariable("map", [AtomicType(AtomicTypeEnum.INT)]), "expr"),
+        (
+            "map<int,bool>",
+            GenericVariable(
+                "map", [AtomicType(AtomicTypeEnum.INT), AtomicType(AtomicTypeEnum.BOOL)]
+            ),
+            "expr",
+        ),
+        ("int", AtomicType(AtomicTypeEnum.INT), "type_instance"),
+        ("bool", AtomicType(AtomicTypeEnum.BOOL), "type_instance"),
+        ("(int)", AtomicType(AtomicTypeEnum.INT), "type_instance"),
+        ("((int))", AtomicType(AtomicTypeEnum.INT), "type_instance"),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

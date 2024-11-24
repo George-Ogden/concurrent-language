@@ -22,6 +22,8 @@ ELSE : 'else' ;
 TYPEDEF : 'typedef' ;
 TYPEALIAS : 'typealias' ;
 MATCH : 'match' ;
+INT: 'int';
+BOOL: 'bool';
 
 OPERATOR: [&|=!/*+^$<>@:]+ ;
 OPERATOR_ID: '__' [&|=!/*+^$<>@:]+ '__';
@@ -45,18 +47,27 @@ definition
     ;
 
 id: ID;
-generic : '<' generic_list '>' ;
-generic_list : | id (',' id)* ','? ;
-generic_id : id generic? ;
+
+id_list : | id (',' id)* ','? ;
+generic_target : id ('<' id_list '>')? ;
+
+generic_list : | type_instance (',' type_instance)* ','? ;
+generic_instance : id ('<' generic_list '>')? ;
+
+atomic_type
+    : BOOL
+    | INT
+    ;
 
 type_instance : return_type | fn_type | '(' type_instance ')';
 return_type
-    : generic_id
+    : generic_instance
+    | atomic_type
     | tuple_type
     ;
 
-type_alias: TYPEALIAS generic_id type_instance;
-type_def: TYPEDEF generic_id (
+type_alias: TYPEALIAS generic_instance type_instance;
+type_def: TYPEDEF generic_target (
     union_def |
     type_instance |
 //     record_def |
@@ -85,7 +96,7 @@ assignment : assignee '=' expr ;
 assignment_list : | (assignment ';')*;
 
 assignee
-    : generic_id
+    : generic_target
     | OPERATOR_ID
 //    | tuple_assignee
 //    | record_assignee
@@ -93,7 +104,7 @@ assignee
 
 infix_free_expr
     : integer
-    | generic_id
+    | generic_instance
     | if_expr
     | match_expr
 //     | switch_expr
@@ -108,7 +119,7 @@ expr : infix_free_expr | infix_call;
 
 integer: '-'? UINT;
 
-fn_call : generic_id '(' (expr | expr_list) ')' ;
+fn_call : generic_instance '(' (expr | expr_list) ')' ;
 
 infix_operator
     : INFIX_ID
