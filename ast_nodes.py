@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeAlias, Union
 
 
@@ -72,7 +72,7 @@ class TypedAssignee(ASTNode):
 
 @dataclass
 class FnCall(ASTNode):
-    fn: Id
+    fn: Expression
     type_variables: list[TypeInstance]
     args: list[Expression]
 
@@ -89,8 +89,9 @@ class ElementAccess(ASTNode):
 
 
 @dataclass
-class Variable(ASTNode):
+class GenericVariable(ASTNode):
     name: Id
+    type_variables: list[TypeInstance] = field(default_factory=list)
 
 
 @dataclass
@@ -125,7 +126,14 @@ class FnDef(ASTNode):
 
 
 Expression: TypeAlias = Union[
-    FnCall, Integer, ElementAccess, Variable, IfExpression, MatchExpression, TupleExpression, FnDef
+    FnCall,
+    Integer,
+    ElementAccess,
+    GenericVariable,
+    IfExpression,
+    MatchExpression,
+    TupleExpression,
+    FnDef,
 ]
 
 

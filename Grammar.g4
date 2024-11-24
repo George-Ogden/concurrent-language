@@ -44,9 +44,10 @@ definition
 //    | trait_impl
     ;
 
+id: ID;
 generic : '<' generic_list '>' ;
-generic_list : | ID (',' ID)* ','? ;
-generic_id : ID generic? ;
+generic_list : | id (',' id)* ','? ;
+generic_id : id generic? ;
 
 type_instance : return_type | fn_type | '(' type_instance ')';
 return_type
@@ -65,7 +66,7 @@ type_def: TYPEDEF generic_id (
 empty_def : ;
 
 union_def : '{' type_item ('|' type_item )* '}' ;
-type_item: ID type_instance ? ;
+type_item: id type_instance ? ;
 tuple_def : '(' type_list ')' ;
 
 tuple_type : '(' type_list ')' ;
@@ -125,7 +126,7 @@ expr_list : | (expr ',' )+ expr? ;
 
 if_expr : IF '(' expr ')' block ELSE block ;
 match_expr : MATCH '(' expr ')' '{' match_block (';' match_block)* ';' '}' ;
-match_block : ID assignee ? ('|' ID assignee ?)* ':' block ;
+match_block : id assignee ? ('|' id assignee ?)* ':' block ;
 
 fn_def : '(' typed_assignee_list ')' RIGHTARROW type_instance block;
 typed_assignee_list : | typed_assignee (',' typed_assignee)* ',' ?;
