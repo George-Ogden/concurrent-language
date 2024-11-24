@@ -73,6 +73,7 @@ class EmptyTypeDefinition(ASTNode): ...
 @dataclass
 class Assignee(ASTNode):
     id: Id
+    generic_variables: list[Id]
 
 
 @dataclass

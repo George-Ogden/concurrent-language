@@ -1,3 +1,4 @@
+import re
 import sys
 from parser.GrammarLexer import GrammarLexer
 from parser.GrammarParser import GrammarParser
@@ -8,6 +9,8 @@ from antlr4 import *
 from antlr4.tree.Trees import Trees
 
 from ast_nodes import (
+    Assignee,
+    Assignment,
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
@@ -32,6 +35,10 @@ def main(argv):
 
 
 class Visitor(GrammarVisitor):
+    def visitList(self, ctx: ParserRuleContext):
+        children = (self.visit(child) for child in ctx.getChildren())
+        return [child for child in children if child is not None]
+
     def visitId(self, ctx: GrammarParser.IdContext):
         return ctx.getText()
 
@@ -46,8 +53,7 @@ class Visitor(GrammarVisitor):
         return super().visitType_instance(ctx)
 
     def visitGeneric_list(self, ctx: GrammarParser.Generic_listContext):
-        children = (self.visit(child) for child in ctx.getChildren())
-        return [child for child in children if child is not None]
+        return self.visitList(ctx)
 
     def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext):
         id = self.visitId(ctx.id_())
@@ -55,8 +61,7 @@ class Visitor(GrammarVisitor):
         return GenericVariable(id, generic_list)
 
     def visitType_list(self, ctx: GrammarParser.Type_listContext):
-        children = (self.visit(child) for child in ctx.getChildren())
-        return [child for child in children if child is not None]
+        return self.visitList(ctx)
 
     def visitTuple_type(self, ctx: GrammarParser.Tuple_typeContext):
         return TupleType(self.visit(ctx.type_list()))
@@ -83,8 +88,7 @@ class Visitor(GrammarVisitor):
             return Boolean(False)
 
     def visitExpr_list(self, ctx: GrammarParser.Expr_listContext):
-        children = (self.visit(child) for child in ctx.getChildren())
-        return [child for child in children if child is not None]
+        return self.visitList(ctx)
 
     def visitTuple_expr(self, ctx: GrammarParser.Tuple_exprContext):
         expressions = self.visit(ctx.expr_list())
@@ -97,6 +101,25 @@ class Visitor(GrammarVisitor):
         if ctx.generic_instance() is not None:
             return self.visitGeneric_instance(child)
         return super().visitInfix_free_expr(ctx)
+
+    def visitId_list(self, ctx: GrammarParser.Id_listContext):
+        return self.visitList(ctx)
+
+    def visitGeneric_target(self, ctx: GrammarParser.Generic_targetContext):
+        id = self.visit(ctx.id_())
+        generics = [] if ctx.id_list() is None else self.visit(ctx.id_list())
+        return Assignee(id, generics)
+
+    def visitAssignee(self, ctx: GrammarParser.AssigneeContext):
+        if ctx.OPERATOR_ID() is not None:
+            id = re.match(r"^\((.*)\)$").group(1)
+            return Assignee(id, [])
+        return super().visit(ctx.generic_target())
+
+    def visitAssignment(self, ctx: GrammarParser.AssignmentContext):
+        assignee = self.visit(ctx.assignee())
+        expression = self.visit(ctx.expr())
+        return Assignment(assignee, expression)
 
 
 class Parser:

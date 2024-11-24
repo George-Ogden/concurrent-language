@@ -3,6 +3,8 @@ from typing import Optional
 import pytest
 
 from ast_nodes import (
+    Assignee,
+    Assignment,
     ASTNode,
     AtomicType,
     Boolean,
@@ -177,6 +179,11 @@ from parse import Parser
             TupleExpression([TupleExpression([])]),
             "expr",
         ),
+        ("a = 3", Assignment(Assignee("a", []), Integer(3)), "assignment"),
+        ("a<T> = 3", Assignment(Assignee("a", ["T"]), Integer(3)), "assignment"),
+        ("a<T,> = true", Assignment(Assignee("a", ["T"]), Boolean(True)), "assignment"),
+        ("a<T,U> = -4", Assignment(Assignee("a", ["T", "U"]), Integer(-4)), "assignment"),
+        ("a<T,U,> = 0", Assignment(Assignee("a", ["T", "U"]), Integer(0)), "assignment"),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):
