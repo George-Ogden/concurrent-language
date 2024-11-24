@@ -8,6 +8,7 @@ from ast_nodes import (
     FunctionType,
     GenericVariable,
     Integer,
+    TupleExpression,
     TupleType,
 )
 from parse import Parser
@@ -141,6 +142,36 @@ from parse import Parser
         (
             "map<(int,int)>",
             GenericVariable("map", [TupleType([AtomicType.INT, AtomicType.INT])]),
+            "expr",
+        ),
+        (
+            "()",
+            TupleExpression([]),
+            "expr",
+        ),
+        (
+            "(3,)",
+            TupleExpression([Integer(3)]),
+            "expr",
+        ),
+        (
+            "(8,5,)",
+            TupleExpression([Integer(8), Integer(5)]),
+            "expr",
+        ),
+        (
+            "(8,5)",
+            TupleExpression([Integer(8), Integer(5)]),
+            "expr",
+        ),
+        (
+            "(())",
+            TupleExpression([]),
+            "expr",
+        ),
+        (
+            "((),)",
+            TupleExpression([TupleExpression([])]),
             "expr",
         ),
     ],

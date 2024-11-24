@@ -14,6 +14,7 @@ from ast_nodes import (
     FunctionType,
     GenericVariable,
     Integer,
+    TupleExpression,
     TupleType,
 )
 
@@ -74,7 +75,17 @@ class Visitor(GrammarVisitor):
         return_type = self.visit(ctx.fn_type_tail())
         return FunctionType(argument_types, return_type)
 
+    def visitExpr_list(self, ctx: GrammarParser.Expr_listContext):
+        children = (self.visit(child) for child in ctx.getChildren())
+        return [child for child in children if child is not None]
+
+    def visitTuple_expr(self, ctx: GrammarParser.Tuple_exprContext):
+        expressions = self.visit(ctx.expr_list())
+        return TupleExpression(expressions)
+
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
+        if ctx.expr() is not None:
+            return self.visit(ctx.expr())
         [child] = ctx.getChildren()
         if ctx.generic_instance() is not None:
             return self.visitGeneric_instance(child)
