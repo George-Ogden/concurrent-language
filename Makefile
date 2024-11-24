@@ -1,4 +1,11 @@
-parse:
-	cat sample.txt | antlr4-parse Grammar.g4  program -tree
+parse: parser
+	python parse.py sample.txt
 
-.PHONY: parse
+parser:
+	antlr4 -no-listener -Dlanguage=Python3 Grammar.g4  -o $@
+	touch $@/__init__.py
+
+clean:
+	rm -rf parser
+
+.PHONY: clean parse
