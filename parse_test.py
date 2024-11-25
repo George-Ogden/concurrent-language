@@ -15,6 +15,9 @@ from ast_nodes import (
     Id,
     IfExpression,
     Integer,
+    MatchBlock,
+    MatchExpression,
+    MatchItem,
     TupleExpression,
     TupleType,
 )
@@ -358,6 +361,41 @@ def Variable(name: Id) -> GenericVariable:
                 FunctionCall(">", [Variable("x"), Integer(0)]),
                 Block([Assignment(Assignee("x", []), Integer(0))], Boolean(True)),
                 Block([Assignment(Assignee("x", []), Integer(1))], Boolean(False)),
+            ),
+            "expr",
+        ),
+        (
+            "match (maybe()) { Some x: { t }; None : { y };}",
+            MatchExpression(
+                FunctionCall(Variable("maybe"), []),
+                [
+                    MatchBlock([MatchItem("Some", Assignee("x", []))], Block([], Variable("t"))),
+                    MatchBlock([MatchItem("None", None)], Block([], Variable("y"))),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "match (maybe()) { Some x: { t }; None : { y }}",
+            MatchExpression(
+                FunctionCall(Variable("maybe"), []),
+                [
+                    MatchBlock([MatchItem("Some", Assignee("x", []))], Block([], Variable("t"))),
+                    MatchBlock([MatchItem("None", None)], Block([], Variable("y"))),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "match(()) { Some x | None: { () }; }",
+            MatchExpression(
+                TupleExpression([]),
+                [
+                    MatchBlock(
+                        [MatchItem("Some", Assignee("x", [])), MatchItem("None", None)],
+                        Block([], TupleExpression([])),
+                    ),
+                ],
             ),
             "expr",
         ),

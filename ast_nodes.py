@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import ClassVar, TypeAlias, Union
+from typing import ClassVar, Optional, TypeAlias, Union
 
 
 class ASTNode: ...
@@ -118,14 +118,20 @@ class IfExpression:
 
 
 @dataclass
+class MatchItem(ASTNode):
+    type_name: str
+    assignee: Optional[Assignee]
+
+
+@dataclass
 class MatchBlock(ASTNode):
-    matches: list[tuple[Id, Assignee]]
+    matches: list[MatchItem]
     block: Block
 
 
 @dataclass
 class MatchExpression:
-    condition: Expression
+    subject: Expression
     blocks: list[MatchBlock]
 
 

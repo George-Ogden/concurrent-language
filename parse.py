@@ -21,6 +21,9 @@ from ast_nodes import (
     GenericVariable,
     IfExpression,
     Integer,
+    MatchBlock,
+    MatchExpression,
+    MatchItem,
     TupleExpression,
     TupleType,
 )
@@ -178,6 +181,27 @@ class Visitor(GrammarVisitor):
         true_block = self.visit(true_ctx)
         false_block = self.visit(false_ctx)
         return IfExpression(condition, true_block, false_block)
+
+    def visitMatch_item(self, ctx: GrammarParser.Match_itemContext):
+        name = self.visit(ctx.id_())
+        assignee = None if ctx.assignee() is None else self.visit(ctx.assignee())
+        return MatchItem(name, assignee)
+
+    def visitMatch_list(self, ctx: GrammarParser.Match_listContext):
+        return self.visitList(ctx)
+
+    def visitMatch_block(self, ctx: GrammarParser.Match_blockContext):
+        matches = self.visit(ctx.match_list())
+        block = self.visit(ctx.block())
+        return MatchBlock(matches, block)
+
+    def visitMatch_block_list(self, ctx: GrammarParser.Match_block_listContext):
+        return self.visitList(ctx)
+
+    def visitMatch_expr(self, ctx: GrammarParser.Match_exprContext):
+        subject = self.visit(ctx.expr())
+        blocks = self.visit(ctx.match_block_list())
+        return MatchExpression(subject, blocks)
 
 
 class Parser:

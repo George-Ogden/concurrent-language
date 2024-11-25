@@ -167,8 +167,11 @@ tuple_expr: '(' expr_list ')';
 expr_list : | (expr ',' )+ expr? ;
 
 if_expr : IF '(' expr ')' block ELSE block ;
-match_expr : MATCH '(' expr ')' '{' match_block (';' match_block)* ';' '}' ;
-match_block : id assignee ? ('|' id assignee ?)* ':' block ;
+match_expr : MATCH '(' expr ')' '{' match_block_list '}' ;
+match_block_list : (match_block ';')* match_block? ;
+match_block : match_list ':' block ;
+match_list : match_item ('|' match_item)*;
+match_item: id assignee ?;
 
 fn_def : '(' typed_assignee_list ')' RIGHTARROW type_instance block;
 typed_assignee_list : | typed_assignee (',' typed_assignee)* ',' ?;
