@@ -312,7 +312,10 @@ def Variable(name: Id) -> GenericVariable:
                 [
                     FunctionCall(
                         Variable("+"),
-                        [FunctionCall(Variable("*"), [Integer(2), Integer(3)]), Integer(4)],
+                        [
+                            FunctionCall(Variable("*"), [Integer(2), Integer(3)]),
+                            Integer(4),
+                        ],
                     ),
                     Integer(5),
                 ],
@@ -388,6 +391,41 @@ def Variable(name: Id) -> GenericVariable:
                         Variable("$"),
                         [Variable("h"), FunctionCall(Variable("i"), [Variable("x")])],
                     ),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "x __add__ f __add__ g",
+            FunctionCall(
+                Variable("add"),
+                [
+                    Variable("x"),
+                    FunctionCall(Variable("add"), [Variable("f"), Variable("g")]),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "x |> f |> g",
+            FunctionCall(
+                Variable("|>"),
+                [
+                    FunctionCall(Variable("|>"), [Variable("x"), Variable("f")]),
+                    Variable("g"),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "(h @ g @ f)(x)",
+            FunctionCall(
+                FunctionCall(
+                    Variable("@"),
+                    [Variable("h"), FunctionCall(Variable("@"), [Variable("g"), Variable("f")])],
+                ),
+                [
+                    Variable("x"),
                 ],
             ),
             "expr",

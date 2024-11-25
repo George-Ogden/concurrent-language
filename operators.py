@@ -9,11 +9,13 @@ class Associativity(enum.IntEnum):
 
 class OperatorManager:
     OPERATOR_PRECEDENCE = {"$": 0, "+": 1, "*": 2}
-    LEFT_ASSOCIATIVE_OPERATORS = {"$"}
+    LEFT_ASSOCIATIVE_OPERATORS = {"$", "@"}
     OPERATOR_REGEX = r"^[&!+/\-^$<>@:*|%=]+$"
 
     @classmethod
     def get_precedence(cls, operator: str):
+        if not re.match(cls.OPERATOR_REGEX, operator):
+            return len(cls.OPERATOR_PRECEDENCE) + 2
         return cls.OPERATOR_PRECEDENCE.get(operator, len(cls.OPERATOR_PRECEDENCE) + 1)
 
     @classmethod
