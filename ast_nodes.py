@@ -111,7 +111,7 @@ class GenericVariable(ASTNode):
 
 
 @dataclass
-class IfExpression:
+class IfExpression(ASTNode):
     condition: Expression
     true_block: Block
     false_block: Block
@@ -130,7 +130,7 @@ class MatchBlock(ASTNode):
 
 
 @dataclass
-class MatchExpression:
+class MatchExpression(ASTNode):
     subject: Expression
     blocks: list[MatchBlock]
 
