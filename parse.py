@@ -51,6 +51,7 @@ class Associativity(enum.IntEnum):
 class OperatorManager:
     OPERATOR_PRECEDENCE = {"$": 0, "+": 1, "*": 2}
     LEFT_ASSOCIATIVE_OPERATORS = {"$"}
+    OPERATOR_REGEX = r"^[&!+-^$<>@:*|=]+$"
 
     @classmethod
     def get_precedence(cls, operator: str):
@@ -58,7 +59,7 @@ class OperatorManager:
 
     @classmethod
     def get_associativity(cls, operator: str):
-        if operator in cls.LEFT_ASSOCIATIVE_OPERATORS:
+        if operator in cls.LEFT_ASSOCIATIVE_OPERATORS or not re.match(cls.OPERATOR_REGEX, operator):
             return Associativity.LEFT
         else:
             return Associativity.RIGHT
@@ -138,37 +139,35 @@ class Visitor(GrammarVisitor):
         else:
             return self.visit(ctx.fn_call_free_expr())
 
-    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, lhs=None):
+    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, carry=None):
+        if carry is None:
+            carry = ("id", lambda x: x)
+
         left = self.visit(ctx.infix_free_expr())
         operator = self.visit(ctx.infix_operator())
-        carry = None
-        if lhs is None:
-            carry = (left, operator)
+
+        parent_operator, tree = carry
+        if OperatorManager.get_precedence(parent_operator) > OperatorManager.get_precedence(
+            operator
+        ) or (
+            operator == parent_operator
+            and OperatorManager.get_associativity(operator) == Associativity.RIGHT
+        ):
+            carry = (
+                operator,
+                lambda x: FunctionCall(GenericVariable(operator, []), [tree(left), x]),
+            )
         else:
-            parent_expression, parent_operator = lhs
-            if (
-                parent_operator == operator
-                and OperatorManager.get_associativity(operator) == Associativity.LEFT
-            ) or OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
-                operator
-            ):
-                carry = (left, operator)
-            else:
-                carry = (
-                    FunctionCall(GenericVariable(parent_operator, []), [parent_expression, left]),
-                    operator,
-                )
-                lhs = None
+            carry = (
+                parent_operator,
+                lambda x: tree(FunctionCall(GenericVariable(operator, []), [left, x])),
+            )
         if ctx.expr().infix_call() is None:
-            left, operator = carry
+            _, function = carry
             right = self.visit(ctx.expr())
-            right = FunctionCall(GenericVariable(operator, []), [left, right])
+            return function(right)
         else:
-            right = self.visitInfix_call(ctx.expr().infix_call(), lhs=carry)
-        if lhs is None:
-            return right
-        left, operator = lhs
-        return FunctionCall(GenericVariable(operator, []), [left, right])
+            return self.visitInfix_call(ctx.expr().infix_call(), carry=carry)
 
     def visitFn_call(self, ctx: GrammarParser.Fn_callContext):
         function = self.visit(ctx.fn_call_head())

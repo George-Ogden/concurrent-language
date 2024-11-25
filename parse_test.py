@@ -208,7 +208,11 @@ def Variable(name: Id) -> GenericVariable:
         ("3 + 4", FunctionCall(Variable("+"), [Integer(3), Integer(4)]), "expr"),
         ("3 * 4", FunctionCall(Variable("*"), [Integer(3), Integer(4)]), "expr"),
         ("3 &&$& 4", FunctionCall(Variable("&&$&"), [Integer(3), Integer(4)]), "expr"),
-        ("3 __add__ 4", FunctionCall(Variable("add"), [Integer(3), Integer(4)]), "expr"),
+        (
+            "3 __add__ 4",
+            FunctionCall(Variable("add"), [Integer(3), Integer(4)]),
+            "expr",
+        ),
         ("3 ____ 4", None, "expr"),
         ("3 __^__ 4", None, "expr"),
         ("3 _____ 4", FunctionCall(Variable("_"), [Integer(3), Integer(4)]), "expr"),
@@ -216,14 +220,16 @@ def Variable(name: Id) -> GenericVariable:
         (
             "3 + 4 + 5",
             FunctionCall(
-                Variable("+"), [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)]
+                Variable("+"),
+                [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)],
             ),
             "expr",
         ),
         (
             "3 * 4 + 5",
             FunctionCall(
-                Variable("+"), [FunctionCall(Variable("*"), [Integer(3), Integer(4)]), Integer(5)]
+                Variable("+"),
+                [FunctionCall(Variable("*"), [Integer(3), Integer(4)]), Integer(5)],
             ),
             "expr",
         ),
@@ -234,7 +240,10 @@ def Variable(name: Id) -> GenericVariable:
                 [
                     FunctionCall(
                         Variable("+"),
-                        [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)],
+                        [
+                            FunctionCall(Variable("+"), [Integer(3), Integer(4)]),
+                            Integer(5),
+                        ],
                     ),
                     Integer(6),
                 ],
@@ -246,11 +255,14 @@ def Variable(name: Id) -> GenericVariable:
             FunctionCall(
                 Variable("add"),
                 [
+                    Integer(3),
                     FunctionCall(
                         Variable("add"),
-                        [FunctionCall(Variable("add"), [Integer(3), Integer(4)]), Integer(5)],
+                        [
+                            Integer(4),
+                            FunctionCall(Variable("add"), [Integer(5), Integer(6)]),
+                        ],
                     ),
-                    Integer(6),
                 ],
             ),
             "expr",
@@ -258,14 +270,16 @@ def Variable(name: Id) -> GenericVariable:
         (
             "3 + 4 * 5",
             FunctionCall(
-                Variable("+"), [Integer(3), FunctionCall(Variable("*"), [Integer(4), Integer(5)])]
+                Variable("+"),
+                [Integer(3), FunctionCall(Variable("*"), [Integer(4), Integer(5)])],
             ),
             "expr",
         ),
         (
             "(3 + 4) * 5",
             FunctionCall(
-                Variable("*"), [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)]
+                Variable("*"),
+                [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)],
             ),
             "expr",
         ),
@@ -276,6 +290,82 @@ def Variable(name: Id) -> GenericVariable:
                 [
                     FunctionCall(Variable("*"), [Integer(2), Integer(3)]),
                     FunctionCall(Variable("*"), [Integer(4), Integer(5)]),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "3 __mul__ 4 + 5",
+            FunctionCall(
+                Variable("+"),
+                [
+                    FunctionCall(Variable("mul"), [Integer(3), Integer(4)]),
+                    Integer(5),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "2 * 3 + 4 + 5",
+            FunctionCall(
+                Variable("+"),
+                [
+                    FunctionCall(
+                        Variable("+"),
+                        [FunctionCall(Variable("*"), [Integer(2), Integer(3)]), Integer(4)],
+                    ),
+                    Integer(5),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "2 + 3 + 4 * 5",
+            FunctionCall(
+                Variable("+"),
+                [
+                    FunctionCall(
+                        Variable("+"),
+                        [
+                            Integer(2),
+                            Integer(3),
+                        ],
+                    ),
+                    FunctionCall(Variable("*"), [Integer(4), Integer(5)]),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "2 + 3 * 4 + 5",
+            FunctionCall(
+                Variable("+"),
+                [
+                    FunctionCall(
+                        Variable("+"),
+                        [
+                            Integer(2),
+                            FunctionCall(Variable("*"), [Integer(3), Integer(4)]),
+                        ],
+                    ),
+                    Integer(5),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "2 + 3 __mul__ 4 + 5",
+            FunctionCall(
+                Variable("+"),
+                [
+                    FunctionCall(
+                        Variable("+"),
+                        [
+                            Integer(2),
+                            FunctionCall(Variable("mul"), [Integer(3), Integer(4)]),
+                        ],
+                    ),
+                    Integer(5),
                 ],
             ),
             "expr",
