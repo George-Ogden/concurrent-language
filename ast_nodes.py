@@ -191,3 +191,7 @@ Definition: TypeAlias = Union[
 class Program(ASTNode):
     imports: list[Import]
     definitions: list[Definition]
+
+
+def Variable(name: Id) -> GenericVariable:
+    return GenericVariable(name, [])

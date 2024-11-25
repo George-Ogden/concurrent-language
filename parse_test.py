@@ -12,7 +12,6 @@ from ast_nodes import (
     FunctionCall,
     FunctionType,
     GenericVariable,
-    Id,
     IfExpression,
     Integer,
     MatchBlock,
@@ -20,12 +19,9 @@ from ast_nodes import (
     MatchItem,
     TupleExpression,
     TupleType,
+    Variable,
 )
 from parse import Parser
-
-
-def Variable(name: Id) -> GenericVariable:
-    return GenericVariable(name, [])
 
 
 @pytest.mark.parametrize(
