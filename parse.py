@@ -31,6 +31,8 @@ def main(argv):
     stream = CommonTokenStream(lexer)
     parser = GrammarParser(stream)
     assert target in parser.ruleNames
+    if target == "id":
+        target = "id_"
     tree = getattr(parser, target).__call__()
     print(Trees.toStringTree(tree, None, parser))
 
@@ -112,9 +114,11 @@ class Visitor(GrammarVisitor):
         return Assignee(id, generics)
 
     def visitAssignee(self, ctx: GrammarParser.AssigneeContext):
-        if ctx.OPERATOR_ID() is not None:
-            id = re.match(r"^__(.*)__$", ctx.getText()).group(1)
+        if ctx.operator_id() is not None:
+            id = re.match(r"^__(\S+)__$", ctx.getText()).group(1)
             return Assignee(id, [])
+        elif ctx.getText() == "__":
+            return Assignee("__", [])
         return super().visit(ctx.generic_target())
 
     def visitAssignment(self, ctx: GrammarParser.AssignmentContext):

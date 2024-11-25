@@ -1,5 +1,24 @@
 grammar Grammar;
 
+@parser::members {
+def check_for_ws(self):
+    token_stream = self.getInputStream()
+    la1 = token_stream.LT(1)
+    lb1 = token_stream.LT(-1)
+
+    for i in range(la1.tokenIndex - 1, -1, -1):
+        token = token_stream.get(i)
+
+        if token.channel != Token.HIDDEN_CHANNEL:
+            return True
+
+        if token.type == self.WS:
+            return False
+
+    return True
+
+}
+
 MULTILINE_COMMENT : '/*' .*? '*/' -> skip ;
 SINGLE_LINE_COMMENT : '//' ~[\r\n]* -> skip ;
 
@@ -16,6 +35,7 @@ RANGLE : '>' ;
 PIPE : '|' ;
 NEGATE: '-' ;
 DOT: '.' ;
+UNDER: '_';
 
 IF : 'if' ;
 ELSE : 'else' ;
@@ -27,13 +47,11 @@ TRUE: 'true';
 FALSE: 'false';
 BOOL: 'bool';
 
-OPERATOR_SYMBOL: [&|=!/*+^$<>@:];
-
-OPERATOR_ID: '__' [&|=!/*+^$<>@:]+ '__';
-INFIX_ID: '__' [a-zA-Z_][a-zA-Z_0-9]* '__' ;
-ID: [a-zA-Z_][a-zA-Z_0-9]* ;
+ID: [a-zA-Z_][a-zA-Z0-9_]* ;
 UINT: '0' | [1-9][0-9]* ;
-WS: [ \t\n\r\f]+ -> skip ;
+WS: [ \t\n\r\f]+ -> channel(HIDDEN);
+
+not_ws: {self.check_for_ws()}? ;
 
 program : imports definitions EOF ;
 
@@ -49,8 +67,12 @@ definition
 //    | trait_impl
     ;
 
-id: ID;
-operator: OPERATOR_SYMBOL+;
+id: ID | '_';
+operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '^' | '$' | '<' | '>' | '@' | ':');
+operator_symbol: operator_symbol_without_eq | '=' ;
+operator: (operator_symbol not_ws)+ operator_symbol | operator_symbol_without_eq;
+operator_id: '__' not_ws operator not_ws '__';
+infix_id: '__' not_ws ID not_ws '__' ;
 
 id_list : | id (',' id)* ','? ;
 generic_target : id ('<' id_list '>')? ;
@@ -101,7 +123,8 @@ assignment_list : | (assignment ';')*;
 
 assignee
     : generic_target
-    | OPERATOR_ID
+    | operator_id
+    | '__'
 //    | tuple_assignee
 //    | record_assignee
     ;
@@ -128,7 +151,7 @@ boolean: TRUE | FALSE;
 fn_call : generic_instance '(' (expr | expr_list) ')' ;
 
 infix_operator
-    : INFIX_ID
+    : infix_id
     | operator
     | DOT
     | NEGATE
