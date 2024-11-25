@@ -240,6 +240,27 @@ def Variable(name: Id) -> GenericVariable:
             "expr",
         ),
         (
+            "3 + 4 * 5",
+            FunctionCall("+", [Integer(3), FunctionCall("*", [Integer(4), Integer(5)])]),
+            "expr",
+        ),
+        (
+            "(3 + 4) * 5",
+            FunctionCall("*", [FunctionCall("+", [Integer(3), Integer(4)]), Integer(5)]),
+            "expr",
+        ),
+        (
+            "2 * 3 + 4 * 5",
+            FunctionCall(
+                "+",
+                [
+                    FunctionCall("*", [Integer(2), Integer(3)]),
+                    FunctionCall("*", [Integer(4), Integer(5)]),
+                ],
+            ),
+            "expr",
+        ),
+        (
             "foo()",
             FunctionCall(Variable("foo"), []),
             "expr",

@@ -43,6 +43,11 @@ def main(argv):
 
 
 class Visitor(GrammarVisitor):
+    OPERATOR_PRECEDENCE = {"+": 1, "*": 2}
+
+    def get_precedence(self, operator: str):
+        return self.OPERATOR_PRECEDENCE.get(operator, len(self.OPERATOR_PRECEDENCE) + 1)
+
     def visitList(self, ctx: ParserRuleContext):
         children = (self.visit(child) for child in ctx.getChildren())
         return [child for child in children if child is not None]
@@ -117,15 +122,27 @@ class Visitor(GrammarVisitor):
 
     def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, lhs=None):
         left = self.visit(ctx.infix_free_expr())
-        if lhs is not None:
-            argument, operator = lhs
-            left = FunctionCall(operator, [argument, left])
         operator = self.visit(ctx.infix_operator())
-        if ctx.expr().infix_call() is None:
-            right = self.visit(ctx.expr())
-            return FunctionCall(operator, [left, right])
+        carry = None
+        if lhs is None:
+            carry = (left, operator)
         else:
-            return self.visitInfix_call(ctx.expr().infix_call(), (left, operator))
+            parent_expression, parent_operator = lhs
+            if self.get_precedence(parent_operator) < self.get_precedence(operator):
+                carry = (left, operator)
+            else:
+                carry = (FunctionCall(parent_operator, [parent_expression, left]), operator)
+                lhs = None
+        if ctx.expr().infix_call() is None:
+            left, operator = carry
+            right = self.visit(ctx.expr())
+            right = FunctionCall(operator, [left, right])
+        else:
+            right = self.visitInfix_call(ctx.expr().infix_call(), lhs=carry)
+        if lhs is None:
+            return right
+        left, operator = lhs
+        return FunctionCall(operator, [left, right])
 
     def visitFn_call(self, ctx: GrammarParser.Fn_callContext):
         function = self.visit(ctx.fn_call_head())
