@@ -16,6 +16,7 @@ from ast_nodes import (
     AtomicTypeEnum,
     Block,
     Boolean,
+    FunctionCall,
     FunctionType,
     GenericVariable,
     Integer,
@@ -26,7 +27,7 @@ from ast_nodes import (
 
 def main(argv):
     input_stream = InputStream(argv[1])
-    target = sys.argv[2]
+    target = sys.argv[2] if len(sys.argv) >= 3 else "program"
     lexer = GrammarLexer(input_stream)
     stream = CommonTokenStream(lexer)
     parser = GrammarParser(stream)
@@ -97,6 +98,13 @@ class Visitor(GrammarVisitor):
         expressions = self.visit(ctx.expr_list())
         return TupleExpression(expressions)
 
+    def visitInfix_operator(self, ctx: GrammarParser.Infix_operatorContext):
+        operator = ctx.getText()
+        match = re.match(r"^__(\S+)__$", ctx.getText())
+        if match:
+            operator = match.group(1)
+        return operator
+
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
         if ctx.expr() is not None:
             return self.visit(ctx.expr())
@@ -104,6 +112,12 @@ class Visitor(GrammarVisitor):
         if ctx.generic_instance() is not None:
             return self.visitGeneric_instance(child)
         return super().visitInfix_free_expr(ctx)
+
+    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext):
+        left = self.visit(ctx.infix_free_expr())
+        operator = self.visit(ctx.infix_operator())
+        right = self.visit(ctx.expr())
+        return FunctionCall(operator, [], [left, right])
 
     def visitId_list(self, ctx: GrammarParser.Id_listContext):
         return self.visitList(ctx)

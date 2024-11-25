@@ -47,6 +47,7 @@ TRUE: 'true';
 FALSE: 'false';
 BOOL: 'bool';
 
+INFIX_ID: '_''_'[a-zA-Z_][a-zA-Z0-9_]*'_''_' ;
 ID: [a-zA-Z_][a-zA-Z0-9_]* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+ -> channel(HIDDEN);
@@ -67,12 +68,11 @@ definition
 //    | trait_impl
     ;
 
-id: ID | '_';
-operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '^' | '$' | '<' | '>' | '@' | ':');
+id: ID | '_' | INFIX_ID;
+operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '^' | '$' | '<' | '>' | '@' | ':' | '*');
 operator_symbol: operator_symbol_without_eq | '=' ;
 operator: (operator_symbol not_ws)+ operator_symbol | operator_symbol_without_eq;
 operator_id: '__' not_ws operator not_ws '__';
-infix_id: '__' not_ws ID not_ws '__' ;
 
 id_list : | id (',' id)* ','? ;
 generic_target : id ('<' id_list '>')? ;
@@ -151,7 +151,7 @@ boolean: TRUE | FALSE;
 fn_call : generic_instance '(' (expr | expr_list) ')' ;
 
 infix_operator
-    : infix_id
+    : INFIX_ID
     | operator
     | DOT
     | NEGATE
