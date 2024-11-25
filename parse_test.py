@@ -431,6 +431,14 @@ def Variable(name: Id) -> GenericVariable:
             "expr",
         ),
         (
+            "3 :: 4 :: t",
+            FunctionCall(
+                Variable("::"),
+                [Integer(3), FunctionCall(Variable("::"), [Integer(4), Variable("t")])],
+            ),
+            "expr",
+        ),
+        (
             "foo()",
             FunctionCall(Variable("foo"), []),
             "expr",

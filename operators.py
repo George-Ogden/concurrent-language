@@ -9,7 +9,7 @@ class Associativity(enum.IntEnum):
 
 class OperatorManager:
     OPERATOR_PRECEDENCE = {"$": 0, "+": 1, "*": 2}
-    LEFT_ASSOCIATIVE_OPERATORS = {"$", "@"}
+    LEFT_ASSOCIATIVE_OPERATORS = {"$", "@", "::", "**", "++"}
     OPERATOR_REGEX = r"^[&!+/\-^$<>@:*|%=]+$"
 
     @classmethod
