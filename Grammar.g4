@@ -69,7 +69,7 @@ definition
     ;
 
 id: ID | '_' | INFIX_ID;
-operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*');
+operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*' | '%' | '/');
 operator_symbol: operator_symbol_without_eq | '=' ;
 operator: (operator_symbol not_ws)+ operator_symbol | operator_symbol_without_eq;
 operator_id: '__' not_ws operator not_ws '__';
