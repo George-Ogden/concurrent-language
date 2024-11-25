@@ -1,3 +1,4 @@
+import enum
 import re
 import sys
 from parser.GrammarLexer import GrammarLexer
@@ -42,11 +43,28 @@ def main(argv):
     print(Trees.toStringTree(tree, None, parser))
 
 
-class Visitor(GrammarVisitor):
-    OPERATOR_PRECEDENCE = {"+": 1, "*": 2}
+class Associativity(enum.IntEnum):
+    LEFT = enum.auto()
+    RIGHT = enum.auto()
 
-    def get_precedence(self, operator: str):
-        return self.OPERATOR_PRECEDENCE.get(operator, len(self.OPERATOR_PRECEDENCE) + 1)
+
+class OperatorManager:
+    OPERATOR_PRECEDENCE = {"$": 0, "+": 1, "*": 2}
+    LEFT_ASSOCIATIVE_OPERATORS = {"$"}
+
+    @classmethod
+    def get_precedence(cls, operator: str):
+        return cls.OPERATOR_PRECEDENCE.get(operator, len(cls.OPERATOR_PRECEDENCE) + 1)
+
+    @classmethod
+    def get_associativity(cls, operator: str):
+        if operator in cls.LEFT_ASSOCIATIVE_OPERATORS:
+            return Associativity.LEFT
+        else:
+            return Associativity.RIGHT
+
+
+class Visitor(GrammarVisitor):
 
     def visitList(self, ctx: ParserRuleContext):
         children = (self.visit(child) for child in ctx.getChildren())
@@ -128,21 +146,29 @@ class Visitor(GrammarVisitor):
             carry = (left, operator)
         else:
             parent_expression, parent_operator = lhs
-            if self.get_precedence(parent_operator) < self.get_precedence(operator):
+            if (
+                parent_operator == operator
+                and OperatorManager.get_associativity(operator) == Associativity.LEFT
+            ) or OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
+                operator
+            ):
                 carry = (left, operator)
             else:
-                carry = (FunctionCall(parent_operator, [parent_expression, left]), operator)
+                carry = (
+                    FunctionCall(GenericVariable(parent_operator, []), [parent_expression, left]),
+                    operator,
+                )
                 lhs = None
         if ctx.expr().infix_call() is None:
             left, operator = carry
             right = self.visit(ctx.expr())
-            right = FunctionCall(operator, [left, right])
+            right = FunctionCall(GenericVariable(operator, []), [left, right])
         else:
             right = self.visitInfix_call(ctx.expr().infix_call(), lhs=carry)
         if lhs is None:
             return right
         left, operator = lhs
-        return FunctionCall(operator, [left, right])
+        return FunctionCall(GenericVariable(operator, []), [left, right])
 
     def visitFn_call(self, ctx: GrammarParser.Fn_callContext):
         function = self.visit(ctx.fn_call_head())

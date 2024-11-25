@@ -99,7 +99,11 @@ def Variable(name: Id) -> GenericVariable:
             FunctionType(TupleType([AtomicType.INT, AtomicType.BOOL]), AtomicType.INT),
             "type_instance",
         ),
-        ("(int,)->int", FunctionType(TupleType([AtomicType.INT]), AtomicType.INT), "type_instance"),
+        (
+            "(int,)->int",
+            FunctionType(TupleType([AtomicType.INT]), AtomicType.INT),
+            "type_instance",
+        ),
         ("(int)->int", FunctionType(AtomicType.INT, AtomicType.INT), "type_instance"),
         ("int->int", FunctionType(AtomicType.INT, AtomicType.INT), "type_instance"),
         ("()->()", FunctionType(TupleType([]), TupleType([])), "type_instance"),
@@ -151,7 +155,11 @@ def Variable(name: Id) -> GenericVariable:
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<T>", GenericVariable("map", [Variable("T")]), "expr"),
-        ("map<f<int>>", GenericVariable("map", [GenericVariable("f", [AtomicType.INT])]), "expr"),
+        (
+            "map<f<int>>",
+            GenericVariable("map", [GenericVariable("f", [AtomicType.INT])]),
+            "expr",
+        ),
         (
             "map<f<g<T>>>",
             GenericVariable("map", [GenericVariable("f", [GenericVariable("g", [Variable("T")])])]),
@@ -197,30 +205,37 @@ def Variable(name: Id) -> GenericVariable:
             TupleExpression([TupleExpression([])]),
             "expr",
         ),
-        ("3 + 4", FunctionCall("+", [Integer(3), Integer(4)]), "expr"),
-        ("3 * 4", FunctionCall("*", [Integer(3), Integer(4)]), "expr"),
-        ("3 &&$& 4", FunctionCall("&&$&", [Integer(3), Integer(4)]), "expr"),
-        ("3 __add__ 4", FunctionCall("add", [Integer(3), Integer(4)]), "expr"),
+        ("3 + 4", FunctionCall(Variable("+"), [Integer(3), Integer(4)]), "expr"),
+        ("3 * 4", FunctionCall(Variable("*"), [Integer(3), Integer(4)]), "expr"),
+        ("3 &&$& 4", FunctionCall(Variable("&&$&"), [Integer(3), Integer(4)]), "expr"),
+        ("3 __add__ 4", FunctionCall(Variable("add"), [Integer(3), Integer(4)]), "expr"),
         ("3 ____ 4", None, "expr"),
         ("3 __^__ 4", None, "expr"),
-        ("3 _____ 4", FunctionCall("_", [Integer(3), Integer(4)]), "expr"),
-        ("3 ______ 4", FunctionCall("__", [Integer(3), Integer(4)]), "expr"),
+        ("3 _____ 4", FunctionCall(Variable("_"), [Integer(3), Integer(4)]), "expr"),
+        ("3 ______ 4", FunctionCall(Variable("__"), [Integer(3), Integer(4)]), "expr"),
         (
             "3 + 4 + 5",
-            FunctionCall("+", [FunctionCall("+", [Integer(3), Integer(4)]), Integer(5)]),
+            FunctionCall(
+                Variable("+"), [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)]
+            ),
             "expr",
         ),
         (
             "3 * 4 + 5",
-            FunctionCall("+", [FunctionCall("*", [Integer(3), Integer(4)]), Integer(5)]),
+            FunctionCall(
+                Variable("+"), [FunctionCall(Variable("*"), [Integer(3), Integer(4)]), Integer(5)]
+            ),
             "expr",
         ),
         (
             "3 + 4 + 5 + 6",
             FunctionCall(
-                "+",
+                Variable("+"),
                 [
-                    FunctionCall("+", [FunctionCall("+", [Integer(3), Integer(4)]), Integer(5)]),
+                    FunctionCall(
+                        Variable("+"),
+                        [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)],
+                    ),
                     Integer(6),
                 ],
             ),
@@ -229,10 +244,11 @@ def Variable(name: Id) -> GenericVariable:
         (
             "3 __add__ 4 __add__ 5 __add__ 6",
             FunctionCall(
-                "add",
+                Variable("add"),
                 [
                     FunctionCall(
-                        "add", [FunctionCall("add", [Integer(3), Integer(4)]), Integer(5)]
+                        Variable("add"),
+                        [FunctionCall(Variable("add"), [Integer(3), Integer(4)]), Integer(5)],
                     ),
                     Integer(6),
                 ],
@@ -241,21 +257,47 @@ def Variable(name: Id) -> GenericVariable:
         ),
         (
             "3 + 4 * 5",
-            FunctionCall("+", [Integer(3), FunctionCall("*", [Integer(4), Integer(5)])]),
+            FunctionCall(
+                Variable("+"), [Integer(3), FunctionCall(Variable("*"), [Integer(4), Integer(5)])]
+            ),
             "expr",
         ),
         (
             "(3 + 4) * 5",
-            FunctionCall("*", [FunctionCall("+", [Integer(3), Integer(4)]), Integer(5)]),
+            FunctionCall(
+                Variable("*"), [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)]
+            ),
             "expr",
         ),
         (
             "2 * 3 + 4 * 5",
             FunctionCall(
-                "+",
+                Variable("+"),
                 [
-                    FunctionCall("*", [Integer(2), Integer(3)]),
-                    FunctionCall("*", [Integer(4), Integer(5)]),
+                    FunctionCall(Variable("*"), [Integer(2), Integer(3)]),
+                    FunctionCall(Variable("*"), [Integer(4), Integer(5)]),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "g $ h(x)",
+            FunctionCall(
+                Variable("$"),
+                [Variable("g"), FunctionCall(Variable("h"), [Variable("x")])],
+            ),
+            "expr",
+        ),
+        (
+            "g $ h $ i(x)",
+            FunctionCall(
+                Variable("$"),
+                [
+                    Variable("g"),
+                    FunctionCall(
+                        Variable("$"),
+                        [Variable("h"), FunctionCall(Variable("i"), [Variable("x")])],
+                    ),
                 ],
             ),
             "expr",
@@ -335,7 +377,11 @@ def Variable(name: Id) -> GenericVariable:
             Assignment(Assignee("a", ["T"]), GenericVariable("t", [Variable("T")])),
             "assignment",
         ),
-        ("a<T,U> = -4", Assignment(Assignee("a", ["T", "U"]), Integer(-4)), "assignment"),
+        (
+            "a<T,U> = -4",
+            Assignment(Assignee("a", ["T", "U"]), Integer(-4)),
+            "assignment",
+        ),
         (
             "a<T,U> = f<U,T>",
             Assignment(
@@ -344,10 +390,18 @@ def Variable(name: Id) -> GenericVariable:
             ),
             "assignment",
         ),
-        ("a<T,U,> = 0", Assignment(Assignee("a", ["T", "U"]), Integer(0)), "assignment"),
+        (
+            "a<T,U,> = 0",
+            Assignment(Assignee("a", ["T", "U"]), Integer(0)),
+            "assignment",
+        ),
         ("{5}", Block([], Integer(5)), "block"),
         ("{}", None, "block"),
-        ("{a = -9; 8}", Block([Assignment(Assignee("a", []), Integer(-9))], Integer(8)), "block"),
+        (
+            "{a = -9; 8}",
+            Block([Assignment(Assignee("a", []), Integer(-9))], Integer(8)),
+            "block",
+        ),
         ("{a = -9}", None, "block"),
         ("{a = -9;}", None, "block"),
         ("{; 8}", None, "block"),
@@ -379,7 +433,7 @@ def Variable(name: Id) -> GenericVariable:
         (
             "if (x > 0) { x = 0; true } else { x = 1; false }",
             IfExpression(
-                FunctionCall(">", [Variable("x"), Integer(0)]),
+                FunctionCall(Variable(">"), [Variable("x"), Integer(0)]),
                 Block([Assignment(Assignee("x", []), Integer(0))], Boolean(True)),
                 Block([Assignment(Assignee("x", []), Integer(1))], Boolean(False)),
             ),
