@@ -113,11 +113,17 @@ class Visitor(GrammarVisitor):
             return self.visitGeneric_instance(child)
         return super().visitInfix_free_expr(ctx)
 
-    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext):
+    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, lhs=None):
         left = self.visit(ctx.infix_free_expr())
+        if lhs is not None:
+            argument, operator = lhs
+            left = FunctionCall(operator, [], [argument, left])
         operator = self.visit(ctx.infix_operator())
-        right = self.visit(ctx.expr())
-        return FunctionCall(operator, [], [left, right])
+        if ctx.expr().infix_call() is None:
+            right = self.visit(ctx.expr())
+            return FunctionCall(operator, [], [left, right])
+        else:
+            return self.visitInfix_call(ctx.expr().infix_call(), (left, operator))
 
     def visitId_list(self, ctx: GrammarParser.Id_listContext):
         return self.visitList(ctx)

@@ -198,6 +198,44 @@ from parse import Parser
         ("3 __^__ 4", None, "expr"),
         ("3 _____ 4", FunctionCall("_", [], [Integer(3), Integer(4)]), "expr"),
         ("3 ______ 4", FunctionCall("__", [], [Integer(3), Integer(4)]), "expr"),
+        (
+            "3 + 4 + 5",
+            FunctionCall("+", [], [FunctionCall("+", [], [Integer(3), Integer(4)]), Integer(5)]),
+            "expr",
+        ),
+        (
+            "3 * 4 + 5",
+            FunctionCall("+", [], [FunctionCall("*", [], [Integer(3), Integer(4)]), Integer(5)]),
+            "expr",
+        ),
+        (
+            "3 + 4 + 5 + 6",
+            FunctionCall(
+                "+",
+                [],
+                [
+                    FunctionCall(
+                        "+", [], [FunctionCall("+", [], [Integer(3), Integer(4)]), Integer(5)]
+                    ),
+                    Integer(6),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "3 __add__ 4 __add__ 5 __add__ 6",
+            FunctionCall(
+                "add",
+                [],
+                [
+                    FunctionCall(
+                        "add", [], [FunctionCall("add", [], [Integer(3), Integer(4)]), Integer(5)]
+                    ),
+                    Integer(6),
+                ],
+            ),
+            "expr",
+        ),
         ("a = 3", Assignment(Assignee("a", []), Integer(3)), "assignment"),
         ("__a__ = 3", Assignment(Assignee("__a__", []), Integer(3)), "assignment"),
         ("__&&__ = 3", Assignment(Assignee("&&", []), Integer(3)), "assignment"),
