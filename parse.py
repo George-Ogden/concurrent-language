@@ -19,6 +19,7 @@ from ast_nodes import (
     FunctionCall,
     FunctionType,
     GenericVariable,
+    IfExpression,
     Integer,
     TupleExpression,
     TupleType,
@@ -153,6 +154,13 @@ class Visitor(GrammarVisitor):
         assignments = self.visit(ctx.assignment_list())
         expression = self.visit(ctx.expr())
         return Block(assignments, expression)
+
+    def visitIf_expr(self, ctx: GrammarParser.If_exprContext):
+        condition = self.visit(ctx.expr())
+        true_ctx, false_ctx = ctx.block()
+        true_block = self.visit(true_ctx)
+        false_block = self.visit(false_ctx)
+        return IfExpression(condition, true_block, false_block)
 
 
 class Parser:

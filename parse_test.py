@@ -12,6 +12,7 @@ from ast_nodes import (
     FunctionCall,
     FunctionType,
     GenericVariable,
+    IfExpression,
     Integer,
     TupleExpression,
     TupleType,
@@ -303,6 +304,20 @@ from parse import Parser
             "{w = x; ()}",
             Block([Assignment(Assignee("w", []), GenericVariable("x", []))], TupleExpression([])),
             "block",
+        ),
+        (
+            "if (g) { 1 } else { 2 }",
+            IfExpression(GenericVariable("g", []), Block([], Integer(1)), Block([], Integer(2))),
+            "expr",
+        ),
+        (
+            "if (x > 0) { x = 0; true } else { x = 1; false }",
+            IfExpression(
+                FunctionCall(">", [], [GenericVariable("x", []), Integer(0)]),
+                Block([Assignment(Assignee("x", []), Integer(0))], Boolean(True)),
+                Block([Assignment(Assignee("x", []), Integer(1))], Boolean(False)),
+            ),
+            "expr",
         ),
     ],
 )
