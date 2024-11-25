@@ -4,6 +4,7 @@ from operators import Associativity, OperatorManager
 
 L = Associativity.LEFT
 R = Associativity.RIGHT
+N = Associativity.NONE
 
 operators = [
     ("$", L, 0),
@@ -18,13 +19,13 @@ operators = [
     ("-", R, 6),
     (">>", R, 7),
     ("<<", R, 7),
-    ("<=>", R, 8),
-    ("<", R, 9),
-    ("<=", R, 9),
-    (">", R, 9),
-    (">=", R, 9),
-    ("==", R, 9),
-    ("!=", R, 9),
+    ("<=>", N, 8),
+    ("<", N, 9),
+    ("<=", N, 9),
+    (">", N, 9),
+    (">=", N, 9),
+    ("==", N, 9),
+    ("!=", N, 9),
     ("&", R, 11),
     ("^", R, 12),
     ("|", R, 13),
