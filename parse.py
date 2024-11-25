@@ -107,24 +107,41 @@ class Visitor(GrammarVisitor):
         return operator
 
     def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
-        if ctx.expr() is not None:
-            return self.visit(ctx.expr())
-        [child] = ctx.getChildren()
-        if ctx.generic_instance() is not None:
-            return self.visitGeneric_instance(child)
-        return super().visitInfix_free_expr(ctx)
+        if ctx.fn_call_free_expr() is None:
+            return self.visit(ctx.fn_call())
+        else:
+            return self.visit(ctx.fn_call_free_expr())
 
     def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, lhs=None):
         left = self.visit(ctx.infix_free_expr())
         if lhs is not None:
             argument, operator = lhs
-            left = FunctionCall(operator, [], [argument, left])
+            left = FunctionCall(operator, [argument, left])
         operator = self.visit(ctx.infix_operator())
         if ctx.expr().infix_call() is None:
             right = self.visit(ctx.expr())
-            return FunctionCall(operator, [], [left, right])
+            return FunctionCall(operator, [left, right])
         else:
             return self.visitInfix_call(ctx.expr().infix_call(), (left, operator))
+
+    def visitFn_call(self, ctx: GrammarParser.Fn_callContext):
+        function = self.visit(ctx.fn_call_head())
+        return self.visitFn_call_tail(ctx.fn_call_tail(), function=function)
+
+    def visitFn_call_free_expr(self, ctx: GrammarParser.Fn_call_free_exprContext):
+        if ctx.expr() is not None:
+            return self.visit(ctx.expr())
+        return super().visitFn_call_free_expr(ctx)
+
+    def visitFn_call_tail(self, ctx: GrammarParser.Fn_call_tailContext, function=None):
+        if ctx.expr() is None:
+            args = self.visit(ctx.expr_list())
+        else:
+            args = [self.visit(ctx.expr())]
+        function = FunctionCall(function, args)
+        if ctx.fn_call_tail() is not None:
+            return self.visitFn_call_tail(ctx.fn_call_tail(), function)
+        return function
 
     def visitId_list(self, ctx: GrammarParser.Id_listContext):
         return self.visitList(ctx)

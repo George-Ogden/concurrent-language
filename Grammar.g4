@@ -129,7 +129,7 @@ assignee
 //    | record_assignee
     ;
 
-infix_free_expr
+fn_call_free_expr
     : integer
     | boolean
     | generic_instance
@@ -140,15 +140,17 @@ infix_free_expr
     | '(' expr ')'
     | tuple_expr
     | fn_def
-    | fn_call
     ;
 
-expr : infix_free_expr | infix_call;
+infix_free_expr: fn_call_free_expr | fn_call;
+expr: infix_free_expr | infix_call;
 
 integer: '-'? UINT;
 boolean: TRUE | FALSE;
 
-fn_call : generic_instance '(' (expr | expr_list) ')' ;
+fn_call: fn_call_head fn_call_tail;
+fn_call_head: fn_call_free_expr;
+fn_call_tail: '(' (expr | expr_list) ')' fn_call_tail?;
 
 infix_operator
     : INFIX_ID
@@ -160,7 +162,7 @@ infix_operator
     | RANGLE
     ;
 
-infix_call : infix_free_expr infix_operator expr;
+infix_call: infix_free_expr infix_operator expr;
 tuple_expr: '(' expr_list ')';
 expr_list : | (expr ',' )+ expr? ;
 

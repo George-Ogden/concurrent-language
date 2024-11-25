@@ -12,12 +12,17 @@ from ast_nodes import (
     FunctionCall,
     FunctionType,
     GenericVariable,
+    Id,
     IfExpression,
     Integer,
     TupleExpression,
     TupleType,
 )
 from parse import Parser
+
+
+def Variable(name: Id) -> GenericVariable:
+    return GenericVariable(name, [])
 
 
 @pytest.mark.parametrize(
@@ -27,7 +32,7 @@ from parse import Parser
         ("bool", AtomicType.BOOL, "type_instance"),
         ("(int)", AtomicType.INT, "type_instance"),
         ("((int))", AtomicType.INT, "type_instance"),
-        ("foo", GenericVariable("foo", []), "type_instance"),
+        ("foo", Variable("foo"), "type_instance"),
         ("foo<int>", GenericVariable("foo", [AtomicType.INT]), "type_instance"),
         ("foo<int,>", GenericVariable("foo", [AtomicType.INT]), "type_instance"),
         (
@@ -137,18 +142,16 @@ from parse import Parser
         ("00", None, "expr"),
         ("true", Boolean(True), "expr"),
         ("false", Boolean(False), "expr"),
-        ("x", GenericVariable("x", []), "expr"),
-        ("foo", GenericVariable("foo", []), "expr"),
-        ("r2d2", GenericVariable("r2d2", []), "expr"),
+        ("x", Variable("x"), "expr"),
+        ("foo", Variable("foo"), "expr"),
+        ("r2d2", Variable("r2d2"), "expr"),
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
-        ("map<T>", GenericVariable("map", [GenericVariable("T", [])]), "expr"),
+        ("map<T>", GenericVariable("map", [Variable("T")]), "expr"),
         ("map<f<int>>", GenericVariable("map", [GenericVariable("f", [AtomicType.INT])]), "expr"),
         (
             "map<f<g<T>>>",
-            GenericVariable(
-                "map", [GenericVariable("f", [GenericVariable("g", [GenericVariable("T", [])])])]
-            ),
+            GenericVariable("map", [GenericVariable("f", [GenericVariable("g", [Variable("T")])])]),
             "expr",
         ),
         (
@@ -191,33 +194,30 @@ from parse import Parser
             TupleExpression([TupleExpression([])]),
             "expr",
         ),
-        ("3 + 4", FunctionCall("+", [], [Integer(3), Integer(4)]), "expr"),
-        ("3 * 4", FunctionCall("*", [], [Integer(3), Integer(4)]), "expr"),
-        ("3 &&$& 4", FunctionCall("&&$&", [], [Integer(3), Integer(4)]), "expr"),
-        ("3 __add__ 4", FunctionCall("add", [], [Integer(3), Integer(4)]), "expr"),
+        ("3 + 4", FunctionCall("+", [Integer(3), Integer(4)]), "expr"),
+        ("3 * 4", FunctionCall("*", [Integer(3), Integer(4)]), "expr"),
+        ("3 &&$& 4", FunctionCall("&&$&", [Integer(3), Integer(4)]), "expr"),
+        ("3 __add__ 4", FunctionCall("add", [Integer(3), Integer(4)]), "expr"),
         ("3 ____ 4", None, "expr"),
         ("3 __^__ 4", None, "expr"),
-        ("3 _____ 4", FunctionCall("_", [], [Integer(3), Integer(4)]), "expr"),
-        ("3 ______ 4", FunctionCall("__", [], [Integer(3), Integer(4)]), "expr"),
+        ("3 _____ 4", FunctionCall("_", [Integer(3), Integer(4)]), "expr"),
+        ("3 ______ 4", FunctionCall("__", [Integer(3), Integer(4)]), "expr"),
         (
             "3 + 4 + 5",
-            FunctionCall("+", [], [FunctionCall("+", [], [Integer(3), Integer(4)]), Integer(5)]),
+            FunctionCall("+", [FunctionCall("+", [Integer(3), Integer(4)]), Integer(5)]),
             "expr",
         ),
         (
             "3 * 4 + 5",
-            FunctionCall("+", [], [FunctionCall("*", [], [Integer(3), Integer(4)]), Integer(5)]),
+            FunctionCall("+", [FunctionCall("*", [Integer(3), Integer(4)]), Integer(5)]),
             "expr",
         ),
         (
             "3 + 4 + 5 + 6",
             FunctionCall(
                 "+",
-                [],
                 [
-                    FunctionCall(
-                        "+", [], [FunctionCall("+", [], [Integer(3), Integer(4)]), Integer(5)]
-                    ),
+                    FunctionCall("+", [FunctionCall("+", [Integer(3), Integer(4)]), Integer(5)]),
                     Integer(6),
                 ],
             ),
@@ -227,13 +227,55 @@ from parse import Parser
             "3 __add__ 4 __add__ 5 __add__ 6",
             FunctionCall(
                 "add",
-                [],
                 [
                     FunctionCall(
-                        "add", [], [FunctionCall("add", [], [Integer(3), Integer(4)]), Integer(5)]
+                        "add", [FunctionCall("add", [Integer(3), Integer(4)]), Integer(5)]
                     ),
                     Integer(6),
                 ],
+            ),
+            "expr",
+        ),
+        (
+            "foo()",
+            FunctionCall(Variable("foo"), []),
+            "expr",
+        ),
+        (
+            "foo(4,)",
+            FunctionCall(Variable("foo"), [Integer(4)]),
+            "expr",
+        ),
+        (
+            "foo(4)",
+            FunctionCall(Variable("foo"), [Integer(4)]),
+            "expr",
+        ),
+        (
+            "foo(4,5)",
+            FunctionCall(Variable("foo"), [Integer(4), Integer(5)]),
+            "expr",
+        ),
+        (
+            "foo(4,5,)",
+            FunctionCall(Variable("foo"), [Integer(4), Integer(5)]),
+            "expr",
+        ),
+        (
+            "(foo)(4)",
+            FunctionCall(Variable("foo"), [Integer(4)]),
+            "expr",
+        ),
+        (
+            "foo(4)(-5,0)",
+            FunctionCall(FunctionCall(Variable("foo"), [Integer(4)]), [Integer(-5), Integer(0)]),
+            "expr",
+        ),
+        (
+            "foo(4)(a)(-5,bar(true))",
+            FunctionCall(
+                FunctionCall(FunctionCall(Variable("foo"), [Integer(4)]), [Variable("a")]),
+                [Integer(-5), FunctionCall(Variable("bar"), [Boolean(True)])],
             ),
             "expr",
         ),
@@ -256,17 +298,17 @@ from parse import Parser
         ("_____ = 0", Assignment(Assignee("_____", []), Integer(0)), "assignment"),
         (
             "a<T> = f<T>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("f", [GenericVariable("T", [])])),
+            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Variable("T")])),
             "assignment",
         ),
         (
             "a<T> = f<T>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("f", [GenericVariable("T", [])])),
+            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Variable("T")])),
             "assignment",
         ),
         (
             "a<T,> = t<T,>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("t", [GenericVariable("T", [])])),
+            Assignment(Assignee("a", ["T"]), GenericVariable("t", [Variable("T")])),
             "assignment",
         ),
         ("a<T,U> = -4", Assignment(Assignee("a", ["T", "U"]), Integer(-4)), "assignment"),
@@ -274,7 +316,7 @@ from parse import Parser
             "a<T,U> = f<U,T>",
             Assignment(
                 Assignee("a", ["T", "U"]),
-                GenericVariable("f", [GenericVariable("U", []), GenericVariable("T", [])]),
+                GenericVariable("f", [Variable("U"), Variable("T")]),
             ),
             "assignment",
         ),
@@ -290,10 +332,10 @@ from parse import Parser
             "{w = x;y<T> = x<T,T>; -8}",
             Block(
                 [
-                    Assignment(Assignee("w", []), GenericVariable("x", [])),
+                    Assignment(Assignee("w", []), Variable("x")),
                     Assignment(
                         Assignee("y", ["T"]),
-                        GenericVariable("x", [GenericVariable("T", []), GenericVariable("T", [])]),
+                        GenericVariable("x", [Variable("T"), Variable("T")]),
                     ),
                 ],
                 Integer(-8),
@@ -302,18 +344,18 @@ from parse import Parser
         ),
         (
             "{w = x; ()}",
-            Block([Assignment(Assignee("w", []), GenericVariable("x", []))], TupleExpression([])),
+            Block([Assignment(Assignee("w", []), Variable("x"))], TupleExpression([])),
             "block",
         ),
         (
             "if (g) { 1 } else { 2 }",
-            IfExpression(GenericVariable("g", []), Block([], Integer(1)), Block([], Integer(2))),
+            IfExpression(Variable("g"), Block([], Integer(1)), Block([], Integer(2))),
             "expr",
         ),
         (
             "if (x > 0) { x = 0; true } else { x = 1; false }",
             IfExpression(
-                FunctionCall(">", [], [GenericVariable("x", []), Integer(0)]),
+                FunctionCall(">", [Variable("x"), Integer(0)]),
                 Block([Assignment(Assignee("x", []), Integer(0))], Boolean(True)),
                 Block([Assignment(Assignee("x", []), Integer(1))], Boolean(False)),
             ),

@@ -85,7 +85,6 @@ class TypedAssignee(ASTNode):
 @dataclass
 class FunctionCall(ASTNode):
     function: Expression
-    type_variables: list[TypeInstance]
     args: list[Expression]
 
 
