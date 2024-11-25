@@ -439,6 +439,36 @@ def Variable(name: Id) -> GenericVariable:
             "expr",
         ),
         (
+            "3 == 4",
+            FunctionCall(
+                Variable("=="),
+                [Integer(3), Integer(4)],
+            ),
+            "expr",
+        ),
+        (
+            "3 == 4 == 5",
+            None,
+            "expr",
+        ),
+        (
+            "(3 == 4) == (5 == 6)",
+            FunctionCall(
+                Variable("=="),
+                [
+                    FunctionCall(
+                        Variable("=="),
+                        [Integer(3), Integer(4)],
+                    ),
+                    FunctionCall(
+                        Variable("=="),
+                        [Integer(5), Integer(6)],
+                    ),
+                ],
+            ),
+            "expr",
+        ),
+        (
             "foo()",
             FunctionCall(Variable("foo"), []),
             "expr",

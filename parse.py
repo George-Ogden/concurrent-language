@@ -43,6 +43,9 @@ def main(argv):
     print(Trees.toStringTree(tree, None, parser))
 
 
+class VisitorError(Exception): ...
+
+
 class Visitor(GrammarVisitor):
     def visitList(self, ctx: ParserRuleContext):
         children = (self.visit(child) for child in ctx.getChildren())
@@ -124,6 +127,11 @@ class Visitor(GrammarVisitor):
         operator = self.visit(ctx.infix_operator())
 
         parent_operator, tree = carry
+        if (
+            operator == parent_operator
+            and OperatorManager.get_associativity(operator) == Associativity.NONE
+        ):
+            raise VisitorError(f"{operator} is non-associative")
         if OperatorManager.get_precedence(parent_operator) > OperatorManager.get_precedence(
             operator
         ) or (
@@ -235,7 +243,10 @@ class Parser:
             if parser.getNumberOfSyntaxErrors() > 0 or stream.LA(1) != Token.EOF:
                 return None
             visitor = Visitor()
-            return visitor.visit(tree)
+            try:
+                return visitor.visit(tree)
+            except VisitorError:
+                return None
 
 
 if __name__ == "__main__":
