@@ -23,6 +23,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    TransparentTypeDefinition,
     TupleExpression,
     TupleType,
     TypedAssignee,
@@ -824,7 +825,7 @@ from parse import Parser
         (
             "typedef Error {Error1|Error2}",
             UnionTypeDefinition(
-                GenericTypeVariable("Error", []),
+                TypeVariable("Error"),
                 [TypeItem("Error1", None), TypeItem("Error2", None)],
             ),
             "type_def",
@@ -852,6 +853,37 @@ from parse import Parser
             ),
             "type_def",
         ),
+        (
+            "typealias int8 int",
+            TransparentTypeDefinition(TypeVariable("int8"), AtomicType.INT),
+            "type_alias",
+        ),
+        (
+            "typealias int8 (int,)",
+            TransparentTypeDefinition(TypeVariable("int8"), TupleType([AtomicType.INT])),
+            "type_alias",
+        ),
+        (
+            "typealias id<T> T -> T",
+            TransparentTypeDefinition(
+                GenericTypeVariable("id", ["T"]), FunctionType(Typename("T"), Typename("T"))
+            ),
+            "type_alias",
+        ),
+        (
+            "typealias int8<> int",
+            TransparentTypeDefinition(TypeVariable("int8"), AtomicType.INT),
+            "type_alias",
+        ),
+        (
+            "typealias id<T> (T -> T)",
+            TransparentTypeDefinition(
+                GenericTypeVariable("id", ["T"]), FunctionType(Typename("T"), Typename("T"))
+            ),
+            "type_alias",
+        ),
+        ("typealias MaybeInt {Some int | None}", None, "type_alias"),
+        ("typealias int", None, "type_alias"),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

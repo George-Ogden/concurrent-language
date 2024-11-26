@@ -30,6 +30,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    TransparentTypeDefinition,
     TupleExpression,
     TupleType,
     TypedAssignee,
@@ -291,6 +292,11 @@ class Visitor(GrammarVisitor):
         else:
             type_items = self.visit(ctx.union_def())
             return UnionTypeDefinition(type_variable, type_items)
+
+    def visitType_alias(self, ctx: GrammarParser.Type_aliasContext):
+        type_variable = self.visit(ctx.generic_typevar())
+        type_instance = self.visit(ctx.type_instance())
+        return TransparentTypeDefinition(type_variable, type_instance)
 
 
 class Parser:

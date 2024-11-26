@@ -93,7 +93,7 @@ return_type
     | tuple_type
     ;
 
-type_alias: TYPEALIAS generic_instance type_instance;
+type_alias: TYPEALIAS generic_typevar type_instance;
 generic_typevar: generic_assignee;
 type_def: TYPEDEF generic_typevar (
     union_def |
