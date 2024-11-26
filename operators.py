@@ -43,14 +43,18 @@ class OperatorManager:
     OPERATOR_REGEX = r"^[&!+/\-^$<>@:*|%=.]+$"
 
     @classmethod
+    def check_operator(cls, operator: str) -> bool:
+        return re.match(cls.OPERATOR_REGEX, operator) is not None
+
+    @classmethod
     def get_precedence(cls, operator: str):
-        if not re.match(cls.OPERATOR_REGEX, operator):
+        if not cls.check_operator(operator):
             return -2
         return cls.OPERATOR_PRECEDENCE.get(operator, -1)
 
     @classmethod
     def get_associativity(cls, operator: str):
-        if operator in cls.LEFT_ASSOCIATIVE_OPERATORS or not re.match(cls.OPERATOR_REGEX, operator):
+        if operator in cls.LEFT_ASSOCIATIVE_OPERATORS or not cls.check_operator(operator):
             return Associativity.LEFT
         elif operator in cls.NON_ASSOCIATIVE_OPERATORS:
             return Associativity.NONE

@@ -750,6 +750,16 @@ from parse import Parser
         ("(x, y: bool) -> bool { a = 3; 9 }", None, "expr"),
         ("(x: int, y: bool) -> bool { a = 3;; 9 }", None, "expr"),
         ("(x: int, y: bool) -> bool { a = 3 }", None, "expr"),
+        ("++x", FunctionCall(Variable("++"), [Variable("x")]), "expr"),
+        ("-x", FunctionCall(Variable("-"), [Variable("x")]), "expr"),
+        ("__add__ x", None, "expr"),
+        (
+            "++ (++x)",
+            FunctionCall(Variable("++"), [FunctionCall(Variable("++"), [Variable("x")])]),
+            "expr",
+        ),
+        ("++ -x", None, "expr"),
+        ("++++x", FunctionCall(Variable("++++"), [Variable("x")]), "expr"),
         (
             "typedef tuple (int, int)",
             OpaqueTypeDefinition(
