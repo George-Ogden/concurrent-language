@@ -20,12 +20,14 @@ from ast_nodes import (
     FunctionCall,
     FunctionDef,
     FunctionType,
+    GenericTypeVariable,
     GenericVariable,
     IfExpression,
     Integer,
     MatchBlock,
     MatchExpression,
     MatchItem,
+    TransparentTypeDefinition,
     TupleExpression,
     TupleType,
     TypedAssignee,
@@ -187,7 +189,7 @@ class Visitor(GrammarVisitor):
     def visitId_list(self, ctx: GrammarParser.Id_listContext):
         return self.visitList(ctx)
 
-    def visitGeneric_target(self, ctx: GrammarParser.Generic_targetContext):
+    def visitGeneric_assignee(self, ctx: GrammarParser.Generic_assigneeContext):
         id = self.visit(ctx.id_())
         generics = [] if ctx.id_list() is None else self.visit(ctx.id_list())
         return Assignee(id, generics)
@@ -198,7 +200,7 @@ class Visitor(GrammarVisitor):
             return Assignee(id, [])
         elif ctx.getText() == "__":
             return Assignee("__", [])
-        return super().visit(ctx.generic_target())
+        return super().visit(ctx.generic_assignee())
 
     def visitAssignment(self, ctx: GrammarParser.AssignmentContext):
         assignee = self.visit(ctx.assignee())
@@ -254,6 +256,16 @@ class Visitor(GrammarVisitor):
         return_type = self.visit(ctx.type_instance())
         body = self.visit(ctx.block())
         return FunctionDef(assignees, return_type, body)
+
+    def visitGeneric_typevar(self, ctx: GrammarParser.Generic_typevarContext):
+        assignee: Assignee = self.visit(ctx.generic_assignee())
+        return GenericTypeVariable(assignee.id, assignee.generic_variables)
+
+    def visitType_def(self, ctx: GrammarParser.Type_defContext):
+        type_variable = self.visit(ctx.generic_typevar())
+        if ctx.type_instance() is not None:
+            type_instance = self.visit(ctx.type_instance())
+            return TransparentTypeDefinition(type_variable, type_instance)
 
 
 class Parser:

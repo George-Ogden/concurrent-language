@@ -13,15 +13,18 @@ from ast_nodes import (
     FunctionCall,
     FunctionDef,
     FunctionType,
+    GenericTypeVariable,
     GenericVariable,
     IfExpression,
     Integer,
     MatchBlock,
     MatchExpression,
     MatchItem,
+    TransparentTypeDefinition,
     TupleExpression,
     TupleType,
     TypedAssignee,
+    TypeVariable,
     Variable,
 )
 from parse import Parser
@@ -729,6 +732,50 @@ from parse import Parser
         ("(x, y: bool) -> bool { a = 3; 9 }", None, "expr"),
         ("(x: int, y: bool) -> bool { a = 3;; 9 }", None, "expr"),
         ("(x: int, y: bool) -> bool { a = 3 }", None, "expr"),
+        (
+            "typedef tuple (int, int)",
+            TransparentTypeDefinition(
+                TypeVariable("tuple"), TupleType([AtomicType.INT, AtomicType.INT])
+            ),
+            "type_def",
+        ),
+        (
+            "typedef tuple ()",
+            TransparentTypeDefinition(TypeVariable("tuple"), TupleType([])),
+            "type_def",
+        ),
+        (
+            "typedef tuple<T> (T, T)",
+            TransparentTypeDefinition(
+                GenericTypeVariable("tuple", ["T"]), TupleType([Variable("T"), Variable("T")])
+            ),
+            "type_def",
+        ),
+        (
+            "typedef tuple<T,U> (F<U>, T)",
+            TransparentTypeDefinition(
+                GenericTypeVariable("tuple", ["T", "U"]),
+                TupleType([GenericVariable("F", [Variable("U")]), Variable("T")]),
+            ),
+            "type_def",
+        ),
+        (
+            "typedef apply<T,U> T<U>",
+            TransparentTypeDefinition(
+                GenericTypeVariable("apply", ["T", "U"]), GenericVariable("T", [Variable("U")])
+            ),
+            "type_def",
+        ),
+        (
+            "typedef alias<T,> T",
+            TransparentTypeDefinition(GenericTypeVariable("alias", ["T"]), Variable("T")),
+            "type_def",
+        ),
+        (
+            "typedef Integer int",
+            TransparentTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
+            "type_def",
+        ),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

@@ -75,7 +75,7 @@ operator: (operator_symbol not_ws)+ operator_symbol | operator_symbol_without_eq
 operator_id: '__' not_ws operator not_ws '__';
 
 id_list : | id (',' id)* ','? ;
-generic_target : id ('<' id_list '>')? ;
+generic_assignee : id ('<' id_list '>')? ;
 
 generic_list : | type_instance (',' type_instance)* ','? ;
 generic_instance : id ('<' generic_list '>')? ;
@@ -93,7 +93,8 @@ return_type
     ;
 
 type_alias: TYPEALIAS generic_instance type_instance;
-type_def: TYPEDEF generic_target (
+generic_typevar: generic_assignee;
+type_def: TYPEDEF generic_typevar (
     union_def |
     type_instance |
 //     record_def |
@@ -122,7 +123,7 @@ assignment : assignee '=' expr ;
 assignment_list : | (assignment ';')*;
 
 assignee
-    : generic_target
+    : generic_assignee
     | operator_id
     | '__'
 //    | tuple_assignee

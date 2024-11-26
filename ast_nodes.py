@@ -173,8 +173,14 @@ class Block(ASTNode):
 
 
 @dataclass
-class TransparentTypeDefinition(ASTNode):
+class GenericTypeVariable(ASTNode):
     id: Id
+    generic_variables: list[Id]
+
+
+@dataclass
+class TransparentTypeDefinition(ASTNode):
+    variable: GenericTypeVariable
     type: TypeInstance
 
 
@@ -195,3 +201,7 @@ class Program(ASTNode):
 
 def Variable(name: Id) -> GenericVariable:
     return GenericVariable(name, [])
+
+
+def TypeVariable(name: Id) -> GenericVariable:
+    return GenericTypeVariable(name, [])
