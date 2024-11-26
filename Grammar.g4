@@ -142,6 +142,7 @@ fn_call_free_expr
     | '(' expr ')'
     | tuple_expr
     | fn_def
+    | prefix_call
     ;
 
 infix_free_expr: fn_call_free_expr | fn_call;
@@ -164,6 +165,7 @@ infix_operator
     | RANGLE
     ;
 
+prefix_call: infix_operator expr;
 infix_call: infix_free_expr infix_operator expr;
 tuple_expr: '(' expr_list ')';
 expr_list : | (expr ',' )+ expr? ;

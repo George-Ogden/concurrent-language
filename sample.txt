@@ -77,3 +77,5 @@ not = the_end;
 smap<T> = map<T,T,>;
 t = f<int>(4);
 typealias map<T> smap<T>;
+y = ++4;
+z = -y;
