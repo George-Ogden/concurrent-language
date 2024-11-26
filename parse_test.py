@@ -968,6 +968,105 @@ from parse import Parser
             ),
             "program",
         ),
+        (
+            "typedef /* None */ Nada",
+            Program(
+                [],
+                [EmptyTypeDefinition("Nada")],
+            ),
+            "program",
+        ),
+        (
+            "typedef  None /* Nada",
+            None,
+            "program",
+        ),
+        (
+            "typedef  None // Nada",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "typedef  None ; // Nada",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "typedef // Nada \n None ;",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "typedef /* Nada \n Not */ None;",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "typedef /* Nada \n Not * / // ;",
+            None,
+            "program",
+        ),
+        (
+            "typedef /* Nada \n Not */ None // ;",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "typedef /* Nada \n Not */ // None;",
+            None,
+            "program",
+        ),
+        (
+            "typedef /* Nada \n Not /* */ None;",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "typedef /* Nada \n Not // */ None;",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
+        (
+            "x = 3 /*/ 4 // */",
+            Program(
+                [],
+                [Assignment(Assignee("x", []), Integer(3))],
+            ),
+            "program",
+        ),
+        (
+            "x = 3 /-/ 4 // */",
+            Program(
+                [],
+                [
+                    Assignment(
+                        Assignee("x", []), FunctionCall(Variable("/-/"), [Integer(3), Integer(4)])
+                    )
+                ],
+            ),
+            "program",
+        ),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):
