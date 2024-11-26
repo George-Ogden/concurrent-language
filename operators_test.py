@@ -9,10 +9,7 @@ R = Associativity.RIGHT
 N = Associativity.NONE
 
 operators = [
-    ("$", L, 0),
-    ("|>", R, 1),
-    ("::", L, 2),
-    ("++", L, 3),
+    ("@", L, 1),
     ("**", L, 4),
     ("*", R, 5),
     ("/", R, 5),
@@ -21,25 +18,28 @@ operators = [
     ("-", R, 6),
     (">>", R, 7),
     ("<<", R, 7),
-    ("<=>", N, 8),
-    ("<", N, 9),
-    ("<=", N, 9),
-    (">", N, 9),
-    (">=", N, 9),
-    ("==", N, 9),
-    ("!=", N, 9),
+    ("::", L, 8),
+    ("++", L, 8),
+    ("<=>", N, 9),
+    ("<", N, 10),
+    ("<=", N, 10),
+    (">", N, 10),
+    (">=", N, 10),
+    ("==", N, 10),
+    ("!=", N, 10),
     ("&", R, 11),
     ("^", R, 12),
     ("|", R, 13),
     ("&&", R, 14),
     ("||", R, 15),
-    ("@", L, 16),
+    ("|>", R, 16),
+    ("$", L, 17),
 ]
 
 
 @pytest.mark.parametrize(
     "operator,associativity",
-    ((operator, associativity) for operator, associativity, priority in operators),
+    ((operator, associativity) for operator, associativity, precedence in operators),
 )
 def test_associativity(operator, associativity):
     assert OperatorManager.get_associativity(operator) == associativity
@@ -47,7 +47,7 @@ def test_associativity(operator, associativity):
 
 @pytest.mark.parametrize(
     "operator",
-    (operator for operator, associativity, priority in operators),
+    (operator for operator, associativity, precedence in operators),
 )
 def test_parsing(operator):
     code = f"x {operator} y"
@@ -59,3 +59,24 @@ def test_parsing(operator):
     ast = Parser.parse(code, target="assignment")
     node = Assignment(Assignee(operator, []), Variable("x"))
     assert ast == node
+
+
+@pytest.mark.parametrize(
+    "operator,precedence",
+    ((operator, precedence) for operator, associativity, precedence in operators),
+)
+def test_precedence(operator, precedence):
+    operator1, precedence1 = operator, precedence
+    for operator2, _, precedence2 in operators:
+        if operator1 == operator2:
+            assert OperatorManager.get_precedence(operator1) == OperatorManager.get_precedence(
+                operator2
+            )
+        elif precedence1 < precedence2:
+            assert OperatorManager.get_precedence(operator1) < OperatorManager.get_precedence(
+                operator2
+            )
+        elif precedence1 > precedence2:
+            assert OperatorManager.get_precedence(operator1) > OperatorManager.get_precedence(
+                operator2
+            )

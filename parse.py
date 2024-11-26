@@ -132,7 +132,7 @@ class Visitor(GrammarVisitor):
             and OperatorManager.get_associativity(operator) == Associativity.NONE
         ):
             raise VisitorError(f"{operator} is non-associative")
-        if OperatorManager.get_precedence(parent_operator) > OperatorManager.get_precedence(
+        if OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
             operator
         ) or (
             operator == parent_operator
