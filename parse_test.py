@@ -11,6 +11,7 @@ from ast_nodes import (
     Boolean,
     ElementAccess,
     FunctionCall,
+    FunctionDef,
     FunctionType,
     GenericVariable,
     IfExpression,
@@ -20,6 +21,7 @@ from ast_nodes import (
     MatchItem,
     TupleExpression,
     TupleType,
+    TypedAssignee,
     Variable,
 )
 from parse import Parser
@@ -678,6 +680,55 @@ from parse import Parser
             "expr",
         ),
         ("x.0.(4+1)", None, "expr"),
+        ("() -> () { () }", FunctionDef([], TupleType([]), Block([], TupleExpression([]))), "expr"),
+        (
+            "(x: int) -> int { a = 3; 9 }",
+            FunctionDef(
+                [TypedAssignee(Assignee("x", []), AtomicType.INT)],
+                AtomicType.INT,
+                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+            ),
+            "expr",
+        ),
+        (
+            "(x: int,) -> int { a = 3; 9 }",
+            FunctionDef(
+                [TypedAssignee(Assignee("x", []), AtomicType.INT)],
+                AtomicType.INT,
+                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+            ),
+            "expr",
+        ),
+        (
+            "(x: int, y: ()) -> int { a = 3; 9 }",
+            FunctionDef(
+                [
+                    TypedAssignee(Assignee("x", []), AtomicType.INT),
+                    TypedAssignee(Assignee("y", []), TupleType([])),
+                ],
+                AtomicType.INT,
+                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+            ),
+            "expr",
+        ),
+        (
+            "(x: int, y: (),) -> int { a = 3; 9 }",
+            FunctionDef(
+                [
+                    TypedAssignee(Assignee("x", []), AtomicType.INT),
+                    TypedAssignee(Assignee("y", []), TupleType([])),
+                ],
+                AtomicType.INT,
+                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+            ),
+            "expr",
+        ),
+        ("(x: int, y: (),) { a = 3; 9 }", None, "expr"),
+        ("(x: int,,) -> bool { a = 3; 9 }", None, "expr"),
+        ("(,) -> bool { a = 3; 9 }", None, "expr"),
+        ("(x, y: bool) -> bool { a = 3; 9 }", None, "expr"),
+        ("(x: int, y: bool) -> bool { a = 3;; 9 }", None, "expr"),
+        ("(x: int, y: bool) -> bool { a = 3 }", None, "expr"),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

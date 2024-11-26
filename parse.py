@@ -18,6 +18,7 @@ from ast_nodes import (
     Boolean,
     ElementAccess,
     FunctionCall,
+    FunctionDef,
     FunctionType,
     GenericVariable,
     IfExpression,
@@ -27,6 +28,7 @@ from ast_nodes import (
     MatchItem,
     TupleExpression,
     TupleType,
+    TypedAssignee,
 )
 from operators import Associativity, OperatorManager
 
@@ -238,6 +240,20 @@ class Visitor(GrammarVisitor):
         subject = self.visit(ctx.expr())
         blocks = self.visit(ctx.match_block_list())
         return MatchExpression(subject, blocks)
+
+    def visitTyped_assignee(self, ctx: GrammarParser.Typed_assigneeContext):
+        assignee = self.visit(ctx.assignee())
+        type_instance = self.visit(ctx.type_instance())
+        return TypedAssignee(assignee, type_instance)
+
+    def visitTyped_assignee_list(self, ctx: GrammarParser.Typed_assignee_listContext):
+        return self.visitList(ctx)
+
+    def visitFn_def(self, ctx: GrammarParser.Fn_defContext):
+        assignees = self.visit(ctx.typed_assignee_list())
+        return_type = self.visit(ctx.type_instance())
+        body = self.visit(ctx.block())
+        return FunctionDef(assignees, return_type, body)
 
 
 class Parser:
