@@ -370,6 +370,34 @@ from parse import Parser
             "expr",
         ),
         (
+            "2 + 3 <<!>> 4 + 5",
+            FunctionCall(
+                Variable("+"),
+                [
+                    FunctionCall(
+                        Variable("+"),
+                        [
+                            Integer(2),
+                            FunctionCall(Variable("<<!>>"), [Integer(3), Integer(4)]),
+                        ],
+                    ),
+                    Integer(5),
+                ],
+            ),
+            "expr",
+        ),
+        (
+            "2 __add__ 3 <<!>> 4 __add__ 5",
+            FunctionCall(
+                Variable("<<!>>"),
+                [
+                    FunctionCall(Variable("add"), [Integer(2), Integer(3)]),
+                    FunctionCall(Variable("add"), [Integer(4), Integer(5)]),
+                ],
+            ),
+            "expr",
+        ),
+        (
             "g $ h(x)",
             FunctionCall(
                 Variable("$"),
