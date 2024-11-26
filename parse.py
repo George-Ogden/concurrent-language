@@ -16,6 +16,7 @@ from ast_nodes import (
     AtomicTypeEnum,
     Block,
     Boolean,
+    ElementAccess,
     FunctionCall,
     FunctionType,
     GenericVariable,
@@ -132,7 +133,15 @@ class Visitor(GrammarVisitor):
             and OperatorManager.get_associativity(operator) == Associativity.NONE
         ):
             raise VisitorError(f"{operator} is non-associative")
-        if OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
+        if operator == ".":
+
+            def function(x):
+                if not isinstance(x, Integer) or x.value < 0:
+                    raise VisitorError(f"Invalid attribute {x}.")
+                return ElementAccess(tree(left), x.value)
+
+            carry = (operator, function)
+        elif OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
             operator
         ) or (
             operator == parent_operator

@@ -9,6 +9,7 @@ from ast_nodes import (
     AtomicType,
     Block,
     Boolean,
+    ElementAccess,
     FunctionCall,
     FunctionType,
     GenericVariable,
@@ -664,6 +665,19 @@ from parse import Parser
             ),
             "expr",
         ),
+        ("x.0", ElementAccess(Variable("x"), 0), "expr"),
+        ("(a, b).1", ElementAccess(TupleExpression([Variable("a"), Variable("b")]), 1), "expr"),
+        ("x.-1", None, "expr"),
+        ("x.b", None, "expr"),
+        ("x.0.(4)", ElementAccess(ElementAccess(Variable("x"), 0), 4), "expr"),
+        (
+            "x.0.4+1",
+            FunctionCall(
+                Variable("+"), [ElementAccess(ElementAccess(Variable("x"), 0), 4), Integer(1)]
+            ),
+            "expr",
+        ),
+        ("x.0.(4+1)", None, "expr"),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):
