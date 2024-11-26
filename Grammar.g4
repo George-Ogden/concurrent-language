@@ -33,11 +33,11 @@ ID: [a-zA-Z_][a-zA-Z0-9_]* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+;
 
-program : imports definitions EOF ;
+program : imports WS* definitions WS* EOF ;
 
 imports: ;
 
-definitions : | (definition WS* ';' WS* )+ definition? ;
+definitions : | definition WS* (';' WS* definition WS*)* ';' ?;
 
 definition
     : type_def

@@ -23,6 +23,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    Program,
     TransparentTypeDefinition,
     TupleExpression,
     TupleType,
@@ -691,7 +692,8 @@ from parse import Parser
         (
             "(f . g)(x)",
             FunctionCall(
-                FunctionCall(Variable("."), [Variable("f"), Variable("g")]), [Variable("x")]
+                FunctionCall(Variable("."), [Variable("f"), Variable("g")]),
+                [Variable("x")],
             ),
             "expr",
         ),
@@ -889,7 +891,8 @@ from parse import Parser
         (
             "typealias id<T> T -> T",
             TransparentTypeDefinition(
-                GenericTypeVariable("id", ["T"]), FunctionType(Typename("T"), Typename("T"))
+                GenericTypeVariable("id", ["T"]),
+                FunctionType(Typename("T"), Typename("T")),
             ),
             "type_alias",
         ),
@@ -901,12 +904,70 @@ from parse import Parser
         (
             "typealias id<T> (T -> T)",
             TransparentTypeDefinition(
-                GenericTypeVariable("id", ["T"]), FunctionType(Typename("T"), Typename("T"))
+                GenericTypeVariable("id", ["T"]),
+                FunctionType(Typename("T"), Typename("T")),
             ),
             "type_alias",
         ),
         ("typealias MaybeInt {Some int | None}", None, "type_alias"),
         ("typealias int", None, "type_alias"),
+        (
+            "z = -y;",
+            Program(
+                [],
+                [Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")]))],
+            ),
+            "program",
+        ),
+        (
+            "z = -y",
+            Program(
+                [],
+                [Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")]))],
+            ),
+            "program",
+        ),
+        (
+            "z = -y; typedef int8 int",
+            Program(
+                [],
+                [
+                    Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")])),
+                    OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
+                ],
+            ),
+            "program",
+        ),
+        (
+            "z = -y; typedef int8 int;",
+            Program(
+                [],
+                [
+                    Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")])),
+                    OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
+                ],
+            ),
+            "program",
+        ),
+        (
+            "z = -y ; typedef int8 int ; ",
+            Program(
+                [],
+                [
+                    Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")])),
+                    OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
+                ],
+            ),
+            "program",
+        ),
+        (
+            "typedef None ",
+            Program(
+                [],
+                [EmptyTypeDefinition("None")],
+            ),
+            "program",
+        ),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

@@ -30,6 +30,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    Program,
     TransparentTypeDefinition,
     TupleExpression,
     TupleType,
@@ -309,6 +310,13 @@ class Visitor(GrammarVisitor):
         type_variable = self.visit(ctx.generic_typevar())
         type_instance = self.visit(ctx.type_instance())
         return TransparentTypeDefinition(type_variable, type_instance)
+
+    def visitDefinitions(self, ctx: GrammarParser.DefinitionsContext):
+        return self.visitList(ctx)
+
+    def visitProgram(self, ctx: GrammarParser.ProgramContext):
+        definitions = self.visit(ctx.definitions())
+        return Program([], definitions)
 
 
 class Parser:
