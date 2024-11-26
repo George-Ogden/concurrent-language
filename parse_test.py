@@ -26,8 +26,10 @@ from ast_nodes import (
     TupleExpression,
     TupleType,
     TypedAssignee,
+    TypeItem,
     Typename,
     TypeVariable,
+    UnionTypeDefinition,
     Variable,
 )
 from parse import Parser
@@ -455,7 +457,10 @@ from parse import Parser
             FunctionCall(
                 FunctionCall(
                     Variable("@"),
-                    [Variable("h"), FunctionCall(Variable("@"), [Variable("g"), Variable("f")])],
+                    [
+                        Variable("h"),
+                        FunctionCall(Variable("@"), [Variable("g"), Variable("f")]),
+                    ],
                 ),
                 [
                     Variable("x"),
@@ -674,19 +679,28 @@ from parse import Parser
             "expr",
         ),
         ("x.0", ElementAccess(Variable("x"), 0), "expr"),
-        ("(a, b).1", ElementAccess(TupleExpression([Variable("a"), Variable("b")]), 1), "expr"),
+        (
+            "(a, b).1",
+            ElementAccess(TupleExpression([Variable("a"), Variable("b")]), 1),
+            "expr",
+        ),
         ("x.-1", None, "expr"),
         ("x.b", None, "expr"),
         ("x.0.(4)", ElementAccess(ElementAccess(Variable("x"), 0), 4), "expr"),
         (
             "x.0.4+1",
             FunctionCall(
-                Variable("+"), [ElementAccess(ElementAccess(Variable("x"), 0), 4), Integer(1)]
+                Variable("+"),
+                [ElementAccess(ElementAccess(Variable("x"), 0), 4), Integer(1)],
             ),
             "expr",
         ),
         ("x.0.(4+1)", None, "expr"),
-        ("() -> () { () }", FunctionDef([], TupleType([]), Block([], TupleExpression([]))), "expr"),
+        (
+            "() -> () { () }",
+            FunctionDef([], TupleType([]), Block([], TupleExpression([]))),
+            "expr",
+        ),
         (
             "(x: int) -> int { a = 3; 9 }",
             FunctionDef(
@@ -750,7 +764,8 @@ from parse import Parser
         (
             "typedef tuple<T> (T, T)",
             OpaqueTypeDefinition(
-                GenericTypeVariable("tuple", ["T"]), TupleType([Typename("T"), Typename("T")])
+                GenericTypeVariable("tuple", ["T"]),
+                TupleType([Typename("T"), Typename("T")]),
             ),
             "type_def",
         ),
@@ -765,7 +780,8 @@ from parse import Parser
         (
             "typedef apply<T,U> T<U>",
             OpaqueTypeDefinition(
-                GenericTypeVariable("apply", ["T", "U"]), GenericType("T", [Typename("U")])
+                GenericTypeVariable("apply", ["T", "U"]),
+                GenericType("T", [Typename("U")]),
             ),
             "type_def",
         ),
@@ -786,6 +802,56 @@ from parse import Parser
         ),
         ("typedef None", EmptyTypeDefinition("None"), "type_def"),
         ("typedef None<T>", None, "type_def"),
+        (
+            "typedef Maybe<T> { Some T | None }",
+            UnionTypeDefinition(
+                GenericTypeVariable("Maybe", ["T"]),
+                [TypeItem("Some", Typename("T")), TypeItem("None", None)],
+            ),
+            "type_def",
+        ),
+        (
+            "typedef Choice<T, U> { Left T | Right U }",
+            UnionTypeDefinition(
+                GenericTypeVariable("Choice", ["T", "U"]),
+                [
+                    TypeItem("Left", Typename("T")),
+                    TypeItem("Right", Typename("U")),
+                ],
+            ),
+            "type_def",
+        ),
+        (
+            "typedef Error {Error1|Error2}",
+            UnionTypeDefinition(
+                GenericTypeVariable("Error", []),
+                [TypeItem("Error1", None), TypeItem("Error2", None)],
+            ),
+            "type_def",
+        ),
+        (
+            "typedef Error {Error1}",
+            None,
+            "type_def",
+        ),
+        (
+            "typedef Error {}",
+            None,
+            "type_def",
+        ),
+        (
+            "typedef Error<T> {Error1<T> | Error2}",
+            None,
+            "type_def",
+        ),
+        (
+            "typedef Error<T> {Error1 | Error2}",
+            UnionTypeDefinition(
+                GenericTypeVariable("Error", ["T"]),
+                [TypeItem("Error1", None), TypeItem("Error2", None)],
+            ),
+            "type_def",
+        ),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):

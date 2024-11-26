@@ -33,6 +33,8 @@ from ast_nodes import (
     TupleExpression,
     TupleType,
     TypedAssignee,
+    TypeItem,
+    UnionTypeDefinition,
 )
 from operators import Associativity, OperatorManager
 
@@ -267,6 +269,14 @@ class Visitor(GrammarVisitor):
         assignee: Assignee = self.visit(ctx.generic_assignee())
         return GenericTypeVariable(assignee.id, assignee.generic_variables)
 
+    def visitType_item(self, ctx: GrammarParser.Type_itemContext):
+        id = self.visit(ctx.id_())
+        type_instance = None if ctx.type_instance() is None else self.visit(ctx.type_instance())
+        return TypeItem(id, type_instance)
+
+    def visitUnion_def(self, ctx: GrammarParser.Union_defContext):
+        return self.visitList(ctx)
+
     def visitType_def(self, ctx: GrammarParser.Type_defContext):
         type_variable: GenericTypeVariable = self.visit(ctx.generic_typevar())
         if ctx.type_instance() is not None:
@@ -278,6 +288,9 @@ class Visitor(GrammarVisitor):
                     f"Invalid empty type with generics {type_variable.generic_variables}"
                 )
             return EmptyTypeDefinition(type_variable.id)
+        else:
+            type_items = self.visit(ctx.union_def())
+            return UnionTypeDefinition(type_variable, type_items)
 
 
 class Parser:

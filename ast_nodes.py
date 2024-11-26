@@ -53,11 +53,12 @@ TypeInstance: TypeAlias = Union[FunctionType, GenericType, TupleType, AtomicType
 @dataclass
 class TypeItem(ASTNode):
     id: Id
-    type: TypeInstance
+    type: Optional[TypeInstance]
 
 
 @dataclass
 class UnionTypeDefinition(ASTNode):
+    variable: GenericTypeVariable
     items: list[TypeItem]
 
 

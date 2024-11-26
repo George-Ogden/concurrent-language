@@ -104,7 +104,7 @@ type_def: TYPEDEF generic_typevar (
 
 empty_def : ;
 
-union_def : '{' type_item ('|' type_item )* '}' ;
+union_def : '{' type_item ('|' type_item )+ '}' ;
 type_item: id type_instance ? ;
 tuple_def : '(' type_list ')' ;
 
