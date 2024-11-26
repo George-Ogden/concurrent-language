@@ -758,7 +758,11 @@ from parse import Parser
             FunctionCall(Variable("++"), [FunctionCall(Variable("++"), [Variable("x")])]),
             "expr",
         ),
-        ("++ -x", None, "expr"),
+        (
+            "++ ++x",
+            FunctionCall(Variable("++"), [FunctionCall(Variable("++"), [Variable("x")])]),
+            "expr",
+        ),
         ("++++x", FunctionCall(Variable("++++"), [Variable("x")]), "expr"),
         (
             "typedef tuple (int, int)",

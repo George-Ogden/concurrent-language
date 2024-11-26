@@ -9,7 +9,7 @@ parser: Grammar.g4
 	touch $@
 
 test: parser
-	pytest . -vv
+	pytest .
 
 clean:
 	rm -rf parser

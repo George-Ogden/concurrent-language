@@ -1,24 +1,5 @@
 grammar Grammar;
 
-@parser::members {
-def check_for_ws(self):
-    token_stream = self.getInputStream()
-    la1 = token_stream.LT(1)
-    lb1 = token_stream.LT(-1)
-
-    for i in range(la1.tokenIndex - 1, -1, -1):
-        token = token_stream.get(i)
-
-        if token.channel != Token.HIDDEN_CHANNEL:
-            return True
-
-        if token.type == self.WS:
-            return False
-
-    return True
-
-}
-
 MULTILINE_COMMENT : '/*' .*? '*/' -> skip ;
 SINGLE_LINE_COMMENT : '//' ~[\r\n]* -> skip ;
 
@@ -50,15 +31,13 @@ BOOL: 'bool';
 INFIX_ID: '_''_'[a-zA-Z_][a-zA-Z0-9_]*'_''_' ;
 ID: [a-zA-Z_][a-zA-Z0-9_]* ;
 UINT: '0' | [1-9][0-9]* ;
-WS: [ \t\n\r\f]+ -> channel(HIDDEN);
-
-not_ws: {self.check_for_ws()}? ;
+WS: [ \t\n\r\f]+;
 
 program : imports definitions EOF ;
 
 imports: ;
 
-definitions : | (definition ';')+ definition? ;
+definitions : | (definition WS* ';' WS* )+ definition? ;
 
 definition
     : type_def
@@ -71,13 +50,13 @@ definition
 id: ID | '_' | INFIX_ID;
 operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*' | '%' | '/');
 operator_symbol: operator_symbol_without_eq | '=' ;
-operator: (operator_symbol not_ws)+ operator_symbol | operator_symbol_without_eq;
-operator_id: '__' not_ws operator not_ws '__';
+operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq;
+operator_id: '__' operator '__';
 
-id_list : | id (',' id)* ','? ;
-generic_assignee : id ('<' id_list '>')? ;
+id_list : | id  WS* (',' WS* id WS* )* ','? ;
+generic_assignee : id ('<' WS* id_list WS* '>')? ;
 
-generic_list : | type_instance (',' type_instance)* ','? ;
+generic_list : | type_instance WS* (',' WS* type_instance WS*)* ','? WS* ;
 generic_instance : id ('<' generic_list '>')? ;
 
 atomic_type
@@ -93,35 +72,35 @@ return_type
     | tuple_type
     ;
 
-type_alias: TYPEALIAS generic_typevar type_instance;
+type_alias: TYPEALIAS WS+ generic_typevar WS* type_instance;
 generic_typevar: generic_assignee;
-type_def: TYPEDEF generic_typevar (
+type_def: TYPEDEF WS+ generic_typevar WS * (
     union_def |
     type_instance |
 //     record_def |
     empty_def
 );
 
-empty_def : ;
+empty_def : WS*;
 
-union_def : '{' type_item ('|' type_item )+ '}' ;
-type_item: id type_instance ? ;
-tuple_def : '(' type_list ')' ;
+union_def : '{' WS* type_item WS* ('|' WS* type_item WS* )+ '}' ;
+type_item: id WS* type_instance ? ;
+tuple_def : '(' WS*  type_list WS* ')' ;
 
-tuple_type : '(' type_list ')' ;
-type_list : | (type_instance ',')+ type_instance?;
+tuple_type : '(' WS*  type_list WS* ')' ;
+type_list : | (type_instance WS * ',' WS*)+ type_instance?;
 
-fn_type : fn_type_head fn_type_tail ;
+fn_type : fn_type_head WS* fn_type_tail ;
 
-fn_type_tail : RIGHTARROW type_instance ;
+fn_type_tail : RIGHTARROW WS* type_instance ;
 
 fn_type_head
     : return_type
-    | '(' type_instance ')'
+    | '(' WS* type_instance WS* ')'
     ;
 
-assignment : assignee '=' expr ;
-assignment_list : | (assignment ';')*;
+assignment : assignee WS*  '=' WS* expr ;
+assignment_list : | (assignment WS* ';' WS*)*;
 
 assignee
     : generic_assignee
@@ -139,7 +118,7 @@ fn_call_free_expr
     | match_expr
 //     | switch_expr
 //     | record_expr
-    | '(' expr ')'
+    | '(' WS* expr WS* ')'
     | tuple_expr
     | fn_def
     | prefix_call
@@ -153,7 +132,7 @@ boolean: TRUE | FALSE;
 
 fn_call: fn_call_head fn_call_tail;
 fn_call_head: fn_call_free_expr;
-fn_call_tail: '(' (expr | expr_list) ')' fn_call_tail?;
+fn_call_tail: '(' WS* (expr | expr_list) WS* ')' fn_call_tail?;
 
 infix_operator
     : INFIX_ID
@@ -165,20 +144,20 @@ infix_operator
     | RANGLE
     ;
 
-prefix_call: infix_operator expr;
-infix_call: infix_free_expr infix_operator expr;
-tuple_expr: '(' expr_list ')';
-expr_list : | (expr ',' )+ expr? ;
+prefix_call: infix_operator WS* expr;
+infix_call: infix_free_expr WS* infix_operator WS* expr;
+tuple_expr: '(' WS* expr_list WS* ')';
+expr_list : | (expr WS* ',' WS* )+ expr? ;
 
-if_expr : IF '(' expr ')' block ELSE block ;
-match_expr : MATCH '(' expr ')' '{' match_block_list '}' ;
-match_block_list : (match_block ';')* match_block? ;
-match_block : match_list ':' block ;
-match_list : match_item ('|' match_item)*;
-match_item: id assignee ?;
+if_expr : IF WS* '(' WS* expr WS* ')' WS* block WS* ELSE WS* block ;
+match_expr : MATCH WS* '(' WS* expr WS* ')' WS* '{' WS* match_block_list WS* '}' ;
+match_block_list : (WS* match_block WS* ';')* WS* match_block? ;
+match_block : match_list WS* ':' WS* block ;
+match_list : match_item (WS* '|' WS* match_item)*;
+match_item: id WS* assignee ?;
 
-fn_def : '(' typed_assignee_list ')' RIGHTARROW type_instance block;
-typed_assignee_list : | typed_assignee (',' typed_assignee)* ',' ?;
-typed_assignee : assignee ':' type_instance ;
+fn_def : '(' WS* typed_assignee_list WS* ')' WS* RIGHTARROW WS* type_instance WS* block;
+typed_assignee_list : | typed_assignee (WS* ',' WS* typed_assignee)* ',' ?;
+typed_assignee : assignee WS* ':' WS* type_instance ;
 
-block : '{' assignment_list expr '}' ;
+block : '{' WS* assignment_list WS* expr WS* '}' ;
