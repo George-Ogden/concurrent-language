@@ -122,7 +122,7 @@ class Visitor(GrammarVisitor):
         return TupleExpression(expressions)
 
     def visitInfix_operator(self, ctx: GrammarParser.Infix_operatorContext):
-        operator = ctx.getText()
+        operator = ctx.getText().strip()
         match = re.match(r"^__(\S+)__$", ctx.getText())
         if match:
             operator = match.group(1)
@@ -147,15 +147,8 @@ class Visitor(GrammarVisitor):
             and OperatorManager.get_associativity(operator) == Associativity.NONE
         ):
             raise VisitorError(f"{operator} is non-associative")
-        if operator == ".":
 
-            def function(x):
-                if not isinstance(x, Integer) or x.value < 0:
-                    raise VisitorError(f"Invalid attribute {x}.")
-                return ElementAccess(tree(left), x.value)
-
-            carry = (operator, function)
-        elif OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
+        if OperatorManager.get_precedence(parent_operator) < OperatorManager.get_precedence(
             operator
         ) or (
             operator == parent_operator
@@ -188,7 +181,18 @@ class Visitor(GrammarVisitor):
         function = self.visit(ctx.fn_call_head())
         return self.visitFn_call_tail(ctx.fn_call_tail(), function=function)
 
-    def visitFn_call_free_expr(self, ctx: GrammarParser.Fn_call_free_exprContext):
+    def visitAccess_tail(self, ctx: GrammarParser.Access_tailContext, expression=None):
+        index = int(ctx.UINT().getText())
+        access = ElementAccess(expression, index)
+        if ctx.access_tail() is None:
+            return access
+        return self.visitAccess_tail(ctx.access_tail(), expression=access)
+
+    def visitAccess(self, ctx: GrammarParser.AccessContext):
+        expression = self.visit(ctx.access_head())
+        return self.visitAccess_tail(ctx.access_tail(), expression=expression)
+
+    def visitFn_call_access_free_expr(self, ctx: GrammarParser.Fn_call_access_free_exprContext):
         if ctx.expr() is not None:
             return self.visit(ctx.expr())
         return super().visitFn_call_free_expr(ctx)

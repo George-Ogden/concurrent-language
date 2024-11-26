@@ -48,9 +48,9 @@ definition
     ;
 
 id: ID | '_' | INFIX_ID;
-operator_symbol_without_eq: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*' | '%' | '/');
-operator_symbol: operator_symbol_without_eq | '=' ;
-operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq;
+operator_symbol_without_eq_dot: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*' | '%' | '/');
+operator_symbol: operator_symbol_without_eq_dot | '=' | '.';
+operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot;
 operator_id: '__' operator '__';
 
 id_list : | id  WS* (',' WS* id WS* )* ','? ;
@@ -110,7 +110,7 @@ assignee
 //    | record_assignee
     ;
 
-fn_call_free_expr
+fn_call_access_free_expr
     : integer
     | boolean
     | generic_instance
@@ -123,6 +123,11 @@ fn_call_free_expr
     | fn_def
     | prefix_call
     ;
+
+fn_call_free_expr: fn_call_access_free_expr | access;
+access: access_head access_tail;
+access_head: fn_call_access_free_expr;
+access_tail: DOT UINT access_tail?;
 
 infix_free_expr: fn_call_free_expr | fn_call;
 expr: infix_free_expr | infix_call;
@@ -137,11 +142,11 @@ fn_call_tail: '(' WS* (expr | expr_list) WS* ')' fn_call_tail?;
 infix_operator
     : INFIX_ID
     | operator
-    | DOT
     | NEGATE
     | PIPE
     | LANGLE
     | RANGLE
+    | WS+ DOT WS+
     ;
 
 prefix_call: infix_operator WS* expr;

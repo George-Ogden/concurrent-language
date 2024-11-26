@@ -62,6 +62,18 @@ def test_parsing(operator):
     assert ast == node
 
 
+def test_parsing_valid_operator():
+    operator = ".."
+    code = f"x {operator} y"
+    ast = Parser.parse(code, target="expr")
+    node = FunctionCall(Variable(".."), [Variable("x"), Variable("y")])
+    assert ast == node
+
+    code = f"x{operator}y"
+    ast = Parser.parse(code, target="expr")
+    assert ast == node
+
+
 def test_parsing_invalid_operator():
     operator = "??"
     code = f"x {operator} y"

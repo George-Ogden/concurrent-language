@@ -10,7 +10,6 @@ class Associativity(enum.IntEnum):
 
 class OperatorManager:
     OPERATOR_PRECEDENCE = {
-        ".": 1,
         "@": 2,
         "**": 3,
         "*": 4,

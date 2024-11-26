@@ -560,6 +560,7 @@ from parse import Parser
         ("a == 3", None, "assignment"),
         ("0 = 3", None, "assignment"),
         ("__=__ = 4", None, "assignment"),
+        ("__.__ = 4", None, "assignment"),
         ("__==__ = 4", Assignment(Assignee("==", []), Integer(4)), "assignment"),
         ("a0 = 0", Assignment(Assignee("a0", []), Integer(0)), "assignment"),
         ("_ = 0", Assignment(Assignee("_", []), Integer(0)), "assignment"),
@@ -685,9 +686,17 @@ from parse import Parser
             ElementAccess(TupleExpression([Variable("a"), Variable("b")]), 1),
             "expr",
         ),
-        ("x.-1", None, "expr"),
+        ("x.-1", FunctionCall(Variable(".-"), [Variable("x"), Integer(1)]), "expr"),
+        ("f . g", FunctionCall(Variable("."), [Variable("f"), Variable("g")]), "expr"),
+        (
+            "(f . g)(x)",
+            FunctionCall(
+                FunctionCall(Variable("."), [Variable("f"), Variable("g")]), [Variable("x")]
+            ),
+            "expr",
+        ),
         ("x.b", None, "expr"),
-        ("x.0.(4)", ElementAccess(ElementAccess(Variable("x"), 0), 4), "expr"),
+        ("x.0.(4)", None, "expr"),
         (
             "x.0.4+1",
             FunctionCall(
