@@ -63,6 +63,7 @@ class UnionTypeDefinition(ASTNode):
 
 @dataclass
 class OpaqueTypeDefinition(ASTNode):
+    variable: GenericTypeVariable
     type: TypeInstance
 
 

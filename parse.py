@@ -29,7 +29,7 @@ from ast_nodes import (
     MatchBlock,
     MatchExpression,
     MatchItem,
-    TransparentTypeDefinition,
+    OpaqueTypeDefinition,
     TupleExpression,
     TupleType,
     TypedAssignee,
@@ -271,7 +271,7 @@ class Visitor(GrammarVisitor):
         type_variable: GenericTypeVariable = self.visit(ctx.generic_typevar())
         if ctx.type_instance() is not None:
             type_instance = self.visit(ctx.type_instance())
-            return TransparentTypeDefinition(type_variable, type_instance)
+            return OpaqueTypeDefinition(type_variable, type_instance)
         elif ctx.empty_def() is not None:
             if type_variable.generic_variables != []:
                 raise VisitorError(

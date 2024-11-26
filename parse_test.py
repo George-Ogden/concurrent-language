@@ -22,7 +22,7 @@ from ast_nodes import (
     MatchBlock,
     MatchExpression,
     MatchItem,
-    TransparentTypeDefinition,
+    OpaqueTypeDefinition,
     TupleExpression,
     TupleType,
     TypedAssignee,
@@ -737,26 +737,26 @@ from parse import Parser
         ("(x: int, y: bool) -> bool { a = 3 }", None, "expr"),
         (
             "typedef tuple (int, int)",
-            TransparentTypeDefinition(
+            OpaqueTypeDefinition(
                 TypeVariable("tuple"), TupleType([AtomicType.INT, AtomicType.INT])
             ),
             "type_def",
         ),
         (
             "typedef tuple ()",
-            TransparentTypeDefinition(TypeVariable("tuple"), TupleType([])),
+            OpaqueTypeDefinition(TypeVariable("tuple"), TupleType([])),
             "type_def",
         ),
         (
             "typedef tuple<T> (T, T)",
-            TransparentTypeDefinition(
+            OpaqueTypeDefinition(
                 GenericTypeVariable("tuple", ["T"]), TupleType([Typename("T"), Typename("T")])
             ),
             "type_def",
         ),
         (
             "typedef tuple<T,U> (F<U>, T)",
-            TransparentTypeDefinition(
+            OpaqueTypeDefinition(
                 GenericTypeVariable("tuple", ["T", "U"]),
                 TupleType([GenericType("F", [Typename("U")]), Typename("T")]),
             ),
@@ -764,24 +764,24 @@ from parse import Parser
         ),
         (
             "typedef apply<T,U> T<U>",
-            TransparentTypeDefinition(
+            OpaqueTypeDefinition(
                 GenericTypeVariable("apply", ["T", "U"]), GenericType("T", [Typename("U")])
             ),
             "type_def",
         ),
         (
             "typedef alias<T,> T",
-            TransparentTypeDefinition(GenericTypeVariable("alias", ["T"]), Typename("T")),
+            OpaqueTypeDefinition(GenericTypeVariable("alias", ["T"]), Typename("T")),
             "type_def",
         ),
         (
             "typedef Integer int",
-            TransparentTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
+            OpaqueTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
             "type_def",
         ),
         (
             "typedef Integer<> int",
-            TransparentTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
+            OpaqueTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
             "type_def",
         ),
         ("typedef None", EmptyTypeDefinition("None"), "type_def"),
