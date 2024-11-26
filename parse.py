@@ -20,6 +20,7 @@ from ast_nodes import (
     FunctionCall,
     FunctionDef,
     FunctionType,
+    GenericType,
     GenericTypeVariable,
     GenericVariable,
     IfExpression,
@@ -71,6 +72,10 @@ class Visitor(GrammarVisitor):
 
     def visitGeneric_list(self, ctx: GrammarParser.Generic_listContext):
         return self.visitList(ctx)
+
+    def visitGeneric_type_instance(self, ctx: GrammarParser.Generic_type_instanceContext):
+        generic_instance: GenericVariable = self.visit(ctx.generic_instance())
+        return GenericType(generic_instance.name, generic_instance.type_variables)
 
     def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext):
         id = self.visitId(ctx.id_())

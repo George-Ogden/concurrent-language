@@ -23,8 +23,8 @@ class FunctionType(ASTNode):
 
 @dataclass
 class GenericType(ASTNode):
-    type_variables: list[Id]
-    type: TypeInstance
+    id: Id
+    type_variables: list[TypeInstance]
 
 
 @dataclass
@@ -201,6 +201,10 @@ class Program(ASTNode):
 
 def Variable(name: Id) -> GenericVariable:
     return GenericVariable(name, [])
+
+
+def Typename(name: Id) -> GenericType:
+    return GenericType(name, [])
 
 
 def TypeVariable(name: Id) -> GenericVariable:

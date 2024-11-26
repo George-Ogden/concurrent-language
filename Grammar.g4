@@ -86,8 +86,9 @@ atomic_type
     ;
 
 type_instance : return_type | fn_type | '(' type_instance ')';
+generic_type_instance: generic_instance;
 return_type
-    : generic_instance
+    : generic_type_instance
     | atomic_type
     | tuple_type
     ;

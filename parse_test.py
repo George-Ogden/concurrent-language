@@ -13,6 +13,7 @@ from ast_nodes import (
     FunctionCall,
     FunctionDef,
     FunctionType,
+    GenericType,
     GenericTypeVariable,
     GenericVariable,
     IfExpression,
@@ -24,6 +25,7 @@ from ast_nodes import (
     TupleExpression,
     TupleType,
     TypedAssignee,
+    Typename,
     TypeVariable,
     Variable,
 )
@@ -37,20 +39,20 @@ from parse import Parser
         ("bool", AtomicType.BOOL, "type_instance"),
         ("(int)", AtomicType.INT, "type_instance"),
         ("((int))", AtomicType.INT, "type_instance"),
-        ("foo", Variable("foo"), "type_instance"),
-        ("foo<int>", GenericVariable("foo", [AtomicType.INT]), "type_instance"),
-        ("foo<int,>", GenericVariable("foo", [AtomicType.INT]), "type_instance"),
+        ("foo", Typename("foo"), "type_instance"),
+        ("foo<int>", GenericType("foo", [AtomicType.INT]), "type_instance"),
+        ("foo<int,>", GenericType("foo", [AtomicType.INT]), "type_instance"),
         (
             "foo<int,bool>",
-            GenericVariable("foo", [AtomicType.INT, AtomicType.BOOL]),
+            GenericType("foo", [AtomicType.INT, AtomicType.BOOL]),
             "type_instance",
         ),
         (
             "foo<bar<int>,bool>",
-            GenericVariable(
+            GenericType(
                 "foo",
                 [
-                    GenericVariable("bar", [AtomicType.INT]),
+                    GenericType("bar", [AtomicType.INT]),
                     AtomicType.BOOL,
                 ],
             ),
@@ -156,15 +158,15 @@ from parse import Parser
         ("r2d2", Variable("r2d2"), "expr"),
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
-        ("map<T>", GenericVariable("map", [Variable("T")]), "expr"),
+        ("map<T>", GenericVariable("map", [Typename("T")]), "expr"),
         (
             "map<f<int>>",
-            GenericVariable("map", [GenericVariable("f", [AtomicType.INT])]),
+            GenericVariable("map", [GenericType("f", [AtomicType.INT])]),
             "expr",
         ),
         (
             "map<f<g<T>>>",
-            GenericVariable("map", [GenericVariable("f", [GenericVariable("g", [Variable("T")])])]),
+            GenericVariable("map", [GenericType("f", [GenericType("g", [Typename("T")])])]),
             "expr",
         ),
         (
@@ -560,17 +562,17 @@ from parse import Parser
         ("_____ = 0", Assignment(Assignee("_____", []), Integer(0)), "assignment"),
         (
             "a<T> = f<T>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Variable("T")])),
+            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Typename("T")])),
             "assignment",
         ),
         (
             "a<T> = f<T>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Variable("T")])),
+            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Typename("T")])),
             "assignment",
         ),
         (
             "a<T,> = t<T,>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("t", [Variable("T")])),
+            Assignment(Assignee("a", ["T"]), GenericVariable("t", [Typename("T")])),
             "assignment",
         ),
         (
@@ -582,7 +584,7 @@ from parse import Parser
             "a<T,U> = f<U,T>",
             Assignment(
                 Assignee("a", ["T", "U"]),
-                GenericVariable("f", [Variable("U"), Variable("T")]),
+                GenericVariable("f", [Typename("U"), Typename("T")]),
             ),
             "assignment",
         ),
@@ -609,7 +611,7 @@ from parse import Parser
                     Assignment(Assignee("w", []), Variable("x")),
                     Assignment(
                         Assignee("y", ["T"]),
-                        GenericVariable("x", [Variable("T"), Variable("T")]),
+                        GenericVariable("x", [Typename("T"), Typename("T")]),
                     ),
                 ],
                 Integer(-8),
@@ -747,7 +749,7 @@ from parse import Parser
         (
             "typedef tuple<T> (T, T)",
             TransparentTypeDefinition(
-                GenericTypeVariable("tuple", ["T"]), TupleType([Variable("T"), Variable("T")])
+                GenericTypeVariable("tuple", ["T"]), TupleType([Typename("T"), Typename("T")])
             ),
             "type_def",
         ),
@@ -755,20 +757,20 @@ from parse import Parser
             "typedef tuple<T,U> (F<U>, T)",
             TransparentTypeDefinition(
                 GenericTypeVariable("tuple", ["T", "U"]),
-                TupleType([GenericVariable("F", [Variable("U")]), Variable("T")]),
+                TupleType([GenericType("F", [Typename("U")]), Typename("T")]),
             ),
             "type_def",
         ),
         (
             "typedef apply<T,U> T<U>",
             TransparentTypeDefinition(
-                GenericTypeVariable("apply", ["T", "U"]), GenericVariable("T", [Variable("U")])
+                GenericTypeVariable("apply", ["T", "U"]), GenericType("T", [Typename("U")])
             ),
             "type_def",
         ),
         (
             "typedef alias<T,> T",
-            TransparentTypeDefinition(GenericTypeVariable("alias", ["T"]), Variable("T")),
+            TransparentTypeDefinition(GenericTypeVariable("alias", ["T"]), Typename("T")),
             "type_def",
         ),
         (
