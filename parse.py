@@ -17,6 +17,7 @@ from ast_nodes import (
     Block,
     Boolean,
     ElementAccess,
+    EmptyTypeDefinition,
     FunctionCall,
     FunctionDef,
     FunctionType,
@@ -267,10 +268,16 @@ class Visitor(GrammarVisitor):
         return GenericTypeVariable(assignee.id, assignee.generic_variables)
 
     def visitType_def(self, ctx: GrammarParser.Type_defContext):
-        type_variable = self.visit(ctx.generic_typevar())
+        type_variable: GenericTypeVariable = self.visit(ctx.generic_typevar())
         if ctx.type_instance() is not None:
             type_instance = self.visit(ctx.type_instance())
             return TransparentTypeDefinition(type_variable, type_instance)
+        elif ctx.empty_def() is not None:
+            if type_variable.generic_variables != []:
+                raise VisitorError(
+                    f"Invalid empty type with generics {type_variable.generic_variables}"
+                )
+            return EmptyTypeDefinition(type_variable.id)
 
 
 class Parser:

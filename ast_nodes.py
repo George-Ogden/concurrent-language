@@ -67,7 +67,8 @@ class OpaqueTypeDefinition(ASTNode):
 
 
 @dataclass
-class EmptyTypeDefinition(ASTNode): ...
+class EmptyTypeDefinition(ASTNode):
+    id: Id
 
 
 @dataclass

@@ -10,6 +10,7 @@ from ast_nodes import (
     Block,
     Boolean,
     ElementAccess,
+    EmptyTypeDefinition,
     FunctionCall,
     FunctionDef,
     FunctionType,
@@ -778,6 +779,13 @@ from parse import Parser
             TransparentTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
             "type_def",
         ),
+        (
+            "typedef Integer<> int",
+            TransparentTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
+            "type_def",
+        ),
+        ("typedef None", EmptyTypeDefinition("None"), "type_def"),
+        ("typedef None<T>", None, "type_def"),
     ],
 )
 def test_parse(code: str, node: Optional[ASTNode], target: str):
