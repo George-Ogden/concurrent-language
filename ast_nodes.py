@@ -88,7 +88,7 @@ class TypedAssignee(ASTNode):
 @dataclass
 class FunctionCall(ASTNode):
     function: Expression
-    args: list[Expression]
+    arguments: list[Expression]
 
 
 @dataclass
@@ -144,8 +144,8 @@ class TupleExpression(ASTNode):
 
 
 @dataclass
-class FunctionDef(ASTNode):
-    assignees: list[TypedAssignee]
+class FunctionDefinition(ASTNode):
+    parameters: list[TypedAssignee]
     return_type: TypeInstance
     body: Block
 
@@ -159,7 +159,7 @@ Expression: TypeAlias = Union[
     IfExpression,
     MatchExpression,
     TupleExpression,
-    FunctionDef,
+    FunctionDefinition,
 ]
 
 

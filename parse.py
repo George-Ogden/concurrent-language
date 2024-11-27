@@ -21,7 +21,7 @@ from ast_nodes import (
     EmptyTypeDefinition,
     Expression,
     FunctionCall,
-    FunctionDef,
+    FunctionDefinition,
     FunctionType,
     GenericType,
     GenericTypeVariable,
@@ -286,11 +286,11 @@ class Visitor(GrammarVisitor):
     ) -> list[TypedAssignee]:
         return self.visitList(ctx)
 
-    def visitFn_def(self, ctx: GrammarParser.Fn_defContext) -> FunctionDef:
+    def visitFn_def(self, ctx: GrammarParser.Fn_defContext) -> FunctionDefinition:
         assignees = self.visit(ctx.typed_assignee_list())
         return_type = self.visit(ctx.type_instance())
         body = self.visit(ctx.block())
-        return FunctionDef(assignees, return_type, body)
+        return FunctionDefinition(assignees, return_type, body)
 
     def visitGeneric_typevar(
         self, ctx: GrammarParser.Generic_typevarContext

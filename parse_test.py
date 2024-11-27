@@ -12,7 +12,7 @@ from ast_nodes import (
     ElementAccess,
     EmptyTypeDefinition,
     FunctionCall,
-    FunctionDef,
+    FunctionDefinition,
     FunctionType,
     GenericType,
     GenericTypeVariable,
@@ -712,12 +712,12 @@ from parse import Parser
         ("x.0.(4+1)", None, "expr"),
         (
             "() -> () { () }",
-            FunctionDef([], TupleType([]), Block([], TupleExpression([]))),
+            FunctionDefinition([], TupleType([]), Block([], TupleExpression([]))),
             "expr",
         ),
         (
             "(x: int) -> int { a = 3; 9 }",
-            FunctionDef(
+            FunctionDefinition(
                 [TypedAssignee(Assignee("x", []), AtomicType.INT)],
                 AtomicType.INT,
                 Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
@@ -726,7 +726,7 @@ from parse import Parser
         ),
         (
             "(x: int,) -> int { a = 3; 9 }",
-            FunctionDef(
+            FunctionDefinition(
                 [TypedAssignee(Assignee("x", []), AtomicType.INT)],
                 AtomicType.INT,
                 Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
@@ -735,7 +735,7 @@ from parse import Parser
         ),
         (
             "(x: int, y: ()) -> int { a = 3; 9 }",
-            FunctionDef(
+            FunctionDefinition(
                 [
                     TypedAssignee(Assignee("x", []), AtomicType.INT),
                     TypedAssignee(Assignee("y", []), TupleType([])),
@@ -747,7 +747,7 @@ from parse import Parser
         ),
         (
             "(x: int, y: (),) -> int { a = 3; 9 }",
-            FunctionDef(
+            FunctionDefinition(
                 [
                     TypedAssignee(Assignee("x", []), AtomicType.INT),
                     TypedAssignee(Assignee("y", []), TupleType([])),
@@ -1067,6 +1067,34 @@ from parse import Parser
                     )
                 ],
             ),
+            "program",
+        ),
+        (
+            "x = () -> () { 3 }",
+            Program(
+                [],
+                [
+                    Assignment(
+                        Assignee("x", []),
+                        FunctionDefinition([], TupleType([]), Block([], Integer(3))),
+                    )
+                ],
+            ),
+            "program",
+        ),
+        (
+            "x = () -> () { typedef int8 int; 3 }",
+            None,
+            "program",
+        ),
+        (
+            "x = () -> () { typealias int8 int; 3 }",
+            None,
+            "program",
+        ),
+        (
+            "x + 3",
+            None,
             "program",
         ),
     ],
