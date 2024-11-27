@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import enum
+import json
 from dataclasses import dataclass
 from typing import ClassVar, Optional, TypeAlias, Union
 
 
-class ASTNode: ...
+class ASTNode:
+    def to_json(self) -> str:
+        return ""
 
 
 Id: TypeAlias = str
@@ -32,9 +35,12 @@ class TupleType(ASTNode):
     types: list[TypeInstance]
 
 
-class AtomicTypeEnum(enum.IntEnum):
+class AtomicTypeEnum(ASTNode, enum.IntEnum):
     INT = enum.auto()
     BOOL = enum.auto()
+
+    def to_json(self) -> str:
+        return json.dumps(self.name)
 
 
 @dataclass
