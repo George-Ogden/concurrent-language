@@ -8,9 +8,11 @@ from ast_nodes import (
     GenericType,
     GenericTypeVariable,
     OpaqueTypeDefinition,
+    TransparentTypeDefinition,
     TupleType,
     TypeItem,
     Typename,
+    TypeVariable,
     UnionTypeDefinition,
 )
 
@@ -74,7 +76,10 @@ from ast_nodes import (
             {
                 "variable": {"id": "Maybe", "generic_variables": ["T"]},
                 "items": [
-                    {"id": "Some", "type_": {"GenericType": {"id": "T", "type_variables": []}}},
+                    {
+                        "id": "Some",
+                        "type_": {"GenericType": {"id": "T", "type_variables": []}},
+                    },
                     {"id": "None", "type_": None},
                 ],
             },
@@ -99,6 +104,23 @@ from ast_nodes import (
         (
             EmptyTypeDefinition("None"),
             {"id": "None"},
+        ),
+        (
+            TransparentTypeDefinition(
+                TypeVariable("ii"),
+                TupleType([AtomicType.INT, AtomicType.INT]),
+            ),
+            {
+                "variable": {"id": "ii", "generic_variables": []},
+                "type_": {
+                    "TupleType": {
+                        "types": [
+                            {"AtomicType": {"type_": "INT"}},
+                            {"AtomicType": {"type_": "INT"}},
+                        ]
+                    }
+                },
+            },
         ),
     ],
 )

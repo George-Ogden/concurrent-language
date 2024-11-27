@@ -106,6 +106,12 @@ struct EmptyTypeDefinition {
     id: Id,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct TransparentTypeDefinition {
+    variable: GenericTypeVariable,
+    type_: TypeInstance,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -228,6 +234,22 @@ mod tests {
             id: String::from("None")
         };
         "empty type definition"
+    )]
+    #[test_case(
+        r#"{"variable":{"id":"ii","generic_variables":[]},"type_":{"TupleType":{"types":[{"AtomicType":{"type_":"INT"}},{"AtomicType":{"type_":"INT"}}]}}}"#,
+        TransparentTypeDefinition{
+            variable: GenericTypeVariable{
+                id: String::from("ii"),
+                generic_variables: Vec::new()
+            },
+            type_: TupleType{
+                types: vec![
+                    ATOMIC_TYPE_INT.into(),
+                    ATOMIC_TYPE_INT.into(),
+                ]
+            }.into()
+        };
+        "transparent type definition"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
