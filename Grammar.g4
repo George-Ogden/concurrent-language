@@ -116,6 +116,7 @@ fn_call_access_free_expr
     | generic_instance
     | if_expr
     | match_expr
+    | constructor_call
 //     | switch_expr
 //     | record_expr
     | '(' WS* expr WS* ')'
@@ -134,6 +135,9 @@ expr: infix_free_expr | infix_call;
 
 integer: '-'? UINT;
 boolean: TRUE | FALSE;
+
+constructor_call: generic_constructor '{' WS* (expr | expr_list) WS* '}' ;
+generic_constructor: generic_instance;
 
 fn_call: fn_call_head fn_call_tail;
 fn_call_head: fn_call_free_expr;

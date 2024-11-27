@@ -16,6 +16,7 @@ from ast_nodes import (
     AtomicTypeEnum,
     Block,
     Boolean,
+    ConstructorCall,
     Definition,
     ElementAccess,
     EmptyTypeDefinition,
@@ -23,6 +24,7 @@ from ast_nodes import (
     FunctionCall,
     FunctionDefinition,
     FunctionType,
+    GenericConstructor,
     GenericType,
     GenericTypeVariable,
     GenericVariable,
@@ -86,7 +88,7 @@ class Visitor(GrammarVisitor):
         self, ctx: GrammarParser.Generic_type_instanceContext
     ) -> GenericType:
         generic_instance: GenericVariable = self.visit(ctx.generic_instance())
-        return GenericType(generic_instance.name, generic_instance.type_variables)
+        return GenericType(generic_instance.name, generic_instance.type_instances)
 
     def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext) -> GenericVariable:
         id = self.visitId(ctx.id_())
@@ -291,6 +293,18 @@ class Visitor(GrammarVisitor):
         return_type = self.visit(ctx.type_instance())
         body = self.visit(ctx.block())
         return FunctionDefinition(assignees, return_type, body)
+
+    def visitGeneric_constructor(self, ctx: GrammarParser.Generic_constructorContext):
+        generic_instance: GenericVariable = self.visit(ctx.generic_instance())
+        return GenericConstructor(generic_instance.name, generic_instance.type_instances)
+
+    def visitConstructor_call(self, ctx: GrammarParser.Constructor_callContext):
+        constructor = self.visit(ctx.generic_constructor())
+        if ctx.expr() is None:
+            arguments = self.visit(ctx.expr_list())
+        else:
+            arguments = [self.visit(ctx.expr())]
+        return ConstructorCall(constructor, arguments)
 
     def visitGeneric_typevar(
         self, ctx: GrammarParser.Generic_typevarContext

@@ -9,6 +9,8 @@ from ast_nodes import (
     AtomicType,
     Block,
     Boolean,
+    Constructor,
+    ConstructorCall,
     ElementAccess,
     EmptyTypeDefinition,
     FunctionCall,
@@ -777,6 +779,7 @@ from parse import Parser
             "expr",
         ),
         ("++++x", FunctionCall(Variable("++++"), [Variable("x")]), "expr"),
+        ("Integer{8}", ConstructorCall(Constructor("Integer"), [Integer(8)]), "expr"),
         (
             "typedef tuple (int, int)",
             OpaqueTypeDefinition(

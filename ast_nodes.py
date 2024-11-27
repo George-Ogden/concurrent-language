@@ -110,7 +110,7 @@ class ElementAccess(ASTNode):
 @dataclass
 class GenericVariable(ASTNode):
     name: Id
-    type_variables: list[TypeInstance]
+    type_instances: list[TypeInstance]
 
 
 @dataclass
@@ -150,6 +150,18 @@ class FunctionDefinition(ASTNode):
     body: Block
 
 
+@dataclass
+class GenericConstructor(ASTNode):
+    name: Id
+    type_instances: list[TypeInstance]
+
+
+@dataclass
+class ConstructorCall(ASTNode):
+    constructor: GenericConstructor
+    arguments: list[Expression]
+
+
 Expression: TypeAlias = Union[
     FunctionCall,
     Integer,
@@ -160,6 +172,7 @@ Expression: TypeAlias = Union[
     MatchExpression,
     TupleExpression,
     FunctionDefinition,
+    ConstructorCall,
 ]
 
 
@@ -212,3 +225,7 @@ def Typename(name: Id) -> GenericType:
 
 def TypeVariable(name: Id) -> GenericTypeVariable:
     return GenericTypeVariable(name, [])
+
+
+def Constructor(name: Id) -> GenericConstructor:
+    return GenericConstructor(name, [])
