@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::convert::From;
 
-type Id = String;
+pub type Id = String;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum AtomicTypeEnum {
@@ -78,9 +78,9 @@ impl From<GenericType> for TypeInstance {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct TypeItem {
-    id: Id,
-    type_: Option<TypeInstance>,
+pub struct TypeItem {
+    pub id: Id,
+    pub type_: Option<TypeInstance>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -97,9 +97,9 @@ pub fn TypeVariable(name: &str) -> GenericTypeVariable {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct UnionTypeDefinition {
-    variable: GenericTypeVariable,
-    items: Vec<TypeItem>,
+pub struct UnionTypeDefinition {
+    pub variable: GenericTypeVariable,
+    pub items: Vec<TypeItem>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -130,6 +130,12 @@ pub enum Definition {
 impl From<OpaqueTypeDefinition> for Definition {
     fn from(value: OpaqueTypeDefinition) -> Self {
         Definition::OpaqueTypeDefinition(value)
+    }
+}
+
+impl From<UnionTypeDefinition> for Definition {
+    fn from(value: UnionTypeDefinition) -> Self {
+        Definition::UnionTypeDefinition(value)
     }
 }
 
