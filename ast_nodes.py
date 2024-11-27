@@ -210,5 +210,5 @@ def Typename(name: Id) -> GenericType:
     return GenericType(name, [])
 
 
-def TypeVariable(name: Id) -> GenericVariable:
+def TypeVariable(name: Id) -> GenericTypeVariable:
     return GenericTypeVariable(name, [])

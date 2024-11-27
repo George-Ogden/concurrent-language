@@ -5,7 +5,7 @@ from parser.GrammarParser import GrammarParser
 from parser.GrammarVisitor import GrammarVisitor
 from typing import Optional
 
-from antlr4 import *
+from antlr4 import CommonTokenStream, InputStream, ParserRuleContext, Token
 from antlr4.tree.Trees import Trees
 
 from ast_nodes import (
@@ -16,8 +16,10 @@ from ast_nodes import (
     AtomicTypeEnum,
     Block,
     Boolean,
+    Definition,
     ElementAccess,
     EmptyTypeDefinition,
+    Expression,
     FunctionCall,
     FunctionDef,
     FunctionType,
@@ -35,6 +37,7 @@ from ast_nodes import (
     TupleExpression,
     TupleType,
     TypedAssignee,
+    TypeInstance,
     TypeItem,
     UnionTypeDefinition,
     Variable,
@@ -59,83 +62,85 @@ class VisitorError(Exception): ...
 
 
 class Visitor(GrammarVisitor):
-    def visitList(self, ctx: ParserRuleContext):
+    def visitList(self, ctx: ParserRuleContext) -> list:
         children = (self.visit(child) for child in ctx.getChildren())
         return [child for child in children if child is not None]
 
-    def visitId(self, ctx: GrammarParser.IdContext):
+    def visitId(self, ctx: GrammarParser.IdContext) -> str:
         return ctx.getText()
 
-    def visitAtomic_type(self, ctx: GrammarParser.Atomic_typeContext):
+    def visitAtomic_type(self, ctx: GrammarParser.Atomic_typeContext) -> AtomicType:
         type_name = ctx.getText().upper()
         type = AtomicTypeEnum[type_name]
         return AtomicType(type)
 
-    def visitType_instance(self, ctx: GrammarParser.Type_instanceContext):
+    def visitType_instance(self, ctx: GrammarParser.Type_instanceContext) -> TypeInstance:
         if ctx.type_instance() is not None:
             return self.visit(ctx.type_instance())
         return super().visitType_instance(ctx)
 
-    def visitGeneric_list(self, ctx: GrammarParser.Generic_listContext):
+    def visitGeneric_list(self, ctx: GrammarParser.Generic_listContext) -> list[TypeInstance]:
         return self.visitList(ctx)
 
-    def visitGeneric_type_instance(self, ctx: GrammarParser.Generic_type_instanceContext):
+    def visitGeneric_type_instance(
+        self, ctx: GrammarParser.Generic_type_instanceContext
+    ) -> GenericType:
         generic_instance: GenericVariable = self.visit(ctx.generic_instance())
         return GenericType(generic_instance.name, generic_instance.type_variables)
 
-    def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext):
+    def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext) -> GenericVariable:
         id = self.visitId(ctx.id_())
         generic_list = [] if ctx.generic_list() is None else self.visit(ctx.generic_list())
         return GenericVariable(id, generic_list)
 
-    def visitType_list(self, ctx: GrammarParser.Type_listContext):
+    def visitType_list(self, ctx: GrammarParser.Type_listContext) -> list[TypeInstance]:
         return self.visitList(ctx)
 
-    def visitTuple_type(self, ctx: GrammarParser.Tuple_typeContext):
+    def visitTuple_type(self, ctx: GrammarParser.Tuple_typeContext) -> TupleType:
         return TupleType(self.visit(ctx.type_list()))
 
-    def visitFn_type_head(self, ctx: GrammarParser.Fn_type_headContext):
+    def visitFn_type_head(self, ctx: GrammarParser.Fn_type_headContext) -> TypeInstance:
         if ctx.return_type() is not None:
             return self.visit(ctx.return_type())
         else:
             return self.visit(ctx.type_instance())
 
-    def visitFn_type(self, ctx: GrammarParser.Fn_typeContext):
+    def visitFn_type(self, ctx: GrammarParser.Fn_typeContext) -> FunctionType:
         argument_types = self.visit(ctx.fn_type_head())
         return_type = self.visit(ctx.fn_type_tail())
         return FunctionType(argument_types, return_type)
 
-    def visitInteger(self, ctx: GrammarParser.IntegerContext):
+    def visitInteger(self, ctx: GrammarParser.IntegerContext) -> Integer:
         value = int(ctx.getText())
         return Integer(value)
 
-    def visitBoolean(self, ctx: GrammarParser.BooleanContext):
+    def visitBoolean(self, ctx: GrammarParser.BooleanContext) -> Boolean:
         if ctx.getText().lower() == "true":
             return Boolean(True)
         else:
             return Boolean(False)
 
-    def visitExpr_list(self, ctx: GrammarParser.Expr_listContext):
+    def visitExpr_list(self, ctx: GrammarParser.Expr_listContext) -> list[Expression]:
         return self.visitList(ctx)
 
-    def visitTuple_expr(self, ctx: GrammarParser.Tuple_exprContext):
+    def visitTuple_expr(self, ctx: GrammarParser.Tuple_exprContext) -> TupleExpression:
         expressions = self.visit(ctx.expr_list())
         return TupleExpression(expressions)
 
-    def visitInfix_operator(self, ctx: GrammarParser.Infix_operatorContext):
+    def visitInfix_operator(self, ctx: GrammarParser.Infix_operatorContext) -> str:
         operator = ctx.getText().strip()
         match = re.match(r"^__(\S+)__$", ctx.getText())
         if match:
             operator = match.group(1)
         return operator
 
-    def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext):
+    def visitInfix_free_expr(self, ctx: GrammarParser.Infix_free_exprContext) -> Expression:
         if ctx.fn_call_free_expr() is None:
             return self.visit(ctx.fn_call())
         else:
             return self.visit(ctx.fn_call_free_expr())
 
-    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, carry=None):
+    def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, carry=None) -> FunctionCall:
         if carry is None:
             carry = ("id", lambda x: x)
 
@@ -171,18 +176,20 @@ class Visitor(GrammarVisitor):
         else:
             return self.visitInfix_call(ctx.expr().infix_call(), carry=carry)
 
-    def visitPrefix_call(self, ctx: GrammarParser.Prefix_callContext):
+    def visitPrefix_call(self, ctx: GrammarParser.Prefix_callContext) -> FunctionCall:
         operator = self.visit(ctx.infix_operator())
         if not OperatorManager.check_operator(operator):
             raise VisitorError(f"Invalid prefix operator {operator}")
         argument = self.visit(ctx.expr())
         return FunctionCall(Variable(operator), [argument])
 
-    def visitFn_call(self, ctx: GrammarParser.Fn_callContext):
+    def visitFn_call(self, ctx: GrammarParser.Fn_callContext) -> FunctionCall:
         function = self.visit(ctx.fn_call_head())
         return self.visitFn_call_tail(ctx.fn_call_tail(), function=function)
 
-    def visitAccess_tail(self, ctx: GrammarParser.Access_tailContext, expression=None):
+    def visitAccess_tail(
+        self, ctx: GrammarParser.Access_tailContext, expression=None
+    ) -> ElementAccess:
         index = int(ctx.UINT().getText())
         access = ElementAccess(expression, index)
         if ctx.access_tail() is None:
@@ -193,12 +200,16 @@ class Visitor(GrammarVisitor):
         expression = self.visit(ctx.access_head())
         return self.visitAccess_tail(ctx.access_tail(), expression=expression)
 
-    def visitFn_call_access_free_expr(self, ctx: GrammarParser.Fn_call_access_free_exprContext):
+    def visitFn_call_access_free_expr(
+        self, ctx: GrammarParser.Fn_call_access_free_exprContext
+    ) -> Expression:
         if ctx.expr() is not None:
             return self.visit(ctx.expr())
         return super().visitFn_call_free_expr(ctx)
 
-    def visitFn_call_tail(self, ctx: GrammarParser.Fn_call_tailContext, function=None):
+    def visitFn_call_tail(
+        self, ctx: GrammarParser.Fn_call_tailContext, function=None
+    ) -> FunctionCall:
         if ctx.expr() is None:
             args = self.visit(ctx.expr_list())
         else:
@@ -208,15 +219,15 @@ class Visitor(GrammarVisitor):
             return self.visitFn_call_tail(ctx.fn_call_tail(), function)
         return function
 
-    def visitId_list(self, ctx: GrammarParser.Id_listContext):
+    def visitId_list(self, ctx: GrammarParser.Id_listContext) -> list[str]:
         return self.visitList(ctx)
 
-    def visitGeneric_assignee(self, ctx: GrammarParser.Generic_assigneeContext):
+    def visitGeneric_assignee(self, ctx: GrammarParser.Generic_assigneeContext) -> Assignee:
         id = self.visit(ctx.id_())
         generics = [] if ctx.id_list() is None else self.visit(ctx.id_list())
         return Assignee(id, generics)
 
-    def visitAssignee(self, ctx: GrammarParser.AssigneeContext):
+    def visitAssignee(self, ctx: GrammarParser.AssigneeContext) -> Assignee:
         if ctx.operator_id() is not None:
             id = re.match(r"^__(\S+)__$", ctx.getText()).group(1)
             return Assignee(id, [])
@@ -224,74 +235,80 @@ class Visitor(GrammarVisitor):
             return Assignee("__", [])
         return super().visit(ctx.generic_assignee())
 
-    def visitAssignment(self, ctx: GrammarParser.AssignmentContext):
+    def visitAssignment(self, ctx: GrammarParser.AssignmentContext) -> Assignment:
         assignee = self.visit(ctx.assignee())
         expression = self.visit(ctx.expr())
         return Assignment(assignee, expression)
 
-    def visitAssignment_list(self, ctx: GrammarParser.Assignment_listContext):
+    def visitAssignment_list(self, ctx: GrammarParser.Assignment_listContext) -> list[Assignee]:
         return self.visitList(ctx)
 
-    def visitBlock(self, ctx: GrammarParser.BlockContext):
+    def visitBlock(self, ctx: GrammarParser.BlockContext) -> Block:
         assignments = self.visit(ctx.assignment_list())
         expression = self.visit(ctx.expr())
         return Block(assignments, expression)
 
-    def visitIf_expr(self, ctx: GrammarParser.If_exprContext):
+    def visitIf_expr(self, ctx: GrammarParser.If_exprContext) -> IfExpression:
         condition = self.visit(ctx.expr())
         true_ctx, false_ctx = ctx.block()
         true_block = self.visit(true_ctx)
         false_block = self.visit(false_ctx)
         return IfExpression(condition, true_block, false_block)
 
-    def visitMatch_item(self, ctx: GrammarParser.Match_itemContext):
+    def visitMatch_item(self, ctx: GrammarParser.Match_itemContext) -> MatchItem:
         name = self.visit(ctx.id_())
         assignee = None if ctx.assignee() is None else self.visit(ctx.assignee())
         return MatchItem(name, assignee)
 
-    def visitMatch_list(self, ctx: GrammarParser.Match_listContext):
+    def visitMatch_list(self, ctx: GrammarParser.Match_listContext) -> list[MatchItem]:
         return self.visitList(ctx)
 
-    def visitMatch_block(self, ctx: GrammarParser.Match_blockContext):
+    def visitMatch_block(self, ctx: GrammarParser.Match_blockContext) -> MatchBlock:
         matches = self.visit(ctx.match_list())
         block = self.visit(ctx.block())
         return MatchBlock(matches, block)
 
-    def visitMatch_block_list(self, ctx: GrammarParser.Match_block_listContext):
+    def visitMatch_block_list(self, ctx: GrammarParser.Match_block_listContext) -> list[MatchBlock]:
         return self.visitList(ctx)
 
-    def visitMatch_expr(self, ctx: GrammarParser.Match_exprContext):
+    def visitMatch_expr(self, ctx: GrammarParser.Match_exprContext) -> MatchExpression:
         subject = self.visit(ctx.expr())
         blocks = self.visit(ctx.match_block_list())
         return MatchExpression(subject, blocks)
 
-    def visitTyped_assignee(self, ctx: GrammarParser.Typed_assigneeContext):
+    def visitTyped_assignee(self, ctx: GrammarParser.Typed_assigneeContext) -> TypedAssignee:
         assignee = self.visit(ctx.assignee())
         type_instance = self.visit(ctx.type_instance())
         return TypedAssignee(assignee, type_instance)
 
-    def visitTyped_assignee_list(self, ctx: GrammarParser.Typed_assignee_listContext):
+    def visitTyped_assignee_list(
+        self, ctx: GrammarParser.Typed_assignee_listContext
+    ) -> list[TypedAssignee]:
         return self.visitList(ctx)
 
-    def visitFn_def(self, ctx: GrammarParser.Fn_defContext):
+    def visitFn_def(self, ctx: GrammarParser.Fn_defContext) -> FunctionDef:
         assignees = self.visit(ctx.typed_assignee_list())
         return_type = self.visit(ctx.type_instance())
         body = self.visit(ctx.block())
         return FunctionDef(assignees, return_type, body)
 
-    def visitGeneric_typevar(self, ctx: GrammarParser.Generic_typevarContext):
+    def visitGeneric_typevar(
+        self, ctx: GrammarParser.Generic_typevarContext
+    ) -> GenericTypeVariable:
         assignee: Assignee = self.visit(ctx.generic_assignee())
         return GenericTypeVariable(assignee.id, assignee.generic_variables)
 
-    def visitType_item(self, ctx: GrammarParser.Type_itemContext):
+    def visitType_item(self, ctx: GrammarParser.Type_itemContext) -> TypeItem:
         id = self.visit(ctx.id_())
         type_instance = None if ctx.type_instance() is None else self.visit(ctx.type_instance())
         return TypeItem(id, type_instance)
 
-    def visitUnion_def(self, ctx: GrammarParser.Union_defContext):
+    def visitUnion_def(self, ctx: GrammarParser.Union_defContext) -> list[TypeItem]:
         return self.visitList(ctx)
 
-    def visitType_def(self, ctx: GrammarParser.Type_defContext):
+    def visitType_def(
+        self, ctx: GrammarParser.Type_defContext
+    ) -> EmptyTypeDefinition | OpaqueTypeDefinition | UnionTypeDefinition:
         type_variable: GenericTypeVariable = self.visit(ctx.generic_typevar())
         if ctx.type_instance() is not None:
             type_instance = self.visit(ctx.type_instance())
@@ -306,15 +323,15 @@ class Visitor(GrammarVisitor):
             type_items = self.visit(ctx.union_def())
             return UnionTypeDefinition(type_variable, type_items)
 
-    def visitType_alias(self, ctx: GrammarParser.Type_aliasContext):
+    def visitType_alias(self, ctx: GrammarParser.Type_aliasContext) -> TransparentTypeDefinition:
         type_variable = self.visit(ctx.generic_typevar())
         type_instance = self.visit(ctx.type_instance())
         return TransparentTypeDefinition(type_variable, type_instance)
 
-    def visitDefinitions(self, ctx: GrammarParser.DefinitionsContext):
+    def visitDefinitions(self, ctx: GrammarParser.DefinitionsContext) -> list[Definition]:
         return self.visitList(ctx)
 
-    def visitProgram(self, ctx: GrammarParser.ProgramContext):
+    def visitProgram(self, ctx: GrammarParser.ProgramContext) -> Program:
         definitions = self.visit(ctx.definitions())
         return Program([], definitions)
 
@@ -335,6 +352,7 @@ class Parser:
                 return visitor.visit(tree)
             except VisitorError:
                 return None
+        return None
 
 
 if __name__ == "__main__":
