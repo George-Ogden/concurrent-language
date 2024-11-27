@@ -3,6 +3,7 @@ from ast_nodes import (
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
+    EmptyTypeDefinition,
     FunctionType,
     GenericType,
     GenericTypeVariable,
@@ -94,6 +95,10 @@ from ast_nodes import (
                     }
                 },
             },
+        ),
+        (
+            EmptyTypeDefinition("None"),
+            {"id": "None"},
         ),
     ],
 )

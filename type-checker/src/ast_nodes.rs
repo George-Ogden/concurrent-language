@@ -101,6 +101,11 @@ struct OpaqueTypeDefinition {
     type_: TypeInstance,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct EmptyTypeDefinition {
+    id: Id,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -201,7 +206,8 @@ mod tests {
                     type_: None
                 }
             ]
-        }
+        };
+        "union type definition"
     )]
     #[test_case(
         r#"{"variable":{"id":"Pair","generic_variables":["T","U"]},"type_":{"TupleType":{"types":[{"GenericType":{"id":"T","type_variables":[]}},{"GenericType":{"id":"U","type_variables":[]}}]}}}"#,
@@ -213,7 +219,15 @@ mod tests {
             type_: TupleType{
                 types: vec![Typename("T").into(), Typename("U").into()]
             }.into()
-        }
+        };
+        "opaque type definition"
+    )]
+    #[test_case(
+        r#"{"id":"None"}"#,
+        EmptyTypeDefinition{
+            id: String::from("None")
+        };
+        "empty type definition"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
