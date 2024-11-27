@@ -1,7 +1,7 @@
+from parser import Parser
 from typing import Optional
 
 import pytest
-
 from ast_nodes import (
     Assignee,
     Assignment,
@@ -36,7 +36,6 @@ from ast_nodes import (
     UnionTypeDefinition,
     Variable,
 )
-from parse import Parser
 
 
 @pytest.mark.parametrize(

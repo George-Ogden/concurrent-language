@@ -1,5 +1,5 @@
-# Parser output
-parser
+# Grammar output
+grammar
 *.interp
 *.tokens
 

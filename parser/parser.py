@@ -1,13 +1,7 @@
 import re
-import sys
-from parser.GrammarLexer import GrammarLexer
-from parser.GrammarParser import GrammarParser
-from parser.GrammarVisitor import GrammarVisitor
 from typing import Optional
 
 from antlr4 import CommonTokenStream, InputStream, ParserRuleContext, Token
-from antlr4.tree.Trees import Trees
-
 from ast_nodes import (
     Assignee,
     Assignment,
@@ -46,18 +40,9 @@ from ast_nodes import (
 )
 from operators import Associativity, OperatorManager
 
-
-def main(argv):
-    input_stream = InputStream(argv[1])
-    target = sys.argv[2] if len(sys.argv) >= 3 else "program"
-    lexer = GrammarLexer(input_stream)
-    stream = CommonTokenStream(lexer)
-    parser = GrammarParser(stream)
-    assert target in parser.ruleNames
-    if target == "id":
-        target = "id_"
-    tree = getattr(parser, target).__call__()
-    print(Trees.toStringTree(tree, None, parser))
+from grammar.GrammarLexer import GrammarLexer
+from grammar.GrammarParser import GrammarParser
+from grammar.GrammarVisitor import GrammarVisitor
 
 
 class VisitorError(Exception): ...
@@ -371,7 +356,3 @@ class Parser:
             except VisitorError:
                 return None
         return None
-
-
-if __name__ == "__main__":
-    main(sys.argv)

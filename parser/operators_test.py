@@ -1,8 +1,8 @@
-import pytest
+from parser import Parser
 
+import pytest
 from ast_nodes import Assignee, Assignment, FunctionCall, Variable
 from operators import Associativity, OperatorManager
-from parse import Parser
 
 L = Associativity.LEFT
 R = Associativity.RIGHT

@@ -1,12 +1,12 @@
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
 
-parse: parser
-	cat sample.txt | xargs -0 python parse.py
+parse: grammar
+	cat sample.txt | xargs -0 python parser
 
-parser: Grammar.g4
-	antlr4 -no-listener -visitor -Dlanguage=Python3 $^  -o $@
-	touch $@/__init__.py
-	touch $@
+grammar: Grammar.g4
+	antlr4 -no-listener -visitor -Dlanguage=Python3 $^  -o parser/$@
+	touch parser/$@/__init__.py
+	touch parser/$@
 
 test: parser
 	pytest .
