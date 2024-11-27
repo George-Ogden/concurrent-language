@@ -136,12 +136,12 @@ expr: infix_free_expr | infix_call;
 integer: '-'? UINT;
 boolean: TRUE | FALSE;
 
-constructor_call: generic_constructor '{' WS* (expr | expr_list) WS* '}' ;
+constructor_call: generic_constructor '{' WS* expr_list WS* '}' ;
 generic_constructor: generic_instance;
 
 fn_call: fn_call_head fn_call_tail;
 fn_call_head: fn_call_free_expr;
-fn_call_tail: '(' WS* (expr | expr_list) WS* ')' fn_call_tail?;
+fn_call_tail: '(' WS* expr_list WS* ')' fn_call_tail?;
 
 infix_operator
     : INFIX_ID
@@ -155,8 +155,9 @@ infix_operator
 
 prefix_call: infix_operator WS* expr;
 infix_call: infix_free_expr WS* infix_operator WS* expr;
-tuple_expr: '(' WS* expr_list WS* ')';
-expr_list : | (expr WS* ',' WS* )+ expr? ;
+tuple_expr: '(' WS* non_singleton_expr_list WS* ')';
+non_singleton_expr_list : | (expr WS* ',' WS* )+ expr? ;
+expr_list: expr | non_singleton_expr_list ;
 
 if_expr : IF WS* '(' WS* expr WS* ')' WS* block WS* ELSE WS* block ;
 match_expr : MATCH WS* '(' WS* expr WS* ')' WS* '{' WS* match_block_list WS* '}' ;

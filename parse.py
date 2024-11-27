@@ -122,11 +122,19 @@ class Visitor(GrammarVisitor):
         else:
             return Boolean(False)
 
-    def visitExpr_list(self, ctx: GrammarParser.Expr_listContext) -> list[Expression]:
+    def visitNon_singleton_expr_list(
+        self, ctx: GrammarParser.Non_singleton_expr_listContext
+    ) -> list[Expression]:
         return self.visitList(ctx)
 
+    def visitExpr_list(self, ctx: GrammarParser.Expr_listContext) -> list[Expression]:
+        if ctx.expr() is None:
+            return self.visit(ctx.non_singleton_expr_list())
+        else:
+            return [self.visit(ctx.expr())]
+
     def visitTuple_expr(self, ctx: GrammarParser.Tuple_exprContext) -> TupleExpression:
-        expressions = self.visit(ctx.expr_list())
+        expressions = self.visit(ctx.non_singleton_expr_list())
         return TupleExpression(expressions)
 
     def visitInfix_operator(self, ctx: GrammarParser.Infix_operatorContext) -> str:
@@ -212,10 +220,7 @@ class Visitor(GrammarVisitor):
     def visitFn_call_tail(
         self, ctx: GrammarParser.Fn_call_tailContext, function=None
     ) -> FunctionCall:
-        if ctx.expr() is None:
-            args = self.visit(ctx.expr_list())
-        else:
-            args = [self.visit(ctx.expr())]
+        args = self.visit(ctx.expr_list())
         function = FunctionCall(function, args)
         if ctx.fn_call_tail() is not None:
             return self.visitFn_call_tail(ctx.fn_call_tail(), function)
@@ -294,16 +299,15 @@ class Visitor(GrammarVisitor):
         body = self.visit(ctx.block())
         return FunctionDefinition(assignees, return_type, body)
 
-    def visitGeneric_constructor(self, ctx: GrammarParser.Generic_constructorContext):
+    def visitGeneric_constructor(
+        self, ctx: GrammarParser.Generic_constructorContext
+    ) -> GenericConstructor:
         generic_instance: GenericVariable = self.visit(ctx.generic_instance())
         return GenericConstructor(generic_instance.name, generic_instance.type_instances)
 
-    def visitConstructor_call(self, ctx: GrammarParser.Constructor_callContext):
+    def visitConstructor_call(self, ctx: GrammarParser.Constructor_callContext) -> ConstructorCall:
         constructor = self.visit(ctx.generic_constructor())
-        if ctx.expr() is None:
-            arguments = self.visit(ctx.expr_list())
-        else:
-            arguments = [self.visit(ctx.expr())]
+        arguments = self.visit(ctx.expr_list())
         return ConstructorCall(constructor, arguments)
 
     def visitGeneric_typevar(
