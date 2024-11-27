@@ -226,6 +226,8 @@ from parse import Parser
         ("3 __^__ 4", None, "expr"),
         ("3 _____ 4", FunctionCall(Variable("_"), [Integer(3), Integer(4)]), "expr"),
         ("3 ______ 4", FunctionCall(Variable("__"), [Integer(3), Integer(4)]), "expr"),
+        ("3 _______ 4", FunctionCall(Variable("___"), [Integer(3), Integer(4)]), "expr"),
+        ("3 ________ 4", FunctionCall(Variable("____"), [Integer(3), Integer(4)]), "expr"),
         (
             "3 + 4 + 5",
             FunctionCall(
