@@ -6,6 +6,7 @@ from ast_nodes import (
     FunctionType,
     GenericType,
     GenericTypeVariable,
+    OpaqueTypeDefinition,
     TupleType,
     TypeItem,
     Typename,
@@ -75,6 +76,23 @@ from ast_nodes import (
                     {"id": "Some", "type_": {"GenericType": {"id": "T", "type_variables": []}}},
                     {"id": "None", "type_": None},
                 ],
+            },
+        ),
+        (
+            OpaqueTypeDefinition(
+                GenericTypeVariable("Pair", ["T", "U"]),
+                TupleType([Typename("T"), Typename("U")]),
+            ),
+            {
+                "variable": {"id": "Pair", "generic_variables": ["T", "U"]},
+                "type_": {
+                    "TupleType": {
+                        "types": [
+                            {"GenericType": {"id": "T", "type_variables": []}},
+                            {"GenericType": {"id": "U", "type_variables": []}},
+                        ]
+                    }
+                },
             },
         ),
     ],

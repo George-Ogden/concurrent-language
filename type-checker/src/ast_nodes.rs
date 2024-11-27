@@ -95,6 +95,12 @@ struct UnionTypeDefinition {
     items: Vec<TypeItem>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct OpaqueTypeDefinition {
+    variable: GenericTypeVariable,
+    type_: TypeInstance,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -195,6 +201,18 @@ mod tests {
                     type_: None
                 }
             ]
+        }
+    )]
+    #[test_case(
+        r#"{"variable":{"id":"Pair","generic_variables":["T","U"]},"type_":{"TupleType":{"types":[{"GenericType":{"id":"T","type_variables":[]}},{"GenericType":{"id":"U","type_variables":[]}}]}}}"#,
+        OpaqueTypeDefinition{
+            variable: GenericTypeVariable{
+                id: String::from("Pair"),
+                generic_variables: vec![String::from("T"), String::from("U")]
+            },
+            type_: TupleType{
+                types: vec![Typename("T").into(), Typename("U").into()]
+            }.into()
         }
     )]
     fn test_deserialize_json<
