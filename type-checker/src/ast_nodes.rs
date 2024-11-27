@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::convert::From;
 
 type Id = String;
 
@@ -45,6 +46,30 @@ pub enum TypeInstance {
     GenericType(GenericType),
 }
 
+impl From<FunctionType> for TypeInstance {
+    fn from(value: FunctionType) -> Self {
+        TypeInstance::FunctionType(value)
+    }
+}
+
+impl From<AtomicType> for TypeInstance {
+    fn from(value: AtomicType) -> Self {
+        TypeInstance::AtomicType(value)
+    }
+}
+
+impl From<TupleType> for TypeInstance {
+    fn from(value: TupleType) -> Self {
+        TypeInstance::TupleType(value)
+    }
+}
+
+impl From<GenericType> for TypeInstance {
+    fn from(value: GenericType) -> Self {
+        TypeInstance::GenericType(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -76,8 +101,8 @@ mod tests {
         r#"{"types":[{"AtomicType":{"type_":"BOOL"}},{"TupleType":{"types":[]}}]}"#,
         TupleType{
             types: vec![
-                TypeInstance::AtomicType(ATOMIC_TYPE_BOOL),
-                TypeInstance::TupleType(TupleType{types: Vec::new()}),
+                ATOMIC_TYPE_BOOL.into(),
+                TupleType{types: Vec::new()}.into(),
             ]
         };
         "non-empty tuple type"
@@ -86,12 +111,12 @@ mod tests {
         r#"{"argument_type":{"TupleType":{"types":[{"AtomicType":{"type_":"INT"}}]}},"return_type":{"AtomicType":{"type_":"INT"}}}"#,
         FunctionType{
             argument_type: Box::new(
-                TypeInstance::TupleType(TupleType{
-                    types: vec![TypeInstance::AtomicType(ATOMIC_TYPE_INT)]
-                })
+                TupleType{
+                    types: vec![ATOMIC_TYPE_INT.into()]
+                }.into()
             ),
             return_type: Box::new(
-                TypeInstance::AtomicType(ATOMIC_TYPE_INT)
+                ATOMIC_TYPE_INT.into()
             )
         };
         "function type"
@@ -101,8 +126,8 @@ mod tests {
         GenericType{
             id: String::from("map"),
             type_variables: vec![
-                TypeInstance::AtomicType(ATOMIC_TYPE_INT),
-                TypeInstance::AtomicType(ATOMIC_TYPE_BOOL)
+                ATOMIC_TYPE_INT.into(),
+                ATOMIC_TYPE_BOOL.into()
             ]
         };
         "generic type"
@@ -112,18 +137,18 @@ mod tests {
         GenericType{
             id: String::from("map"),
             type_variables: vec![
-                TypeInstance::FunctionType(FunctionType{
+                FunctionType{
                     argument_type: Box::new(
-                        TypeInstance::AtomicType(ATOMIC_TYPE_INT)
+                        ATOMIC_TYPE_INT.into()
                     ),
                     return_type: Box::new(
-                        TypeInstance::AtomicType(ATOMIC_TYPE_INT)
+                        ATOMIC_TYPE_INT.into()
                     )
-                }),
-                TypeInstance::GenericType(GenericType {
+                }.into(),
+                GenericType {
                     id: String::from("foo"),
                     type_variables: Vec::new()
-                })
+                }.into()
             ]
         };
         "nested generic type"
