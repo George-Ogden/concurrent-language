@@ -1,4 +1,5 @@
 mod ast_nodes;
+mod type_check;
 
 use ast_nodes::*;
 use std::io::{self, Read};

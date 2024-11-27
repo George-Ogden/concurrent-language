@@ -112,6 +112,14 @@ struct TransparentTypeDefinition {
     type_: TypeInstance,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum Definition {
+    UnionTypeDefinition(UnionTypeDefinition),
+    OpaqueTypeDefinition(OpaqueTypeDefinition),
+    TransparentTypeDefinition(TransparentTypeDefinition),
+    EmptyTypeDefinition(EmptyTypeDefinition),
+}
+
 #[cfg(test)]
 mod tests {
 
