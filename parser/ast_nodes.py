@@ -1,14 +1,45 @@
 from __future__ import annotations
 
 import enum
-import json
+import inspect
+import typing
 from dataclasses import dataclass
-from typing import ClassVar, Optional, TypeAlias, Union
+from typing import Any, ClassVar, Optional, Type, TypeAlias, Union
 
 
 class ASTNode:
-    def to_json(self) -> str:
-        return ""
+    SUBSTITUTIONS: ClassVar[dict[str, str]] = {"type": "type_"}
+
+    def to_json(self) -> Any:
+        annotations = inspect.get_annotations(type(self), eval_str=True)
+        attrs = (
+            (
+                self.SUBSTITUTIONS.get(attr, attr),
+                self.convert_to_json(getattr(self, attr), type_=annotations[attr]),
+            )
+            for attr in self.__match_args__
+        )
+        return {key: value for key, value in attrs if value is not None}
+
+    @classmethod
+    def convert_to_json(cls, value: Any, type_: Optional[Type] = None) -> Optional[Any]:
+        value_type = type(value)
+        if type_ is None:
+            type_ = value_type
+        if isinstance(value, ASTNode):
+            if typing.get_origin(type_) == Union and value_type in typing.get_args(type_):
+                return {value_type.__name__: cls.convert_to_json(value, value_type)}
+            else:
+                return value.to_json()
+        elif isinstance(value, list):
+            node_type = typing.get_args(type_)
+            if len(node_type) == 1:
+                [type_] = node_type
+            else:
+                type_ = None
+            return [cls.convert_to_json(node, type_=type_) for node in value]
+        elif isinstance(value, Id):
+            return value
 
 
 Id: TypeAlias = str
@@ -39,8 +70,8 @@ class AtomicTypeEnum(ASTNode, enum.IntEnum):
     INT = enum.auto()
     BOOL = enum.auto()
 
-    def to_json(self) -> str:
-        return json.dumps(self.name)
+    def to_json(self) -> Any:
+        return self.name
 
 
 @dataclass
