@@ -29,7 +29,7 @@ struct GenericType {
 
 fn Typename(name: &str) -> GenericType {
     GenericType {
-        id: String::from(name),
+        id: Id::from(name),
         type_variables: Vec::new(),
     }
 }
@@ -166,7 +166,7 @@ mod tests {
     #[test_case(
         r#"{"id":"map","type_variables":[{"AtomicType":{"type_":"INT"}},{"AtomicType":{"type_":"BOOL"}}]}"#,
         GenericType{
-            id: String::from("map"),
+            id: Id::from("map"),
             type_variables: vec![
                 ATOMIC_TYPE_INT.into(),
                 ATOMIC_TYPE_BOOL.into()
@@ -177,7 +177,7 @@ mod tests {
     #[test_case(
         r#"{"id":"map","type_variables":[{"FunctionType":{"argument_type":{"AtomicType":{"type_":"INT"}},"return_type":{"AtomicType":{"type_":"INT"}}}},{"GenericType":{"id":"foo","type_variables":[]}}]}"#,
         GenericType{
-            id: String::from("map"),
+            id: Id::from("map"),
             type_variables: vec![
                 FunctionType{
                     argument_type: Box::new(
@@ -188,7 +188,7 @@ mod tests {
                     )
                 }.into(),
                 GenericType {
-                    id: String::from("foo"),
+                    id: Id::from("foo"),
                     type_variables: Vec::new()
                 }.into()
             ]
@@ -199,16 +199,16 @@ mod tests {
         r#"{"variable":{"id":"Maybe","generic_variables":["T"]},"items":[{"id":"Some","type_":{"GenericType":{"id":"T","type_variables":[]}}},{"id":"None","type_":null}]}"#,
         UnionTypeDefinition {
             variable: GenericTypeVariable{
-                id: String::from("Maybe"),
-                generic_variables: vec![String::from("T")]
+                id: Id::from("Maybe"),
+                generic_variables: vec![Id::from("T")]
             },
             items: vec![
                 TypeItem {
-                    id: String::from("Some"),
+                    id: Id::from("Some"),
                     type_: Some(Typename("T").into()),
                 },
                 TypeItem {
-                    id: String::from("None"),
+                    id: Id::from("None"),
                     type_: None
                 }
             ]
@@ -219,8 +219,8 @@ mod tests {
         r#"{"variable":{"id":"Pair","generic_variables":["T","U"]},"type_":{"TupleType":{"types":[{"GenericType":{"id":"T","type_variables":[]}},{"GenericType":{"id":"U","type_variables":[]}}]}}}"#,
         OpaqueTypeDefinition{
             variable: GenericTypeVariable{
-                id: String::from("Pair"),
-                generic_variables: vec![String::from("T"), String::from("U")]
+                id: Id::from("Pair"),
+                generic_variables: vec![Id::from("T"), Id::from("U")]
             },
             type_: TupleType{
                 types: vec![Typename("T").into(), Typename("U").into()]
@@ -231,7 +231,7 @@ mod tests {
     #[test_case(
         r#"{"id":"None"}"#,
         EmptyTypeDefinition{
-            id: String::from("None")
+            id: Id::from("None")
         };
         "empty type definition"
     )]
@@ -239,7 +239,7 @@ mod tests {
         r#"{"variable":{"id":"ii","generic_variables":[]},"type_":{"TupleType":{"types":[{"AtomicType":{"type_":"INT"}},{"AtomicType":{"type_":"INT"}}]}}}"#,
         TransparentTypeDefinition{
             variable: GenericTypeVariable{
-                id: String::from("ii"),
+                id: Id::from("ii"),
                 generic_variables: Vec::new()
             },
             type_: TupleType{
