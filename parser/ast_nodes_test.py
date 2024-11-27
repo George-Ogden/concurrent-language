@@ -5,7 +5,11 @@ from ast_nodes import (
     AtomicTypeEnum,
     FunctionType,
     GenericType,
+    GenericTypeVariable,
     TupleType,
+    TypeItem,
+    Typename,
+    UnionTypeDefinition,
 )
 
 
@@ -57,6 +61,19 @@ from ast_nodes import (
                         }
                     },
                     {"GenericType": {"id": "foo", "type_variables": []}},
+                ],
+            },
+        ),
+        (
+            UnionTypeDefinition(
+                GenericTypeVariable("Maybe", ["T"]),
+                [TypeItem("Some", Typename("T")), TypeItem("None", None)],
+            ),
+            {
+                "variable": {"id": "Maybe", "generic_variables": ["T"]},
+                "items": [
+                    {"id": "Some", "type_": {"GenericType": {"id": "T", "type_variables": []}}},
+                    {"id": "None", "type_": None},
                 ],
             },
         ),

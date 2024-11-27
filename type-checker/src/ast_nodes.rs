@@ -27,6 +27,13 @@ struct GenericType {
     type_variables: Vec<TypeInstance>,
 }
 
+fn Typename(name: &str) -> GenericType {
+    GenericType {
+        id: String::from(name),
+        type_variables: Vec::new(),
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct TupleType {
     types: Vec<TypeInstance>,
@@ -68,6 +75,24 @@ impl From<GenericType> for TypeInstance {
     fn from(value: GenericType) -> Self {
         TypeInstance::GenericType(value)
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct TypeItem {
+    id: Id,
+    type_: Option<TypeInstance>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct GenericTypeVariable {
+    id: Id,
+    generic_variables: Vec<Id>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct UnionTypeDefinition {
+    variable: GenericTypeVariable,
+    items: Vec<TypeItem>,
 }
 
 #[cfg(test)]
@@ -152,6 +177,25 @@ mod tests {
             ]
         };
         "nested generic type"
+    )]
+    #[test_case(
+        r#"{"variable":{"id":"Maybe","generic_variables":["T"]},"items":[{"id":"Some","type_":{"GenericType":{"id":"T","type_variables":[]}}},{"id":"None","type_":null}]}"#,
+        UnionTypeDefinition {
+            variable: GenericTypeVariable{
+                id: String::from("Maybe"),
+                generic_variables: vec![String::from("T")]
+            },
+            items: vec![
+                TypeItem {
+                    id: String::from("Some"),
+                    type_: Some(Typename("T").into()),
+                },
+                TypeItem {
+                    id: String::from("None"),
+                    type_: None
+                }
+            ]
+        }
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

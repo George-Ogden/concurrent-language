@@ -19,7 +19,7 @@ class ASTNode:
             )
             for attr in self.__match_args__
         )
-        return {key: value for key, value in attrs if value is not None}
+        return {key: value for key, value in attrs}
 
     @classmethod
     def convert_to_json(cls, value: Any, type_: Optional[Type] = None) -> Optional[Any]:
@@ -39,6 +39,8 @@ class ASTNode:
                 type_ = None
             return [cls.convert_to_json(node, type_=type_) for node in value]
         elif isinstance(value, Id):
+            return value
+        elif value is None:
             return value
 
 
