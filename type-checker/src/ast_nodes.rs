@@ -4,20 +4,20 @@ use std::convert::From;
 type Id = String;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-enum AtomicTypeEnum {
+pub enum AtomicTypeEnum {
     INT,
     BOOL,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct AtomicType {
-    type_: AtomicTypeEnum,
+pub struct AtomicType {
+    pub type_: AtomicTypeEnum,
 }
 
-const ATOMIC_TYPE_INT: AtomicType = AtomicType {
+pub const ATOMIC_TYPE_INT: AtomicType = AtomicType {
     type_: AtomicTypeEnum::INT,
 };
-const ATOMIC_TYPE_BOOL: AtomicType = AtomicType {
+pub const ATOMIC_TYPE_BOOL: AtomicType = AtomicType {
     type_: AtomicTypeEnum::BOOL,
 };
 
@@ -84,9 +84,16 @@ struct TypeItem {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct GenericTypeVariable {
-    id: Id,
+pub struct GenericTypeVariable {
+    pub id: Id,
     generic_variables: Vec<Id>,
+}
+
+pub fn TypeVariable(name: &str) -> GenericTypeVariable {
+    return GenericTypeVariable {
+        id: String::from(name),
+        generic_variables: Vec::new(),
+    };
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -96,9 +103,9 @@ struct UnionTypeDefinition {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct OpaqueTypeDefinition {
-    variable: GenericTypeVariable,
-    type_: TypeInstance,
+pub struct OpaqueTypeDefinition {
+    pub variable: GenericTypeVariable,
+    pub type_: TypeInstance,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -118,6 +125,12 @@ pub enum Definition {
     OpaqueTypeDefinition(OpaqueTypeDefinition),
     TransparentTypeDefinition(TransparentTypeDefinition),
     EmptyTypeDefinition(EmptyTypeDefinition),
+}
+
+impl From<OpaqueTypeDefinition> for Definition {
+    fn from(value: OpaqueTypeDefinition) -> Self {
+        Definition::OpaqueTypeDefinition(value)
+    }
 }
 
 #[cfg(test)]
