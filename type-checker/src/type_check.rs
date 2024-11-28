@@ -304,8 +304,11 @@ impl TypeChecker {
         for definition in definitions {
             let type_name = definition.get_name();
             let type_ = match &definition {
-                Definition::OpaqueTypeDefinition(OpaqueTypeDefinition { variable: _, type_ }) => {
-                    TypeChecker::convert_ast_type(type_, &type_definitions)
+                Definition::OpaqueTypeDefinition(OpaqueTypeDefinition { variable, type_ }) => {
+                    Type::Union(HashMap::from([(
+                        variable.id.clone(),
+                        Some(TypeChecker::convert_ast_type(type_, &type_definitions)),
+                    )]))
                 }
                 Definition::UnionTypeDefinition(UnionTypeDefinition { variable: _, items }) => {
                     let variant_names = items.iter().map(|item| &item.id);
@@ -368,7 +371,9 @@ mod tests {
             }.into()
         ],
         Some(TypeDefinitions::from([
-            (Id::from("i"), Rc::new(RefCell::new(TYPE_INT)))
+            (Id::from("i"), Type::Union(HashMap::from([
+                (Id::from("i"), Some(TYPE_INT))
+            ])))
         ]));
         "atomic opaque type definition"
     )]
@@ -479,8 +484,18 @@ mod tests {
             }.into()
         ],
         Some(TypeDefinitions::from([
-            (Id::from("Int"), TYPE_INT),
-            (Id::from("Bool"), TYPE_BOOL),
+            (
+                Id::from("Int"),
+                Type::Union(HashMap::from([
+                    (Id::from("Int"), Some(TYPE_INT))
+                ]))
+            ),
+            (
+                Id::from("Bool"),
+                Type::Union(HashMap::from([
+                    (Id::from("Bool"), Some(TYPE_BOOL))
+                ]))
+            ),
         ]));
         "two type definitions"
     )]
@@ -519,7 +534,9 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("ii"),
-                Type::Tuple(vec![TYPE_INT, TYPE_INT])
+                Type::Union(HashMap::from([
+                    (Id::from("ii"), Some(Type::Tuple(vec![TYPE_INT, TYPE_INT])))
+                ]))
             ),
         ]));
         "tuple type definition"
@@ -537,7 +554,9 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("i2b"),
-                Type::Function(Box::new(TYPE_INT), Box::new(TYPE_BOOL))
+                Type::Union(HashMap::from([
+                    (Id::from("i2b"), Some(Type::Function(Box::new(TYPE_INT), Box::new(TYPE_BOOL))))
+                ]))
             ),
         ]));
         "function type definition"
@@ -589,8 +608,15 @@ mod tests {
         ],
         Some(
             TypeDefinitions::from({
-                let iint = Rc::new(RefCell::new(TYPE_INT));
-                let iiint = Rc::new(RefCell::new(Type::Reference(iint.clone())));
+                let iint = Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([(Id::from("iint"), Some(TYPE_INT))]))
+                ));
+                let iiint = Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([(
+                        Id::from("iiint"),
+                        Some(Type::Reference(iint.clone()))
+                    )]))
+                ));
                 [(Id::from("iint"), iint), (Id::from("iiint"), iiint)]
             })
         );
