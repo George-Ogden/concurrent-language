@@ -1,6 +1,6 @@
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, GenericType, Id, OpaqueTypeDefinition, TupleType,
-    TypeInstance, UnionTypeDefinition,
+    AtomicType, AtomicTypeEnum, Definition, FunctionType, GenericType, Id, OpaqueTypeDefinition,
+    TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -18,6 +18,7 @@ enum Type {
     Union(Vec<Variant>),
     Reference(Rc<RefCell<Self>>),
     Tuple(Vec<Type>),
+    Function(Box<Type>, Box<Type>),
     Empty,
 }
 
@@ -30,11 +31,13 @@ impl fmt::Debug for Type {
             Type::Atomic(atomic_type) => write!(f, "Atomic({:?})", atomic_type),
             Type::Union(variants) => write!(f, "Union({:?})", variants),
             Type::Reference(reference) => {
-                // Include information about the memory address for clarity
                 write!(f, "Reference({:p})", Rc::as_ptr(reference),)
             }
             Type::Empty => write!(f, "Empty"),
             Type::Tuple(types) => write!(f, "Tuple({:?})", types),
+            Type::Function(argument_type, return_type) => {
+                write!(f, "Function({:?},{:?})", argument_type, return_type)
+            }
         }
     }
 }
@@ -101,6 +104,19 @@ impl TypeDefinitions {
                         )
                     })
             }
+            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
+                TypeDefinitions::type_equality(
+                    self_references_index,
+                    other_references_index,
+                    a1,
+                    a2,
+                ) && TypeDefinitions::type_equality(
+                    self_references_index,
+                    other_references_index,
+                    r1,
+                    r2,
+                )
+            }
             _ => false,
         }
     }
@@ -157,7 +173,7 @@ impl fmt::Debug for TypeDefinitions {
 struct DebugTypeWrapper(Rc<RefCell<Type>>, Box<HashMap<*mut Type, Id>>);
 impl DebugTypeWrapper {
     fn fmt_type(&self, type_: &Type) -> String {
-        let references_index = &self.1; // Get the reference index (HashMap)
+        let references_index = &self.1;
         match type_ {
             Type::Atomic(atomic_type_enum) => format!("Atomic({})", atomic_type_enum),
             Type::Union(variants) => {
@@ -186,6 +202,13 @@ impl DebugTypeWrapper {
             Type::Tuple(types) => {
                 let mut formatted_types = types.iter().map(|t| format!("{}", self.fmt_type(t)));
                 format!("Tuple({})", formatted_types.join(", "))
+            }
+            Type::Function(argument_type, return_type) => {
+                format!(
+                    "Function({},{})",
+                    self.fmt_type(&*argument_type),
+                    self.fmt_type(&*return_type)
+                )
             }
         }
     }
@@ -238,7 +261,19 @@ impl TypeChecker {
                     .map(|t| TypeChecker::convert_ast_type(t, type_definitions))
                     .collect_vec(),
             ),
-            _ => todo!(),
+            TypeInstance::FunctionType(FunctionType {
+                argument_type,
+                return_type,
+            }) => Type::Function(
+                Box::new(TypeChecker::convert_ast_type(
+                    &argument_type,
+                    type_definitions,
+                )),
+                Box::new(TypeChecker::convert_ast_type(
+                    &return_type,
+                    type_definitions,
+                )),
+            ),
         }
     }
     fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, Id> {
@@ -296,8 +331,8 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        TupleType, TypeItem, TypeVariable, Typename, UnionTypeDefinition, ATOMIC_TYPE_BOOL,
-        ATOMIC_TYPE_INT,
+        FunctionType, TupleType, TypeItem, TypeVariable, Typename, UnionTypeDefinition,
+        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -478,6 +513,24 @@ mod tests {
             ),
         ]));
         "tuple type definition"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition {
+                variable: TypeVariable("i2b"),
+                type_: FunctionType{
+                    argument_type: Box::new(ATOMIC_TYPE_INT.into()),
+                    return_type: Box::new(ATOMIC_TYPE_BOOL.into()),
+                }.into()
+            }.into()
+        ],
+        Some(TypeDefinitions::from([
+            (
+                Id::from("i2b"),
+                Type::Function(Box::new(TYPE_INT), Box::new(TYPE_BOOL))
+            ),
+        ]));
+        "function type definition"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,

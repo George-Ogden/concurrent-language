@@ -47,9 +47,9 @@ pub struct TupleType {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct FunctionType {
-    argument_type: Box<TypeInstance>,
-    return_type: Box<TypeInstance>,
+pub struct FunctionType {
+    pub argument_type: Box<TypeInstance>,
+    pub return_type: Box<TypeInstance>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
