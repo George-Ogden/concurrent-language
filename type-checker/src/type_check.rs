@@ -573,6 +573,26 @@ mod tests {
         );
         "empty type definition"
     )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: TypeVariable("iint"),
+                type_: ATOMIC_TYPE_INT.into()
+            }.into(),
+            OpaqueTypeDefinition{
+                variable: TypeVariable("iiint"),
+                type_: Typename("iint").into(),
+            }.into(),
+        ],
+        Some(
+            TypeDefinitions::from({
+                let iint = Rc::new(RefCell::new(TYPE_INT));
+                let iiint = Rc::new(RefCell::new(Type::Reference(iint.clone())));
+                [(Id::from("iint"), iint), (Id::from("iiint"), iiint)]
+            })
+        );
+        "indirect type reference"
+    )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
         expected_result: Option<TypeDefinitions>,
