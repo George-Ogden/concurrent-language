@@ -1,6 +1,6 @@
 use crate::{
     AtomicType, AtomicTypeEnum, Definition, FunctionType, GenericType, Id, OpaqueTypeDefinition,
-    TupleType, TypeInstance, UnionTypeDefinition,
+    TransparentTypeDefinition, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -320,6 +320,10 @@ impl TypeChecker {
                     });
                     Type::Union(variants.collect())
                 }
+                Definition::TransparentTypeDefinition(TransparentTypeDefinition {
+                    variable: _,
+                    type_,
+                }) => TypeChecker::convert_ast_type(type_, &type_definitions),
                 _ => todo!(),
             };
             if let Some(type_reference) = type_definitions.get_mut(type_name) {
@@ -336,8 +340,8 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        FunctionType, TupleType, TypeItem, TypeVariable, Typename, UnionTypeDefinition,
-        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        FunctionType, TransparentTypeDefinition, TupleType, TypeItem, TypeVariable, Typename,
+        UnionTypeDefinition, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -536,6 +540,24 @@ mod tests {
             ),
         ]));
         "function type definition"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition {
+                variable: TypeVariable("u2u"),
+                type_: FunctionType{
+                    argument_type: Box::new(TupleType{types: Vec::new()}.into()),
+                    return_type: Box::new(TupleType{types: Vec::new()}.into()),
+                }.into()
+            }.into()
+        ],
+        Some(TypeDefinitions::from([
+            (
+                Id::from("u2u"),
+                Type::Function(Box::new(Type::Tuple(Vec::new())), Box::new(Type::Tuple(Vec::new())))
+            ),
+        ]));
+        "transparent function type definition"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
