@@ -281,7 +281,7 @@ impl TypeChecker {
             ),
         }
     }
-    fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, Id> {
+    fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, String> {
         let type_names = definitions.iter().map(Definition::get_name);
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
@@ -312,6 +312,16 @@ impl TypeChecker {
                     TypeChecker::convert_ast_type(type_, &type_definitions)
                 }
                 Definition::UnionTypeDefinition(UnionTypeDefinition { variable: _, items }) => {
+                    let variant_names = items.iter().map(|item| &item.id);
+                    if !variant_names.clone().all_unique() {
+                        let variant_name_counts = variant_names.collect::<Counter<_>>();
+                        for (name, count) in variant_name_counts {
+                            if count > 1 {
+                                return Err(format!("Duplicated variant name {}", name));
+                            }
+                        }
+                        panic!("Variant names were not unique but all counts were < 2");
+                    }
                     let variants = items.iter().map(|item| Variant {
                         id: item.id.clone(),
                         type_: item.type_.as_ref().map(|type_instance| {
@@ -665,6 +675,44 @@ mod tests {
             })
         );
         "mutually recursive types"
+    )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition{
+                variable: TypeVariable("Left_Right"),
+                items: vec![
+                    TypeItem{
+                        id: Id::from("left"),
+                        type_: Some(ATOMIC_TYPE_BOOL.into())
+                    },
+                    TypeItem{
+                        id: Id::from("left"),
+                        type_: Some(ATOMIC_TYPE_BOOL.into())
+                    }
+                ]
+            }.into(),
+        ],
+        None;
+        "duplicate types in union type"
+    )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition{
+                variable: TypeVariable("Left_Right"),
+                items: vec![
+                    TypeItem{
+                        id: Id::from("left"),
+                        type_: Some(ATOMIC_TYPE_BOOL.into())
+                    },
+                    TypeItem{
+                        id: Id::from("left"),
+                        type_: None
+                    }
+                ]
+            }.into(),
+        ],
+        None;
+        "duplicate names in union type"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
