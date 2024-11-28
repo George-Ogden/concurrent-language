@@ -93,8 +93,8 @@ pub struct OpaqueTypeDefinition {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct EmptyTypeDefinition {
-    id: Id,
+pub struct EmptyTypeDefinition {
+    pub id: Id,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

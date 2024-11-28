@@ -1,6 +1,6 @@
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, FunctionType, GenericType, Id, OpaqueTypeDefinition,
-    TransparentTypeDefinition, TupleType, TypeInstance, UnionTypeDefinition,
+    AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, FunctionType, GenericType, Id,
+    OpaqueTypeDefinition, TransparentTypeDefinition, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -324,7 +324,7 @@ impl TypeChecker {
                     variable: _,
                     type_,
                 }) => TypeChecker::convert_ast_type(type_, &type_definitions),
-                _ => todo!(),
+                Definition::EmptyTypeDefinition(EmptyTypeDefinition { id: _ }) => Type::Empty,
             };
             if let Some(type_reference) = type_definitions.get_mut(type_name) {
                 *type_reference.borrow_mut() = type_;
@@ -340,8 +340,8 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        FunctionType, TransparentTypeDefinition, TupleType, TypeItem, TypeVariable, Typename,
-        UnionTypeDefinition, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        EmptyTypeDefinition, FunctionType, TransparentTypeDefinition, TupleType, TypeItem,
+        TypeVariable, Typename, UnionTypeDefinition, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -558,6 +558,20 @@ mod tests {
             ),
         ]));
         "transparent function type definition"
+    )]
+    #[test_case(
+        vec![
+            EmptyTypeDefinition{id: Id::from("None")}.into()
+        ],
+        Some(
+            TypeDefinitions::from([
+                (
+                    Id::from("None"),
+                    Type::Empty
+                )
+            ])
+        );
+        "empty type definition"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
