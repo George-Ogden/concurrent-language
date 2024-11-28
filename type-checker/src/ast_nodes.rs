@@ -42,8 +42,8 @@ pub fn Typename(name: &str) -> GenericType {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct TupleType {
-    types: Vec<TypeInstance>,
+pub struct TupleType {
+    pub types: Vec<TypeInstance>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

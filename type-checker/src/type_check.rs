@@ -1,12 +1,12 @@
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, GenericType, Id, OpaqueTypeDefinition, TypeInstance,
-    UnionTypeDefinition,
+    AtomicType, AtomicTypeEnum, Definition, GenericType, Id, OpaqueTypeDefinition, TupleType,
+    TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::rc::Rc;
 use strum::IntoEnumIterator;
 
@@ -17,6 +17,7 @@ enum Type {
     Atomic(AtomicTypeEnum),
     Union(Vec<Variant>),
     Reference(Rc<RefCell<Self>>),
+    Tuple(Vec<Type>),
     Empty,
 }
 
@@ -33,6 +34,7 @@ impl fmt::Debug for Type {
                 write!(f, "Reference({:p})", Rc::as_ptr(reference),)
             }
             Type::Empty => write!(f, "Empty"),
+            Type::Tuple(types) => write!(f, "Tuple({:?})", types),
         }
     }
 }
@@ -88,6 +90,17 @@ impl TypeDefinitions {
             (Type::Reference(t1), Type::Reference(t2)) => {
                 self_references_index.get(&t1.as_ptr()) == other_references_index.get(&t2.as_ptr())
             }
+            (Type::Tuple(t1), Type::Tuple(t2)) => {
+                t1.len() == t2.len()
+                    && t1.iter().zip(t2.iter()).all(|(t1, t2)| {
+                        TypeDefinitions::type_equality(
+                            self_references_index,
+                            other_references_index,
+                            t1,
+                            t2,
+                        )
+                    })
+            }
             _ => false,
         }
     }
@@ -142,21 +155,35 @@ impl fmt::Debug for TypeDefinitions {
 }
 
 struct DebugTypeWrapper(Rc<RefCell<Type>>, Box<HashMap<*mut Type, Id>>);
+impl DebugTypeWrapper {
+    fn fmt_type(&self, type_: &Type) -> String {
+        let references_index = &self.1; // Get the reference index (HashMap)
+        match type_ {
+            Type::Atomic(atomic_type_enum) => format!("Atomic({})", atomic_type_enum),
+            Type::Union(vec) => format!("Union({:?})", vec),
+            Type::Reference(rc) => {
+                format!(
+                    "Reference({:?})",
+                    references_index
+                        .get(&rc.as_ptr())
+                        .unwrap_or(&Id::from("unknown"))
+                )
+            }
+            Type::Empty => format!("Empty"),
+            Type::Tuple(types) => {
+                let formatted_types: Vec<String> = types
+                    .iter()
+                    .map(|t| format!("{}", self.fmt_type(t)))
+                    .collect();
+                format!("Tuple({})", formatted_types.join(", "))
+            }
+        }
+    }
+}
+
 impl fmt::Debug for DebugTypeWrapper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let references_index = &self.1;
-        match &*self.0.borrow() {
-            Type::Atomic(atomic_type_enum) => write!(f, "Atomic({:?})", atomic_type_enum),
-            Type::Union(vec) => write!(f, "Union({:?})", vec),
-            Type::Reference(rc) => write!(
-                f,
-                "{:?}",
-                references_index
-                    .get(&rc.as_ptr())
-                    .unwrap_or(&Id::from("unknown"))
-            ),
-            Type::Empty => write!(f, "Empty"),
-        }
+        write!(f, "{}", self.fmt_type(&*self.0.borrow()))
     }
 }
 
@@ -195,6 +222,12 @@ impl TypeChecker {
                     panic!("{} not found in type definitions", id)
                 }
             }
+            TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
+                types
+                    .iter()
+                    .map(|t| TypeChecker::convert_ast_type(t, type_definitions))
+                    .collect_vec(),
+            ),
             _ => todo!(),
         }
     }
@@ -202,7 +235,7 @@ impl TypeChecker {
         let type_names = definitions.iter().map(Definition::get_name);
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
-            .collect::<Vec<_>>();
+            .collect_vec();
         if !type_names
             .clone()
             .chain(predefined_type_names.iter())
@@ -253,7 +286,8 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        TypeItem, TypeVariable, Typename, UnionTypeDefinition, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        TupleType, TypeItem, TypeVariable, Typename, UnionTypeDefinition, ATOMIC_TYPE_BOOL,
+        ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -417,6 +451,23 @@ mod tests {
         ],
         None;
         "additional bool definition"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition {
+                variable: TypeVariable("ii"),
+                type_: TupleType{
+                    types: vec![ATOMIC_TYPE_INT.into(),ATOMIC_TYPE_INT.into()]
+                }.into()
+            }.into()
+        ],
+        Some(TypeDefinitions::from([
+            (
+                Id::from("ii"),
+                Type::Tuple(vec![TYPE_INT, TYPE_INT])
+            ),
+        ]));
+        "tuple type definition"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
