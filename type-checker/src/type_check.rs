@@ -593,6 +593,79 @@ mod tests {
         );
         "indirect type reference"
     )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition{
+                variable: TypeVariable("left"),
+                items: vec![
+                    TypeItem{
+                        id: Id::from("Right"),
+                        type_: Some(
+                            TupleType{
+                                types: vec![
+                                    Typename("right").into(),
+                                    ATOMIC_TYPE_BOOL.into()
+                                ]
+                            }.into()
+                        )
+                    },
+                    TypeItem{
+                        id: Id::from("Incorrect"),
+                        type_: None
+                    }
+                ]
+            }.into(),
+            UnionTypeDefinition{
+                variable: TypeVariable("right"),
+                items: vec![
+                    TypeItem{
+                        id: Id::from("Left"),
+                        type_: Some(Typename("left").into())
+                    },
+                    TypeItem{
+                        id: Id::from("Correct"),
+                        type_: None
+                    }
+                ]
+            }.into(),
+        ],
+        Some(
+            TypeDefinitions::from({
+                let left = Rc::new(RefCell::new(Type::Empty));
+                let right = Rc::new(RefCell::new(
+                    Type::Union(vec![
+                        Variant{
+                            id: Id::from("Left"),
+                            type_: Some(
+                                Type::Reference(left.clone())
+                            )
+                        },
+                        Variant{
+                            id: Id::from("Correct"),
+                            type_: None
+                        }
+                    ])
+                ));
+                *left.borrow_mut() = Type::Union(vec![
+                    Variant{
+                        id: Id::from("Right"),
+                        type_: Some(
+                            Type::Tuple(vec![
+                                Type::Reference(right.clone()),
+                                TYPE_BOOL
+                            ])
+                        )
+                    },
+                    Variant{
+                        id: Id::from("Incorrect"),
+                        type_: None
+                    }
+                ]);
+                [(Id::from("left"), left), (Id::from("right"), right)]
+            })
+        );
+        "mutually recursive types"
+    )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
         expected_result: Option<TypeDefinitions>,
