@@ -19,6 +19,9 @@ enum Type {
     Empty,
 }
 
+const TYPE_INT: Type = Type::Atomic(AtomicTypeEnum::INT);
+const TYPE_BOOL: Type = Type::Atomic(AtomicTypeEnum::BOOL);
+
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -95,9 +98,25 @@ impl From<HashMap<Id, Rc<RefCell<Type>>>> for TypeDefinitions {
     }
 }
 
+impl<const N: usize> From<[(Id, Type); N]> for TypeDefinitions {
+    fn from(arr: [(Id, Type); N]) -> Self {
+        arr.into_iter().collect()
+    }
+}
+
 impl<const N: usize> From<[(Id, Rc<RefCell<Type>>); N]> for TypeDefinitions {
     fn from(arr: [(Id, Rc<RefCell<Type>>); N]) -> Self {
         TypeDefinitions(HashMap::from(arr))
+    }
+}
+
+impl FromIterator<(Id, Type)> for TypeDefinitions {
+    fn from_iter<T: IntoIterator<Item = (Id, Type)>>(iter: T) -> Self {
+        TypeDefinitions(
+            iter.into_iter()
+                .map(|(id, type_)| (id, Rc::new(RefCell::new(type_))))
+                .collect(),
+        )
     }
 }
 
@@ -190,7 +209,7 @@ impl TypeChecker {
             panic!("Type names were not unique but all counts were < 2");
         }
         let mut type_definitions: TypeDefinitions = type_names
-            .map(|name| (name.clone(), Rc::new(RefCell::new(Type::Empty))))
+            .map(|name| (name.clone(), Type::Empty))
             .collect::<TypeDefinitions>();
         for definition in definitions {
             let type_name = definition.get_name();
@@ -243,7 +262,7 @@ mod tests {
             }.into()
         ],
         Some(TypeDefinitions::from([
-            (Id::from("i"), Rc::new(RefCell::new(Type::Atomic(AtomicTypeEnum::INT))))
+            (Id::from("i"), Rc::new(RefCell::new(TYPE_INT)))
         ]));
         "atomic opaque type definition"
     )]
@@ -294,18 +313,18 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("int_or_bool"),
-                Rc::new(RefCell::new(Type::Union(
+                Type::Union(
                     vec![
                         Variant {
                             id: Id::from("Int"),
-                            type_: Some(Type::Atomic(AtomicTypeEnum::INT))
+                            type_: Some(TYPE_INT)
                         },
                         Variant {
                             id: Id::from("Bool"),
-                            type_: Some(Type::Atomic(AtomicTypeEnum::BOOL))
+                            type_: Some(TYPE_BOOL)
                         },
                     ]
-                )))
+                )
             )
         ]));
         "basic union type definition"
@@ -347,6 +366,23 @@ mod tests {
             )
         ]));
         "recursive type definition"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition {
+                variable: TypeVariable("int"),
+                type_: ATOMIC_TYPE_INT.into()
+            }.into(),
+            OpaqueTypeDefinition {
+                variable: TypeVariable("bool"),
+                type_: ATOMIC_TYPE_BOOL.into()
+            }.into()
+        ],
+        Some(TypeDefinitions::from([
+            (Id::from("int"), TYPE_INT),
+            (Id::from("bool"), TYPE_BOOL),
+        ]));
+        "two type definitions"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
