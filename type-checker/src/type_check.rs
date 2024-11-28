@@ -15,7 +15,7 @@ struct TypeChecker {}
 #[derive(PartialEq, Clone)]
 enum Type {
     Atomic(AtomicTypeEnum),
-    Union(Vec<Variant>),
+    Union(HashMap<Id, Option<Type>>),
     Reference(Rc<RefCell<Self>>),
     Tuple(Vec<Type>),
     Function(Box<Type>, Box<Type>),
@@ -29,7 +29,7 @@ impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Atomic(atomic_type) => write!(f, "Atomic({:?})", atomic_type),
-            Type::Union(variants) => write!(f, "Union({:?})", variants),
+            Type::Union(variants) => write!(f, "Union({:?})", variants.iter().collect_vec()),
             Type::Reference(reference) => {
                 write!(f, "Reference({:p})", Rc::as_ptr(reference),)
             }
@@ -40,12 +40,6 @@ impl fmt::Debug for Type {
             }
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-struct Variant {
-    id: Id,
-    type_: Option<Type>,
 }
 
 type TypeReferencesIndex = HashMap<*mut Type, Id>;
@@ -77,19 +71,23 @@ impl TypeDefinitions {
         match (t1, t2) {
             (Type::Empty, Type::Empty) => true,
             (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
-            (Type::Union(v1), Type::Union(v2)) => v1.iter().zip(v2.iter()).all(|(i1, i2)| {
-                i1.id == i2.id
-                    && match (&i1.type_, &i2.type_) {
-                        (None, None) => true,
-                        (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
-                            self_references_index,
-                            other_references_index,
-                            t1,
-                            t2,
-                        ),
-                        _ => false,
-                    }
-            }),
+            (Type::Union(v1), Type::Union(v2)) => v1
+                .iter()
+                .sorted_by_key(|(i1, _)| *i1)
+                .zip(v2.iter().sorted_by_key(|(i1, _)| *i1))
+                .all(|((i1, o1), (i2, o2))| {
+                    i1 == i2
+                        && match (&o1, &o2) {
+                            (None, None) => true,
+                            (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
+                                self_references_index,
+                                other_references_index,
+                                t1,
+                                t2,
+                            ),
+                            _ => false,
+                        }
+                }),
             (Type::Reference(t1), Type::Reference(t2)) => {
                 self_references_index.get(&t1.as_ptr()) == other_references_index.get(&t2.as_ptr())
             }
@@ -182,11 +180,10 @@ impl fmt::Debug for DebugTypeWrapper {
                     "Union({:?})",
                     variants
                         .into_iter()
-                        .map(|variant| {
+                        .map(|(id, type_)| {
                             (
-                                variant.id,
-                                variant
-                                    .type_
+                                id,
+                                type_
                                     .map(|type_| DebugTypeWrapper(type_, references_index.clone())),
                             )
                         })
@@ -322,11 +319,13 @@ impl TypeChecker {
                         }
                         panic!("Variant names were not unique but all counts were < 2");
                     }
-                    let variants = items.iter().map(|item| Variant {
-                        id: item.id.clone(),
-                        type_: item.type_.as_ref().map(|type_instance| {
-                            TypeChecker::convert_ast_type(type_instance, &type_definitions)
-                        }),
+                    let variants = items.iter().map(|item| {
+                        (
+                            item.id.clone(),
+                            item.type_.as_ref().map(|type_instance| {
+                                TypeChecker::convert_ast_type(type_instance, &type_definitions)
+                            }),
+                        )
                     });
                     Type::Union(variants.collect())
                 }
@@ -349,10 +348,7 @@ impl TypeChecker {
 #[cfg(test)]
 mod tests {
 
-    use crate::{
-        EmptyTypeDefinition, FunctionType, TransparentTypeDefinition, TupleType, TypeItem,
-        TypeVariable, Typename, UnionTypeDefinition, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
-    };
+    use crate::{TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT};
 
     use super::*;
 
@@ -408,11 +404,11 @@ mod tests {
             UnionTypeDefinition {
                 variable: TypeVariable("int_or_bool"),
                 items: vec![
-                    TypeItem{
+                    TypeItem {
                         id: Id::from("Int"),
                         type_: Some(ATOMIC_TYPE_INT.into())
                     },
-                    TypeItem{
+                    TypeItem {
                         id: Id::from("Bool"),
                         type_: Some(ATOMIC_TYPE_BOOL.into())
                     },
@@ -423,16 +419,10 @@ mod tests {
             (
                 Id::from("int_or_bool"),
                 Type::Union(
-                    vec![
-                        Variant {
-                            id: Id::from("Int"),
-                            type_: Some(TYPE_INT)
-                        },
-                        Variant {
-                            id: Id::from("Bool"),
-                            type_: Some(TYPE_BOOL)
-                        },
-                    ]
+                    HashMap::from([
+                        (Id::from("Int"), Some(TYPE_INT.into())),
+                        (Id::from("Bool"), Some(TYPE_BOOL.into()))
+                    ])
                 )
             )
         ]));
@@ -459,16 +449,16 @@ mod tests {
                 Id::from("int_list"),
                 ({
                     let reference = Rc::new(RefCell::new(Type::Empty));
-                    let union_type = Type::Union(vec![
-                        Variant {
-                            id: Id::from("Cons"),
-                            type_: Some(Type::Reference(Rc::clone(&reference))),
-                        },
-                        Variant {
-                            id: Id::from("Nil"),
-                            type_: None,
-                        },
-                    ]);
+                    let union_type = Type::Union(HashMap::from([
+                        (
+                            Id::from("Cons"),
+                            Some(Type::Reference(Rc::clone(&reference))),
+                        ),
+                        (
+                            Id::from("Nil"),
+                            None,
+                        ),
+                    ]));
                     *reference.borrow_mut() = union_type;
                     reference
                 })
@@ -643,34 +633,34 @@ mod tests {
             TypeDefinitions::from({
                 let left = Rc::new(RefCell::new(Type::Empty));
                 let right = Rc::new(RefCell::new(
-                    Type::Union(vec![
-                        Variant{
-                            id: Id::from("Left"),
-                            type_: Some(
+                    Type::Union(HashMap::from([
+                        (
+                            Id::from("Left"),
+                            Some(
                                 Type::Reference(left.clone())
                             )
-                        },
-                        Variant{
-                            id: Id::from("Correct"),
-                            type_: None
-                        }
-                    ])
+                        ),
+                        (
+                            Id::from("Correct"),
+                            None
+                        )
+                    ]))
                 ));
-                *left.borrow_mut() = Type::Union(vec![
-                    Variant{
-                        id: Id::from("Right"),
-                        type_: Some(
+                *left.borrow_mut() = Type::Union(HashMap::from([
+                    (
+                        Id::from("Right"),
+                        Some(
                             Type::Tuple(vec![
                                 Type::Reference(right.clone()),
                                 TYPE_BOOL
                             ])
                         )
-                    },
-                    Variant{
-                        id: Id::from("Incorrect"),
-                        type_: None
-                    }
-                ]);
+                    ),
+                    (
+                        Id::from("Incorrect"),
+                        None
+                    )
+                ]));
                 [(Id::from("left"), left), (Id::from("right"), right)]
             })
         );
