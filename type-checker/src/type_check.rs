@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
+use strum::IntoEnumIterator;
 
 struct TypeChecker {}
 
@@ -199,9 +200,19 @@ impl TypeChecker {
     }
     fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, Id> {
         let type_names = definitions.iter().map(Definition::get_name);
-        if !type_names.clone().all_unique() {
+        let predefined_type_names = AtomicTypeEnum::iter()
+            .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
+            .collect::<Vec<_>>();
+        if !type_names
+            .clone()
+            .chain(predefined_type_names.iter())
+            .all_unique()
+        {
             let type_name_counts = type_names.collect::<Counter<_>>();
             for (name, count) in type_name_counts {
+                if predefined_type_names.contains(name) {
+                    return Err(format!("Attempt to override built-in type name {}", name));
+                }
                 if count > 1 {
                     return Err(format!("Duplicated type name {}", name));
                 }
@@ -370,19 +381,42 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("int"),
+                variable: TypeVariable("Int"),
                 type_: ATOMIC_TYPE_INT.into()
             }.into(),
             OpaqueTypeDefinition {
-                variable: TypeVariable("bool"),
+                variable: TypeVariable("Bool"),
                 type_: ATOMIC_TYPE_BOOL.into()
             }.into()
         ],
         Some(TypeDefinitions::from([
-            (Id::from("int"), TYPE_INT),
-            (Id::from("bool"), TYPE_BOOL),
+            (Id::from("Int"), TYPE_INT),
+            (Id::from("Bool"), TYPE_BOOL),
         ]));
         "two type definitions"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition {
+                variable: TypeVariable("int"),
+                type_: ATOMIC_TYPE_INT.into()
+            }.into(),
+        ],
+        None;
+        "additional int definition"
+    )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition {
+                variable: TypeVariable("bool"),
+                items: vec![
+                    TypeItem { id: Id::from("two"), type_: None},
+                    TypeItem { id: Id::from("four"), type_: None},
+                ]
+            }.into()
+        ],
+        None;
+        "additional bool definition"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,

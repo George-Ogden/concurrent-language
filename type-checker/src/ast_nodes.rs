@@ -1,12 +1,19 @@
 use serde::{Deserialize, Serialize};
-use std::convert::From;
+use std::{convert::From, fmt};
+use strum_macros::EnumIter;
 
 pub type Id = String;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, EnumIter)]
 pub enum AtomicTypeEnum {
     INT,
     BOOL,
+}
+
+impl fmt::Display for AtomicTypeEnum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
