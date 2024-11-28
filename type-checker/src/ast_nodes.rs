@@ -3,6 +3,7 @@ use std::{convert::From, fmt};
 use strum_macros::EnumIter;
 
 pub type Id = String;
+use from_variants::FromVariants;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, EnumIter)]
 pub enum AtomicTypeEnum {
@@ -52,36 +53,12 @@ pub struct FunctionType {
     pub return_type: Box<TypeInstance>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 pub enum TypeInstance {
     FunctionType(FunctionType),
     AtomicType(AtomicType),
     TupleType(TupleType),
     GenericType(GenericType),
-}
-
-impl From<FunctionType> for TypeInstance {
-    fn from(value: FunctionType) -> Self {
-        TypeInstance::FunctionType(value)
-    }
-}
-
-impl From<AtomicType> for TypeInstance {
-    fn from(value: AtomicType) -> Self {
-        TypeInstance::AtomicType(value)
-    }
-}
-
-impl From<TupleType> for TypeInstance {
-    fn from(value: TupleType) -> Self {
-        TypeInstance::TupleType(value)
-    }
-}
-
-impl From<GenericType> for TypeInstance {
-    fn from(value: GenericType) -> Self {
-        TypeInstance::GenericType(value)
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -121,12 +98,12 @@ struct EmptyTypeDefinition {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct TransparentTypeDefinition {
-    variable: GenericTypeVariable,
-    type_: TypeInstance,
+pub struct TransparentTypeDefinition {
+    pub variable: GenericTypeVariable,
+    pub type_: TypeInstance,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 pub enum Definition {
     UnionTypeDefinition(UnionTypeDefinition),
     OpaqueTypeDefinition(OpaqueTypeDefinition),
@@ -163,18 +140,6 @@ impl Definition {
                 type_: _,
             }) => id,
         }
-    }
-}
-
-impl From<OpaqueTypeDefinition> for Definition {
-    fn from(value: OpaqueTypeDefinition) -> Self {
-        Definition::OpaqueTypeDefinition(value)
-    }
-}
-
-impl From<UnionTypeDefinition> for Definition {
-    fn from(value: UnionTypeDefinition) -> Self {
-        Definition::UnionTypeDefinition(value)
     }
 }
 
