@@ -19,7 +19,6 @@ enum Type {
     Reference(Rc<RefCell<Self>>),
     Tuple(Vec<Type>),
     Function(Box<Type>, Box<Type>),
-    Empty,
 }
 
 const TYPE_INT: Type = Type::Atomic(AtomicTypeEnum::INT);
@@ -33,7 +32,6 @@ impl fmt::Debug for Type {
             Type::Reference(reference) => {
                 write!(f, "Reference({:p})", Rc::as_ptr(reference),)
             }
-            Type::Empty => write!(f, "Empty"),
             Type::Tuple(types) => write!(f, "Tuple({:?})", types),
             Type::Function(argument_type, return_type) => {
                 write!(f, "Function({:?},{:?})", argument_type, return_type)
@@ -69,25 +67,27 @@ impl TypeDefinitions {
         t2: &Type,
     ) -> bool {
         match (t1, t2) {
-            (Type::Empty, Type::Empty) => true,
             (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
-            (Type::Union(v1), Type::Union(v2)) => v1
-                .iter()
-                .sorted_by_key(|(i1, _)| *i1)
-                .zip(v2.iter().sorted_by_key(|(i1, _)| *i1))
-                .all(|((i1, o1), (i2, o2))| {
-                    i1 == i2
-                        && match (&o1, &o2) {
-                            (None, None) => true,
-                            (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
-                                self_references_index,
-                                other_references_index,
-                                t1,
-                                t2,
-                            ),
-                            _ => false,
-                        }
-                }),
+            (Type::Union(v1), Type::Union(v2)) => {
+                v1.len() == v2.len()
+                    && v1
+                        .iter()
+                        .sorted_by_key(|(i1, _)| *i1)
+                        .zip(v2.iter().sorted_by_key(|(i1, _)| *i1))
+                        .all(|((i1, o1), (i2, o2))| {
+                            i1 == i2
+                                && match (&o1, &o2) {
+                                    (None, None) => true,
+                                    (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
+                                        self_references_index,
+                                        other_references_index,
+                                        t1,
+                                        t2,
+                                    ),
+                                    _ => false,
+                                }
+                        })
+            }
             (Type::Reference(t1), Type::Reference(t2)) => {
                 self_references_index.get(&t1.as_ptr()) == other_references_index.get(&t2.as_ptr())
             }
@@ -199,7 +199,6 @@ impl fmt::Debug for DebugTypeWrapper {
                         .unwrap_or(&Id::from("unknown"))
                 )
             }
-            Type::Empty => write!(f, "Empty"),
             Type::Tuple(types) => {
                 write!(
                     f,
@@ -300,7 +299,7 @@ impl TypeChecker {
             panic!("Type names were not unique but all counts were < 2");
         }
         let mut type_definitions: TypeDefinitions = type_names
-            .map(|name| (name.clone(), Type::Empty))
+            .map(|name| (name.clone(), Type::Tuple(Vec::new())))
             .collect::<TypeDefinitions>();
         for definition in definitions {
             let type_name = definition.get_name();
@@ -333,7 +332,9 @@ impl TypeChecker {
                     variable: _,
                     type_,
                 }) => TypeChecker::convert_ast_type(type_, &type_definitions),
-                Definition::EmptyTypeDefinition(EmptyTypeDefinition { id: _ }) => Type::Empty,
+                Definition::EmptyTypeDefinition(EmptyTypeDefinition { id }) => {
+                    Type::Union(HashMap::from([(id.clone(), None)]))
+                }
             };
             if let Some(type_reference) = type_definitions.get_mut(type_name) {
                 *type_reference.borrow_mut() = type_;
@@ -448,7 +449,7 @@ mod tests {
             (
                 Id::from("int_list"),
                 ({
-                    let reference = Rc::new(RefCell::new(Type::Empty));
+                    let reference = Rc::new(RefCell::new(Type::Tuple(Vec::new())));
                     let union_type = Type::Union(HashMap::from([
                         (
                             Id::from("Cons"),
@@ -567,7 +568,9 @@ mod tests {
             TypeDefinitions::from([
                 (
                     Id::from("None"),
-                    Type::Empty
+                    Type::Union(HashMap::from([
+                        (Id::from("None"), None)
+                    ]))
                 )
             ])
         );
@@ -631,7 +634,7 @@ mod tests {
         ],
         Some(
             TypeDefinitions::from({
-                let left = Rc::new(RefCell::new(Type::Empty));
+                let left = Rc::new(RefCell::new(Type::Tuple(Vec::new())));
                 let right = Rc::new(RefCell::new(
                     Type::Union(HashMap::from([
                         (
