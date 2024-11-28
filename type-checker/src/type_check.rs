@@ -12,7 +12,7 @@ use strum::IntoEnumIterator;
 
 struct TypeChecker {}
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum Type {
     Atomic(AtomicTypeEnum),
     Union(Vec<Variant>),
@@ -42,7 +42,7 @@ impl fmt::Debug for Type {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct Variant {
     id: Id,
     type_: Option<Type>,
@@ -163,60 +163,65 @@ impl fmt::Debug for TypeDefinitions {
             .entries(self.0.iter().map(|(key, value)| {
                 (
                     key,
-                    DebugTypeWrapper(value.clone(), references_index.clone()),
+                    DebugTypeWrapper(value.borrow().clone(), references_index.clone()),
                 )
             }))
             .finish()
     }
 }
 
-struct DebugTypeWrapper(Rc<RefCell<Type>>, Box<HashMap<*mut Type, Id>>);
-impl DebugTypeWrapper {
-    fn fmt_type(&self, type_: &Type) -> String {
+struct DebugTypeWrapper(Type, Box<HashMap<*mut Type, Id>>);
+impl fmt::Debug for DebugTypeWrapper {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let references_index = &self.1;
-        match type_ {
-            Type::Atomic(atomic_type_enum) => format!("Atomic({})", atomic_type_enum),
+        match self.0.clone() {
+            Type::Atomic(atomic_type_enum) => write!(f, "Atomic({:?})", atomic_type_enum),
             Type::Union(variants) => {
-                let mut formatted_types = variants.iter().map(|variant| {
-                    format!(
-                        "Variant{{id:{}{}}}",
-                        variant.id,
-                        if let Some(type_) = &variant.type_ {
-                            format!(",type:{}", self.fmt_type(type_))
-                        } else {
-                            String::new()
-                        }
-                    )
-                });
-                format!("Union({})", formatted_types.join(", "))
+                write!(
+                    f,
+                    "Union({:?})",
+                    variants
+                        .into_iter()
+                        .map(|variant| {
+                            (
+                                variant.id,
+                                variant
+                                    .type_
+                                    .map(|type_| DebugTypeWrapper(type_, references_index.clone())),
+                            )
+                        })
+                        .collect_vec()
+                )
             }
             Type::Reference(rc) => {
-                format!(
+                write!(
+                    f,
                     "Reference({})",
                     references_index
                         .get(&rc.as_ptr())
                         .unwrap_or(&Id::from("unknown"))
                 )
             }
-            Type::Empty => format!("Empty"),
+            Type::Empty => write!(f, "Empty"),
             Type::Tuple(types) => {
-                let mut formatted_types = types.iter().map(|t| format!("{}", self.fmt_type(t)));
-                format!("Tuple({})", formatted_types.join(", "))
+                write!(
+                    f,
+                    "Tuple({:?})",
+                    types
+                        .into_iter()
+                        .map(|type_| DebugTypeWrapper(type_, references_index.clone()))
+                        .collect_vec()
+                )
             }
             Type::Function(argument_type, return_type) => {
-                format!(
-                    "Function({},{})",
-                    self.fmt_type(&*argument_type),
-                    self.fmt_type(&*return_type)
+                write!(
+                    f,
+                    "Function({:?},{:?})",
+                    DebugTypeWrapper(*argument_type, references_index.clone()),
+                    DebugTypeWrapper(*return_type, references_index.clone()),
                 )
             }
         }
-    }
-}
-
-impl fmt::Debug for DebugTypeWrapper {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.fmt_type(&*self.0.borrow()))
     }
 }
 
