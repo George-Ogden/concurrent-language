@@ -3,7 +3,7 @@ use std::convert::From;
 
 pub type Id = String;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum AtomicTypeEnum {
     INT,
     BOOL,
@@ -22,12 +22,12 @@ pub const ATOMIC_TYPE_BOOL: AtomicType = AtomicType {
 };
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct GenericType {
-    id: Id,
-    type_variables: Vec<TypeInstance>,
+pub struct GenericType {
+    pub id: Id,
+    pub type_variables: Vec<TypeInstance>,
 }
 
-fn Typename(name: &str) -> GenericType {
+pub fn Typename(name: &str) -> GenericType {
     GenericType {
         id: Id::from(name),
         type_variables: Vec::new(),
@@ -125,6 +125,38 @@ pub enum Definition {
     OpaqueTypeDefinition(OpaqueTypeDefinition),
     TransparentTypeDefinition(TransparentTypeDefinition),
     EmptyTypeDefinition(EmptyTypeDefinition),
+}
+
+impl Definition {
+    pub fn get_name(&self) -> &Id {
+        match self {
+            Self::UnionTypeDefinition(UnionTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id,
+                        generic_variables: _,
+                    },
+                items: _,
+            })
+            | Self::EmptyTypeDefinition(EmptyTypeDefinition { id })
+            | Self::TransparentTypeDefinition(TransparentTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id,
+                        generic_variables: _,
+                    },
+                type_: _,
+            })
+            | Self::OpaqueTypeDefinition(OpaqueTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id,
+                        generic_variables: _,
+                    },
+                type_: _,
+            }) => id,
+        }
+    }
 }
 
 impl From<OpaqueTypeDefinition> for Definition {
