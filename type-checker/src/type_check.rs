@@ -160,10 +160,23 @@ impl DebugTypeWrapper {
         let references_index = &self.1; // Get the reference index (HashMap)
         match type_ {
             Type::Atomic(atomic_type_enum) => format!("Atomic({})", atomic_type_enum),
-            Type::Union(vec) => format!("Union({:?})", vec),
+            Type::Union(variants) => {
+                let mut formatted_types = variants.iter().map(|variant| {
+                    format!(
+                        "Variant{{id:{}{}}}",
+                        variant.id,
+                        if let Some(type_) = &variant.type_ {
+                            format!(",type:{}", self.fmt_type(type_))
+                        } else {
+                            String::new()
+                        }
+                    )
+                });
+                format!("Union({})", formatted_types.join(", "))
+            }
             Type::Reference(rc) => {
                 format!(
-                    "Reference({:?})",
+                    "Reference({})",
                     references_index
                         .get(&rc.as_ptr())
                         .unwrap_or(&Id::from("unknown"))
@@ -171,10 +184,7 @@ impl DebugTypeWrapper {
             }
             Type::Empty => format!("Empty"),
             Type::Tuple(types) => {
-                let formatted_types: Vec<String> = types
-                    .iter()
-                    .map(|t| format!("{}", self.fmt_type(t)))
-                    .collect();
+                let mut formatted_types = types.iter().map(|t| format!("{}", self.fmt_type(t)));
                 format!("Tuple({})", formatted_types.join(", "))
             }
         }
