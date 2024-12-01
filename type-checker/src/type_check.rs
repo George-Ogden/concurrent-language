@@ -41,7 +41,7 @@ impl ParametricType {
 enum Type {
     Atomic(AtomicTypeEnum),
     Union(HashMap<Id, Option<Type>>),
-    Reference(Rc<RefCell<ParametricType>>),
+    Instantiation(Rc<RefCell<ParametricType>>, Vec<Type>),
     Tuple(Vec<Type>),
     Function(Box<Type>, Box<Type>),
     Variable(u32),
@@ -61,8 +61,13 @@ impl fmt::Debug for Type {
         match self {
             Type::Atomic(atomic_type) => write!(f, "Atomic({:?})", atomic_type),
             Type::Union(variants) => write!(f, "Union({:?})", variants.iter().collect_vec()),
-            Type::Reference(reference) => {
-                write!(f, "Reference({:p})", Rc::as_ptr(reference),)
+            Type::Instantiation(reference, instances) => {
+                write!(
+                    f,
+                    "Instantiation({:p},{:?})",
+                    Rc::as_ptr(reference),
+                    instances
+                )
             }
             Type::Tuple(types) => write!(f, "Tuple({:?})", types),
             Type::Function(argument_type, return_type) => {
@@ -121,8 +126,17 @@ impl TypeDefinitions {
                                 }
                         })
             }
-            (Type::Reference(t1), Type::Reference(t2)) => {
+            (Type::Instantiation(t1, i1), Type::Instantiation(t2, i2)) => {
                 self_references_index.get(&t1.as_ptr()) == other_references_index.get(&t2.as_ptr())
+                    && i1.len() == i2.len()
+                    && i1.into_iter().zip(i2.into_iter()).all(|(t1, t2)| {
+                        TypeDefinitions::type_equality(
+                            self_references_index,
+                            other_references_index,
+                            t1,
+                            t2,
+                        )
+                    })
             }
             (Type::Tuple(t1), Type::Tuple(t2)) => {
                 t1.len() == t2.len()
@@ -244,13 +258,17 @@ impl fmt::Debug for DebugTypeWrapper {
                         .collect_vec()
                 )
             }
-            Type::Reference(rc) => {
+            Type::Instantiation(rc, instances) => {
                 write!(
                     f,
-                    "Reference({})",
+                    "Instantation({}, {:?})",
                     references_index
                         .get(&rc.as_ptr())
-                        .unwrap_or(&Id::from("unknown"))
+                        .unwrap_or(&Id::from("unknown")),
+                    instances
+                        .into_iter()
+                        .map(|type_| DebugTypeWrapper(type_, references_index.clone()))
+                        .collect_vec()
                 )
             }
             Type::Tuple(types) => {
@@ -318,7 +336,19 @@ impl TypeChecker {
                 {
                     Type::Variable(position as u32)
                 } else if let Some(reference) = type_definitions.get(id) {
-                    Type::Reference(reference.clone())
+                    Type::Instantiation(
+                        reference.clone(),
+                        type_variables
+                            .into_iter()
+                            .map(|type_instance| {
+                                TypeChecker::convert_ast_type(
+                                    type_instance,
+                                    type_definitions,
+                                    generic_variables,
+                                )
+                            })
+                            .collect::<Result<_, _>>()?,
+                    )
                 } else {
                     return Err(format!("{} is not a valid type or generic name", id));
                 }
@@ -590,7 +620,7 @@ mod tests {
                     let union_type = Type::Union(HashMap::from([
                         (
                             Id::from("Cons"),
-                            Some(Type::Reference(Rc::clone(&reference))),
+                            Some(Type::Instantiation(Rc::clone(&reference), Vec::new())),
                         ),
                         (
                             Id::from("Nil"),
@@ -746,7 +776,7 @@ mod tests {
                 let iiint = Rc::new(RefCell::new(
                     Type::Union(HashMap::from([(
                         Id::from("iiint"),
-                        Some(Type::Reference(iint.clone()))
+                        Some(Type::Instantiation(iint.clone(), Vec::new()))
                     )])).into()
                 ));
                 [(Id::from("iint"), iint), (Id::from("iiint"), iiint)]
@@ -798,7 +828,7 @@ mod tests {
                         (
                             Id::from("Left"),
                             Some(
-                                Type::Reference(left.clone())
+                                Type::Instantiation(left.clone(), Vec::new())
                             )
                         ),
                         (
@@ -812,7 +842,7 @@ mod tests {
                         Id::from("Right"),
                         Some(
                             Type::Tuple(vec![
-                                Type::Reference(right.clone()),
+                                Type::Instantiation(right.clone(), Vec::new()),
                                 TYPE_BOOL
                             ])
                         )
@@ -1072,6 +1102,41 @@ mod tests {
             )
         );
         "type parameter name override"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: TypeVariable("generic_int"),
+                type_: GenericType{
+                    id: Id::from("wrapper"),
+                    type_variables: vec![ATOMIC_TYPE_INT.into()]
+                }.into()
+            }.into(),
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("wrapper"),
+                    generic_variables: vec![String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into()
+        ],
+        Some(
+            TypeDefinitions::from({
+                let wrapper = Rc::new(RefCell::new(ParametricType{
+                    type_: Type::Union(HashMap::from([(
+                        Id::from("wrapper"),
+                        Some(Type::Variable(0))
+                    )])),
+                    num_parameters: 1
+                }));
+                let generic_int = Rc::new(RefCell::new(ParametricType{
+                    type_: Type::Instantiation(wrapper.clone(), vec![TYPE_INT]),
+                    num_parameters: 0
+                }));
+                [(Id::from("wrapper"), wrapper), (Id::from("generic_int"), generic_int)]
+            })
+        );
+        "generic type instantiation"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
