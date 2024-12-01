@@ -8,6 +8,7 @@ from ast_nodes import (
     FunctionType,
     GenericType,
     GenericTypeVariable,
+    GenericVariable,
     Integer,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
@@ -17,6 +18,7 @@ from ast_nodes import (
     Typename,
     TypeVariable,
     UnionTypeDefinition,
+    Variable,
 )
 
 
@@ -148,6 +150,15 @@ from ast_nodes import (
                     {"TupleExpression": {"expressions": []}},
                 ]
             },
+        ),
+        (Variable("foo"), {"name": "foo", "type_instances": []}),
+        (
+            GenericVariable("map", [AtomicType.INT]),
+            {"name": "map", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
+        ),
+        (
+            GenericVariable("foo", [Typename("T")]),
+            {"name": "foo", "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}]},
         ),
     ],
 )

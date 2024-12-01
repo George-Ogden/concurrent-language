@@ -187,11 +187,25 @@ struct TupleExpression {
     expressions: Vec<Expression>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct GenericVariable {
+    name: Id,
+    type_instances: Vec<TypeInstance>,
+}
+
+fn Variable(name: &str) -> GenericVariable {
+    GenericVariable {
+        name: Id::from(name),
+        type_instances: Vec::new(),
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 enum Expression {
     Integer(Integer),
     Boolean(Boolean),
     TupleExpression(TupleExpression),
+    GenericVariable(GenericVariable),
 }
 
 #[cfg(test)]
@@ -387,6 +401,27 @@ mod tests {
             ]
         };
         "nested tuple"
+    )]
+    #[test_case(
+        r#"{"name":"foo","type_instances":[]}"#,
+        Variable("foo");
+        "variable"
+    )]
+    #[test_case(
+        r#"{"name":"map","type_instances":[{"AtomicType":{"type_":"INT"}}]}"#,
+        GenericVariable{
+            name: Id::from("map"),
+            type_instances: vec![ATOMIC_TYPE_INT.into()]
+        };
+        "generic concrete instance"
+    )]
+    #[test_case(
+        r#"{"name":"foo","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}"#,
+        GenericVariable{
+            name: Id::from("foo"),
+            type_instances: vec![Typename("T").into()]
+        };
+        "generic variable instance"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
