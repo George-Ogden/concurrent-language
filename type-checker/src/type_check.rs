@@ -308,8 +308,8 @@ impl TypeChecker {
         type_instance: &TypeInstance,
         type_definitions: &TypeDefinitions,
         generic_variables: &Vec<Id>,
-    ) -> Type {
-        match type_instance {
+    ) -> Result<Type, String> {
+        Ok(match type_instance {
             TypeInstance::AtomicType(AtomicType {
                 type_: atomic_type_enum,
             }) => Type::Atomic(atomic_type_enum.clone()),
@@ -320,14 +320,14 @@ impl TypeChecker {
                 } else if let Some(reference) = type_definitions.get(id) {
                     Type::Reference(reference.clone())
                 } else {
-                    panic!("{} not found in type definitions", id)
+                    return Err(format!("{} is not a valid type or generic name", id));
                 }
             }
             TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
                 types
                     .iter()
                     .map(|t| TypeChecker::convert_ast_type(t, type_definitions, generic_variables))
-                    .collect_vec(),
+                    .collect::<Result<_, _>>()?,
             ),
             TypeInstance::FunctionType(FunctionType {
                 argument_type,
@@ -337,18 +337,18 @@ impl TypeChecker {
                     &argument_type,
                     type_definitions,
                     generic_variables,
-                )),
+                )?),
                 Box::new(TypeChecker::convert_ast_type(
                     &return_type,
                     type_definitions,
                     generic_variables,
-                )),
+                )?),
             ),
-        }
+        })
     }
     fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, String> {
         let type_names = definitions.iter().map(Definition::get_name);
-        let type_parameters = definitions.iter().map(Definition::get_num_parameters);
+        let all_type_parameters = definitions.iter().map(Definition::get_parameters);
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
             .collect_vec();
@@ -368,14 +368,35 @@ impl TypeChecker {
             }
             panic!("Type names were not unique but all counts were < 2");
         }
+        for type_parameters in all_type_parameters.clone() {
+            if !type_parameters
+                .iter()
+                .chain(predefined_type_names.iter())
+                .all_unique()
+            {
+                let type_parameter_counts = type_parameters.into_iter().collect::<Counter<_>>();
+                for (parameter, count) in type_parameter_counts {
+                    if predefined_type_names.contains(&parameter) {
+                        return Err(format!(
+                            "Attempt to override built-in type name {}",
+                            parameter
+                        ));
+                    }
+                    if count > 1 {
+                        return Err(format!("Duplicated parameter name {}", parameter));
+                    }
+                }
+                panic!("Type names were not unique but all counts were < 2");
+            }
+        }
         let mut type_definitions: TypeDefinitions = type_names
-            .zip(type_parameters)
-            .map(|(name, num_parameters)| {
+            .zip(all_type_parameters)
+            .map(|(name, parameters)| {
                 (
                     name.clone(),
                     ParametricType {
                         type_: Type::new(),
-                        num_parameters,
+                        num_parameters: parameters.len() as u32,
                     },
                 )
             })
@@ -396,7 +417,7 @@ impl TypeChecker {
                         type_,
                         &type_definitions,
                         generic_variables,
-                    )),
+                    )?),
                 )])),
                 Definition::UnionTypeDefinition(UnionTypeDefinition {
                     variable:
@@ -417,18 +438,19 @@ impl TypeChecker {
                         panic!("Variant names were not unique but all counts were < 2");
                     }
                     let variants = items.iter().map(|item| {
-                        (
-                            item.id.clone(),
-                            item.type_.as_ref().map(|type_instance| {
+                        item.type_
+                            .as_ref()
+                            .map(|type_instance| {
                                 TypeChecker::convert_ast_type(
                                     type_instance,
                                     &type_definitions,
                                     generic_variables,
                                 )
-                            }),
-                        )
+                            })
+                            .transpose()
+                            .map(|type_| (item.id.clone(), type_))
                     });
-                    Type::Union(variants.collect())
+                    Type::Union(variants.collect::<Result<_, _>>()?)
                 }
                 Definition::TransparentTypeDefinition(TransparentTypeDefinition {
                     variable:
@@ -437,7 +459,7 @@ impl TypeChecker {
                             generic_variables,
                         },
                     type_,
-                }) => TypeChecker::convert_ast_type(type_, &type_definitions, generic_variables),
+                }) => TypeChecker::convert_ast_type(type_, &type_definitions, generic_variables)?,
                 Definition::EmptyTypeDefinition(EmptyTypeDefinition { id }) => {
                     Type::Union(HashMap::from([(id.clone(), None)]))
                 }
@@ -931,6 +953,62 @@ mod tests {
             )
         );
         "union generic type test"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: TypeVariable("Zero"),
+                type_: Typename("Unknown").into(),
+            }.into()
+        ],
+        None;
+        "unknown type name"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("One"),
+                    generic_variables: vec![String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into(),
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("Zero"),
+                    generic_variables: vec![String::from("U")]
+                },
+                type_: Typename("T").into()
+            }.into()
+        ],
+        None;
+        "unknown type parameter"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("One"),
+                    generic_variables: vec![String::from("T"), String::from("U"), String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into(),
+        ],
+        None;
+        "duplicate type parameter"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("One"),
+                    generic_variables: vec![String::from("int")]
+                },
+                type_: Typename("T").into()
+            }.into(),
+        ],
+        None;
+        "invalid type parameter"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,

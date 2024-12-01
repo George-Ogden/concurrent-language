@@ -141,7 +141,7 @@ impl Definition {
             }) => id,
         }
     }
-    pub fn get_num_parameters(&self) -> u32 {
+    pub fn get_parameters(&self) -> Vec<String> {
         match self {
             Self::UnionTypeDefinition(UnionTypeDefinition {
                 variable:
@@ -166,8 +166,8 @@ impl Definition {
                         generic_variables,
                     },
                 type_: _,
-            }) => generic_variables.len() as u32,
-            Self::EmptyTypeDefinition(EmptyTypeDefinition { id: _ }) => 0,
+            }) => generic_variables.clone(),
+            Self::EmptyTypeDefinition(EmptyTypeDefinition { id: _ }) => Vec::new(),
         }
     }
 }
