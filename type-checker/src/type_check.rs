@@ -326,7 +326,7 @@ impl TypeChecker {
             TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
                 types
                     .iter()
-                    .map(|t| TypeChecker::convert_ast_type(t, type_definitions, &Vec::new()))
+                    .map(|t| TypeChecker::convert_ast_type(t, type_definitions, generic_variables))
                     .collect_vec(),
             ),
             TypeInstance::FunctionType(FunctionType {
@@ -336,12 +336,12 @@ impl TypeChecker {
                 Box::new(TypeChecker::convert_ast_type(
                     &argument_type,
                     type_definitions,
-                    &Vec::new(),
+                    generic_variables,
                 )),
                 Box::new(TypeChecker::convert_ast_type(
                     &return_type,
                     type_definitions,
-                    &Vec::new(),
+                    generic_variables,
                 )),
             ),
         }
@@ -398,7 +398,14 @@ impl TypeChecker {
                         generic_variables,
                     )),
                 )])),
-                Definition::UnionTypeDefinition(UnionTypeDefinition { variable: _, items }) => {
+                Definition::UnionTypeDefinition(UnionTypeDefinition {
+                    variable:
+                        GenericTypeVariable {
+                            id: _,
+                            generic_variables,
+                        },
+                    items,
+                }) => {
                     let variant_names = items.iter().map(|item| &item.id);
                     if !variant_names.clone().all_unique() {
                         let variant_name_counts = variant_names.collect::<Counter<_>>();
@@ -416,7 +423,7 @@ impl TypeChecker {
                                 TypeChecker::convert_ast_type(
                                     type_instance,
                                     &type_definitions,
-                                    &Vec::new(),
+                                    generic_variables,
                                 )
                             }),
                         )
@@ -848,8 +855,8 @@ mod tests {
                     ParametricType{
                         type_: Type::Union(HashMap::from([(
                             Id::from("wrapper"),
-                            Some(Type::Variable(0)))
-                        ])),
+                            Some(Type::Variable(0))
+                        )])),
                         num_parameters: 1
                     }
                 )]
@@ -879,6 +886,51 @@ mod tests {
             )
         );
         "transparent generic type test"
+    )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("Either"),
+                    generic_variables: vec![String::from("T"), String::from("U")]
+                },
+                items: vec![
+                    TypeItem {
+                        id: String::from("Left"),
+                        type_: Some(
+                            Typename("T").into()
+                        )
+                    },
+                    TypeItem {
+                        id: String::from("Right"),
+                        type_: Some(
+                            Typename("U").into()
+                        )
+                    }
+                ]
+            }.into()
+        ],
+        Some(
+            TypeDefinitions::from(
+                [(
+                    Id::from("Either"),
+                    ParametricType{
+                        type_: Type::Union(HashMap::from([
+                            (
+                                Id::from("Left"),
+                                Some(Type::Variable(0))
+                            ),
+                            (
+                                Id::from("Right"),
+                                Some(Type::Variable(1))
+                            ),
+                        ])),
+                        num_parameters: 2
+                    }
+                )]
+            )
+        );
+        "union generic type test"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
