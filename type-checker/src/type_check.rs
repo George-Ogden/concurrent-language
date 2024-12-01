@@ -336,6 +336,19 @@ impl TypeChecker {
                 {
                     Type::Variable(position as u32)
                 } else if let Some(reference) = type_definitions.get(id) {
+                    if type_variables.len() as u32 != reference.borrow().num_parameters {
+                        let type_name = type_definitions
+                            .references_index()
+                            .get(&reference.as_ptr())
+                            .cloned();
+                        return Err(format!(
+                            "{} accepts {} type parameters but called with {:?} ({})",
+                            type_name.unwrap_or(String::from("unknown")),
+                            reference.borrow().num_parameters,
+                            type_variables,
+                            type_variables.len()
+                        ));
+                    }
                     Type::Instantiation(
                         reference.clone(),
                         type_variables
@@ -1137,6 +1150,26 @@ mod tests {
             })
         );
         "generic type instantiation"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: TypeVariable("generic_int"),
+                type_: GenericType{
+                    id: Id::from("wrapper"),
+                    type_variables: vec![]
+                }.into()
+            }.into(),
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("wrapper"),
+                    generic_variables: vec![String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into()
+        ],
+        None;
+        "generic type instantiation wrong arguments"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
