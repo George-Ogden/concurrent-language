@@ -166,6 +166,12 @@ impl<const N: usize> From<[(Id, Rc<RefCell<ParametricType>>); N]> for TypeDefini
     }
 }
 
+impl FromIterator<(Id, ParametricType)> for TypeDefinitions {
+    fn from_iter<T: IntoIterator<Item = (Id, ParametricType)>>(iter: T) -> Self {
+        HashMap::from_iter(iter).into()
+    }
+}
+
 impl From<HashMap<Id, ParametricType>> for TypeDefinitions {
     fn from(value: HashMap<Id, ParametricType>) -> Self {
         value
@@ -281,12 +287,17 @@ impl PartialEq for TypeDefinitions {
             .keys()
             .map(|key| (self.0.get(key), other.0.get(key)))
             .all(|(v1, v2)| match (v1, v2) {
-                (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
-                    self_references_index,
-                    other_references_index,
-                    &*&t1.borrow().type_,
-                    &*&t2.borrow().type_,
-                ),
+                (Some(t1), Some(t2)) => {
+                    let p1 = &*&t1.borrow();
+                    let p2 = &*&t2.borrow();
+                    p1.num_parameters == p2.num_parameters
+                        && TypeDefinitions::type_equality(
+                            self_references_index,
+                            other_references_index,
+                            &p1.type_,
+                            &p2.type_,
+                        )
+                }
                 _ => false,
             })
     }
@@ -337,6 +348,7 @@ impl TypeChecker {
     }
     fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, String> {
         let type_names = definitions.iter().map(Definition::get_name);
+        let type_parameters = definitions.iter().map(Definition::get_num_parameters);
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
             .collect_vec();
@@ -357,8 +369,17 @@ impl TypeChecker {
             panic!("Type names were not unique but all counts were < 2");
         }
         let mut type_definitions: TypeDefinitions = type_names
-            .map(|name| (name.clone(), Type::Tuple(Vec::new())))
-            .collect::<TypeDefinitions>();
+            .zip(type_parameters)
+            .map(|(name, num_parameters)| {
+                (
+                    name.clone(),
+                    ParametricType {
+                        type_: Type::new(),
+                        num_parameters,
+                    },
+                )
+            })
+            .collect();
         for definition in definitions {
             let type_name = definition.get_name();
             let type_ = match &definition {
@@ -403,15 +424,19 @@ impl TypeChecker {
                     Type::Union(variants.collect())
                 }
                 Definition::TransparentTypeDefinition(TransparentTypeDefinition {
-                    variable: _,
+                    variable:
+                        GenericTypeVariable {
+                            id: _,
+                            generic_variables,
+                        },
                     type_,
-                }) => TypeChecker::convert_ast_type(type_, &type_definitions, &Vec::new()),
+                }) => TypeChecker::convert_ast_type(type_, &type_definitions, generic_variables),
                 Definition::EmptyTypeDefinition(EmptyTypeDefinition { id }) => {
                     Type::Union(HashMap::from([(id.clone(), None)]))
                 }
             };
             if let Some(type_reference) = type_definitions.get_mut(type_name) {
-                *type_reference.borrow_mut() = type_.into();
+                type_reference.borrow_mut().type_ = type_;
             } else {
                 panic!("{} not found in type definitions", type_name)
             }
@@ -820,11 +845,40 @@ mod tests {
             TypeDefinitions::from(
                 [(
                     Id::from("wrapper"),
-                    Type::Union(HashMap::from([(Id::from("wrapper"), Some(Type::Variable(0)))]))
+                    ParametricType{
+                        type_: Type::Union(HashMap::from([(
+                            Id::from("wrapper"),
+                            Some(Type::Variable(0)))
+                        ])),
+                        num_parameters: 1
+                    }
                 )]
             )
         );
-        "generic type test"
+        "opaque generic type test"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("transparent"),
+                    generic_variables: vec![String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into()
+        ],
+        Some(
+            TypeDefinitions::from(
+                [(
+                    Id::from("transparent"),
+                    ParametricType{
+                        type_: Type::Variable(0),
+                        num_parameters: 1
+                    }
+                )]
+            )
+        );
+        "transparent generic type test"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,

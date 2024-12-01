@@ -141,6 +141,35 @@ impl Definition {
             }) => id,
         }
     }
+    pub fn get_num_parameters(&self) -> u32 {
+        match self {
+            Self::UnionTypeDefinition(UnionTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id: _,
+                        generic_variables,
+                    },
+                items: _,
+            })
+            | Self::TransparentTypeDefinition(TransparentTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id: _,
+                        generic_variables,
+                    },
+                type_: _,
+            })
+            | Self::OpaqueTypeDefinition(OpaqueTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id: _,
+                        generic_variables,
+                    },
+                type_: _,
+            }) => generic_variables.len() as u32,
+            Self::EmptyTypeDefinition(EmptyTypeDefinition { id: _ }) => 0,
+        }
+    }
 }
 
 #[cfg(test)]
