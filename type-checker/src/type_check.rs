@@ -13,7 +13,7 @@ use strum::IntoEnumIterator;
 
 struct TypeChecker {}
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 struct ParametricType {
     type_: Type,
     num_parameters: u32,
@@ -1195,6 +1195,111 @@ mod tests {
         ],
         None;
         "generic type parameter instantiation"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("Pair"),
+                    generic_variables: vec![Id::from("T"), Id::from("U")]
+                },
+                type_: TupleType{
+                    types: vec![Typename("T").into(), Typename("U").into()]
+                }.into()
+            }.into(),
+        ],
+        Some(
+            TypeDefinitions::from([(
+                Id::from("Pair"),
+                ParametricType{
+                    num_parameters: 2,
+                    type_: Type::Tuple(
+                        vec![Type::Variable(0), Type::Variable(1)]
+                    )
+                },
+            )])
+        );
+        "pair type"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("Function"),
+                    generic_variables: vec![Id::from("T"), Id::from("U")]
+                },
+                type_: FunctionType{
+                    argument_type: Box::new(Typename("T").into()),
+                    return_type: Box::new(Typename("U").into())
+                }.into()
+            }.into(),
+        ],
+        Some(
+            TypeDefinitions::from([(
+                Id::from("Function"),
+                ParametricType{
+                    num_parameters: 2,
+                    type_: Type::Function(
+                        Box::new(Type::Variable(0)),
+                        Box::new(Type::Variable(1))
+                    )
+                },
+            )])
+        );
+        "function type"
+    )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("Tree"),
+                    generic_variables: vec![Id::from("T")]
+                },
+                items: vec![
+                    TypeItem {
+                        id: Id::from("Node"),
+                        type_: Some(TupleType {
+                            types: vec![
+                                Typename("T").into(),
+                                GenericType{
+                                    id: Id::from("Tree"),
+                                    type_variables: vec![Typename("T").into()]
+                                }.into(),
+                                Typename("T").into()
+                            ]
+                        }.into())
+                    },
+                    TypeItem {
+                        id: Id::from("Leaf"),
+                        type_: None
+                    }
+                ]
+            }.into(),
+        ],
+        Some(
+            TypeDefinitions::from([(
+                Id::from("Tree"),
+                {
+                    let tree_type = Rc::new(RefCell::new(ParametricType{num_parameters: 1, type_: Type::new()}));
+                    tree_type.borrow_mut().type_ = Type::Union(HashMap::from([
+                        (
+                            Id::from("Node"),
+                            Some(Type::Tuple(vec![
+                                Type::Variable(0),
+                                Type::Instantiation(
+                                    tree_type.clone(),
+                                    vec![Type::Variable(0)]
+                                ),
+                                Type::Variable(0),
+                            ]))
+                        ),
+                        (Id::from("Leaf"), None)
+                    ]));
+                    tree_type
+                }
+            )])
+        );
+        "tree type"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
