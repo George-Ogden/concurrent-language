@@ -177,9 +177,15 @@ struct Integer {
     value: i64,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct Boolean {
+    value: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 enum Expression {
     Integer(Integer),
+    Boolean(Boolean),
 }
 
 #[cfg(test)]
@@ -334,6 +340,13 @@ mod tests {
             value: -128
         };
         "negative integer"
+    )]
+    #[test_case(
+        r#"{"value":true}"#,
+        Boolean{
+            value: true
+        };
+        "boolean"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

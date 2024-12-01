@@ -3,6 +3,7 @@ from ast_nodes import (
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
+    Boolean,
     EmptyTypeDefinition,
     FunctionType,
     GenericType,
@@ -125,6 +126,7 @@ from ast_nodes import (
         ),
         (Integer(128), {"value": 128}),
         (Integer(-128), {"value": -128}),
+        (Boolean(True), {"value": True}),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:
