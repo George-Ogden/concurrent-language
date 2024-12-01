@@ -182,10 +182,16 @@ struct Boolean {
     value: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct TupleExpression {
+    expressions: Vec<Expression>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 enum Expression {
     Integer(Integer),
     Boolean(Boolean),
+    TupleExpression(TupleExpression),
 }
 
 #[cfg(test)]
@@ -347,6 +353,40 @@ mod tests {
             value: true
         };
         "boolean"
+    )]
+    #[test_case(
+        r#"{"expressions":[]}"#,
+        TupleExpression{
+            expressions: Vec::new()
+        };
+        "empty tuple"
+    )]
+    #[test_case(
+        r#"{"expressions":[{"Boolean":{"value":false}},{"Integer":{"value":5}}]}"#,
+        TupleExpression{
+            expressions: vec![
+                Boolean { value: false }.into(),
+                Integer { value: 5 }.into(),
+            ]
+        };
+        "flat tuple"
+    )]
+    #[test_case(
+        r#"{"expressions":[{"TupleExpression":{"expressions":[{"Boolean":{"value":false}},{"Integer":{"value":5}}]}},{"TupleExpression":{"expressions":[]}}]}"#,
+        TupleExpression{
+            expressions: vec![
+                TupleExpression{
+                    expressions: vec![
+                        Boolean { value: false }.into(),
+                        Integer { value: 5 }.into(),
+                    ]
+                }.into(),
+                TupleExpression{
+                    expressions: Vec::new()
+                }.into()
+            ]
+        };
+        "nested tuple"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

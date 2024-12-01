@@ -11,6 +11,7 @@ from ast_nodes import (
     Integer,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
+    TupleExpression,
     TupleType,
     TypeItem,
     Typename,
@@ -127,6 +128,27 @@ from ast_nodes import (
         (Integer(128), {"value": 128}),
         (Integer(-128), {"value": -128}),
         (Boolean(True), {"value": True}),
+        (TupleExpression([]), {"expressions": []}),
+        (
+            TupleExpression([Boolean(False), Integer(5)]),
+            {"expressions": [{"Boolean": {"value": False}}, {"Integer": {"value": 5}}]},
+        ),
+        (
+            TupleExpression([TupleExpression([Boolean(False), Integer(5)]), TupleExpression([])]),
+            {
+                "expressions": [
+                    {
+                        "TupleExpression": {
+                            "expressions": [
+                                {"Boolean": {"value": False}},
+                                {"Integer": {"value": 5}},
+                            ]
+                        }
+                    },
+                    {"TupleExpression": {"expressions": []}},
+                ]
+            },
+        ),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:
