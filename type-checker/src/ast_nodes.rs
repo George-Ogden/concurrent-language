@@ -172,6 +172,16 @@ impl Definition {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct Integer {
+    value: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
+enum Expression {
+    Integer(Integer),
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -310,6 +320,20 @@ mod tests {
             }.into()
         };
         "transparent type definition"
+    )]
+    #[test_case(
+        r#"{"value":128}"#,
+        Integer{
+            value: 128
+        };
+        "positive integer"
+    )]
+    #[test_case(
+        r#"{"value":-128}"#,
+        Integer{
+            value: -128
+        };
+        "negative integer"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

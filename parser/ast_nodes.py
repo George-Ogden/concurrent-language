@@ -4,6 +4,7 @@ import enum
 import inspect
 import typing
 from dataclasses import dataclass
+from types import NoneType
 from typing import Any, ClassVar, Optional, Type, TypeAlias, Union
 
 
@@ -38,9 +39,7 @@ class ASTNode:
             else:
                 type_ = None
             return [cls.convert_to_json(node, type_=type_) for node in value]
-        elif isinstance(value, Id):
-            return value
-        elif value is None:
+        elif isinstance(value, (Id, NoneType, int)):
             return value
 
 

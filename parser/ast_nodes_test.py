@@ -7,6 +7,7 @@ from ast_nodes import (
     FunctionType,
     GenericType,
     GenericTypeVariable,
+    Integer,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
     TupleType,
@@ -122,6 +123,8 @@ from ast_nodes import (
                 },
             },
         ),
+        (Integer(128), {"value": 128}),
+        (Integer(-128), {"value": -128}),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:
