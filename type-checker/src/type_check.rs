@@ -334,7 +334,14 @@ impl TypeChecker {
             TypeInstance::GenericType(GenericType { id, type_variables }) => {
                 if let Some(position) = generic_variables.iter().position(|variable| variable == id)
                 {
-                    Type::Variable(position as u32)
+                    if type_variables == &Vec::new() {
+                        Type::Variable(position as u32)
+                    } else {
+                        return Err(format!(
+                            "Attempt to instantiate type variable {} with {:?}",
+                            id, type_variables
+                        ));
+                    }
                 } else if let Some(reference) = type_definitions.get(id) {
                     if type_variables.len() as u32 != reference.borrow().num_parameters {
                         let type_name = type_definitions
@@ -524,6 +531,8 @@ impl TypeChecker {
 
 #[cfg(test)]
 mod tests {
+
+    use std::result;
 
     use crate::{
         GenericTypeVariable, TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
@@ -1171,6 +1180,22 @@ mod tests {
         None;
         "generic type instantiation wrong arguments"
     )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("apply"),
+                    generic_variables: vec![Id::from("T"), Id::from("U")]
+                },
+                type_: GenericType{
+                    id: Id::from("T"),
+                    type_variables: vec![Typename("U").into()]
+                }.into()
+            }.into(),
+        ],
+        None;
+        "generic type parameter instantiation"
+    )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
         expected_result: Option<TypeDefinitions>,
@@ -1181,6 +1206,9 @@ mod tests {
                 assert_eq!(type_check_result, Ok(type_definitions))
             }
             None => {
+                if type_check_result.is_ok() {
+                    println!("{:?}", type_check_result)
+                }
                 assert!(type_check_result.is_err())
             }
         }
