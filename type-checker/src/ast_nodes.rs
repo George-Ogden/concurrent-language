@@ -70,7 +70,7 @@ pub struct TypeItem {
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct GenericTypeVariable {
     pub id: Id,
-    generic_variables: Vec<Id>,
+    pub generic_variables: Vec<Id>,
 }
 
 pub fn TypeVariable(name: &str) -> GenericTypeVariable {

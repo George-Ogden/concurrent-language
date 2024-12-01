@@ -1,6 +1,7 @@
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, FunctionType, GenericType, Id,
-    OpaqueTypeDefinition, TransparentTypeDefinition, TupleType, TypeInstance, UnionTypeDefinition,
+    AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, FunctionType, GenericType,
+    GenericTypeVariable, Id, OpaqueTypeDefinition, TransparentTypeDefinition, TupleType,
+    TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -13,12 +14,43 @@ use strum::IntoEnumIterator;
 struct TypeChecker {}
 
 #[derive(PartialEq, Clone)]
+struct ParametricType {
+    type_: Type,
+    num_parameters: u32,
+}
+
+impl From<Type> for ParametricType {
+    fn from(value: Type) -> Self {
+        ParametricType {
+            type_: value,
+            num_parameters: 0,
+        }
+    }
+}
+
+impl ParametricType {
+    fn new() -> Self {
+        ParametricType {
+            type_: Type::new(),
+            num_parameters: 0,
+        }
+    }
+}
+
+#[derive(PartialEq, Clone)]
 enum Type {
     Atomic(AtomicTypeEnum),
     Union(HashMap<Id, Option<Type>>),
-    Reference(Rc<RefCell<Self>>),
+    Reference(Rc<RefCell<ParametricType>>),
     Tuple(Vec<Type>),
     Function(Box<Type>, Box<Type>),
+    Variable(u32),
+}
+
+impl Type {
+    fn new() -> Self {
+        Type::Tuple(Vec::new())
+    }
 }
 
 const TYPE_INT: Type = Type::Atomic(AtomicTypeEnum::INT);
@@ -36,22 +68,23 @@ impl fmt::Debug for Type {
             Type::Function(argument_type, return_type) => {
                 write!(f, "Function({:?},{:?})", argument_type, return_type)
             }
+            Type::Variable(idx) => write!(f, "Variable({:?})", idx),
         }
     }
 }
 
-type TypeReferencesIndex = HashMap<*mut Type, Id>;
+type TypeReferencesIndex = HashMap<*mut ParametricType, Id>;
 
-struct TypeDefinitions(HashMap<Id, Rc<RefCell<Type>>>);
+struct TypeDefinitions(HashMap<Id, Rc<RefCell<ParametricType>>>);
 
 impl TypeDefinitions {
     pub fn new() -> Self {
         TypeDefinitions(HashMap::new())
     }
-    pub fn get(&self, k: &Id) -> Option<&Rc<RefCell<Type>>> {
+    pub fn get(&self, k: &Id) -> Option<&Rc<RefCell<ParametricType>>> {
         self.0.get(k)
     }
-    pub fn get_mut(&mut self, k: &Id) -> Option<&mut Rc<RefCell<Type>>> {
+    pub fn get_mut(&mut self, k: &Id) -> Option<&mut Rc<RefCell<ParametricType>>> {
         self.0.get_mut(k)
     }
     fn references_index(&self) -> TypeReferencesIndex {
@@ -115,14 +148,47 @@ impl TypeDefinitions {
                     r2,
                 )
             }
+            (Type::Variable(i1), Type::Variable(i2)) => i1 == i2,
             _ => false,
         }
     }
 }
 
-impl From<HashMap<Id, Rc<RefCell<Type>>>> for TypeDefinitions {
-    fn from(value: HashMap<Id, Rc<RefCell<Type>>>) -> Self {
-        return TypeDefinitions(value);
+impl From<HashMap<Id, Rc<RefCell<ParametricType>>>> for TypeDefinitions {
+    fn from(value: HashMap<Id, Rc<RefCell<ParametricType>>>) -> Self {
+        TypeDefinitions(value)
+    }
+}
+
+impl<const N: usize> From<[(Id, Rc<RefCell<ParametricType>>); N]> for TypeDefinitions {
+    fn from(arr: [(Id, Rc<RefCell<ParametricType>>); N]) -> Self {
+        HashMap::from(arr).into()
+    }
+}
+
+impl From<HashMap<Id, ParametricType>> for TypeDefinitions {
+    fn from(value: HashMap<Id, ParametricType>) -> Self {
+        value
+            .into_iter()
+            .map(|(id, type_)| (id, Rc::from(RefCell::from(type_))))
+            .collect::<HashMap<_, _>>()
+            .into()
+    }
+}
+
+impl<const N: usize> From<[(Id, ParametricType); N]> for TypeDefinitions {
+    fn from(arr: [(Id, ParametricType); N]) -> Self {
+        HashMap::from(arr).into()
+    }
+}
+
+impl From<HashMap<Id, Type>> for TypeDefinitions {
+    fn from(value: HashMap<Id, Type>) -> Self {
+        value
+            .into_iter()
+            .map(|(id, type_)| (id, type_.into()))
+            .collect::<HashMap<_, ParametricType>>()
+            .into()
     }
 }
 
@@ -131,26 +197,9 @@ impl<const N: usize> From<[(Id, Type); N]> for TypeDefinitions {
         arr.into_iter().collect()
     }
 }
-
-impl<const N: usize> From<[(Id, Rc<RefCell<Type>>); N]> for TypeDefinitions {
-    fn from(arr: [(Id, Rc<RefCell<Type>>); N]) -> Self {
-        TypeDefinitions(HashMap::from(arr))
-    }
-}
-
 impl FromIterator<(Id, Type)> for TypeDefinitions {
     fn from_iter<T: IntoIterator<Item = (Id, Type)>>(iter: T) -> Self {
-        TypeDefinitions(
-            iter.into_iter()
-                .map(|(id, type_)| (id, Rc::new(RefCell::new(type_))))
-                .collect(),
-        )
-    }
-}
-
-impl FromIterator<(Id, Rc<RefCell<Type>>)> for TypeDefinitions {
-    fn from_iter<T: IntoIterator<Item = (Id, Rc<RefCell<Type>>)>>(iter: T) -> Self {
-        TypeDefinitions(HashMap::from_iter(iter))
+        HashMap::from_iter(iter).into()
     }
 }
 
@@ -161,19 +210,18 @@ impl fmt::Debug for TypeDefinitions {
             .entries(self.0.iter().map(|(key, value)| {
                 (
                     key,
-                    DebugTypeWrapper(value.borrow().clone(), references_index.clone()),
+                    DebugTypeWrapper(value.borrow().clone().type_, references_index.clone()),
                 )
             }))
             .finish()
     }
 }
 
-struct DebugTypeWrapper(Type, Box<HashMap<*mut Type, Id>>);
+struct DebugTypeWrapper(Type, Box<HashMap<*mut ParametricType, Id>>);
 impl fmt::Debug for DebugTypeWrapper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let references_index = &self.1;
         match self.0.clone() {
-            Type::Atomic(atomic_type_enum) => write!(f, "Atomic({:?})", atomic_type_enum),
             Type::Union(variants) => {
                 write!(
                     f,
@@ -217,6 +265,7 @@ impl fmt::Debug for DebugTypeWrapper {
                     DebugTypeWrapper(*return_type, references_index.clone()),
                 )
             }
+            type_ => write!(f, "{:?}", type_),
         }
     }
 }
@@ -235,8 +284,8 @@ impl PartialEq for TypeDefinitions {
                 (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
                     self_references_index,
                     other_references_index,
-                    &*t1.borrow(),
-                    &*t2.borrow(),
+                    &*&t1.borrow().type_,
+                    &*&t2.borrow().type_,
                 ),
                 _ => false,
             })
@@ -244,13 +293,20 @@ impl PartialEq for TypeDefinitions {
 }
 
 impl TypeChecker {
-    fn convert_ast_type(type_instance: &TypeInstance, type_definitions: &TypeDefinitions) -> Type {
+    fn convert_ast_type(
+        type_instance: &TypeInstance,
+        type_definitions: &TypeDefinitions,
+        generic_variables: &Vec<Id>,
+    ) -> Type {
         match type_instance {
             TypeInstance::AtomicType(AtomicType {
                 type_: atomic_type_enum,
             }) => Type::Atomic(atomic_type_enum.clone()),
             TypeInstance::GenericType(GenericType { id, type_variables }) => {
-                if let Some(reference) = type_definitions.get(id) {
+                if let Some(position) = generic_variables.iter().position(|variable| variable == id)
+                {
+                    Type::Variable(position as u32)
+                } else if let Some(reference) = type_definitions.get(id) {
                     Type::Reference(reference.clone())
                 } else {
                     panic!("{} not found in type definitions", id)
@@ -259,7 +315,7 @@ impl TypeChecker {
             TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
                 types
                     .iter()
-                    .map(|t| TypeChecker::convert_ast_type(t, type_definitions))
+                    .map(|t| TypeChecker::convert_ast_type(t, type_definitions, &Vec::new()))
                     .collect_vec(),
             ),
             TypeInstance::FunctionType(FunctionType {
@@ -269,10 +325,12 @@ impl TypeChecker {
                 Box::new(TypeChecker::convert_ast_type(
                     &argument_type,
                     type_definitions,
+                    &Vec::new(),
                 )),
                 Box::new(TypeChecker::convert_ast_type(
                     &return_type,
                     type_definitions,
+                    &Vec::new(),
                 )),
             ),
         }
@@ -304,12 +362,21 @@ impl TypeChecker {
         for definition in definitions {
             let type_name = definition.get_name();
             let type_ = match &definition {
-                Definition::OpaqueTypeDefinition(OpaqueTypeDefinition { variable, type_ }) => {
-                    Type::Union(HashMap::from([(
-                        variable.id.clone(),
-                        Some(TypeChecker::convert_ast_type(type_, &type_definitions)),
-                    )]))
-                }
+                Definition::OpaqueTypeDefinition(OpaqueTypeDefinition {
+                    variable:
+                        GenericTypeVariable {
+                            id,
+                            generic_variables,
+                        },
+                    type_,
+                }) => Type::Union(HashMap::from([(
+                    id.clone(),
+                    Some(TypeChecker::convert_ast_type(
+                        type_,
+                        &type_definitions,
+                        generic_variables,
+                    )),
+                )])),
                 Definition::UnionTypeDefinition(UnionTypeDefinition { variable: _, items }) => {
                     let variant_names = items.iter().map(|item| &item.id);
                     if !variant_names.clone().all_unique() {
@@ -325,7 +392,11 @@ impl TypeChecker {
                         (
                             item.id.clone(),
                             item.type_.as_ref().map(|type_instance| {
-                                TypeChecker::convert_ast_type(type_instance, &type_definitions)
+                                TypeChecker::convert_ast_type(
+                                    type_instance,
+                                    &type_definitions,
+                                    &Vec::new(),
+                                )
                             }),
                         )
                     });
@@ -334,13 +405,13 @@ impl TypeChecker {
                 Definition::TransparentTypeDefinition(TransparentTypeDefinition {
                     variable: _,
                     type_,
-                }) => TypeChecker::convert_ast_type(type_, &type_definitions),
+                }) => TypeChecker::convert_ast_type(type_, &type_definitions, &Vec::new()),
                 Definition::EmptyTypeDefinition(EmptyTypeDefinition { id }) => {
                     Type::Union(HashMap::from([(id.clone(), None)]))
                 }
             };
             if let Some(type_reference) = type_definitions.get_mut(type_name) {
-                *type_reference.borrow_mut() = type_;
+                *type_reference.borrow_mut() = type_.into();
             } else {
                 panic!("{} not found in type definitions", type_name)
             }
@@ -352,7 +423,9 @@ impl TypeChecker {
 #[cfg(test)]
 mod tests {
 
-    use crate::{TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT};
+    use crate::{
+        GenericTypeVariable, TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+    };
 
     use super::*;
 
@@ -454,7 +527,7 @@ mod tests {
             (
                 Id::from("int_list"),
                 ({
-                    let reference = Rc::new(RefCell::new(Type::Tuple(Vec::new())));
+                    let reference = Rc::new(RefCell::new(ParametricType::new()));
                     let union_type = Type::Union(HashMap::from([
                         (
                             Id::from("Cons"),
@@ -465,7 +538,7 @@ mod tests {
                             None,
                         ),
                     ]));
-                    *reference.borrow_mut() = union_type;
+                    *reference.borrow_mut() = union_type.into();
                     reference
                 })
             )
@@ -609,13 +682,13 @@ mod tests {
         Some(
             TypeDefinitions::from({
                 let iint = Rc::new(RefCell::new(
-                    Type::Union(HashMap::from([(Id::from("iint"), Some(TYPE_INT))]))
+                    Type::Union(HashMap::from([(Id::from("iint"), Some(TYPE_INT))])).into()
                 ));
                 let iiint = Rc::new(RefCell::new(
                     Type::Union(HashMap::from([(
                         Id::from("iiint"),
                         Some(Type::Reference(iint.clone()))
-                    )]))
+                    )])).into()
                 ));
                 [(Id::from("iint"), iint), (Id::from("iiint"), iiint)]
             })
@@ -660,7 +733,7 @@ mod tests {
         ],
         Some(
             TypeDefinitions::from({
-                let left = Rc::new(RefCell::new(Type::Tuple(Vec::new())));
+                let left = Rc::new(RefCell::new(ParametricType::new()));
                 let right = Rc::new(RefCell::new(
                     Type::Union(HashMap::from([
                         (
@@ -673,7 +746,7 @@ mod tests {
                             Id::from("Correct"),
                             None
                         )
-                    ]))
+                    ])).into()
                 ));
                 *left.borrow_mut() = Type::Union(HashMap::from([
                     (
@@ -689,7 +762,7 @@ mod tests {
                         Id::from("Incorrect"),
                         None
                     )
-                ]));
+                ])).into();
                 [(Id::from("left"), left), (Id::from("right"), right)]
             })
         );
@@ -732,6 +805,26 @@ mod tests {
         ],
         None;
         "duplicate names in union type"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("wrapper"),
+                    generic_variables: vec![String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into()
+        ],
+        Some(
+            TypeDefinitions::from(
+                [(
+                    Id::from("wrapper"),
+                    Type::Union(HashMap::from([(Id::from("wrapper"), Some(Type::Variable(0)))]))
+                )]
+            )
+        );
+        "generic type test"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
