@@ -368,6 +368,11 @@ impl TypeChecker {
             }
             panic!("Type names were not unique but all counts were < 2");
         }
+        for (type_name, type_parameters) in type_names.clone().zip(all_type_parameters.clone()) {
+            if type_parameters.contains(type_name) {
+                return Err(format!("Type {} contains itself as a parameter", type_name));
+            }
+        }
         for type_parameters in all_type_parameters.clone() {
             if !type_parameters
                 .iter()
@@ -1009,6 +1014,64 @@ mod tests {
         ],
         None;
         "invalid type parameter"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("One"),
+                    generic_variables: vec![String::from("One")]
+                },
+                type_: Typename("One").into()
+            }.into(),
+        ],
+        None;
+        "type parameter same as name"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("U"),
+                    generic_variables: vec![String::from("T")]
+                },
+                type_: Typename("T").into()
+            }.into(),
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("V"),
+                    generic_variables: vec![String::from("U")]
+                },
+                type_: Typename("U").into()
+            }.into()
+        ],
+        Some(
+            TypeDefinitions::from(
+                [
+                    (
+                        Id::from("U"),
+                        ParametricType{
+                            type_: Type::Union(HashMap::from([(
+                                Id::from("U"),
+                                Some(Type::Variable(0))
+                            )])),
+                            num_parameters: 1
+                        }
+                    ),
+                    (
+                        Id::from("V"),
+                        ParametricType{
+                            type_: Type::Union(HashMap::from([(
+                                Id::from("V"),
+                                Some(Type::Variable(0))
+                            )])),
+                            num_parameters: 1
+                        }
+                    ),
+                ]
+            )
+        );
+        "type parameter name override"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
