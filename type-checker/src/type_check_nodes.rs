@@ -76,11 +76,18 @@ pub struct TypedTuple {
     pub expressions: Vec<TypedExpression>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedVariable {
+    pub id: Id,
+    pub type_: Type,
+}
+
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
     Boolean(Boolean),
     TypedTuple(TypedTuple),
+    TypedVariable(TypedVariable),
 }
 
 impl TypedExpression {
@@ -91,6 +98,7 @@ impl TypedExpression {
             Self::TypedTuple(TypedTuple { expressions }) => {
                 Type::Tuple(expressions.iter().map(TypedExpression::type_).collect_vec())
             }
+            Self::TypedVariable(TypedVariable { id: _, type_ }) => type_.clone(),
             _ => todo!(),
         }
     }

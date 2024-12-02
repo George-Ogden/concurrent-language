@@ -1,8 +1,8 @@
-use crate::type_check_nodes::{ParametricType, Type, TypedExpression, TypedTuple};
+use crate::type_check_nodes::{ParametricType, Type, TypedExpression, TypedTuple, TypedVariable};
 use crate::{
     AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, Expression, FunctionType,
-    GenericType, GenericTypeVariable, Id, OpaqueTypeDefinition, TransparentTypeDefinition,
-    TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
+    GenericType, GenericTypeVariable, GenericVariable, Id, OpaqueTypeDefinition,
+    TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -465,17 +465,34 @@ impl TypeChecker {
         }
         return Ok(type_definitions);
     }
-    fn check_expression(expression: &Expression) -> Result<TypedExpression, String> {
+    fn check_expression(
+        expression: &Expression,
+        context: &TypeContext,
+    ) -> Result<TypedExpression, String> {
         Ok(match expression {
             Expression::Integer(i) => i.clone().into(),
             Expression::Boolean(b) => b.clone().into(),
             Expression::TupleExpression(TupleExpression { expressions }) => TypedTuple {
                 expressions: expressions
                     .iter()
-                    .map(TypeChecker::check_expression)
+                    .map(|expression| TypeChecker::check_expression(expression, context))
                     .collect::<Result<_, _>>()?,
             }
             .into(),
+            Expression::GenericVariable(GenericVariable {
+                name,
+                type_instances: _,
+            }) => {
+                let variable_type = context.get(name);
+                match variable_type {
+                    Some(type_) => TypedVariable {
+                        id: name.clone(),
+                        type_: type_.type_.clone(),
+                    }
+                    .into(),
+                    None => return Err(format!("{} not found in scope", name)),
+                }
+            }
             _ => todo!(),
         })
     }
@@ -487,7 +504,7 @@ mod tests {
     use crate::{
         type_check_nodes::{TYPE_BOOL, TYPE_INT},
         Boolean, GenericTypeVariable, Integer, TupleExpression, TypeItem, TypeVariable, Typename,
-        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        Variable, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -1274,13 +1291,13 @@ mod tests {
     #[test_case(
         Integer{value: -5}.into(),
         Some(TYPE_INT),
-        ();
+        TypeContext::new();
         "type check integer"
     )]
     #[test_case(
         Boolean{value: true}.into(),
         Some(TYPE_BOOL),
-        ();
+        TypeContext::new();
         "type check boolean"
     )]
     #[test_case(
@@ -1288,7 +1305,7 @@ mod tests {
             expressions: Vec::new()
         }.into(),
         Some(Type::Tuple(Vec::new())),
-        ();
+        TypeContext::new();
         "type check empty tuple"
     )]
     #[test_case(
@@ -1306,7 +1323,7 @@ mod tests {
             TYPE_BOOL.into(),
             TYPE_INT.into(),
         ])),
-        ();
+        TypeContext::new();
         "type check flat tuple"
     )]
     #[test_case(
@@ -1334,11 +1351,62 @@ mod tests {
                 TYPE_INT.into(),
             ])
         ])),
-        ();
+        TypeContext::new();
         "type check nested tuple"
     )]
-    fn test_check_expressions(expression: Expression, expected_type: Option<Type>, context: ()) {
-        let type_check_result = TypeChecker::check_expression(&expression);
+    #[test_case(
+        Variable("a").into(),
+        Some(TYPE_INT),
+        TypeContext::from([
+            (
+                Id::from("a"),
+                Type::from(TYPE_INT).into()
+            )
+        ]);
+        "type check variable"
+    )]
+    #[test_case(
+        Variable("b").into(),
+        None,
+        TypeContext::from([
+            (
+                Id::from("a"),
+                Type::from(TYPE_INT).into()
+            )
+        ]);
+        "type check missing variable"
+    )]
+    #[test_case(
+        TupleExpression{
+            expressions: vec![
+                Variable("b").into(),
+                Variable("a").into(),
+                Variable("a").into(),
+            ]
+        }.into(),
+        Some(Type::Tuple(vec![
+            TYPE_BOOL.into(),
+            TYPE_INT.into(),
+            TYPE_INT.into(),
+        ])),
+        TypeContext::from([
+            (
+                Id::from("a"),
+                Type::from(TYPE_INT).into()
+            ),
+            (
+                Id::from("b"),
+                Type::from(TYPE_BOOL).into()
+            )
+        ]);
+        "type check multiple variables"
+    )]
+    fn test_check_expressions(
+        expression: Expression,
+        expected_type: Option<Type>,
+        context: TypeContext,
+    ) {
+        let type_check_result = TypeChecker::check_expression(&expression, &context);
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {

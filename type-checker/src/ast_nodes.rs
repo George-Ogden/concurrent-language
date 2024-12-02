@@ -17,7 +17,7 @@ impl fmt::Display for AtomicTypeEnum {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct AtomicType {
     pub type_: AtomicTypeEnum,
 }
@@ -29,7 +29,7 @@ pub const ATOMIC_TYPE_BOOL: AtomicType = AtomicType {
     type_: AtomicTypeEnum::BOOL,
 };
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct GenericType {
     pub id: Id,
     pub type_variables: Vec<TypeInstance>,
@@ -42,18 +42,18 @@ pub fn Typename(name: &str) -> GenericType {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct TupleType {
     pub types: Vec<TypeInstance>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct FunctionType {
     pub argument_type: Box<TypeInstance>,
     pub return_type: Box<TypeInstance>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants, Clone)]
 pub enum TypeInstance {
     FunctionType(FunctionType),
     AtomicType(AtomicType),
@@ -187,13 +187,13 @@ pub struct TupleExpression {
     pub expressions: Vec<Expression>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct GenericVariable {
-    name: Id,
-    type_instances: Vec<TypeInstance>,
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct GenericVariable {
+    pub name: Id,
+    pub type_instances: Vec<TypeInstance>,
 }
 
-fn Variable(name: &str) -> GenericVariable {
+pub fn Variable(name: &str) -> GenericVariable {
     GenericVariable {
         name: Id::from(name),
         type_instances: Vec::new(),
