@@ -1,6 +1,7 @@
 import pytest
 from ast_nodes import (
     Assignee,
+    Assignment,
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
@@ -183,6 +184,25 @@ from ast_nodes import (
         ),
         (Assignee("a", []), {"id": "a", "generic_variables": []}),
         (Assignee("f", ["T", "U"]), {"id": "f", "generic_variables": ["T", "U"]}),
+        (
+            Assignment(Assignee("a", []), Variable("b")),
+            {
+                "assignee": {"id": "a", "generic_variables": []},
+                "expression": {"GenericVariable": {"name": "b", "type_instances": []}},
+            },
+        ),
+        (
+            Assignment(Assignee("a", ["T"]), GenericVariable("b", [Typename("T")])),
+            {
+                "assignee": {"id": "a", "generic_variables": ["T"]},
+                "expression": {
+                    "GenericVariable": {
+                        "name": "b",
+                        "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}],
+                    }
+                },
+            },
+        ),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:

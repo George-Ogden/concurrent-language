@@ -221,6 +221,12 @@ struct Assignee {
     generic_variables: Vec<Id>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct Assignment {
+    assignee: Box<Assignee>,
+    expression: Box<Expression>,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -481,6 +487,35 @@ mod tests {
             ]
         };
         "generic assignee"
+    )]
+    #[test_case(
+        r#"{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"name":"b","type_instances":[]}}}"#,
+        Assignment {
+            assignee: Box::new(Assignee {
+                id: Id::from("a"),
+                generic_variables: Vec::new()
+            }),
+            expression: Box::new(Variable("b").into())
+        };
+        "variable assignment"
+    )]
+    #[test_case(
+        r#"{"assignee":{"id":"a","generic_variables":["T"]},"expression":{"GenericVariable":{"name":"b","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}}}"#,
+        Assignment {
+            assignee: Box::new(Assignee {
+                id: Id::from("a"),
+                generic_variables: vec![
+                    Id::from("T")
+                ]
+            }),
+            expression: Box::new(GenericVariable{
+                name: Id::from("b"),
+                type_instances: vec![
+                    Typename("T").into()
+                ]
+            }.into())
+        };
+        "generic variable assignment"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
