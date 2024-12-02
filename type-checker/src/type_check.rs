@@ -338,7 +338,7 @@ impl TypeChecker {
         })
     }
     fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, String> {
-        let type_names = definitions.iter().map(Definition::get_name);
+        let type_names = definitions.iter().map(Definition::get_id);
         let all_type_parameters = definitions.iter().map(Definition::get_parameters);
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
@@ -349,12 +349,12 @@ impl TypeChecker {
             .all_unique()
         {
             let type_name_counts = type_names.collect::<Counter<_>>();
-            for (name, count) in type_name_counts {
-                if predefined_type_names.contains(name) {
-                    return Err(format!("Attempt to override built-in type name {}", name));
+            for (nam, count) in type_name_counts {
+                if predefined_type_names.contains(nam) {
+                    return Err(format!("Attempt to override built-in type name {}", nam));
                 }
                 if count > 1 {
-                    return Err(format!("Duplicated type name {}", name));
+                    return Err(format!("Duplicated type name {}", nam));
                 }
             }
             panic!("Type names were not unique but all counts were < 2");
@@ -387,9 +387,9 @@ impl TypeChecker {
         }
         let mut type_definitions: TypeDefinitions = type_names
             .zip(all_type_parameters)
-            .map(|(name, parameters)| {
+            .map(|(id, parameters)| {
                 (
-                    name.clone(),
+                    id.clone(),
                     ParametricType {
                         type_: Type::new(),
                         num_parameters: parameters.len() as u32,
@@ -398,7 +398,7 @@ impl TypeChecker {
             })
             .collect();
         for definition in definitions {
-            let type_name = definition.get_name();
+            let type_name = definition.get_id();
             let type_ = match &definition {
                 Definition::OpaqueTypeDefinition(OpaqueTypeDefinition {
                     variable:
@@ -482,15 +482,12 @@ impl TypeChecker {
                     .collect::<Result<_, _>>()?,
             }
             .into(),
-            Expression::GenericVariable(GenericVariable {
-                name,
-                type_instances,
-            }) => {
-                let variable_type = context.get(name);
+            Expression::GenericVariable(GenericVariable { id, type_instances }) => {
+                let variable_type = context.get(id);
                 match variable_type {
                     Some(type_) => {
                         if type_instances.len() != type_.borrow().num_parameters as usize {
-                            return Err(format!("wrong number parameters to instantiate type {} (expected {} got {})", name, type_.borrow().num_parameters, type_instances.len()))
+                            return Err(format!("wrong number parameters to instantiate type {} (expected {} got {})", id, type_.borrow().num_parameters, type_instances.len()))
                         }
                         let type_ = if type_instances.len() == 0 {
                             type_.borrow().type_.clone()
@@ -502,11 +499,11 @@ impl TypeChecker {
                                 .collect::<Result<_,_>>()?)
                         };
                         TypedVariable {
-                            id: name.clone(),
+                            id: id.clone(),
                             type_
                         }
                     }.into(),
-                    None => return Err(format!("{} not found in scope", name)),
+                    None => return Err(format!("{} not found in scope", id)),
                 }
             }
             Expression::ElementAccess(ElementAccess { expression, index }) => {
@@ -1465,7 +1462,7 @@ mod tests {
     )]
     #[test_case(
         GenericVariable {
-            name: Id::from("f"),
+            id: Id::from("f"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         }.into(),
         Some(Type::Instantiation(ALPHA_TYPE.clone(), vec![TYPE_INT.into()])),

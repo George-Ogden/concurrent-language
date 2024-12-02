@@ -151,7 +151,7 @@ class ElementAccess(ASTNode):
 
 @dataclass
 class GenericVariable(ASTNode):
-    name: Id
+    id: Id
     type_instances: list[TypeInstance]
 
 
@@ -194,7 +194,7 @@ class FunctionDefinition(ASTNode):
 
 @dataclass
 class GenericConstructor(ASTNode):
-    name: Id
+    id: Id
     type_instances: list[TypeInstance]
 
 
@@ -257,17 +257,17 @@ class Program(ASTNode):
     definitions: list[Definition]
 
 
-def Variable(name: Id) -> GenericVariable:
-    return GenericVariable(name, [])
+def Variable(id: Id) -> GenericVariable:
+    return GenericVariable(id, [])
 
 
-def Typename(name: Id) -> GenericType:
-    return GenericType(name, [])
+def Typename(id: Id) -> GenericType:
+    return GenericType(id, [])
 
 
-def TypeVariable(name: Id) -> GenericTypeVariable:
-    return GenericTypeVariable(name, [])
+def TypeVariable(id: Id) -> GenericTypeVariable:
+    return GenericTypeVariable(id, [])
 
 
-def Constructor(name: Id) -> GenericConstructor:
-    return GenericConstructor(name, [])
+def Constructor(id: Id) -> GenericConstructor:
+    return GenericConstructor(id, [])

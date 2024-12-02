@@ -35,9 +35,9 @@ pub struct GenericType {
     pub type_variables: Vec<TypeInstance>,
 }
 
-pub fn Typename(name: &str) -> GenericType {
+pub fn Typename(id: &str) -> GenericType {
     GenericType {
-        id: Id::from(name),
+        id: Id::from(id),
         type_variables: Vec::new(),
     }
 }
@@ -73,9 +73,9 @@ pub struct GenericTypeVariable {
     pub generic_variables: Vec<Id>,
 }
 
-pub fn TypeVariable(name: &str) -> GenericTypeVariable {
+pub fn TypeVariable(id: &str) -> GenericTypeVariable {
     return GenericTypeVariable {
-        id: String::from(name),
+        id: String::from(id),
         generic_variables: Vec::new(),
     };
 }
@@ -112,7 +112,7 @@ pub enum Definition {
 }
 
 impl Definition {
-    pub fn get_name(&self) -> &Id {
+    pub fn get_id(&self) -> &Id {
         match self {
             Self::UnionTypeDefinition(UnionTypeDefinition {
                 variable:
@@ -189,13 +189,13 @@ pub struct TupleExpression {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct GenericVariable {
-    pub name: Id,
+    pub id: Id,
     pub type_instances: Vec<TypeInstance>,
 }
 
-pub fn Variable(name: &str) -> GenericVariable {
+pub fn Variable(id: &str) -> GenericVariable {
     GenericVariable {
-        name: Id::from(name),
+        id: Id::from(id),
         type_instances: Vec::new(),
     }
 }
@@ -455,22 +455,22 @@ mod tests {
         "nested tuple"
     )]
     #[test_case(
-        r#"{"name":"foo","type_instances":[]}"#,
+        r#"{"id":"foo","type_instances":[]}"#,
         Variable("foo");
         "variable"
     )]
     #[test_case(
-        r#"{"name":"map","type_instances":[{"AtomicType":{"type_":"INT"}}]}"#,
+        r#"{"id":"map","type_instances":[{"AtomicType":{"type_":"INT"}}]}"#,
         GenericVariable{
-            name: Id::from("map"),
+            id: Id::from("map"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         };
         "generic concrete instance"
     )]
     #[test_case(
-        r#"{"name":"foo","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}"#,
+        r#"{"id":"foo","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}"#,
         GenericVariable{
-            name: Id::from("foo"),
+            id: Id::from("foo"),
             type_instances: vec![Typename("T").into()]
         };
         "generic variable instance"
@@ -488,7 +488,7 @@ mod tests {
         "single element access"
     )]
     #[test_case(
-        r#"{"expression":{"ElementAccess":{"expression":{"GenericVariable":{"name":"foo","type_instances":[]}},"index":13}},"index":1}"#,
+        r#"{"expression":{"ElementAccess":{"expression":{"GenericVariable":{"id":"foo","type_instances":[]}},"index":13}},"index":1}"#,
         ElementAccess{
             expression: Box::new(
                 ElementAccess{
@@ -522,7 +522,7 @@ mod tests {
         "generic assignee"
     )]
     #[test_case(
-        r#"{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"name":"b","type_instances":[]}}}"#,
+        r#"{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"id":"b","type_instances":[]}}}"#,
         Assignment {
             assignee: Box::new(Assignee {
                 id: Id::from("a"),
@@ -533,7 +533,7 @@ mod tests {
         "variable assignment"
     )]
     #[test_case(
-        r#"{"assignee":{"id":"a","generic_variables":["T"]},"expression":{"GenericVariable":{"name":"b","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}}}"#,
+        r#"{"assignee":{"id":"a","generic_variables":["T"]},"expression":{"GenericVariable":{"id":"b","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}}}"#,
         Assignment {
             assignee: Box::new(Assignee {
                 id: Id::from("a"),
@@ -542,7 +542,7 @@ mod tests {
                 ]
             }),
             expression: Box::new(GenericVariable{
-                name: Id::from("b"),
+                id: Id::from("b"),
                 type_instances: vec![
                     Typename("T").into()
                 ]
@@ -561,7 +561,7 @@ mod tests {
         "assignment-free block"
     )]
     #[test_case(
-        r#"{"assignments":[{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"name":"x","type_instances":[]}}},{"assignee":{"id":"b","generic_variables":[]},"expression":{"Integer":{"value":3}}}],"expression":{"Integer":{"value":4}}}"#,
+        r#"{"assignments":[{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"id":"x","type_instances":[]}}},{"assignee":{"id":"b","generic_variables":[]},"expression":{"Integer":{"value":3}}}],"expression":{"Integer":{"value":4}}}"#,
         Block {
             assignments: vec![
                 Assignment {
@@ -704,7 +704,7 @@ mod tests {
         "match block"
     )]
     #[test_case(
-        r#"{"subject":{"GenericVariable":{"name":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}]}"#,
+        r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}]}"#,
         MatchExpression {
             subject: Box::new(Variable("maybe").into()),
             blocks: vec![
@@ -744,7 +744,7 @@ mod tests {
         "flat match expression"
     )]
     #[test_case(
-        r#"{"subject":{"GenericVariable":{"name":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"MatchExpression":{"subject":{"GenericVariable":{"name":"x","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Positive","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":1}}}},{"matches":[{"type_name":"Negative","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}]}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":0}}}}]}"#,
+        r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"MatchExpression":{"subject":{"GenericVariable":{"id":"x","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Positive","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":1}}}},{"matches":[{"type_name":"Negative","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}]}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":0}}}}]}"#,
         MatchExpression {
             subject: Box::new(Variable("maybe").into()),
             blocks: vec![

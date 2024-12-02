@@ -73,7 +73,7 @@ class Visitor(GrammarVisitor):
         self, ctx: GrammarParser.Generic_type_instanceContext
     ) -> GenericType:
         generic_instance: GenericVariable = self.visit(ctx.generic_instance())
-        return GenericType(generic_instance.name, generic_instance.type_instances)
+        return GenericType(generic_instance.id, generic_instance.type_instances)
 
     def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext) -> GenericVariable:
         id = self.visitId(ctx.id_())
@@ -288,7 +288,7 @@ class Visitor(GrammarVisitor):
         self, ctx: GrammarParser.Generic_constructorContext
     ) -> GenericConstructor:
         generic_instance: GenericVariable = self.visit(ctx.generic_instance())
-        return GenericConstructor(generic_instance.name, generic_instance.type_instances)
+        return GenericConstructor(generic_instance.id, generic_instance.type_instances)
 
     def visitConstructor_call(self, ctx: GrammarParser.Constructor_callContext) -> ConstructorCall:
         constructor = self.visit(ctx.generic_constructor())

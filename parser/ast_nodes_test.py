@@ -159,15 +159,15 @@ from ast_nodes import (
                 ]
             },
         ),
-        (Variable("foo"), {"name": "foo", "type_instances": []}),
+        (Variable("foo"), {"id": "foo", "type_instances": []}),
         (
             GenericVariable("map", [AtomicType.INT]),
-            {"name": "map", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
+            {"id": "map", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
         ),
         (
             GenericVariable("foo", [Typename("T")]),
             {
-                "name": "foo",
+                "id": "foo",
                 "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}],
             },
         ),
@@ -183,7 +183,7 @@ from ast_nodes import (
             {
                 "expression": {
                     "ElementAccess": {
-                        "expression": {"GenericVariable": {"name": "foo", "type_instances": []}},
+                        "expression": {"GenericVariable": {"id": "foo", "type_instances": []}},
                         "index": 13,
                     }
                 },
@@ -196,7 +196,7 @@ from ast_nodes import (
             Assignment(Assignee("a", []), Variable("b")),
             {
                 "assignee": {"id": "a", "generic_variables": []},
-                "expression": {"GenericVariable": {"name": "b", "type_instances": []}},
+                "expression": {"GenericVariable": {"id": "b", "type_instances": []}},
             },
         ),
         (
@@ -205,7 +205,7 @@ from ast_nodes import (
                 "assignee": {"id": "a", "generic_variables": ["T"]},
                 "expression": {
                     "GenericVariable": {
-                        "name": "b",
+                        "id": "b",
                         "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}],
                     }
                 },
@@ -223,7 +223,7 @@ from ast_nodes import (
                 "assignments": [
                     {
                         "assignee": {"id": "a", "generic_variables": []},
-                        "expression": {"GenericVariable": {"name": "x", "type_instances": []}},
+                        "expression": {"GenericVariable": {"id": "x", "type_instances": []}},
                     },
                     {
                         "assignee": {"id": "b", "generic_variables": []},
@@ -325,7 +325,7 @@ from ast_nodes import (
                 ],
             ),
             {
-                "subject": {"GenericVariable": {"name": "maybe", "type_instances": []}},
+                "subject": {"GenericVariable": {"id": "maybe", "type_instances": []}},
                 "blocks": [
                     {
                         "matches": [
@@ -371,7 +371,7 @@ from ast_nodes import (
                 ],
             ),
             {
-                "subject": {"GenericVariable": {"name": "maybe", "type_instances": []}},
+                "subject": {"GenericVariable": {"id": "maybe", "type_instances": []}},
                 "blocks": [
                     {
                         "matches": [
@@ -386,7 +386,7 @@ from ast_nodes import (
                                 "MatchExpression": {
                                     "subject": {
                                         "GenericVariable": {
-                                            "name": "x",
+                                            "id": "x",
                                             "type_instances": [],
                                         }
                                     },
