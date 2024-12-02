@@ -241,6 +241,12 @@ struct Block {
     expression: Box<Expression>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct MatchItem {
+    type_name: Id,
+    assignee: Option<Assignee>,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -639,6 +645,25 @@ mod tests {
             }
         };
         "nested if expression"
+    )]
+    #[test_case(
+        r#"{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}"#,
+        MatchItem {
+            type_name: Id::from("Some"),
+            assignee: Some(Assignee{
+                id: Id::from("x"),
+                generic_variables: Vec::new(),
+            }),
+        };
+        "present match item"
+    )]
+    #[test_case(
+        r#"{"type_name":"None","assignee":null}"#,
+        MatchItem {
+            type_name: Id::from("None"),
+            assignee: None,
+        };
+        "absent match item"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

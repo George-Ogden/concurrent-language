@@ -15,6 +15,7 @@ from ast_nodes import (
     GenericVariable,
     IfExpression,
     Integer,
+    MatchItem,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
     TupleExpression,
@@ -286,6 +287,11 @@ from ast_nodes import (
                 "false_block": {"assignments": [], "expression": {"Integer": {"value": -1}}},
             },
         ),
+        (
+            MatchItem("Some", Assignee("x", [])),
+            {"type_name": "Some", "assignee": {"id": "x", "generic_variables": []}},
+        ),
+        (MatchItem("None", None), {"type_name": "None", "assignee": None}),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:

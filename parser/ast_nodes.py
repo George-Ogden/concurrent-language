@@ -28,7 +28,11 @@ class ASTNode:
         if type_ is None:
             type_ = value_type
         if isinstance(value, ASTNode):
-            if typing.get_origin(type_) == Union and value_type in typing.get_args(type_):
+            if (
+                typing.get_origin(type_) == Union
+                and value_type in typing.get_args(type_)
+                and set(typing.get_args(type_)) != {NoneType, type(value)}
+            ):
                 return {value_type.__name__: cls.convert_to_json(value, value_type)}
             else:
                 return value.to_json()
