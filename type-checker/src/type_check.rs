@@ -6,6 +6,7 @@ use crate::{
 };
 use counter::Counter;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -255,7 +256,7 @@ impl PartialEq for TypeDefinitions {
     }
 }
 
-type TypeContext = HashMap<Id, ParametricType>;
+type TypeContext = TypeDefinitions;
 
 struct TypeChecker {}
 
@@ -481,15 +482,28 @@ impl TypeChecker {
             .into(),
             Expression::GenericVariable(GenericVariable {
                 name,
-                type_instances: _,
+                type_instances,
             }) => {
                 let variable_type = context.get(name);
                 match variable_type {
-                    Some(type_) => TypedVariable {
-                        id: name.clone(),
-                        type_: type_.type_.clone(),
-                    }
-                    .into(),
+                    Some(type_) => {
+                        if type_instances.len() != type_.borrow().num_parameters as usize {
+                            return Err(format!("wrong number parameters to instantiate type {} (expected {} got {})", name, type_.borrow().num_parameters, type_instances.len()))
+                        }
+                        let type_ = if type_instances.len() == 0 {
+                            type_.borrow().type_.clone()
+                        } else {
+                            Type::Instantiation(
+                                type_.clone(),
+                                type_instances.iter()
+                                .map(|type_instance| TypeChecker::convert_ast_type(type_instance, &TypeDefinitions::new(), &Vec::new()))
+                                .collect::<Result<_,_>>()?)
+                        };
+                        TypedVariable {
+                            id: name.clone(),
+                            type_
+                        }
+                    }.into(),
                     None => return Err(format!("{} not found in scope", name)),
                 }
             }
@@ -1288,6 +1302,12 @@ mod tests {
         }
     }
 
+    const ALPHA_TYPE: Lazy<Rc<RefCell<ParametricType>>> = Lazy::new(|| {
+        Rc::new(RefCell::new(ParametricType {
+            type_: Type::Variable(0),
+            num_parameters: 1,
+        }))
+    });
     #[test_case(
         Integer{value: -5}.into(),
         Some(TYPE_INT),
@@ -1360,7 +1380,7 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("a"),
-                Type::from(TYPE_INT).into()
+                Type::from(TYPE_INT)
             )
         ]);
         "type check variable"
@@ -1371,7 +1391,7 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("a"),
-                Type::from(TYPE_INT).into()
+                Type::from(TYPE_INT)
             )
         ]);
         "type check missing variable"
@@ -1392,14 +1412,42 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("a"),
-                Type::from(TYPE_INT).into()
+                Type::from(TYPE_INT)
             ),
             (
                 Id::from("b"),
-                Type::from(TYPE_BOOL).into()
+                Type::from(TYPE_BOOL)
             )
         ]);
         "type check multiple variables"
+    )]
+    #[test_case(
+        Variable("f").into(),
+        None,
+        TypeContext::from([
+            (
+                Id::from("f"),
+                ParametricType{
+                    type_: Type::Variable(0),
+                    num_parameters: 1
+                }
+            )
+        ]);
+        "type check wrong arguments"
+    )]
+    #[test_case(
+        GenericVariable {
+            name: Id::from("f"),
+            type_instances: vec![ATOMIC_TYPE_INT.into()]
+        }.into(),
+        Some(Type::Instantiation(ALPHA_TYPE.clone(), vec![TYPE_INT.into()])),
+        TypeContext::from([
+            (
+                Id::from("f"),
+                ALPHA_TYPE.clone()
+            )
+        ]);
+        "type check parametric type"
     )]
     fn test_check_expressions(
         expression: Expression,
