@@ -15,6 +15,7 @@ from ast_nodes import (
     GenericVariable,
     IfExpression,
     Integer,
+    MatchBlock,
     MatchItem,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
@@ -284,7 +285,10 @@ from ast_nodes import (
                         }
                     },
                 },
-                "false_block": {"assignments": [], "expression": {"Integer": {"value": -1}}},
+                "false_block": {
+                    "assignments": [],
+                    "expression": {"Integer": {"value": -1}},
+                },
             },
         ),
         (
@@ -292,6 +296,25 @@ from ast_nodes import (
             {"type_name": "Some", "assignee": {"id": "x", "generic_variables": []}},
         ),
         (MatchItem("None", None), {"type_name": "None", "assignee": None}),
+        (
+            MatchBlock(
+                [MatchItem("None", None), MatchItem("Some", Assignee("x", []))],
+                Block([], Boolean(True)),
+            ),
+            {
+                "matches": [
+                    {"type_name": "None", "assignee": None},
+                    {
+                        "type_name": "Some",
+                        "assignee": {"id": "x", "generic_variables": []},
+                    },
+                ],
+                "block": {
+                    "assignments": [],
+                    "expression": {"Boolean": {"value": True}},
+                },
+            },
+        ),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:

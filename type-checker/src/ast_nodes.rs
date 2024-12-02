@@ -247,6 +247,12 @@ struct MatchItem {
     assignee: Option<Assignee>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct MatchBlock {
+    matches: Vec<MatchItem>,
+    block: Block,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -664,6 +670,31 @@ mod tests {
             assignee: None,
         };
         "absent match item"
+    )]
+    #[test_case(
+        r#"{"matches":[{"type_name":"None","assignee":null},{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}}"#,
+        MatchBlock {
+            matches: vec![
+                MatchItem {
+                    type_name: Id::from("None"),
+                    assignee: None,
+                },
+                MatchItem {
+                    type_name: Id::from("Some"),
+                    assignee: Some(Assignee{
+                        id: Id::from("x"),
+                        generic_variables: Vec::new(),
+                    }),
+                }
+            ],
+            block: Block{
+                assignments: Vec::new(),
+                expression: Box::new(
+                    Boolean{value: true}.into()
+                )
+            }
+        };
+        "match block"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
