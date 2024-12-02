@@ -200,12 +200,19 @@ fn Variable(name: &str) -> GenericVariable {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct ElementAccess {
+    expression: Box<Expression>,
+    index: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 enum Expression {
     Integer(Integer),
     Boolean(Boolean),
     TupleExpression(TupleExpression),
     GenericVariable(GenericVariable),
+    ElementAccess(ElementAccess),
 }
 
 #[cfg(test)]
@@ -422,6 +429,33 @@ mod tests {
             type_instances: vec![Typename("T").into()]
         };
         "generic variable instance"
+    )]
+    #[test_case(
+        r#"{"expression":{"TupleExpression":{"expressions":[{"Integer":{"value":0}}]}},"index":0}"#,
+        ElementAccess{
+            expression: Box::new(TupleExpression{
+                expressions: vec![
+                    Integer{value: 0}.into()
+                ]
+            }.into()),
+            index: 0
+        };
+        "single element access"
+    )]
+    #[test_case(
+        r#"{"expression":{"ElementAccess":{"expression":{"GenericVariable":{"name":"foo","type_instances":[]}},"index":13}},"index":1}"#,
+        ElementAccess{
+            expression: Box::new(
+                ElementAccess{
+                    expression: Box::new(
+                        Variable("foo").into()
+                    ),
+                    index: 13,
+                }.into()
+            ),
+            index: 1
+        };
+        "nested element access"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

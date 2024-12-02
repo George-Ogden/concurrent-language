@@ -4,6 +4,7 @@ from ast_nodes import (
     AtomicType,
     AtomicTypeEnum,
     Boolean,
+    ElementAccess,
     EmptyTypeDefinition,
     FunctionType,
     GenericType,
@@ -159,6 +160,25 @@ from ast_nodes import (
         (
             GenericVariable("foo", [Typename("T")]),
             {"name": "foo", "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}]},
+        ),
+        (
+            ElementAccess(TupleExpression([Integer(0)]), 0),
+            {
+                "expression": {"TupleExpression": {"expressions": [{"Integer": {"value": 0}}]}},
+                "index": 0,
+            },
+        ),
+        (
+            ElementAccess(ElementAccess(Variable("foo"), 13), 1),
+            {
+                "expression": {
+                    "ElementAccess": {
+                        "expression": {"GenericVariable": {"name": "foo", "type_instances": []}},
+                        "index": 13,
+                    }
+                },
+                "index": 1,
+            },
         ),
     ],
 )
