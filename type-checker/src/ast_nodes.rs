@@ -183,8 +183,8 @@ pub struct Boolean {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct TupleExpression {
-    expressions: Vec<Expression>,
+pub struct TupleExpression {
+    pub expressions: Vec<Expression>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

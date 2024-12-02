@@ -1,8 +1,8 @@
-use crate::type_check_nodes::{ParametricType, Type, TypeDefinitions, TypedExpression};
+use crate::type_check_nodes::{ParametricType, Type, TypeDefinitions, TypedExpression, TypedTuple};
 use crate::{
     AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, Expression, FunctionType,
     GenericType, GenericTypeVariable, Id, OpaqueTypeDefinition, TransparentTypeDefinition,
-    TupleType, TypeInstance, UnionTypeDefinition,
+    TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -222,8 +222,15 @@ impl TypeChecker {
     }
     fn check_expression(expression: &Expression) -> Result<TypedExpression, String> {
         Ok(match expression {
-            Expression::Integer(i) => TypedExpression::Integer(i.clone()),
-            Expression::Boolean(b) => TypedExpression::Boolean(b.clone()),
+            Expression::Integer(i) => i.clone().into(),
+            Expression::Boolean(b) => b.clone().into(),
+            Expression::TupleExpression(TupleExpression { expressions }) => TypedTuple {
+                expressions: expressions
+                    .iter()
+                    .map(TypeChecker::check_expression)
+                    .collect::<Result<_, _>>()?,
+            }
+            .into(),
             _ => todo!(),
         })
     }
@@ -234,8 +241,8 @@ mod tests {
 
     use crate::{
         type_check_nodes::{TypeDefinitions, TYPE_BOOL, TYPE_INT},
-        Boolean, GenericTypeVariable, Integer, TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL,
-        ATOMIC_TYPE_INT,
+        Boolean, GenericTypeVariable, Integer, TupleExpression, TypeItem, TypeVariable, Typename,
+        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -1031,12 +1038,66 @@ mod tests {
         ();
         "type check boolean"
     )]
+    #[test_case(
+        TupleExpression{
+            expressions: Vec::new()
+        }.into(),
+        Some(Type::Tuple(Vec::new())),
+        ();
+        "type check empty tuple"
+    )]
+    #[test_case(
+        TupleExpression{
+            expressions: vec![
+                Boolean{
+                    value: true,
+                }.into(),
+                Integer{
+                    value: -2,
+                }.into(),
+            ]
+        }.into(),
+        Some(Type::Tuple(vec![
+            TYPE_BOOL.into(),
+            TYPE_INT.into(),
+        ])),
+        ();
+        "type check flat tuple"
+    )]
+    #[test_case(
+        TupleExpression{
+            expressions: vec![
+                TupleExpression{
+                    expressions: Vec::new()
+                }.into(),
+                TupleExpression{
+                    expressions: vec![
+                        Boolean{
+                            value: true,
+                        }.into(),
+                        Integer{
+                            value: -2,
+                        }.into(),
+                    ]
+                }.into()
+            ]
+        }.into(),
+        Some(Type::Tuple(vec![
+            Type::Tuple(Vec::new()),
+            Type::Tuple(vec![
+                TYPE_BOOL.into(),
+                TYPE_INT.into(),
+            ])
+        ])),
+        ();
+        "type check nested tuple"
+    )]
     fn test_check_expressions(expression: Expression, expected_type: Option<Type>, context: ()) {
         let type_check_result = TypeChecker::check_expression(&expression);
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {
-                    assert_eq!(typed_expression.type_(), &type_)
+                    assert_eq!(typed_expression.type_(), type_)
                 }
                 Err(msg) => {
                     dbg!(msg);

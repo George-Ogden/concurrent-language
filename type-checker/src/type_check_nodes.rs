@@ -1,15 +1,10 @@
-use crate::{
-    AtomicType, AtomicTypeEnum, Boolean, Definition, EmptyTypeDefinition, Expression, FunctionType,
-    GenericType, GenericTypeVariable, Id, Integer, OpaqueTypeDefinition, TransparentTypeDefinition,
-    TupleType, TypeInstance, UnionTypeDefinition,
-};
-use counter::Counter;
+use crate::{AtomicTypeEnum, Boolean, Id, Integer};
+use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use strum::IntoEnumIterator;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct ParametricType {
@@ -320,16 +315,25 @@ impl PartialEq for TypeDefinitions {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct TypedTuple {
+    pub expressions: Vec<TypedExpression>,
+}
+
+#[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
     Boolean(Boolean),
+    TypedTuple(TypedTuple),
 }
 
 impl TypedExpression {
-    pub fn type_(&self) -> &Type {
+    pub fn type_(&self) -> Type {
         match self {
-            Self::Integer(_) => &TYPE_INT,
-            Self::Boolean(_) => &TYPE_BOOL,
+            Self::Integer(_) => TYPE_INT,
+            Self::Boolean(_) => TYPE_BOOL,
+            Self::TypedTuple(TypedTuple { expressions }) => {
+                Type::Tuple(expressions.iter().map(TypedExpression::type_).collect_vec())
+            }
             _ => todo!(),
         }
     }
