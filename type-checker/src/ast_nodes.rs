@@ -177,9 +177,9 @@ pub struct Integer {
     pub value: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct Boolean {
-    value: bool,
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct Boolean {
+    pub value: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

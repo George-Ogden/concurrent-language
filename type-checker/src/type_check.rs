@@ -223,6 +223,7 @@ impl TypeChecker {
     fn check_expression(expression: &Expression) -> Result<TypedExpression, String> {
         Ok(match expression {
             Expression::Integer(i) => TypedExpression::Integer(i.clone()),
+            Expression::Boolean(b) => TypedExpression::Boolean(b.clone()),
             _ => todo!(),
         })
     }
@@ -233,7 +234,7 @@ mod tests {
 
     use crate::{
         type_check_nodes::{TypeDefinitions, TYPE_BOOL, TYPE_INT},
-        GenericTypeVariable, Integer, TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL,
+        Boolean, GenericTypeVariable, Integer, TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL,
         ATOMIC_TYPE_INT,
     };
 
@@ -1023,6 +1024,12 @@ mod tests {
         Some(TYPE_INT),
         ();
         "type check integer"
+    )]
+    #[test_case(
+        Boolean{value: true}.into(),
+        Some(TYPE_BOOL),
+        ();
+        "type check boolean"
     )]
     fn test_check_expressions(expression: Expression, expected_type: Option<Type>, context: ()) {
         let type_check_result = TypeChecker::check_expression(&expression);

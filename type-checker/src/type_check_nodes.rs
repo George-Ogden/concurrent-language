@@ -1,5 +1,5 @@
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, Expression, FunctionType,
+    AtomicType, AtomicTypeEnum, Boolean, Definition, EmptyTypeDefinition, Expression, FunctionType,
     GenericType, GenericTypeVariable, Id, Integer, OpaqueTypeDefinition, TransparentTypeDefinition,
     TupleType, TypeInstance, UnionTypeDefinition,
 };
@@ -319,14 +319,17 @@ impl PartialEq for TypeDefinitions {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TypedExpression {
     Integer(Integer),
+    Boolean(Boolean),
 }
+
 impl TypedExpression {
     pub fn type_(&self) -> &Type {
         match self {
             Self::Integer(_) => &TYPE_INT,
+            Self::Boolean(_) => &TYPE_BOOL,
             _ => todo!(),
         }
     }
