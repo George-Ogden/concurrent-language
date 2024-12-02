@@ -172,9 +172,9 @@ impl Definition {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct Integer {
-    value: i64,
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct Integer {
+    pub value: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -232,7 +232,7 @@ struct MatchExpression {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
-enum Expression {
+pub enum Expression {
     Integer(Integer),
     Boolean(Boolean),
     TupleExpression(TupleExpression),
