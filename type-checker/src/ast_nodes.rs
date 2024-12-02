@@ -182,7 +182,7 @@ pub struct Boolean {
     pub value: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct TupleExpression {
     pub expressions: Vec<Expression>,
 }
@@ -200,38 +200,38 @@ pub fn Variable(name: &str) -> GenericVariable {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct ElementAccess {
-    expression: Box<Expression>,
-    index: u32,
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct ElementAccess {
+    pub expression: Box<Expression>,
+    pub index: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct IfExpression {
     condition: Box<Expression>,
     true_block: Block,
     false_block: Block,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct MatchItem {
     type_name: Id,
     assignee: Option<Assignee>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct MatchBlock {
     matches: Vec<MatchItem>,
     block: Block,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct MatchExpression {
     subject: Box<Expression>,
     blocks: Vec<MatchBlock>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants, Clone)]
 pub enum Expression {
     Integer(Integer),
     Boolean(Boolean),
@@ -242,19 +242,19 @@ pub enum Expression {
     MatchExpression(MatchExpression),
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct Assignee {
     id: Id,
     generic_variables: Vec<Id>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct Assignment {
     assignee: Box<Assignee>,
     expression: Box<Expression>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct Block {
     assignments: Vec<Assignment>,
     expression: Box<Expression>,

@@ -1,7 +1,9 @@
-use crate::type_check_nodes::{ParametricType, Type, TypedExpression, TypedTuple, TypedVariable};
+use crate::type_check_nodes::{
+    ParametricType, Type, TypedElementAccess, TypedExpression, TypedTuple, TypedVariable,
+};
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, EmptyTypeDefinition, Expression, FunctionType,
-    GenericType, GenericTypeVariable, GenericVariable, Id, OpaqueTypeDefinition,
+    AtomicType, AtomicTypeEnum, Definition, ElementAccess, EmptyTypeDefinition, Expression,
+    FunctionType, GenericType, GenericTypeVariable, GenericVariable, Id, OpaqueTypeDefinition,
     TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
@@ -507,6 +509,32 @@ impl TypeChecker {
                     None => return Err(format!("{} not found in scope", name)),
                 }
             }
+            Expression::ElementAccess(ElementAccess { expression, index }) => {
+                let typed_expression = TypeChecker::check_expression(expression, context)?;
+                match typed_expression.type_() {
+                    Type::Tuple(types) => {
+                        if *index as usize >= types.len() {
+                            return Err(format!(
+                                "Cannot access element {}, {:?} contains only {} elements",
+                                index,
+                                expression,
+                                types.len()
+                            ));
+                        };
+                        TypedElementAccess {
+                            expression: Box::new(typed_expression),
+                            index: *index,
+                        }
+                        .into()
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Cannot perform element access on {:?}, expected tuple type",
+                            *expression
+                        ))
+                    }
+                }
+            }
             _ => todo!(),
         })
     }
@@ -516,9 +544,9 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        type_check_nodes::{TYPE_BOOL, TYPE_INT},
-        Boolean, GenericTypeVariable, Integer, TupleExpression, TypeItem, TypeVariable, Typename,
-        Variable, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        type_check_nodes::{TYPE_BOOL, TYPE_INT, TYPE_UNIT},
+        Boolean, ElementAccess, GenericTypeVariable, Integer, TupleExpression, TypeItem,
+        TypeVariable, Typename, Variable, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -1448,6 +1476,64 @@ mod tests {
             )
         ]);
         "type check parametric type"
+    )]
+    #[test_case(
+        ElementAccess{
+            expression: Box::new(Integer{value:5}.into()),
+            index: 0
+        }.into(),
+        None,
+        TypeContext::new();
+        "invalid type element access"
+    )]
+    #[test_case(
+        ElementAccess{
+            expression: Box::new(TupleExpression{
+                expressions: vec![
+                    Integer{value: 5}.into(),
+                    Boolean{value: true}.into(),
+                ]
+            }.into()),
+            index: 0
+        }.into(),
+        Some(TYPE_INT.into()),
+        TypeContext::new();
+        "flat element access"
+    )]
+    #[test_case(
+        ElementAccess{
+            expression: Box::new(TupleExpression{
+                expressions: vec![
+                    Integer{value: 5}.into(),
+                    Boolean{value: true}.into(),
+                ]
+            }.into()),
+            index: 2
+        }.into(),
+        None,
+        TypeContext::new();
+        "element access out of range"
+    )]
+    #[test_case(
+        ElementAccess{
+            expression: Box::new(ElementAccess {
+                expression: Box::new(Variable("a").into()),
+                index: 0
+            }.into()),
+            index: 0
+        }.into(),
+        Some(TYPE_UNIT.into()),
+        TypeContext::from([(
+            Id::from("a"),
+            Type::Tuple(
+                vec![Type::Tuple(
+                    vec![
+                        TYPE_UNIT
+                    ]
+                )]
+            )
+        )]);
+        "nested element access"
     )]
     fn test_check_expressions(
         expression: Expression,

@@ -1,4 +1,4 @@
-use crate::{AtomicTypeEnum, Boolean, Id, Integer};
+use crate::{AtomicTypeEnum, Boolean, Id, Integer, TupleType};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -48,6 +48,7 @@ impl Type {
 
 pub const TYPE_INT: Type = Type::Atomic(AtomicTypeEnum::INT);
 pub const TYPE_BOOL: Type = Type::Atomic(AtomicTypeEnum::BOOL);
+pub const TYPE_UNIT: Type = Type::Tuple(Vec::new());
 
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -82,12 +83,19 @@ pub struct TypedVariable {
     pub type_: Type,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedElementAccess {
+    pub expression: Box<TypedExpression>,
+    pub index: u32,
+}
+
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
     Boolean(Boolean),
     TypedTuple(TypedTuple),
     TypedVariable(TypedVariable),
+    TypedElementAccess(TypedElementAccess),
 }
 
 impl TypedExpression {
@@ -99,6 +107,13 @@ impl TypedExpression {
                 Type::Tuple(expressions.iter().map(TypedExpression::type_).collect_vec())
             }
             Self::TypedVariable(TypedVariable { id: _, type_ }) => type_.clone(),
+            Self::TypedElementAccess(TypedElementAccess { expression, index }) => {
+                if let Type::Tuple(types) = expression.type_() {
+                    types[*index as usize].clone()
+                } else {
+                    panic!("Type of an element access is no longer a tuple!")
+                }
+            }
             _ => todo!(),
         }
     }
