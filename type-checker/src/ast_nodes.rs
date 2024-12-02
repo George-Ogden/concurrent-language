@@ -213,6 +213,24 @@ struct IfExpression {
     false_block: Block,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct MatchItem {
+    type_name: Id,
+    assignee: Option<Assignee>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct MatchBlock {
+    matches: Vec<MatchItem>,
+    block: Block,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct MatchExpression {
+    subject: Box<Expression>,
+    blocks: Vec<MatchBlock>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 enum Expression {
     Integer(Integer),
@@ -221,6 +239,7 @@ enum Expression {
     GenericVariable(GenericVariable),
     ElementAccess(ElementAccess),
     IfExpression(IfExpression),
+    MatchExpression(MatchExpression),
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -239,18 +258,6 @@ struct Assignment {
 struct Block {
     assignments: Vec<Assignment>,
     expression: Box<Expression>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct MatchItem {
-    type_name: Id,
-    assignee: Option<Assignee>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct MatchBlock {
-    matches: Vec<MatchItem>,
-    block: Block,
 }
 
 #[cfg(test)]
@@ -695,6 +702,114 @@ mod tests {
             }
         };
         "match block"
+    )]
+    #[test_case(
+        r#"{"subject":{"GenericVariable":{"name":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}]}"#,
+        MatchExpression {
+            subject: Box::new(Variable("maybe").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: Some(Assignee{
+                                id: Id::from("x"),
+                                generic_variables: Vec::new(),
+                            }),
+                        }
+                    ],
+                    block: Block{
+                        assignments: Vec::new(),
+                        expression: Box::new(
+                            Boolean{value: true}.into()
+                        )
+                    }
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None,
+                        }
+                    ],
+                    block: Block{
+                        assignments: Vec::new(),
+                        expression: Box::new(
+                            Boolean{value: false}.into()
+                        )
+                    }
+                }
+            ]
+        };
+        "flat match expression"
+    )]
+    #[test_case(
+        r#"{"subject":{"GenericVariable":{"name":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"MatchExpression":{"subject":{"GenericVariable":{"name":"x","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Positive","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":1}}}},{"matches":[{"type_name":"Negative","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}]}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":0}}}}]}"#,
+        MatchExpression {
+            subject: Box::new(Variable("maybe").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: Some(Assignee{
+                                id: Id::from("x"),
+                                generic_variables: Vec::new(),
+                            }),
+                        }
+                    ],
+                    block: Block{
+                        assignments: Vec::new(),
+                        expression: Box::new(
+                            MatchExpression {
+                                subject: Box::new(Variable("x").into()),
+                                blocks: vec![
+                                    MatchBlock{
+                                        matches: vec![
+                                            MatchItem{
+                                                type_name: Id::from("Positive"),
+                                                assignee: None
+                                            }
+                                        ],
+                                        block: Block{
+                                            assignments: Vec::new(),
+                                            expression: Box::new(Integer{value: 1}.into())
+                                        }
+                                    },
+                                    MatchBlock{
+                                        matches: vec![
+                                            MatchItem{
+                                                type_name: Id::from("Negative"),
+                                                assignee: None
+                                            }
+                                        ],
+                                        block: Block{
+                                            assignments: Vec::new(),
+                                            expression: Box::new(Integer{value: -1}.into())
+                                        }
+                                    }
+                                ]
+                            }.into()
+                        )
+                    }
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None,
+                        }
+                    ],
+                    block: Block{
+                        assignments: Vec::new(),
+                        expression: Box::new(
+                            Integer{value: 0}.into()
+                        )
+                    }
+                }
+            ]
+        };
+        "nested match expression"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

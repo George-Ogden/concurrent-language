@@ -16,6 +16,7 @@ from ast_nodes import (
     IfExpression,
     Integer,
     MatchBlock,
+    MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
@@ -313,6 +314,120 @@ from ast_nodes import (
                     "assignments": [],
                     "expression": {"Boolean": {"value": True}},
                 },
+            },
+        ),
+        (
+            MatchExpression(
+                Variable("maybe"),
+                [
+                    MatchBlock([MatchItem("Some", Assignee("x", []))], Block([], Boolean(True))),
+                    MatchBlock([MatchItem("None", None)], Block([], Boolean(False))),
+                ],
+            ),
+            {
+                "subject": {"GenericVariable": {"name": "maybe", "type_instances": []}},
+                "blocks": [
+                    {
+                        "matches": [
+                            {"type_name": "Some", "assignee": {"id": "x", "generic_variables": []}}
+                        ],
+                        "block": {"assignments": [], "expression": {"Boolean": {"value": True}}},
+                    },
+                    {
+                        "matches": [{"type_name": "None", "assignee": None}],
+                        "block": {"assignments": [], "expression": {"Boolean": {"value": False}}},
+                    },
+                ],
+            },
+        ),
+        (
+            MatchExpression(
+                Variable("maybe"),
+                [
+                    MatchBlock(
+                        [MatchItem("Some", Assignee("x", []))],
+                        Block(
+                            [],
+                            MatchExpression(
+                                Variable("x"),
+                                [
+                                    MatchBlock(
+                                        [
+                                            MatchItem("Positive", None),
+                                        ],
+                                        Block([], Integer(1)),
+                                    ),
+                                    MatchBlock(
+                                        [
+                                            MatchItem("Negative", None),
+                                        ],
+                                        Block([], Integer(-1)),
+                                    ),
+                                ],
+                            ),
+                        ),
+                    ),
+                    MatchBlock([MatchItem("None", None)], Block([], Integer(0))),
+                ],
+            ),
+            {
+                "subject": {"GenericVariable": {"name": "maybe", "type_instances": []}},
+                "blocks": [
+                    {
+                        "matches": [
+                            {
+                                "type_name": "Some",
+                                "assignee": {"id": "x", "generic_variables": []},
+                            }
+                        ],
+                        "block": {
+                            "assignments": [],
+                            "expression": {
+                                "MatchExpression": {
+                                    "subject": {
+                                        "GenericVariable": {
+                                            "name": "x",
+                                            "type_instances": [],
+                                        }
+                                    },
+                                    "blocks": [
+                                        {
+                                            "matches": [
+                                                {
+                                                    "type_name": "Positive",
+                                                    "assignee": None,
+                                                }
+                                            ],
+                                            "block": {
+                                                "assignments": [],
+                                                "expression": {"Integer": {"value": 1}},
+                                            },
+                                        },
+                                        {
+                                            "matches": [
+                                                {
+                                                    "type_name": "Negative",
+                                                    "assignee": None,
+                                                }
+                                            ],
+                                            "block": {
+                                                "assignments": [],
+                                                "expression": {"Integer": {"value": -1}},
+                                            },
+                                        },
+                                    ],
+                                }
+                            },
+                        },
+                    },
+                    {
+                        "matches": [{"type_name": "None", "assignee": None}],
+                        "block": {
+                            "assignments": [],
+                            "expression": {"Integer": {"value": 0}},
+                        },
+                    },
+                ],
             },
         ),
     ],

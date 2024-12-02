@@ -532,8 +532,6 @@ impl TypeChecker {
 #[cfg(test)]
 mod tests {
 
-    use std::result;
-
     use crate::{
         GenericTypeVariable, TypeItem, TypeVariable, Typename, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
