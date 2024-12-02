@@ -13,6 +13,7 @@ from ast_nodes import (
     GenericType,
     GenericTypeVariable,
     GenericVariable,
+    IfExpression,
     Integer,
     OpaqueTypeDefinition,
     TransparentTypeDefinition,
@@ -227,6 +228,62 @@ from ast_nodes import (
                     },
                 ],
                 "expression": {"Integer": {"value": 4}},
+            },
+        ),
+        (
+            IfExpression(Boolean(True), Block([], Integer(1)), Block([], Integer(-1))),
+            {
+                "condition": {"Boolean": {"value": True}},
+                "true_block": {
+                    "assignments": [],
+                    "expression": {"Integer": {"value": 1}},
+                },
+                "false_block": {
+                    "assignments": [],
+                    "expression": {"Integer": {"value": -1}},
+                },
+            },
+        ),
+        (
+            IfExpression(
+                IfExpression(Boolean(True), Block([], Boolean(True)), Block([], Boolean(False))),
+                Block(
+                    [],
+                    IfExpression(Boolean(False), Block([], Integer(1)), Block([], Integer(0))),
+                ),
+                Block([], Integer(-1)),
+            ),
+            {
+                "condition": {
+                    "IfExpression": {
+                        "condition": {"Boolean": {"value": True}},
+                        "true_block": {
+                            "assignments": [],
+                            "expression": {"Boolean": {"value": True}},
+                        },
+                        "false_block": {
+                            "assignments": [],
+                            "expression": {"Boolean": {"value": False}},
+                        },
+                    }
+                },
+                "true_block": {
+                    "assignments": [],
+                    "expression": {
+                        "IfExpression": {
+                            "condition": {"Boolean": {"value": False}},
+                            "true_block": {
+                                "assignments": [],
+                                "expression": {"Integer": {"value": 1}},
+                            },
+                            "false_block": {
+                                "assignments": [],
+                                "expression": {"Integer": {"value": 0}},
+                            },
+                        }
+                    },
+                },
+                "false_block": {"assignments": [], "expression": {"Integer": {"value": -1}}},
             },
         ),
     ],

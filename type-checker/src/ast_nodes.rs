@@ -206,6 +206,13 @@ struct ElementAccess {
     index: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct IfExpression {
+    condition: Box<Expression>,
+    true_block: Block,
+    false_block: Block,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
 enum Expression {
     Integer(Integer),
@@ -213,6 +220,7 @@ enum Expression {
     TupleExpression(TupleExpression),
     GenericVariable(GenericVariable),
     ElementAccess(ElementAccess),
+    IfExpression(IfExpression),
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -557,6 +565,80 @@ mod tests {
             }.into())
         };
         "block"
+    )]
+    #[test_case(
+        r#"{"condition":{"Boolean":{"value":true}},"true_block":{"assignments":[],"expression":{"Integer":{"value":1}}},"false_block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}"#,
+        IfExpression {
+            condition: Box::new(
+                Boolean{ value: true }.into()
+            ),
+            true_block: Block {
+                assignments: Vec::new(),
+                expression: Box::new(
+                    Integer{ value: 1 }.into()
+                )
+            },
+            false_block: Block {
+                assignments: Vec::new(),
+                expression: Box::new(
+                    Integer{ value: -1 }.into()
+                )
+            }
+        };
+        "flat if expression"
+    )]
+    #[test_case(
+        r#"{"condition":{"IfExpression":{"condition":{"Boolean":{"value":true}},"true_block":{"assignments":[],"expression":{"Boolean":{"value":true}}},"false_block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}},"true_block":{"assignments":[],"expression":{"IfExpression":{"condition":{"Boolean":{"value":false}},"true_block":{"assignments":[],"expression":{"Integer":{"value":1}}},"false_block":{"assignments":[],"expression":{"Integer":{"value":0}}}}}},"false_block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}"#,
+        IfExpression {
+            condition: Box::new(
+                IfExpression {
+                    condition: Box::new(
+                        Boolean{ value: true }.into()
+                    ),
+                    true_block: Block {
+                        assignments: Vec::new(),
+                        expression: Box::new(
+                            Boolean{ value: true }.into()
+                        )
+                    },
+                    false_block: Block {
+                        assignments: Vec::new(),
+                        expression: Box::new(
+                            Boolean{ value: false }.into()
+                        )
+                    }
+                }.into()
+            ),
+            true_block: Block {
+                assignments: Vec::new(),
+                expression: Box::new(
+                    IfExpression {
+                        condition: Box::new(
+                            Boolean{ value: false }.into()
+                        ),
+                        true_block: Block {
+                            assignments: Vec::new(),
+                            expression: Box::new(
+                                Integer{ value: 1 }.into()
+                            )
+                        },
+                        false_block: Block {
+                            assignments: Vec::new(),
+                            expression: Box::new(
+                                Integer{ value: 0 }.into()
+                            )
+                        }
+                    }.into()
+                )
+            },
+            false_block: Block {
+                assignments: Vec::new(),
+                expression: Box::new(
+                    Integer{ value: -1 }.into()
+                )
+            }
+        };
+        "nested if expression"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
