@@ -215,6 +215,12 @@ enum Expression {
     ElementAccess(ElementAccess),
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct Assignee {
+    id: Id,
+    generic_variables: Vec<Id>,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -456,6 +462,25 @@ mod tests {
             index: 1
         };
         "nested element access"
+    )]
+    #[test_case(
+        r#"{"id":"a","generic_variables":[]}"#,
+        Assignee {
+            id: Id::from("a"),
+            generic_variables: Vec::new()
+        };
+        "basic assignee"
+    )]
+    #[test_case(
+        r#"{"id":"f","generic_variables":["T","U"]}"#,
+        Assignee {
+            id: Id::from("f"),
+            generic_variables: vec![
+                Id::from("T"),
+                Id::from("U")
+            ]
+        };
+        "generic assignee"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,

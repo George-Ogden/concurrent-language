@@ -1,5 +1,6 @@
 import pytest
 from ast_nodes import (
+    Assignee,
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
@@ -180,6 +181,8 @@ from ast_nodes import (
                 "index": 1,
             },
         ),
+        (Assignee("a", []), {"id": "a", "generic_variables": []}),
+        (Assignee("f", ["T", "U"]), {"id": "f", "generic_variables": ["T", "U"]}),
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:
