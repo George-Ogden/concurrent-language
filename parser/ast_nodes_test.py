@@ -5,6 +5,7 @@ from ast_nodes import (
     ASTNode,
     AtomicType,
     AtomicTypeEnum,
+    Block,
     Boolean,
     ElementAccess,
     EmptyTypeDefinition,
@@ -161,7 +162,10 @@ from ast_nodes import (
         ),
         (
             GenericVariable("foo", [Typename("T")]),
-            {"name": "foo", "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}]},
+            {
+                "name": "foo",
+                "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}],
+            },
         ),
         (
             ElementAccess(TupleExpression([Integer(0)]), 0),
@@ -201,6 +205,28 @@ from ast_nodes import (
                         "type_instances": [{"GenericType": {"id": "T", "type_variables": []}}],
                     }
                 },
+            },
+        ),
+        (
+            Block(
+                [
+                    Assignment(Assignee("a", []), Variable("x")),
+                    Assignment(Assignee("b", []), Integer(3)),
+                ],
+                Integer(4),
+            ),
+            {
+                "assignments": [
+                    {
+                        "assignee": {"id": "a", "generic_variables": []},
+                        "expression": {"GenericVariable": {"name": "x", "type_instances": []}},
+                    },
+                    {
+                        "assignee": {"id": "b", "generic_variables": []},
+                        "expression": {"Integer": {"value": 3}},
+                    },
+                ],
+                "expression": {"Integer": {"value": 4}},
             },
         ),
     ],

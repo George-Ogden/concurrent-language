@@ -227,6 +227,12 @@ struct Assignment {
     expression: Box<Expression>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct Block {
+    assignments: Vec<Assignment>,
+    expression: Box<Expression>,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -516,6 +522,41 @@ mod tests {
             }.into())
         };
         "generic variable assignment"
+    )]
+    #[test_case(
+        r#"{"assignments":[],"expression":{"Integer":{"value":3}}}"#,
+        Block {
+            assignments: Vec::new(),
+            expression: Box::new(Integer{
+                value: 3
+            }.into())
+        };
+        "assignment-free block"
+    )]
+    #[test_case(
+        r#"{"assignments":[{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"name":"x","type_instances":[]}}},{"assignee":{"id":"b","generic_variables":[]},"expression":{"Integer":{"value":3}}}],"expression":{"Integer":{"value":4}}}"#,
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: Box::new(Assignee {
+                        id: Id::from("a"),
+                        generic_variables: Vec::new()
+                    }),
+                    expression: Box::new(Variable("x").into())
+                },
+                Assignment {
+                    assignee: Box::new(Assignee {
+                        id: Id::from("b"),
+                        generic_variables: Vec::new()
+                    }),
+                    expression: Box::new(Integer{value:3}.into())
+                },
+            ],
+            expression: Box::new(Integer{
+                value: 4
+            }.into())
+        };
+        "block"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
