@@ -118,3 +118,35 @@ impl TypedExpression {
         }
     }
 }
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct ParametricExpression {
+    pub expression: TypedExpression,
+    pub num_parameters: u32,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedAssignment {
+    pub id: Id,
+    pub expression: ParametricExpression,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedBlock {
+    pub assignments: Vec<TypedAssignment>,
+    pub expression: Box<TypedExpression>,
+}
+
+impl TypedBlock {
+    pub fn type_(&self) -> Type {
+        return self.expression.type_();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeCheckError {
+    DefaultError(String),
+    DuplicatedNameError { duplicate: String, type_: String },
+    InvalidConditionError { condition: TypedExpression },
+    InvalidAccessError { expression: TypedExpression },
+}

@@ -207,10 +207,10 @@ pub struct ElementAccess {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct IfExpression {
-    condition: Box<Expression>,
-    true_block: Block,
-    false_block: Block,
+pub struct IfExpression {
+    pub condition: Box<Expression>,
+    pub true_block: Block,
+    pub false_block: Block,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -243,21 +243,35 @@ pub enum Expression {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct Assignee {
-    id: Id,
-    generic_variables: Vec<Id>,
+pub struct Assignee {
+    pub id: Id,
+    pub generic_variables: Vec<Id>,
+}
+
+pub fn VariableAssignee(id: &str) -> Assignee {
+    Assignee {
+        id: Id::from(id),
+        generic_variables: Vec::new(),
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct Assignment {
-    assignee: Box<Assignee>,
-    expression: Box<Expression>,
+pub struct Assignment {
+    pub assignee: Box<Assignee>,
+    pub expression: Box<Expression>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct Block {
-    assignments: Vec<Assignment>,
-    expression: Box<Expression>,
+pub struct Block {
+    pub assignments: Vec<Assignment>,
+    pub expression: Box<Expression>,
+}
+
+pub fn ExpressionBlock(expression: Expression) -> Block {
+    return Block {
+        assignments: Vec::new(),
+        expression: Box::new(expression),
+    };
 }
 
 #[cfg(test)]
@@ -524,10 +538,7 @@ mod tests {
     #[test_case(
         r#"{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"id":"b","type_instances":[]}}}"#,
         Assignment {
-            assignee: Box::new(Assignee {
-                id: Id::from("a"),
-                generic_variables: Vec::new()
-            }),
+            assignee: Box::new(VariableAssignee("a")),
             expression: Box::new(Variable("b").into())
         };
         "variable assignment"
@@ -552,12 +563,8 @@ mod tests {
     )]
     #[test_case(
         r#"{"assignments":[],"expression":{"Integer":{"value":3}}}"#,
-        Block {
-            assignments: Vec::new(),
-            expression: Box::new(Integer{
-                value: 3
-            }.into())
-        };
+        ExpressionBlock(Integer{value:3}.into())
+        ;
         "assignment-free block"
     )]
     #[test_case(
@@ -565,17 +572,11 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("a"),
-                        generic_variables: Vec::new()
-                    }),
+                    assignee: Box::new(VariableAssignee("a")),
                     expression: Box::new(Variable("x").into())
                 },
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("b"),
-                        generic_variables: Vec::new()
-                    }),
+                    assignee: Box::new(VariableAssignee("b")),
                     expression: Box::new(Integer{value:3}.into())
                 },
             ],
@@ -591,18 +592,8 @@ mod tests {
             condition: Box::new(
                 Boolean{ value: true }.into()
             ),
-            true_block: Block {
-                assignments: Vec::new(),
-                expression: Box::new(
-                    Integer{ value: 1 }.into()
-                )
-            },
-            false_block: Block {
-                assignments: Vec::new(),
-                expression: Box::new(
-                    Integer{ value: -1 }.into()
-                )
-            }
+            true_block: ExpressionBlock(Integer{ value: 1 }.into()),
+            false_block: ExpressionBlock(Integer{ value: -1 }.into()),
         };
         "flat if expression"
     )]
@@ -614,48 +605,28 @@ mod tests {
                     condition: Box::new(
                         Boolean{ value: true }.into()
                     ),
-                    true_block: Block {
-                        assignments: Vec::new(),
-                        expression: Box::new(
-                            Boolean{ value: true }.into()
-                        )
-                    },
-                    false_block: Block {
-                        assignments: Vec::new(),
-                        expression: Box::new(
-                            Boolean{ value: false }.into()
-                        )
-                    }
+                    true_block: ExpressionBlock(
+                        Boolean{ value: true }.into()
+                    )
+                    ,
+                    false_block: ExpressionBlock(
+                        Boolean{ value: false }.into()
+                    )
+
                 }.into()
             ),
-            true_block: Block {
-                assignments: Vec::new(),
-                expression: Box::new(
-                    IfExpression {
+            true_block: ExpressionBlock(IfExpression {
                         condition: Box::new(
                             Boolean{ value: false }.into()
                         ),
-                        true_block: Block {
-                            assignments: Vec::new(),
-                            expression: Box::new(
-                                Integer{ value: 1 }.into()
-                            )
-                        },
-                        false_block: Block {
-                            assignments: Vec::new(),
-                            expression: Box::new(
-                                Integer{ value: 0 }.into()
-                            )
-                        }
-                    }.into()
-                )
-            },
-            false_block: Block {
-                assignments: Vec::new(),
-                expression: Box::new(
-                    Integer{ value: -1 }.into()
-                )
-            }
+                        true_block: ExpressionBlock(
+                            Integer{ value: 1 }.into()
+                        ),
+                        false_block: ExpressionBlock(
+                            Integer{ value: 0 }.into()
+                        )
+                    }.into()),
+            false_block: ExpressionBlock(Integer{ value: -1 }.into()),
         };
         "nested if expression"
     )]
@@ -663,10 +634,7 @@ mod tests {
         r#"{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}"#,
         MatchItem {
             type_name: Id::from("Some"),
-            assignee: Some(Assignee{
-                id: Id::from("x"),
-                generic_variables: Vec::new(),
-            }),
+            assignee: Some(VariableAssignee("x")),
         };
         "present match item"
     )]
@@ -688,10 +656,7 @@ mod tests {
                 },
                 MatchItem {
                     type_name: Id::from("Some"),
-                    assignee: Some(Assignee{
-                        id: Id::from("x"),
-                        generic_variables: Vec::new(),
-                    }),
+                    assignee: Some(VariableAssignee("x")),
                 }
             ],
             block: Block{
@@ -712,10 +677,7 @@ mod tests {
                     matches: vec![
                         MatchItem {
                             type_name: Id::from("Some"),
-                            assignee: Some(Assignee{
-                                id: Id::from("x"),
-                                generic_variables: Vec::new(),
-                            }),
+                            assignee: Some(VariableAssignee("x")),
                         }
                     ],
                     block: Block{
@@ -752,10 +714,7 @@ mod tests {
                     matches: vec![
                         MatchItem {
                             type_name: Id::from("Some"),
-                            assignee: Some(Assignee{
-                                id: Id::from("x"),
-                                generic_variables: Vec::new(),
-                            }),
+                            assignee: Some(VariableAssignee("x")),
                         }
                     ],
                     block: Block{

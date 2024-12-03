@@ -1,10 +1,13 @@
 use crate::type_check_nodes::{
-    ParametricType, Type, TypedElementAccess, TypedExpression, TypedTuple, TypedVariable,
+    ParametricExpression, ParametricType, Type, TypeCheckError, TypedAssignment, TypedBlock,
+    TypedElementAccess, TypedExpression, TypedTuple, TypedVariable, TYPE_BOOL,
 };
+use crate::utils::UniqueError;
 use crate::{
-    AtomicType, AtomicTypeEnum, Definition, ElementAccess, EmptyTypeDefinition, Expression,
-    FunctionType, GenericType, GenericTypeVariable, GenericVariable, Id, OpaqueTypeDefinition,
-    TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
+    utils, AtomicType, AtomicTypeEnum, Block, Definition, ElementAccess, EmptyTypeDefinition,
+    Expression, FunctionType, GenericType, GenericTypeVariable, GenericVariable, Id, IfExpression,
+    OpaqueTypeDefinition, TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance,
+    UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -17,17 +20,24 @@ use strum::IntoEnumIterator;
 
 type TypeReferencesIndex = HashMap<*mut ParametricType, Id>;
 
-struct TypeDefinitions(HashMap<Id, Rc<RefCell<ParametricType>>>);
+type K = Id;
+type V = Rc<RefCell<ParametricType>>;
+
+#[derive(Clone)]
+struct TypeDefinitions(HashMap<K, V>);
 
 impl TypeDefinitions {
     pub fn new() -> Self {
-        TypeDefinitions(HashMap::new())
+        Self(HashMap::new())
     }
-    pub fn get(&self, k: &Id) -> Option<&Rc<RefCell<ParametricType>>> {
+    pub fn get(&self, k: &Id) -> Option<&V> {
         self.0.get(k)
     }
-    pub fn get_mut(&mut self, k: &Id) -> Option<&mut Rc<RefCell<ParametricType>>> {
+    pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
         self.0.get_mut(k)
+    }
+    pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+        self.0.insert(k, v)
     }
     fn references_index(&self) -> TypeReferencesIndex {
         self.0
@@ -267,7 +277,7 @@ impl TypeChecker {
         type_instance: &TypeInstance,
         type_definitions: &TypeDefinitions,
         generic_variables: &Vec<Id>,
-    ) -> Result<Type, String> {
+    ) -> Result<Type, TypeCheckError> {
         Ok(match type_instance {
             TypeInstance::AtomicType(AtomicType {
                 type_: atomic_type_enum,
@@ -278,10 +288,10 @@ impl TypeChecker {
                     if type_variables == &Vec::new() {
                         Type::Variable(position as u32)
                     } else {
-                        return Err(format!(
+                        return Err(TypeCheckError::DefaultError(format!(
                             "Attempt to instantiate type variable {} with {:?}",
                             id, type_variables
-                        ));
+                        )));
                     }
                 } else if let Some(reference) = type_definitions.get(id) {
                     if type_variables.len() as u32 != reference.borrow().num_parameters {
@@ -289,13 +299,13 @@ impl TypeChecker {
                             .references_index()
                             .get(&reference.as_ptr())
                             .cloned();
-                        return Err(format!(
+                        return Err(TypeCheckError::DefaultError(format!(
                             "{} accepts {} type parameters but called with {:?} ({})",
                             type_name.unwrap_or(String::from("unknown")),
                             reference.borrow().num_parameters,
                             type_variables,
                             type_variables.len()
-                        ));
+                        )));
                     }
                     Type::Instantiation(
                         reference.clone(),
@@ -311,7 +321,10 @@ impl TypeChecker {
                             .collect::<Result<_, _>>()?,
                     )
                 } else {
-                    return Err(format!("{} is not a valid type or generic name", id));
+                    return Err(TypeCheckError::DefaultError(format!(
+                        "{} is not a valid type or generic name",
+                        id
+                    )));
                 }
             }
             TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
@@ -337,7 +350,9 @@ impl TypeChecker {
             ),
         })
     }
-    fn check_type_definitions(definitions: &Vec<Definition>) -> Result<TypeDefinitions, String> {
+    fn check_type_definitions(
+        definitions: &Vec<Definition>,
+    ) -> Result<TypeDefinitions, TypeCheckError> {
         let type_names = definitions.iter().map(Definition::get_id);
         let all_type_parameters = definitions.iter().map(Definition::get_parameters);
         let predefined_type_names = AtomicTypeEnum::iter()
@@ -351,17 +366,26 @@ impl TypeChecker {
             let type_name_counts = type_names.collect::<Counter<_>>();
             for (nam, count) in type_name_counts {
                 if predefined_type_names.contains(nam) {
-                    return Err(format!("Attempt to override built-in type name {}", nam));
+                    return Err(TypeCheckError::DefaultError(format!(
+                        "Attempt to override built-in type name {}",
+                        nam
+                    )));
                 }
                 if count > 1 {
-                    return Err(format!("Duplicated type name {}", nam));
+                    return Err(TypeCheckError::DefaultError(format!(
+                        "Duplicated type name {}",
+                        nam
+                    )));
                 }
             }
             panic!("Type names were not unique but all counts were < 2");
         }
         for (type_name, type_parameters) in type_names.clone().zip(all_type_parameters.clone()) {
             if type_parameters.contains(type_name) {
-                return Err(format!("Type {} contains itself as a parameter", type_name));
+                return Err(TypeCheckError::DefaultError(format!(
+                    "Type {} contains itself as a parameter",
+                    type_name
+                )));
             }
         }
         for type_parameters in all_type_parameters.clone() {
@@ -373,13 +397,16 @@ impl TypeChecker {
                 let type_parameter_counts = type_parameters.into_iter().collect::<Counter<_>>();
                 for (parameter, count) in type_parameter_counts {
                     if predefined_type_names.contains(&parameter) {
-                        return Err(format!(
+                        return Err(TypeCheckError::DefaultError(format!(
                             "Attempt to override built-in type name {}",
                             parameter
-                        ));
+                        )));
                     }
                     if count > 1 {
-                        return Err(format!("Duplicated parameter name {}", parameter));
+                        return Err(TypeCheckError::DefaultError(format!(
+                            "Duplicated parameter name {}",
+                            parameter
+                        )));
                     }
                 }
                 panic!("Type names were not unique but all counts were < 2");
@@ -424,14 +451,14 @@ impl TypeChecker {
                     items,
                 }) => {
                     let variant_names = items.iter().map(|item| &item.id);
-                    if !variant_names.clone().all_unique() {
-                        let variant_name_counts = variant_names.collect::<Counter<_>>();
-                        for (name, count) in variant_name_counts {
-                            if count > 1 {
-                                return Err(format!("Duplicated variant name {}", name));
-                            }
+                    match utils::check_unique(variant_names.clone()) {
+                        Ok(()) => {}
+                        Err(UniqueError { duplicate }) => {
+                            return Err(TypeCheckError::DuplicatedNameError {
+                                duplicate: duplicate.clone(),
+                                type_: String::from("variant name"),
+                            })
                         }
-                        panic!("Variant names were not unique but all counts were < 2");
                     }
                     let variants = items.iter().map(|item| {
                         item.type_
@@ -471,7 +498,7 @@ impl TypeChecker {
     fn check_expression(
         expression: &Expression,
         context: &TypeContext,
-    ) -> Result<TypedExpression, String> {
+    ) -> Result<TypedExpression, TypeCheckError> {
         Ok(match expression {
             Expression::Integer(i) => i.clone().into(),
             Expression::Boolean(b) => b.clone().into(),
@@ -487,7 +514,7 @@ impl TypeChecker {
                 match variable_type {
                     Some(type_) => {
                         if type_instances.len() != type_.borrow().num_parameters as usize {
-                            return Err(format!("wrong number parameters to instantiate type {} (expected {} got {})", id, type_.borrow().num_parameters, type_instances.len()))
+                            return Err(TypeCheckError::DefaultError(format!("wrong number parameters to instantiate type {} (expected {} got {})", id, type_.borrow().num_parameters, type_instances.len())))
                         }
                         let type_ = if type_instances.len() == 0 {
                             type_.borrow().type_.clone()
@@ -503,7 +530,7 @@ impl TypeChecker {
                             type_
                         }
                     }.into(),
-                    None => return Err(format!("{} not found in scope", id)),
+                    None => return Err(TypeCheckError::DefaultError(format!("{} not found in scope", id))),
                 }
             }
             Expression::ElementAccess(ElementAccess { expression, index }) => {
@@ -511,12 +538,12 @@ impl TypeChecker {
                 match typed_expression.type_() {
                     Type::Tuple(types) => {
                         if *index as usize >= types.len() {
-                            return Err(format!(
+                            return Err(TypeCheckError::DefaultError(format!(
                                 "Cannot access element {}, {:?} contains only {} elements",
                                 index,
                                 expression,
                                 types.len()
-                            ));
+                            )));
                         };
                         TypedElementAccess {
                             expression: Box::new(typed_expression),
@@ -525,14 +552,69 @@ impl TypeChecker {
                         .into()
                     }
                     _ => {
-                        return Err(format!(
-                            "Cannot perform element access on {:?}, expected tuple type",
-                            *expression
-                        ))
+                        return Err(TypeCheckError::InvalidAccessError {
+                            expression: typed_expression,
+                        })
                     }
                 }
             }
+            Expression::IfExpression(IfExpression {
+                condition,
+                true_block,
+                false_block,
+            }) => {
+                let condition = TypeChecker::check_expression(&*condition, context)?;
+                if condition.type_() != TYPE_BOOL {
+                    return Err(TypeCheckError::InvalidConditionError {
+                        condition: condition,
+                    });
+                }
+                todo!()
+            }
             _ => todo!(),
+        })
+    }
+    fn check_block(block: &Block, context: &TypeContext) -> Result<TypedBlock, TypeCheckError> {
+        let mut new_context = context.clone();
+        let mut assignments = Vec::new();
+        let assignment_names = block
+            .assignments
+            .iter()
+            .map(|assignment| assignment.assignee.id.clone());
+        match utils::check_unique(assignment_names) {
+            Ok(()) => {}
+            Err(UniqueError { duplicate }) => {
+                return Err(TypeCheckError::DuplicatedNameError {
+                    duplicate,
+                    type_: String::from("assignment names"),
+                })
+            }
+        }
+        for assignment in &block.assignments {
+            let typed_expression =
+                TypeChecker::check_expression(&assignment.expression, &new_context)?;
+            let assignment = TypedAssignment {
+                id: assignment.assignee.id.clone(),
+                expression: ParametricExpression {
+                    expression: typed_expression,
+                    num_parameters: assignment.assignee.generic_variables.len() as u32,
+                },
+            };
+            new_context.insert(
+                assignment.id.clone(),
+                Rc::new(RefCell::new(ParametricType {
+                    type_: (assignment.expression.expression.type_()),
+                    num_parameters: assignment.expression.num_parameters,
+                })),
+            );
+            assignments.push(assignment);
+        }
+        Ok(TypedBlock {
+            assignments: assignments,
+            expression: Box::new(TypeChecker::check_expression(
+                &block.expression,
+                &new_context,
+            )?),
         })
     }
 }
@@ -542,8 +624,9 @@ mod tests {
 
     use crate::{
         type_check_nodes::{TYPE_BOOL, TYPE_INT, TYPE_UNIT},
-        Boolean, ElementAccess, GenericTypeVariable, Integer, TupleExpression, TypeItem,
-        TypeVariable, Typename, Variable, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        Assignment, Block, Boolean, ElementAccess, ExpressionBlock, GenericTypeVariable,
+        IfExpression, Integer, TupleExpression, TypeItem, TypeVariable, Typename, Variable,
+        VariableAssignee, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -1532,12 +1615,136 @@ mod tests {
         )]);
         "nested element access"
     )]
+    #[test_case(
+        Variable("empty").into(),
+        Some(Type::Union([(
+            Id::from("Empty"),
+            None
+        )].into())),
+        TypeContext::from([(
+            Id::from("empty"),
+            Type::Union([(
+                Id::from("Empty"),
+                None
+            )].into())
+        )]);
+        "variable with empty type"
+    )]
     fn test_check_expressions(
         expression: Expression,
         expected_type: Option<Type>,
         context: TypeContext,
     ) {
         let type_check_result = TypeChecker::check_expression(&expression, &context);
+        match expected_type {
+            Some(type_) => match &type_check_result {
+                Ok(typed_expression) => {
+                    assert_eq!(typed_expression.type_(), type_)
+                }
+                Err(msg) => {
+                    dbg!(msg);
+                    assert!(&type_check_result.is_ok());
+                }
+            },
+            None => {
+                if type_check_result.is_ok() {
+                    dbg!(&type_check_result);
+                }
+                assert!(&type_check_result.is_err());
+            }
+        }
+    }
+
+    #[test_case(
+        ExpressionBlock(Boolean{value: true}.into()),
+        Some(TYPE_BOOL),
+        TypeContext::new();
+        "block no assignments"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: Box::new(VariableAssignee("x")),
+                    expression: Box::new(Boolean{value: true}.into())
+                }
+            ],
+            expression: Box::new(Boolean{value: true}.into())
+        },
+        Some(TYPE_BOOL),
+        TypeContext::new();
+        "block unused assignment"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: Box::new(VariableAssignee("x")),
+                    expression: Box::new(Boolean{value: true}.into())
+                }
+            ],
+            expression: Box::new(Variable("x").into())
+        },
+        Some(TYPE_BOOL),
+        TypeContext::new();
+        "block used assignment"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: Box::new(VariableAssignee("x")),
+                    expression: Box::new(Integer{value: 3}.into())
+                },
+                Assignment{
+                    assignee: Box::new(VariableAssignee("y")),
+                    expression: Box::new(Variable("x").into())
+                },
+            ],
+            expression: Box::new(Variable("y").into())
+        },
+        Some(TYPE_INT),
+        TypeContext::new();
+        "block multiple assignments"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: Box::new(VariableAssignee("x")),
+                    expression: Box::new(Integer{value: 3}.into())
+                },
+                Assignment{
+                    assignee: Box::new(VariableAssignee("x")),
+                    expression: Box::new(Integer{value: 5}.into())
+                },
+            ],
+            expression: Box::new(Integer{value: 7}.into())
+        },
+        None,
+        TypeContext::new();
+        "block duplicate assignments"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: Box::new(VariableAssignee("y")),
+                    expression: Box::new(Variable("x").into())
+                },
+                Assignment{
+                    assignee: Box::new(VariableAssignee("x")),
+                    expression: Box::new(Integer{value: 3}.into())
+                },
+            ],
+            expression: Box::new(Variable("y").into())
+        },
+        None,
+        TypeContext::new();
+        "block flipped assignments"
+    )]
+    fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
+        let type_check_result = TypeChecker::check_block(&block, &context);
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {

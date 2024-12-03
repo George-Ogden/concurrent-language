@@ -1,6 +1,7 @@
 mod ast_nodes;
 mod type_check;
 mod type_check_nodes;
+mod utils;
 
 use ast_nodes::*;
 use std::io::{self, Read};
