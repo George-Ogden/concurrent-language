@@ -56,7 +56,7 @@ class Import(ASTNode): ...
 
 @dataclass
 class FunctionType(ASTNode):
-    argument_type: TypeInstance
+    argument_types: list[TypeInstance]
     return_type: TypeInstance
 
 

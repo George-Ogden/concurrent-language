@@ -1,4 +1,4 @@
-use crate::{AtomicTypeEnum, Boolean, Id, Integer, TupleType};
+use crate::{AtomicTypeEnum, Block, Boolean, Id, Integer};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -36,7 +36,7 @@ pub enum Type {
     Union(HashMap<Id, Option<Type>>),
     Instantiation(Rc<RefCell<ParametricType>>, Vec<Type>),
     Tuple(Vec<Type>),
-    Function(Box<Type>, Box<Type>),
+    Function(Vec<Type>, Box<Type>),
     Variable(u32),
 }
 
@@ -96,6 +96,22 @@ pub struct TypedIf {
     pub false_block: TypedBlock,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct PartiallyTypedFunctionDefinition {
+    pub parameter_ids: Vec<Id>,
+    pub parameter_types: Vec<Type>,
+    pub return_type: Box<Type>,
+    pub body: Block,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedFunctionDefinition {
+    pub parameter_ids: Vec<Id>,
+    pub parameter_types: Vec<Type>,
+    pub return_type: Box<Type>,
+    pub body: TypedBlock,
+}
+
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
@@ -104,6 +120,8 @@ pub enum TypedExpression {
     TypedVariable(TypedVariable),
     TypedElementAccess(TypedElementAccess),
     TypedIf(TypedIf),
+    PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition),
+    TypedFunctionDefinition(TypedFunctionDefinition),
 }
 
 impl TypedExpression {
@@ -127,6 +145,12 @@ impl TypedExpression {
                 true_block,
                 false_block: _,
             }) => true_block.type_(),
+            Self::PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition {
+                parameter_ids: _,
+                parameter_types,
+                return_type,
+                body: _,
+            }) => Type::Function(parameter_types.clone(), return_type.clone()),
             _ => todo!(),
         }
     }
@@ -172,5 +196,9 @@ pub enum TypeCheckError {
     NonMatchingIfBlocksError {
         true_block: TypedBlock,
         false_block: TypedBlock,
+    },
+    FunctionReturnTypeError {
+        return_type: Type,
+        body: TypedBlock,
     },
 }

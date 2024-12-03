@@ -50,7 +50,7 @@ pub struct TupleType {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct FunctionType {
-    pub argument_type: Box<TypeInstance>,
+    pub argument_types: Vec<TypeInstance>,
     pub return_type: Box<TypeInstance>,
 }
 
@@ -234,6 +234,19 @@ struct MatchExpression {
     blocks: Vec<MatchBlock>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct TypedAssignee {
+    pub assignee: Box<Assignee>,
+    pub type_: TypeInstance,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct FunctionDefinition {
+    pub parameters: Vec<TypedAssignee>,
+    pub return_type: TypeInstance,
+    pub body: Block,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants, Clone)]
 pub enum Expression {
     Integer(Integer),
@@ -243,6 +256,7 @@ pub enum Expression {
     ElementAccess(ElementAccess),
     IfExpression(IfExpression),
     MatchExpression(MatchExpression),
+    FunctionDefinition(FunctionDefinition),
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -317,18 +331,24 @@ mod tests {
         "non-empty tuple type"
     )]
     #[test_case(
-        r#"{"argument_type":{"TupleType":{"types":[{"AtomicType":{"type_":"INT"}}]}},"return_type":{"AtomicType":{"type_":"INT"}}}"#,
+        r#"{"argument_types":[{"AtomicType":{"type_":"INT"}}],"return_type":{"AtomicType":{"type_":"INT"}}}"#,
         FunctionType{
-            argument_type: Box::new(
-                TupleType{
-                    types: vec![ATOMIC_TYPE_INT.into()]
-                }.into()
-            ),
+            argument_types: vec![ATOMIC_TYPE_INT.into()],
             return_type: Box::new(
                 ATOMIC_TYPE_INT.into()
             )
         };
         "function type"
+    )]
+    #[test_case(
+        r#"{"argument_types":[{"TupleType":{"types":[{"AtomicType":{"type_":"INT"}}]}}],"return_type":{"TupleType":{"types":[]}}}"#,
+        FunctionType{
+            argument_types: vec![TupleType{types: vec![ATOMIC_TYPE_INT.into()]}.into()],
+            return_type: Box::new(
+                TupleType{types: Vec::new()}.into()
+            )
+        };
+        "function type single tuple argument"
     )]
     #[test_case(
         r#"{"id":"map","type_variables":[{"AtomicType":{"type_":"INT"}},{"AtomicType":{"type_":"BOOL"}}]}"#,
@@ -342,14 +362,14 @@ mod tests {
         "generic type"
     )]
     #[test_case(
-        r#"{"id":"map","type_variables":[{"FunctionType":{"argument_type":{"AtomicType":{"type_":"INT"}},"return_type":{"AtomicType":{"type_":"INT"}}}},{"GenericType":{"id":"foo","type_variables":[]}}]}"#,
+        r#"{"id":"map","type_variables":[{"FunctionType":{"argument_types":[{"AtomicType":{"type_":"INT"}}],"return_type":{"AtomicType":{"type_":"INT"}}}},{"GenericType":{"id":"foo","type_variables":[]}}]}"#,
         GenericType{
             id: Id::from("map"),
             type_variables: vec![
                 FunctionType{
-                    argument_type: Box::new(
+                    argument_types: vec![
                         ATOMIC_TYPE_INT.into()
-                    ),
+                    ],
                     return_type: Box::new(
                         ATOMIC_TYPE_INT.into()
                     )

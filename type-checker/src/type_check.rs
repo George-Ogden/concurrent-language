@@ -1,13 +1,14 @@
 use crate::type_check_nodes::{
-    ParametricExpression, ParametricType, Type, TypeCheckError, TypedAssignment, TypedBlock,
-    TypedElementAccess, TypedExpression, TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
+    ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type, TypeCheckError,
+    TypedAssignment, TypedBlock, TypedElementAccess, TypedExpression, TypedFunctionDefinition,
+    TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, Definition, ElementAccess, EmptyTypeDefinition,
-    Expression, FunctionType, GenericType, GenericTypeVariable, GenericVariable, Id, IfExpression,
-    OpaqueTypeDefinition, TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance,
-    UnionTypeDefinition,
+    Expression, FunctionDefinition, FunctionType, GenericType, GenericTypeVariable,
+    GenericVariable, Id, IfExpression, OpaqueTypeDefinition, TransparentTypeDefinition,
+    TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use counter::Counter;
 use itertools::Itertools;
@@ -100,8 +101,8 @@ impl TypeDefinitions {
                 TypeDefinitions::type_equality(
                     self_references_index,
                     other_references_index,
-                    a1,
-                    a2,
+                    &Type::Tuple(a1.clone()),
+                    &Type::Tuple(a2.clone()),
                 ) && TypeDefinitions::type_equality(
                     self_references_index,
                     other_references_index,
@@ -228,11 +229,14 @@ impl fmt::Debug for DebugTypeWrapper {
                         .collect_vec()
                 )
             }
-            Type::Function(argument_type, return_type) => {
+            Type::Function(argument_types, return_type) => {
                 write!(
                     f,
                     "Function({:?},{:?})",
-                    DebugTypeWrapper(*argument_type, references_index.clone()),
+                    argument_types
+                        .into_iter()
+                        .map(|type_| DebugTypeWrapper(type_, references_index.clone()))
+                        .collect_vec(),
                     DebugTypeWrapper(*return_type, references_index.clone()),
                 )
             }
@@ -334,14 +338,15 @@ impl TypeChecker {
                     .collect::<Result<_, _>>()?,
             ),
             TypeInstance::FunctionType(FunctionType {
-                argument_type,
+                argument_types,
                 return_type,
             }) => Type::Function(
-                Box::new(TypeChecker::convert_ast_type(
-                    &argument_type,
-                    type_definitions,
-                    generic_variables,
-                )?),
+                argument_types
+                    .iter()
+                    .map(|type_| {
+                        TypeChecker::convert_ast_type(type_, type_definitions, generic_variables)
+                    })
+                    .collect::<Result<_, _>>()?,
                 Box::new(TypeChecker::convert_ast_type(
                     &return_type,
                     type_definitions,
@@ -582,6 +587,45 @@ impl TypeChecker {
                 }
                 .into()
             }
+            Expression::FunctionDefinition(FunctionDefinition {
+                parameters,
+                return_type,
+                body,
+            }) => {
+                let parameter_ids = parameters
+                    .iter()
+                    .map(|typed_assignee| typed_assignee.assignee.id.clone())
+                    .collect_vec();
+                if let Err(UniqueError { duplicate }) =
+                    utils::check_unique::<_, &String>(parameter_ids.iter())
+                {
+                    return Err(TypeCheckError::DuplicatedNameError {
+                        duplicate: duplicate.clone(),
+                        type_: String::from("function parameter"),
+                    });
+                }
+                let parameter_types = parameters
+                    .iter()
+                    .map(|typed_assignee| {
+                        TypeChecker::convert_ast_type(
+                            &typed_assignee.type_,
+                            &TypeDefinitions::new(),
+                            &Vec::new(),
+                        )
+                    })
+                    .collect::<Result<_, _>>()?;
+                PartiallyTypedFunctionDefinition {
+                    parameter_types,
+                    parameter_ids,
+                    return_type: Box::new(TypeChecker::convert_ast_type(
+                        return_type,
+                        &TypeDefinitions::new(),
+                        &Vec::new(),
+                    )?),
+                    body: body.clone(),
+                }
+                .into()
+            }
             _ => todo!(),
         })
     }
@@ -597,7 +641,7 @@ impl TypeChecker {
             Err(UniqueError { duplicate }) => {
                 return Err(TypeCheckError::DuplicatedNameError {
                     duplicate,
-                    type_: String::from("assignment names"),
+                    type_: String::from("assignment name"),
                 })
             }
         }
@@ -620,12 +664,117 @@ impl TypeChecker {
             );
             assignments.push(assignment);
         }
-        Ok(TypedBlock {
+        let typed_expression = TypeChecker::check_expression(&block.expression, &new_context)?;
+        let block = TypedBlock {
             assignments,
-            expression: Box::new(TypeChecker::check_expression(
-                &block.expression,
-                &new_context,
+            expression: Box::new(typed_expression),
+        };
+        TypeChecker::check_functions_in_block(&block, &new_context)
+    }
+    fn check_functions_in_expression(
+        expression: &TypedExpression,
+        context: &TypeContext,
+    ) -> Result<TypedExpression, TypeCheckError> {
+        Ok(match expression {
+            TypedExpression::Integer(_)
+            | TypedExpression::Boolean(_)
+            | TypedExpression::TypedVariable(_) => expression.clone(),
+            TypedExpression::TypedTuple(TypedTuple { expressions }) => {
+                TypedExpression::TypedTuple(TypedTuple {
+                    expressions: expressions
+                        .iter()
+                        .map(|expression| {
+                            TypeChecker::check_functions_in_expression(expression, context)
+                        })
+                        .collect::<Result<_, _>>()?,
+                })
+            }
+            TypedExpression::TypedElementAccess(TypedElementAccess { expression, index }) => {
+                TypedExpression::TypedElementAccess(TypedElementAccess {
+                    expression: Box::new(TypeChecker::check_functions_in_expression(
+                        &*expression,
+                        context,
+                    )?),
+                    index: *index,
+                })
+            }
+            TypedExpression::TypedIf(TypedIf {
+                condition,
+                true_block,
+                false_block,
+            }) => TypedExpression::TypedIf(TypedIf {
+                condition: Box::new(TypeChecker::check_functions_in_expression(
+                    condition, context,
+                )?),
+                true_block: TypeChecker::check_functions_in_block(true_block, context)?,
+                false_block: TypeChecker::check_functions_in_block(false_block, context)?,
+            }),
+            TypedExpression::PartiallyTypedFunctionDefinition(
+                partially_typed_function_definition,
+            ) => TypedExpression::TypedFunctionDefinition(TypeChecker::fully_type_function(
+                partially_typed_function_definition,
+                context,
             )?),
+            TypedExpression::TypedFunctionDefinition(_) => {
+                panic!("Typed function found when only partially typed functions are expected.")
+            }
+        })
+    }
+    fn check_functions_in_block(
+        block: &TypedBlock,
+        context: &TypeContext,
+    ) -> Result<TypedBlock, TypeCheckError> {
+        Ok(TypedBlock {
+            assignments: block
+                .assignments
+                .iter()
+                .map(|assignment| {
+                    TypeChecker::check_functions_in_expression(
+                        &assignment.expression.expression,
+                        context,
+                    )
+                    .map(|expression| TypedAssignment {
+                        id: assignment.id.clone(),
+                        expression: ParametricExpression {
+                            expression,
+                            num_parameters: assignment.expression.num_parameters,
+                        },
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+            expression: Box::new(TypeChecker::check_functions_in_expression(
+                &block.expression,
+                context,
+            )?),
+        })
+    }
+    fn fully_type_function(
+        function_definition: &PartiallyTypedFunctionDefinition,
+        context: &TypeContext,
+    ) -> Result<TypedFunctionDefinition, TypeCheckError> {
+        let mut new_context = context.clone();
+        for (parameter_name, parameter_type) in function_definition
+            .parameter_ids
+            .iter()
+            .zip(function_definition.parameter_types.iter())
+        {
+            new_context.insert(
+                parameter_name.clone(),
+                Rc::new(RefCell::new(parameter_type.clone().into())),
+            );
+        }
+        let body = TypeChecker::check_block(&function_definition.body, &new_context)?;
+        if *function_definition.return_type != body.type_() {
+            return Err(TypeCheckError::FunctionReturnTypeError {
+                return_type: *function_definition.return_type.clone(),
+                body,
+            });
+        }
+        Ok(TypedFunctionDefinition {
+            parameter_ids: function_definition.parameter_ids.clone(),
+            parameter_types: function_definition.parameter_types.clone(),
+            return_type: function_definition.return_type.clone(),
+            body,
         })
     }
 }
@@ -635,9 +784,9 @@ mod tests {
 
     use crate::{
         type_check_nodes::{TYPE_BOOL, TYPE_INT, TYPE_UNIT},
-        Assignment, Block, Boolean, ElementAccess, ExpressionBlock, GenericTypeVariable,
-        IfExpression, Integer, TupleExpression, TypeItem, TypeVariable, Typename, Variable,
-        VariableAssignee, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        Assignment, Block, Boolean, ElementAccess, ExpressionBlock, FunctionDefinition,
+        GenericTypeVariable, IfExpression, Integer, TupleExpression, TypeItem, TypeVariable,
+        TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -832,7 +981,7 @@ mod tests {
             OpaqueTypeDefinition {
                 variable: TypeVariable("i2b"),
                 type_: FunctionType{
-                    argument_type: Box::new(ATOMIC_TYPE_INT.into()),
+                    argument_types: vec![ATOMIC_TYPE_INT.into()],
                     return_type: Box::new(ATOMIC_TYPE_BOOL.into()),
                 }.into()
             }.into()
@@ -841,7 +990,7 @@ mod tests {
             (
                 Id::from("i2b"),
                 Type::Union(HashMap::from([
-                    (Id::from("i2b"), Some(Type::Function(Box::new(TYPE_INT), Box::new(TYPE_BOOL))))
+                    (Id::from("i2b"), Some(Type::Function(vec![TYPE_INT], Box::new(TYPE_BOOL))))
                 ]))
             ),
         ]));
@@ -852,7 +1001,7 @@ mod tests {
             TransparentTypeDefinition {
                 variable: TypeVariable("u2u"),
                 type_: FunctionType{
-                    argument_type: Box::new(TupleType{types: Vec::new()}.into()),
+                    argument_types: Vec::new(),
                     return_type: Box::new(TupleType{types: Vec::new()}.into()),
                 }.into()
             }.into()
@@ -860,7 +1009,7 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("u2u"),
-                Type::Function(Box::new(Type::Tuple(Vec::new())), Box::new(Type::Tuple(Vec::new())))
+                Type::Function(Vec::new(), Box::new(Type::Tuple(Vec::new())))
             ),
         ]));
         "transparent function type definition"
@@ -1331,7 +1480,7 @@ mod tests {
                     generic_variables: vec![Id::from("T"), Id::from("U")]
                 },
                 type_: FunctionType{
-                    argument_type: Box::new(Typename("T").into()),
+                    argument_types: vec![Typename("T").into()],
                     return_type: Box::new(Typename("U").into())
                 }.into()
             }.into(),
@@ -1342,7 +1491,7 @@ mod tests {
                 ParametricType{
                     num_parameters: 2,
                     type_: Type::Function(
-                        Box::new(Type::Variable(0)),
+                        vec![Type::Variable(0)],
                         Box::new(Type::Variable(1))
                     )
                 },
@@ -1772,6 +1921,35 @@ mod tests {
         )]);
         "if expression variable shadowed then accessed"
     )]
+    #[test_case(
+        FunctionDefinition {
+            parameters: Vec::new(),
+            return_type: TupleType{types: Vec::new()}.into(),
+            body: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+        }.into(),
+        Some(Type::Function(vec![], Box::new(TYPE_UNIT))),
+        TypeContext::new();
+        "unit function def"
+    )]
+    #[test_case(
+        FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("y")),
+                    type_: ATOMIC_TYPE_BOOL.into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(Variable("x").into())
+        }.into(),
+        Some(Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT))),
+        TypeContext::new();
+        "arguments function def"
+    )]
     fn test_check_expressions(
         expression: Expression,
         expected_type: Option<Type>,
@@ -1884,6 +2062,63 @@ mod tests {
         None,
         TypeContext::new();
         "block flipped assignments"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("y")),
+                    type_: ATOMIC_TYPE_BOOL.into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(Variable("z").into())
+        }.into()),
+        None,
+        TypeContext::new();
+        "function invalid block"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("y")),
+                    type_: ATOMIC_TYPE_BOOL.into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(Variable("y").into())
+        }.into()),
+        None,
+        TypeContext::new();
+        "function incorrect return type"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_BOOL.into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(Integer{value: 5}.into())
+        }.into()),
+        None,
+        TypeContext::new();
+        "function duplicate parameter"
     )]
     fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
         let type_check_result = TypeChecker::check_block(&block, &context);

@@ -47,10 +47,17 @@ from ast_nodes import (
             },
         ),
         (
-            FunctionType(TupleType([AtomicType.INT]), AtomicType.INT),
+            FunctionType([AtomicType.INT], AtomicType.INT),
             {
-                "argument_type": {"TupleType": {"types": [{"AtomicType": {"type_": "INT"}}]}},
+                "argument_types": [{"AtomicType": {"type_": "INT"}}],
                 "return_type": {"AtomicType": {"type_": "INT"}},
+            },
+        ),
+        (
+            FunctionType([TupleType([AtomicType.INT])], TupleType([])),
+            {
+                "argument_types": [{"TupleType": {"types": [{"AtomicType": {"type_": "INT"}}]}}],
+                "return_type": {"TupleType": {"types": []}},
             },
         ),
         (
@@ -66,14 +73,17 @@ from ast_nodes import (
         (
             GenericType(
                 "map",
-                [FunctionType(AtomicType.INT, AtomicType.INT), GenericType("foo", [])],
+                [
+                    FunctionType([AtomicType.INT], AtomicType.INT),
+                    GenericType("foo", []),
+                ],
             ),
             {
                 "id": "map",
                 "type_variables": [
                     {
                         "FunctionType": {
-                            "argument_type": {"AtomicType": {"type_": "INT"}},
+                            "argument_types": [{"AtomicType": {"type_": "INT"}}],
                             "return_type": {"AtomicType": {"type_": "INT"}},
                         }
                     },
@@ -329,13 +339,22 @@ from ast_nodes import (
                 "blocks": [
                     {
                         "matches": [
-                            {"type_name": "Some", "assignee": {"id": "x", "generic_variables": []}}
+                            {
+                                "type_name": "Some",
+                                "assignee": {"id": "x", "generic_variables": []},
+                            }
                         ],
-                        "block": {"assignments": [], "expression": {"Boolean": {"value": True}}},
+                        "block": {
+                            "assignments": [],
+                            "expression": {"Boolean": {"value": True}},
+                        },
                     },
                     {
                         "matches": [{"type_name": "None", "assignee": None}],
-                        "block": {"assignments": [], "expression": {"Boolean": {"value": False}}},
+                        "block": {
+                            "assignments": [],
+                            "expression": {"Boolean": {"value": False}},
+                        },
                     },
                 ],
             },
