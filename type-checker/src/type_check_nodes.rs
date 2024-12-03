@@ -89,6 +89,13 @@ pub struct TypedElementAccess {
     pub index: u32,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedIf {
+    pub condition: Box<TypedExpression>,
+    pub true_block: TypedBlock,
+    pub false_block: TypedBlock,
+}
+
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
@@ -96,6 +103,7 @@ pub enum TypedExpression {
     TypedTuple(TypedTuple),
     TypedVariable(TypedVariable),
     TypedElementAccess(TypedElementAccess),
+    TypedIf(TypedIf),
 }
 
 impl TypedExpression {
@@ -114,6 +122,11 @@ impl TypedExpression {
                     panic!("Type of an element access is no longer a tuple!")
                 }
             }
+            Self::TypedIf(TypedIf {
+                condition: _,
+                true_block,
+                false_block: _,
+            }) => true_block.type_(),
             _ => todo!(),
         }
     }
@@ -146,7 +159,18 @@ impl TypedBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeCheckError {
     DefaultError(String),
-    DuplicatedNameError { duplicate: String, type_: String },
-    InvalidConditionError { condition: TypedExpression },
-    InvalidAccessError { expression: TypedExpression },
+    DuplicatedNameError {
+        duplicate: String,
+        type_: String,
+    },
+    InvalidConditionError {
+        condition: TypedExpression,
+    },
+    InvalidAccessError {
+        expression: TypedExpression,
+    },
+    NonMatchingIfBlocksError {
+        true_block: TypedBlock,
+        false_block: TypedBlock,
+    },
 }

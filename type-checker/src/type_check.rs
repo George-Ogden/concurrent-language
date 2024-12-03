@@ -1,6 +1,6 @@
 use crate::type_check_nodes::{
     ParametricExpression, ParametricType, Type, TypeCheckError, TypedAssignment, TypedBlock,
-    TypedElementAccess, TypedExpression, TypedTuple, TypedVariable, TYPE_BOOL,
+    TypedElementAccess, TypedExpression, TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
@@ -565,11 +565,22 @@ impl TypeChecker {
             }) => {
                 let condition = TypeChecker::check_expression(&*condition, context)?;
                 if condition.type_() != TYPE_BOOL {
-                    return Err(TypeCheckError::InvalidConditionError {
-                        condition: condition,
+                    return Err(TypeCheckError::InvalidConditionError { condition });
+                }
+                let typed_true_block = TypeChecker::check_block(true_block, context)?;
+                let typed_false_block = TypeChecker::check_block(false_block, context)?;
+                if typed_true_block.type_() != typed_false_block.type_() {
+                    return Err(TypeCheckError::NonMatchingIfBlocksError {
+                        true_block: typed_true_block,
+                        false_block: typed_false_block,
                     });
                 }
-                todo!()
+                TypedIf {
+                    condition: Box::new(condition),
+                    true_block: typed_true_block,
+                    false_block: typed_false_block,
+                }
+                .into()
             }
             _ => todo!(),
         })
@@ -610,7 +621,7 @@ impl TypeChecker {
             assignments.push(assignment);
         }
         Ok(TypedBlock {
-            assignments: assignments,
+            assignments,
             expression: Box::new(TypeChecker::check_expression(
                 &block.expression,
                 &new_context,
@@ -1629,6 +1640,137 @@ mod tests {
             )].into())
         )]);
         "variable with empty type"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Integer{value: 0}.into()),
+            true_block: ExpressionBlock(Boolean{value: true}.into()),
+            false_block: ExpressionBlock(Boolean{value: false}.into())
+        }.into(),
+        None,
+        TypeContext::new();
+        "if expression invalid condition"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: ExpressionBlock(Boolean{value: true}.into()),
+            false_block: ExpressionBlock(Boolean{value: false}.into())
+        }.into(),
+        Some(TYPE_BOOL.into()),
+        TypeContext::new();
+        "if expression no assignments condition"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: ExpressionBlock(Integer{value: 8}.into()),
+            false_block: ExpressionBlock(Boolean{value: false}.into())
+        }.into(),
+        None,
+        TypeContext::new();
+        "if expression different blocks"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: ExpressionBlock(Variable("x").into()),
+            false_block: ExpressionBlock(Boolean{value: false}.into())
+        }.into(),
+        None,
+        TypeContext::new();
+        "if expression invalid block"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: Block{
+                assignments: vec![
+                    Assignment {
+                        assignee: Box::new(VariableAssignee("x")),
+                        expression: Box::new(Integer{value: -5}.into())
+                    }
+                ],
+                expression: Box::new(Variable("x").into())
+            },
+            false_block: ExpressionBlock(Integer{value: 5}.into())
+        }.into(),
+        Some(TYPE_INT.into()),
+        TypeContext::new();
+        "if expression variable in block"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: Block{
+                assignments: vec![
+                    Assignment {
+                        assignee: Box::new(VariableAssignee("x")),
+                        expression: Box::new(Integer{value: -5}.into())
+                    }
+                ],
+                expression: Box::new(Variable("x").into())
+            },
+            false_block: ExpressionBlock(Integer{value: 5}.into())
+        }.into(),
+        Some(TYPE_INT.into()),
+        TypeContext::from([(
+            Id::from("x"),
+            TYPE_BOOL
+        )]);
+        "if expression variable shadowed in block"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: Block{
+                assignments: vec![
+                    Assignment {
+                        assignee: Box::new(VariableAssignee("x")),
+                        expression: Box::new(Integer{value: -5}.into())
+                    }
+                ],
+                expression: Box::new(Variable("x").into())
+            },
+            false_block: ExpressionBlock(Variable("x").into())
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("x"),
+            TYPE_BOOL
+        )]);
+        "if expression variable shadowed incorrectly block"
+    )]
+    #[test_case(
+        IfExpression {
+            condition: Box::new(Boolean{value: false}.into()),
+            true_block: Block{
+                assignments: vec![
+                    Assignment {
+                        assignee: Box::new(VariableAssignee("x")),
+                        expression: Box::new(Integer{value: -5}.into())
+                    }
+                ],
+                expression: Box::new(Variable("x").into())
+            },
+            false_block: ExpressionBlock(
+                ElementAccess {
+                    expression: Box::new(Variable("x").into()),
+                    index: 1
+                }.into()
+            ),
+        }.into(),
+        Some(TYPE_INT),
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Tuple(
+                vec![
+                    TYPE_BOOL,
+                    TYPE_INT,
+                ]
+            )
+        )]);
+        "if expression variable shadowed then accessed"
     )]
     fn test_check_expressions(
         expression: Expression,

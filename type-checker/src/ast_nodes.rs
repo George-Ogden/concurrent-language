@@ -35,6 +35,7 @@ pub struct GenericType {
     pub type_variables: Vec<TypeInstance>,
 }
 
+#[allow(non_snake_case)]
 pub fn Typename(id: &str) -> GenericType {
     GenericType {
         id: Id::from(id),
@@ -73,6 +74,7 @@ pub struct GenericTypeVariable {
     pub generic_variables: Vec<Id>,
 }
 
+#[allow(non_snake_case)]
 pub fn TypeVariable(id: &str) -> GenericTypeVariable {
     return GenericTypeVariable {
         id: String::from(id),
@@ -193,6 +195,7 @@ pub struct GenericVariable {
     pub type_instances: Vec<TypeInstance>,
 }
 
+#[allow(non_snake_case)]
 pub fn Variable(id: &str) -> GenericVariable {
     GenericVariable {
         id: Id::from(id),
@@ -248,6 +251,7 @@ pub struct Assignee {
     pub generic_variables: Vec<Id>,
 }
 
+#[allow(non_snake_case)]
 pub fn VariableAssignee(id: &str) -> Assignee {
     Assignee {
         id: Id::from(id),
@@ -267,6 +271,7 @@ pub struct Block {
     pub expression: Box<Expression>,
 }
 
+#[allow(non_snake_case)]
 pub fn ExpressionBlock(expression: Expression) -> Block {
     return Block {
         assignments: Vec::new(),
