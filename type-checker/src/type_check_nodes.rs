@@ -30,7 +30,7 @@ impl ParametricType {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
 pub enum Type {
     Atomic(AtomicTypeEnum),
     Union(HashMap<Id, Option<Type>>),
@@ -40,9 +40,58 @@ pub enum Type {
     Variable(u32),
 }
 
+impl PartialEq for Type {
+    fn eq(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2)) if r1 == r2 => t1 == t2,
+            (Self::Instantiation(r1, t1), t2) | (t2, Self::Instantiation(r1, t1)) => {
+                t2 == &r1.borrow().type_.instantiate(t1)
+            }
+            (Self::Atomic(a1), Self::Atomic(a2)) => a1 == a2,
+            (Self::Union(h1), Self::Union(h2)) => h1 == h2,
+            (Self::Tuple(t1), Self::Tuple(t2)) => t1 == t2,
+            (Self::Function(a1, r1), Self::Function(a2, r2)) => a1 == a2 && r1 == r2,
+            (Self::Variable(u1), Self::Variable(h2)) => u1 == h2,
+            _ => false,
+        }
+    }
+}
+
 impl Type {
     pub fn new() -> Self {
         Type::Tuple(Vec::new())
+    }
+    pub fn instantiate_types(types: &Vec<Self>, type_variables: &Vec<Type>) -> Vec<Type> {
+        types
+            .iter()
+            .map(|type_| type_.instantiate(type_variables))
+            .collect_vec()
+    }
+    pub fn instantiate(&self, type_variables: &Vec<Type>) -> Type {
+        match self {
+            Self::Atomic(_) => self.clone(),
+            Self::Tuple(types) => Type::Tuple(Type::instantiate_types(types, type_variables)),
+            Self::Union(types) => Type::Union(
+                types
+                    .iter()
+                    .map(|(id, type_)| {
+                        (
+                            id.clone(),
+                            type_.clone().map(|type_| type_.instantiate(type_variables)),
+                        )
+                    })
+                    .collect(),
+            ),
+            Self::Instantiation(parametric_type, types) => Type::Instantiation(
+                parametric_type.clone(),
+                Self::instantiate_types(types, type_variables),
+            ),
+            Self::Function(arg_types, return_type) => Type::Function(
+                Self::instantiate_types(arg_types, type_variables),
+                Box::new(return_type.instantiate(type_variables)),
+            ),
+            Self::Variable(i) => type_variables[*i as usize].clone(),
+        }
     }
 }
 
@@ -126,7 +175,7 @@ pub enum TypedExpression {
 
 impl TypedExpression {
     pub fn type_(&self) -> Type {
-        match self {
+        let type_ = match self {
             Self::Integer(_) => TYPE_INT,
             Self::Boolean(_) => TYPE_BOOL,
             Self::TypedTuple(TypedTuple { expressions }) => {
@@ -150,8 +199,19 @@ impl TypedExpression {
                 parameter_types,
                 return_type,
                 body: _,
+            })
+            | Self::TypedFunctionDefinition(TypedFunctionDefinition {
+                parameter_ids: _,
+                parameter_types,
+                return_type,
+                body: _,
             }) => Type::Function(parameter_types.clone(), return_type.clone()),
             _ => todo!(),
+        };
+        if let Type::Instantiation(r, t) = type_ {
+            r.borrow().type_.instantiate(&t)
+        } else {
+            type_
         }
     }
 }
@@ -184,7 +244,7 @@ impl TypedBlock {
 pub enum TypeCheckError {
     DefaultError(String),
     DuplicatedNameError {
-        duplicate: String,
+        duplicate: Id,
         type_: String,
     },
     InvalidConditionError {
@@ -200,5 +260,9 @@ pub enum TypeCheckError {
     FunctionReturnTypeError {
         return_type: Type,
         body: TypedBlock,
+    },
+    UnknownTypeError {
+        type_name: Id,
+        type_names: Vec<Id>,
     },
 }

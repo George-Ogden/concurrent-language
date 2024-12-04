@@ -14,6 +14,7 @@ use counter::Counter;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
+use std::collections::hash_map::Keys;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
@@ -39,6 +40,9 @@ impl TypeDefinitions {
     }
     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
         self.0.insert(k, v)
+    }
+    pub fn keys(&self) -> Keys<'_, K, V> {
+        self.0.keys()
     }
     fn references_index(&self) -> TypeReferencesIndex {
         self.0
@@ -274,9 +278,16 @@ impl PartialEq for TypeDefinitions {
 
 type TypeContext = TypeDefinitions;
 
-struct TypeChecker {}
+struct TypeChecker {
+    type_definitions: TypeDefinitions,
+}
 
 impl TypeChecker {
+    fn with_type_definitions(definitions: TypeDefinitions) -> Self {
+        TypeChecker {
+            type_definitions: definitions,
+        }
+    }
     fn convert_ast_type(
         type_instance: &TypeInstance,
         type_definitions: &TypeDefinitions,
@@ -325,10 +336,10 @@ impl TypeChecker {
                             .collect::<Result<_, _>>()?,
                     )
                 } else {
-                    return Err(TypeCheckError::DefaultError(format!(
-                        "{} is not a valid type or generic name",
-                        id
-                    )));
+                    return Err(TypeCheckError::UnknownTypeError {
+                        type_name: id.clone(),
+                        type_names: type_definitions.keys().map(|id| id.clone()).collect_vec(),
+                    });
                 }
             }
             TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
@@ -501,6 +512,7 @@ impl TypeChecker {
         return Ok(type_definitions);
     }
     fn check_expression(
+        &self,
         expression: &Expression,
         context: &TypeContext,
     ) -> Result<TypedExpression, TypeCheckError> {
@@ -510,7 +522,7 @@ impl TypeChecker {
             Expression::TupleExpression(TupleExpression { expressions }) => TypedTuple {
                 expressions: expressions
                     .iter()
-                    .map(|expression| TypeChecker::check_expression(expression, context))
+                    .map(|expression| self.check_expression(expression, context))
                     .collect::<Result<_, _>>()?,
             }
             .into(),
@@ -527,7 +539,7 @@ impl TypeChecker {
                             Type::Instantiation(
                                 type_.clone(),
                                 type_instances.iter()
-                                .map(|type_instance| TypeChecker::convert_ast_type(type_instance, &TypeDefinitions::new(), &Vec::new()))
+                                .map(|type_instance| TypeChecker::convert_ast_type(type_instance, &self.type_definitions, &Vec::new()))
                                 .collect::<Result<_,_>>()?)
                         };
                         TypedVariable {
@@ -539,7 +551,7 @@ impl TypeChecker {
                 }
             }
             Expression::ElementAccess(ElementAccess { expression, index }) => {
-                let typed_expression = TypeChecker::check_expression(expression, context)?;
+                let typed_expression = self.check_expression(expression, context)?;
                 match typed_expression.type_() {
                     Type::Tuple(types) => {
                         if *index as usize >= types.len() {
@@ -568,12 +580,12 @@ impl TypeChecker {
                 true_block,
                 false_block,
             }) => {
-                let condition = TypeChecker::check_expression(&*condition, context)?;
+                let condition = self.check_expression(&*condition, context)?;
                 if condition.type_() != TYPE_BOOL {
                     return Err(TypeCheckError::InvalidConditionError { condition });
                 }
-                let typed_true_block = TypeChecker::check_block(true_block, context)?;
-                let typed_false_block = TypeChecker::check_block(false_block, context)?;
+                let typed_true_block = self.check_block(true_block, context)?;
+                let typed_false_block = self.check_block(false_block, context)?;
                 if typed_true_block.type_() != typed_false_block.type_() {
                     return Err(TypeCheckError::NonMatchingIfBlocksError {
                         true_block: typed_true_block,
@@ -609,7 +621,7 @@ impl TypeChecker {
                     .map(|typed_assignee| {
                         TypeChecker::convert_ast_type(
                             &typed_assignee.type_,
-                            &TypeDefinitions::new(),
+                            &self.type_definitions,
                             &Vec::new(),
                         )
                     })
@@ -619,7 +631,7 @@ impl TypeChecker {
                     parameter_ids,
                     return_type: Box::new(TypeChecker::convert_ast_type(
                         return_type,
-                        &TypeDefinitions::new(),
+                        &self.type_definitions,
                         &Vec::new(),
                     )?),
                     body: body.clone(),
@@ -629,7 +641,11 @@ impl TypeChecker {
             _ => todo!(),
         })
     }
-    fn check_block(block: &Block, context: &TypeContext) -> Result<TypedBlock, TypeCheckError> {
+    fn check_block(
+        &self,
+        block: &Block,
+        context: &TypeContext,
+    ) -> Result<TypedBlock, TypeCheckError> {
         let mut new_context = context.clone();
         let mut assignments = Vec::new();
         let assignment_names = block
@@ -646,8 +662,7 @@ impl TypeChecker {
             }
         }
         for assignment in &block.assignments {
-            let typed_expression =
-                TypeChecker::check_expression(&assignment.expression, &new_context)?;
+            let typed_expression = self.check_expression(&assignment.expression, &new_context)?;
             let assignment = TypedAssignment {
                 id: assignment.assignee.id.clone(),
                 expression: ParametricExpression {
@@ -664,14 +679,15 @@ impl TypeChecker {
             );
             assignments.push(assignment);
         }
-        let typed_expression = TypeChecker::check_expression(&block.expression, &new_context)?;
+        let typed_expression = self.check_expression(&block.expression, &new_context)?;
         let block = TypedBlock {
             assignments,
             expression: Box::new(typed_expression),
         };
-        TypeChecker::check_functions_in_block(&block, &new_context)
+        self.check_functions_in_block(&block, &new_context)
     }
     fn check_functions_in_expression(
+        &self,
         expression: &TypedExpression,
         context: &TypeContext,
     ) -> Result<TypedExpression, TypeCheckError> {
@@ -683,18 +699,15 @@ impl TypeChecker {
                 TypedExpression::TypedTuple(TypedTuple {
                     expressions: expressions
                         .iter()
-                        .map(|expression| {
-                            TypeChecker::check_functions_in_expression(expression, context)
-                        })
+                        .map(|expression| self.check_functions_in_expression(expression, context))
                         .collect::<Result<_, _>>()?,
                 })
             }
             TypedExpression::TypedElementAccess(TypedElementAccess { expression, index }) => {
                 TypedExpression::TypedElementAccess(TypedElementAccess {
-                    expression: Box::new(TypeChecker::check_functions_in_expression(
-                        &*expression,
-                        context,
-                    )?),
+                    expression: Box::new(
+                        self.check_functions_in_expression(&*expression, context)?,
+                    ),
                     index: *index,
                 })
             }
@@ -703,24 +716,22 @@ impl TypeChecker {
                 true_block,
                 false_block,
             }) => TypedExpression::TypedIf(TypedIf {
-                condition: Box::new(TypeChecker::check_functions_in_expression(
-                    condition, context,
-                )?),
-                true_block: TypeChecker::check_functions_in_block(true_block, context)?,
-                false_block: TypeChecker::check_functions_in_block(false_block, context)?,
+                condition: Box::new(self.check_functions_in_expression(condition, context)?),
+                true_block: self.check_functions_in_block(true_block, context)?,
+                false_block: self.check_functions_in_block(false_block, context)?,
             }),
             TypedExpression::PartiallyTypedFunctionDefinition(
                 partially_typed_function_definition,
-            ) => TypedExpression::TypedFunctionDefinition(TypeChecker::fully_type_function(
-                partially_typed_function_definition,
-                context,
-            )?),
+            ) => TypedExpression::TypedFunctionDefinition(
+                self.fully_type_function(partially_typed_function_definition, context)?,
+            ),
             TypedExpression::TypedFunctionDefinition(_) => {
                 panic!("Typed function found when only partially typed functions are expected.")
             }
         })
     }
     fn check_functions_in_block(
+        &self,
         block: &TypedBlock,
         context: &TypeContext,
     ) -> Result<TypedBlock, TypeCheckError> {
@@ -729,26 +740,21 @@ impl TypeChecker {
                 .assignments
                 .iter()
                 .map(|assignment| {
-                    TypeChecker::check_functions_in_expression(
-                        &assignment.expression.expression,
-                        context,
-                    )
-                    .map(|expression| TypedAssignment {
-                        id: assignment.id.clone(),
-                        expression: ParametricExpression {
-                            expression,
-                            num_parameters: assignment.expression.num_parameters,
-                        },
-                    })
+                    self.check_functions_in_expression(&assignment.expression.expression, context)
+                        .map(|expression| TypedAssignment {
+                            id: assignment.id.clone(),
+                            expression: ParametricExpression {
+                                expression,
+                                num_parameters: assignment.expression.num_parameters,
+                            },
+                        })
                 })
                 .collect::<Result<_, _>>()?,
-            expression: Box::new(TypeChecker::check_functions_in_expression(
-                &block.expression,
-                context,
-            )?),
+            expression: Box::new(self.check_functions_in_expression(&block.expression, context)?),
         })
     }
     fn fully_type_function(
+        &self,
         function_definition: &PartiallyTypedFunctionDefinition,
         context: &TypeContext,
     ) -> Result<TypedFunctionDefinition, TypeCheckError> {
@@ -763,7 +769,7 @@ impl TypeChecker {
                 Rc::new(RefCell::new(parameter_type.clone().into())),
             );
         }
-        let body = TypeChecker::check_block(&function_definition.body, &new_context)?;
+        let body = self.check_block(&function_definition.body, &new_context)?;
         if *function_definition.return_type != body.type_() {
             return Err(TypeCheckError::FunctionReturnTypeError {
                 return_type: *function_definition.return_type.clone(),
@@ -1576,6 +1582,37 @@ mod tests {
             num_parameters: 1,
         }))
     });
+    const TYPE_DEFINITIONS: Lazy<TypeDefinitions> = Lazy::new(|| {
+        TypeDefinitions::from([
+            (
+                Id::from("opaque_int"),
+                Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([(Id::from("opaque_int"), Some(TYPE_INT))])).into(),
+                )),
+            ),
+            (
+                Id::from("transparent_int"),
+                Rc::new(RefCell::new(TYPE_INT.into())),
+            ),
+            (
+                Id::from("transparent_int_2"),
+                Rc::new(RefCell::new(TYPE_INT.into())),
+            ),
+            (
+                Id::from("ii"),
+                Rc::new(RefCell::new(Type::Tuple(vec![TYPE_INT, TYPE_INT]).into())),
+            ),
+            (Id::from("recursive"), {
+                let reference = Rc::new(RefCell::new(ParametricType::new()));
+                *reference.borrow_mut() = Type::Union(HashMap::from([(
+                    Id::from("recursive"),
+                    Some(Type::Instantiation(Rc::clone(&reference), Vec::new())),
+                )]))
+                .into();
+                reference
+            }),
+        ])
+    });
     #[test_case(
         Integer{value: -5}.into(),
         Some(TYPE_INT),
@@ -1955,7 +1992,8 @@ mod tests {
         expected_type: Option<Type>,
         context: TypeContext,
     ) {
-        let type_check_result = TypeChecker::check_expression(&expression, &context);
+        let type_checker = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone());
+        let type_check_result = type_checker.check_expression(&expression, &context);
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {
@@ -2120,8 +2158,102 @@ mod tests {
         TypeContext::new();
         "function duplicate parameter"
     )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: Typename("opaque_int").into()
+                },
+            ],
+            return_type: Typename("opaque_int").into(),
+            body: ExpressionBlock(Variable("x").into()),
+        }.into()),
+        Some(Type::Function(
+            vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new())],
+            Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new()))
+        )),
+        TypeContext::new();
+        "opaque type reference"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: Typename("transparent_int").into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(Variable("x").into()),
+        }.into()),
+        Some(Type::Function(
+            vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())],
+            Box::new(TYPE_INT)
+        )),
+        TypeContext::new();
+        "transparent type reference"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: Typename("transparent_int").into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(Variable("x").into()),
+        }.into()),
+        Some(Type::Function(
+            vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())],
+            Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int_2")).unwrap().clone(), Vec::new()))
+        )),
+        TypeContext::new();
+        "double transparent type reference"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: Typename("ii").into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(ElementAccess{
+                expression: Box::new(Variable("x").into()),
+                index: 0
+            }.into()),
+        }.into()),
+        Some(Type::Function(
+            vec![Type::Tuple(vec![TYPE_INT, TYPE_INT])],
+            Box::new(TYPE_INT)
+        )),
+        TypeContext::new();
+        "transparent type usage"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition {
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: Typename("recursive").into()
+                },
+            ],
+            return_type: Typename("recursive").into(),
+            body: ExpressionBlock(ElementAccess{
+                expression: Box::new(Variable("x").into()),
+                index: 0
+            }.into()),
+        }.into()),
+        None,
+        TypeContext::new();
+        "invalid recursive type usage"
+    )]
     fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
-        let type_check_result = TypeChecker::check_block(&block, &context);
+        let type_checker = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone());
+        let type_check_result = type_checker.check_block(&block, &context);
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {
