@@ -1,4 +1,4 @@
-use crate::{AtomicTypeEnum, Block, Boolean, Id, Integer};
+use crate::{AtomicTypeEnum, Block, Boolean, Id, Integer, TypeInstance};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -9,14 +9,14 @@ use std::rc::Rc;
 #[derive(PartialEq, Clone, Debug)]
 pub struct ParametricType {
     pub type_: Type,
-    pub num_parameters: u32,
+    pub parameters: Vec<Rc<RefCell<Option<Type>>>>,
 }
 
 impl From<Type> for ParametricType {
     fn from(value: Type) -> Self {
         ParametricType {
             type_: value,
-            num_parameters: 0,
+            parameters: Vec::new(),
         }
     }
 }
@@ -25,8 +25,18 @@ impl ParametricType {
     pub fn new() -> Self {
         ParametricType {
             type_: Type::new(),
-            num_parameters: 0,
+            parameters: Vec::new(),
         }
+    }
+    pub fn instantiate(&self, type_variables: &Vec<Type>) -> Type {
+        for (parameter, variable) in self.parameters.iter().zip(type_variables) {
+            *parameter.borrow_mut() = Some(variable.clone());
+        }
+        let type_ = self.type_.instantiate();
+        for parameter in &self.parameters {
+            *parameter.borrow_mut() = None;
+        }
+        type_
     }
 }
 
@@ -37,7 +47,7 @@ pub enum Type {
     Instantiation(Rc<RefCell<ParametricType>>, Vec<Type>),
     Tuple(Vec<Type>),
     Function(Vec<Type>, Box<Type>),
-    Variable(u32),
+    Variable(Rc<RefCell<Option<Type>>>),
 }
 
 impl PartialEq for Type {
@@ -45,7 +55,7 @@ impl PartialEq for Type {
         match (self, other) {
             (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2)) if r1 == r2 => t1 == t2,
             (Self::Instantiation(r1, t1), t2) | (t2, Self::Instantiation(r1, t1)) => {
-                t2 == &r1.borrow().type_.instantiate(t1)
+                t2 == &r1.borrow().instantiate(t1)
             }
             (Self::Atomic(a1), Self::Atomic(a2)) => a1 == a2,
             (Self::Union(h1), Self::Union(h2)) => h1 == h2,
@@ -61,36 +71,27 @@ impl Type {
     pub fn new() -> Self {
         Type::Tuple(Vec::new())
     }
-    pub fn instantiate_types(types: &Vec<Self>, type_variables: &Vec<Type>) -> Vec<Type> {
-        types
-            .iter()
-            .map(|type_| type_.instantiate(type_variables))
-            .collect_vec()
+    pub fn instantiate_types(types: &Vec<Self>) -> Vec<Type> {
+        types.iter().map(Type::instantiate).collect_vec()
     }
-    pub fn instantiate(&self, type_variables: &Vec<Type>) -> Type {
+    pub fn instantiate(&self) -> Type {
         match self {
             Self::Atomic(_) => self.clone(),
-            Self::Tuple(types) => Type::Tuple(Type::instantiate_types(types, type_variables)),
+            Self::Tuple(types) => Type::Tuple(Type::instantiate_types(types)),
             Self::Union(types) => Type::Union(
                 types
                     .iter()
-                    .map(|(id, type_)| {
-                        (
-                            id.clone(),
-                            type_.clone().map(|type_| type_.instantiate(type_variables)),
-                        )
-                    })
+                    .map(|(id, type_)| (id.clone(), type_.clone().map(|type_| type_.instantiate())))
                     .collect(),
             ),
-            Self::Instantiation(parametric_type, types) => Type::Instantiation(
-                parametric_type.clone(),
-                Self::instantiate_types(types, type_variables),
-            ),
+            Self::Instantiation(parametric_type, types) => {
+                Type::Instantiation(parametric_type.clone(), Self::instantiate_types(types))
+            }
             Self::Function(arg_types, return_type) => Type::Function(
-                Self::instantiate_types(arg_types, type_variables),
-                Box::new(return_type.instantiate(type_variables)),
+                Self::instantiate_types(arg_types),
+                Box::new(return_type.instantiate()),
             ),
-            Self::Variable(i) => type_variables[*i as usize].clone(),
+            Self::Variable(i) => i.borrow().clone().unwrap_or(self.clone()),
         }
     }
 }
@@ -222,20 +223,20 @@ impl TypedExpression {
                 };
                 *return_type
             }
-            _ => todo!(),
         };
-        if let Type::Instantiation(r, t) = type_ {
-            r.borrow().type_.instantiate(&t)
+        let type_ = if let Type::Instantiation(r, t) = type_ {
+            r.borrow().instantiate(&t)
         } else {
             type_
-        }
+        };
+        type_
     }
 }
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct ParametricExpression {
     pub expression: TypedExpression,
-    pub num_parameters: u32,
+    pub parameters: HashMap<Id, Rc<RefCell<Option<Type>>>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -295,5 +296,13 @@ pub enum TypeCheckError {
     InvalidFunctionCall {
         expression: TypedExpression,
         arguments: Vec<TypedExpression>,
+    },
+    InstantiationOfTypeVariable {
+        variable: Id,
+        type_instances: Vec<TypeInstance>,
+    },
+    WrongNumberOfTypeParameters {
+        type_: ParametricType,
+        type_instances: Vec<TypeInstance>,
     },
 }
