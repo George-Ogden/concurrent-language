@@ -2992,6 +2992,143 @@ mod tests {
         TypeContext::new();
         "nested generic function instantiation"
     )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: Box::new(Assignee {
+                        id: Id::from("id"),
+                        generic_variables: vec![Id::from("T")]
+                    }),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Box::new(VariableAssignee("x")),
+                                type_: Typename("T").into(),
+                            }
+                        ],
+                        return_type: Typename("T").into(),
+                        body: ExpressionBlock(Variable("x").into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(
+                FunctionCall {
+                    function: Box::new(Variable("&").into()),
+                    arguments: vec![
+                        FunctionCall {
+                            function: Box::new(GenericVariable{
+                                id: Id::from("id"),
+                                type_instances: vec![ATOMIC_TYPE_INT.into()]
+                            }.into()),
+                            arguments: vec![Integer{value: 5}.into()]
+                        }.into(),
+                        FunctionCall {
+                            function: Box::new(GenericVariable{
+                                id: Id::from("id"),
+                                type_instances: vec![ATOMIC_TYPE_BOOL.into()]
+                            }.into()),
+                            arguments: vec![Boolean{value: false}.into()]
+                        }.into()
+                    ]
+                }.into()
+            )
+        },
+        Some(TYPE_INT),
+        TypeContext::from([(
+            Id::from("&"),
+            Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT))
+        )]);
+        "reused generic function"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: Box::new(Assignee {
+                        id: Id::from("apply"),
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    }),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Box::new(VariableAssignee("f")),
+                                type_: FunctionType{
+                                    argument_types: vec![Typename("T").into()],
+                                    return_type: Box::new(Typename("U").into())
+                                }.into(),
+                            },
+                            TypedAssignee {
+                                assignee: Box::new(VariableAssignee("x")),
+                                type_: Typename("T").into(),
+                            }
+                        ],
+                        return_type: Typename("U").into(),
+                        body: ExpressionBlock(FunctionCall {
+                            function: Box::new(Variable("f").into()),
+                            arguments: vec![Variable("x").into()]
+                        }.into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(
+                GenericVariable{
+                    id: Id::from("apply"),
+                    type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
+                }.into()
+            )
+        },
+        Some(Type::Function(
+            vec![
+                Type::Function(vec![TYPE_INT], Box::new(TYPE_BOOL)),
+                TYPE_INT
+            ],
+            Box::new(TYPE_BOOL)
+        )),
+        TypeContext::new();
+        "compound generic function"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: Box::new(Assignee {
+                        id: Id::from("first"),
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    }),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Box::new(VariableAssignee("x")),
+                                type_: TupleType{
+                                    types: vec![Typename("T").into(), Typename("U").into()],
+                                }.into()
+                            },
+                        ],
+                        return_type: Typename("T").into(),
+                        body: ExpressionBlock(ElementAccess {
+                            expression: Box::new(Variable("x").into()),
+                            index: 0
+                        }.into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(
+                GenericVariable{
+                    id: Id::from("first"),
+                    type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
+                }.into()
+            )
+        },
+        Some(Type::Function(
+            vec![
+                Type::Tuple(vec![TYPE_INT, TYPE_BOOL]),
+            ],
+            Box::new(TYPE_INT)
+        )),
+        TypeContext::new();
+        "tuple generic function"
+    )]
     fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
         let type_checker = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone());
         let type_check_result =
