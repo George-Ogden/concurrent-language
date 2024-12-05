@@ -161,6 +161,12 @@ pub struct TypedFunctionDefinition {
     pub body: TypedBlock,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedFunctionCall {
+    pub function: Box<TypedExpression>,
+    pub arguments: Vec<TypedExpression>,
+}
+
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
@@ -171,6 +177,7 @@ pub enum TypedExpression {
     TypedIf(TypedIf),
     PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition),
     TypedFunctionDefinition(TypedFunctionDefinition),
+    TypedFunctionCall(TypedFunctionCall),
 }
 
 impl TypedExpression {
@@ -206,6 +213,15 @@ impl TypedExpression {
                 return_type,
                 body: _,
             }) => Type::Function(parameter_types.clone(), return_type.clone()),
+            Self::TypedFunctionCall(TypedFunctionCall {
+                function,
+                arguments: _,
+            }) => {
+                let Type::Function(_, return_type) = function.type_() else {
+                    panic!("Function does not have function type.")
+                };
+                *return_type
+            }
             _ => todo!(),
         };
         if let Type::Instantiation(r, t) = type_ {
@@ -243,36 +259,41 @@ impl TypedBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeCheckError {
     DefaultError(String),
-    DuplicatedNameError {
+    DuplicatedName {
         duplicate: Id,
         reason: String,
     },
-    InvalidConditionError {
+    InvalidCondition {
         condition: TypedExpression,
     },
-    InvalidAccessError {
+    InvalidAccess {
         expression: TypedExpression,
+        index: u32,
     },
-    NonMatchingIfBlocksError {
+    NonMatchingIfBlocks {
         true_block: TypedBlock,
         false_block: TypedBlock,
     },
-    FunctionReturnTypeError {
+    FunctionReturnTypeMismatch {
         return_type: Type,
         body: TypedBlock,
     },
-    UnknownTypeError {
+    UnknownType {
         type_name: Id,
         type_names: Vec<Id>,
     },
-    BuiltInOverrideError {
+    BuiltInOverride {
         name: Id,
         reason: String,
     },
-    TypeAsParameterError {
+    TypeAsParameter {
         type_name: Id,
     },
     RecursiveTypeAlias {
         type_alias: Id,
+    },
+    InvalidFunctionCall {
+        expression: TypedExpression,
+        arguments: Vec<TypedExpression>,
     },
 }

@@ -1,12 +1,12 @@
 use crate::type_check_nodes::{
     ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type, TypeCheckError,
-    TypedAssignment, TypedBlock, TypedElementAccess, TypedExpression, TypedFunctionDefinition,
-    TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
+    TypedAssignment, TypedBlock, TypedElementAccess, TypedExpression, TypedFunctionCall,
+    TypedFunctionDefinition, TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, Definition, ElementAccess, EmptyTypeDefinition,
-    Expression, FunctionDefinition, FunctionType, GenericType, GenericTypeVariable,
+    Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType, GenericTypeVariable,
     GenericVariable, Id, IfExpression, OpaqueTypeDefinition, TransparentTypeDefinition,
     TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
@@ -338,7 +338,7 @@ impl TypeChecker {
                             .collect::<Result<_, _>>()?,
                     )
                 } else {
-                    return Err(TypeCheckError::UnknownTypeError {
+                    return Err(TypeCheckError::UnknownType {
                         type_name: id.clone(),
                         type_names: type_definitions.keys().map(|id| id.clone()).collect_vec(),
                     });
@@ -380,12 +380,12 @@ impl TypeChecker {
             utils::check_unique(type_names.clone().chain(predefined_type_names.iter()))
         {
             if predefined_type_names.contains(&duplicate) {
-                return Err(TypeCheckError::BuiltInOverrideError {
+                return Err(TypeCheckError::BuiltInOverride {
                     name: duplicate.clone(),
                     reason: String::from("type name"),
                 });
             } else {
-                return Err(TypeCheckError::DuplicatedNameError {
+                return Err(TypeCheckError::DuplicatedName {
                     duplicate: duplicate.clone(),
                     reason: String::from("type name"),
                 });
@@ -393,7 +393,7 @@ impl TypeChecker {
         }
         for (type_name, type_parameters) in type_names.clone().zip(all_type_parameters.clone()) {
             if type_parameters.contains(type_name) {
-                return Err(TypeCheckError::TypeAsParameterError {
+                return Err(TypeCheckError::TypeAsParameter {
                     type_name: type_name.clone(),
                 });
             }
@@ -403,12 +403,12 @@ impl TypeChecker {
                 utils::check_unique(type_parameters.iter().chain(predefined_type_names.iter()))
             {
                 if predefined_type_names.contains(&duplicate) {
-                    return Err(TypeCheckError::BuiltInOverrideError {
+                    return Err(TypeCheckError::BuiltInOverride {
                         name: duplicate.clone(),
                         reason: String::from("type parameter"),
                     });
                 } else {
-                    return Err(TypeCheckError::DuplicatedNameError {
+                    return Err(TypeCheckError::DuplicatedName {
                         duplicate: duplicate.clone(),
                         reason: String::from("type parameter"),
                     });
@@ -457,7 +457,7 @@ impl TypeChecker {
                     match utils::check_unique(variant_names.clone()) {
                         Ok(()) => {}
                         Err(UniqueError { duplicate }) => {
-                            return Err(TypeCheckError::DuplicatedNameError {
+                            return Err(TypeCheckError::DuplicatedName {
                                 duplicate: duplicate.clone(),
                                 reason: String::from("variant name"),
                             })
@@ -603,28 +603,23 @@ impl TypeChecker {
             }
             Expression::ElementAccess(ElementAccess { expression, index }) => {
                 let typed_expression = self.check_expression(expression, context)?;
-                match typed_expression.type_() {
-                    Type::Tuple(types) => {
-                        if *index as usize >= types.len() {
-                            return Err(TypeCheckError::DefaultError(format!(
-                                "Cannot access element {}, {:?} contains only {} elements",
-                                index,
-                                expression,
-                                types.len()
-                            )));
-                        };
-                        TypedElementAccess {
-                            expression: Box::new(typed_expression),
-                            index: *index,
-                        }
-                        .into()
-                    }
-                    _ => {
-                        return Err(TypeCheckError::InvalidAccessError {
-                            expression: typed_expression,
-                        })
-                    }
+                let Type::Tuple(types) = typed_expression.type_() else {
+                    return Err(TypeCheckError::InvalidAccess {
+                        expression: typed_expression,
+                        index: *index,
+                    });
+                };
+                if *index as usize >= types.len() {
+                    return Err(TypeCheckError::InvalidAccess {
+                        index: *index,
+                        expression: typed_expression,
+                    });
+                };
+                TypedElementAccess {
+                    expression: Box::new(typed_expression),
+                    index: *index,
                 }
+                .into()
             }
             Expression::IfExpression(IfExpression {
                 condition,
@@ -633,12 +628,12 @@ impl TypeChecker {
             }) => {
                 let condition = self.check_expression(&*condition, context)?;
                 if condition.type_() != TYPE_BOOL {
-                    return Err(TypeCheckError::InvalidConditionError { condition });
+                    return Err(TypeCheckError::InvalidCondition { condition });
                 }
                 let typed_true_block = self.check_block(true_block, context)?;
                 let typed_false_block = self.check_block(false_block, context)?;
                 if typed_true_block.type_() != typed_false_block.type_() {
-                    return Err(TypeCheckError::NonMatchingIfBlocksError {
+                    return Err(TypeCheckError::NonMatchingIfBlocks {
                         true_block: typed_true_block,
                         false_block: typed_false_block,
                     });
@@ -662,7 +657,7 @@ impl TypeChecker {
                 if let Err(UniqueError { duplicate }) =
                     utils::check_unique::<_, &String>(parameter_ids.iter())
                 {
-                    return Err(TypeCheckError::DuplicatedNameError {
+                    return Err(TypeCheckError::DuplicatedName {
                         duplicate: duplicate.clone(),
                         reason: String::from("function parameter"),
                     });
@@ -689,6 +684,45 @@ impl TypeChecker {
                 }
                 .into()
             }
+            Expression::FunctionCall(FunctionCall {
+                function,
+                arguments,
+            }) => {
+                let function = self.check_expression(&function, context)?;
+                let arguments_tuple = self.check_expression(
+                    &TupleExpression {
+                        expressions: arguments.clone(),
+                    }
+                    .into(),
+                    context,
+                )?;
+                let Type::Tuple(types) = arguments_tuple.type_() else {
+                    panic!("Tuple expression has non-tuple type")
+                };
+                let TypedExpression::TypedTuple(TypedTuple {
+                    expressions: arguments,
+                }) = arguments_tuple
+                else {
+                    panic!("Tuple expression became non-tuple type.")
+                };
+                let Type::Function(argument_types, return_type) = function.type_() else {
+                    return Err(TypeCheckError::InvalidFunctionCall {
+                        expression: function,
+                        arguments,
+                    });
+                };
+                if argument_types != types {
+                    return Err(TypeCheckError::InvalidFunctionCall {
+                        expression: function,
+                        arguments,
+                    });
+                }
+                TypedFunctionCall {
+                    function: Box::new(function),
+                    arguments,
+                }
+                .into()
+            }
             _ => todo!(),
         })
     }
@@ -706,7 +740,7 @@ impl TypeChecker {
         match utils::check_unique(assignment_names) {
             Ok(()) => {}
             Err(UniqueError { duplicate }) => {
-                return Err(TypeCheckError::DuplicatedNameError {
+                return Err(TypeCheckError::DuplicatedName {
                     duplicate,
                     reason: String::from("assignment name"),
                 })
@@ -779,6 +813,28 @@ impl TypeChecker {
             TypedExpression::TypedFunctionDefinition(_) => {
                 panic!("Typed function found when only partially typed functions are expected.")
             }
+            TypedExpression::TypedFunctionCall(TypedFunctionCall {
+                function,
+                arguments,
+            }) => {
+                let TypedExpression::TypedTuple(TypedTuple {
+                    expressions: arguments,
+                }) = self.check_functions_in_expression(
+                    &TypedTuple {
+                        expressions: arguments.clone(),
+                    }
+                    .into(),
+                    context,
+                )?
+                else {
+                    panic!("Tuple expression has non-tuple type.")
+                };
+                TypedFunctionCall {
+                    function: Box::new(self.check_functions_in_expression(&*function, context)?),
+                    arguments,
+                }
+                .into()
+            }
         })
     }
     fn check_functions_in_block(
@@ -822,7 +878,7 @@ impl TypeChecker {
         }
         let body = self.check_block(&function_definition.body, &new_context)?;
         if *function_definition.return_type != body.type_() {
-            return Err(TypeCheckError::FunctionReturnTypeError {
+            return Err(TypeCheckError::FunctionReturnTypeMismatch {
                 return_type: *function_definition.return_type.clone(),
                 body,
             });
@@ -841,9 +897,10 @@ mod tests {
 
     use crate::{
         type_check_nodes::{TYPE_BOOL, TYPE_INT, TYPE_UNIT},
-        Assignment, Block, Boolean, ElementAccess, ExpressionBlock, FunctionDefinition,
-        GenericTypeVariable, IfExpression, Integer, TupleExpression, TypeItem, TypeVariable,
-        TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        Assignment, Block, Boolean, ElementAccess, ExpressionBlock, FunctionCall,
+        FunctionDefinition, GenericTypeVariable, IfExpression, Integer, TupleExpression, TypeItem,
+        TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL,
+        ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -2128,6 +2185,63 @@ mod tests {
         TypeContext::new();
         "arguments function def"
     )]
+    #[test_case(
+        FunctionCall {
+            function: Box::new(Variable("+").into()),
+            arguments: vec![
+                Integer{ value: 3}.into(),
+                Integer{ value: 5}.into(),
+            ],
+        }.into(),
+        Some(TYPE_INT),
+        TypeContext::from([(
+            Id::from("+"),
+            Type::Function(
+                vec![TYPE_INT, TYPE_INT],
+                Box::new(TYPE_INT)
+            )
+        )]);
+        "addition function call"
+    )]
+    #[test_case(
+        FunctionCall {
+            function: Box::new(Variable("+").into()),
+            arguments: vec![
+                Boolean{ value: true}.into(),
+                Integer{ value: 5}.into(),
+            ],
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("+"),
+            Type::Function(
+                vec![TYPE_INT, TYPE_INT],
+                Box::new(TYPE_INT)
+            )
+        )]);
+        "addition function call wrong type"
+    )]
+    #[test_case(
+        FunctionCall {
+            function: Box::new(Variable("+").into()),
+            arguments: vec![
+                Integer{ value: 3}.into(),
+                Integer{ value: 5}.into(),
+            ],
+        }.into(),
+        Some(TYPE_INT),
+        TypeContext::from([(
+            Id::from("+"),
+            Type::Function(
+                vec![
+                    Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new()),
+                    Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())
+                ],
+                Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new()))
+            )
+        )]);
+        "addition function call with aliases"
+    )]
     fn test_check_expressions(
         expression: Expression,
         expected_type: Option<Type>,
@@ -2391,6 +2505,71 @@ mod tests {
         None,
         TypeContext::new();
         "invalid recursive type usage"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition{
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("y")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(FunctionCall {
+                function: Box::new(Variable("+").into()),
+                arguments: vec![
+                    Variable("x").into(),
+                    Variable("y").into(),
+                ],
+            }.into())
+        }.into()),
+        Some(Type::Function(
+            vec![TYPE_INT, TYPE_INT],
+            Box::new(TYPE_INT)
+        )),
+        TypeContext::from([(
+            Id::from("+"),
+            Type::Function(
+                vec![TYPE_INT, TYPE_INT],
+                Box::new(TYPE_INT)
+            )
+        )]);
+        "add function definition"
+    )]
+    #[test_case(
+        ExpressionBlock(FunctionDefinition{
+            parameters: vec![
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("x")),
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee{
+                    assignee: Box::new(VariableAssignee("y")),
+                    type_: ATOMIC_TYPE_BOOL.into()
+                },
+            ],
+            return_type: ATOMIC_TYPE_INT.into(),
+            body: ExpressionBlock(FunctionCall {
+                function: Box::new(Variable("+").into()),
+                arguments: vec![
+                    Variable("x").into(),
+                    Variable("y").into(),
+                ],
+            }.into())
+        }.into()),
+        None,
+        TypeContext::from([(
+            Id::from("+"),
+            Type::Function(
+                vec![TYPE_INT, TYPE_INT],
+                Box::new(TYPE_INT)
+            )
+        )]);
+        "add invalid function definition"
     )]
     fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
         let type_checker = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone());

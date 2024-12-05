@@ -247,6 +247,12 @@ pub struct FunctionDefinition {
     pub body: Block,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct FunctionCall {
+    pub function: Box<Expression>,
+    pub arguments: Vec<Expression>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants, Clone)]
 pub enum Expression {
     Integer(Integer),
@@ -257,6 +263,7 @@ pub enum Expression {
     IfExpression(IfExpression),
     MatchExpression(MatchExpression),
     FunctionDefinition(FunctionDefinition),
+    FunctionCall(FunctionCall),
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
