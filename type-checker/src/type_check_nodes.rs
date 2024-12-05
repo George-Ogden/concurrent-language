@@ -29,6 +29,12 @@ impl ParametricType {
         }
     }
     pub fn instantiate(&self, type_variables: &Vec<Type>) -> Type {
+        dbg!(&self
+            .parameters
+            .clone()
+            .into_iter()
+            .map(|p| p.as_ptr())
+            .collect_vec());
         for (parameter, variable) in self.parameters.iter().zip(type_variables) {
             *parameter.borrow_mut() = Some(variable.clone());
         }
@@ -236,7 +242,7 @@ impl TypedExpression {
 #[derive(PartialEq, Clone, Debug)]
 pub struct ParametricExpression {
     pub expression: TypedExpression,
-    pub parameters: HashMap<Id, Rc<RefCell<Option<Type>>>>,
+    pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -305,4 +311,10 @@ pub enum TypeCheckError {
         type_: ParametricType,
         type_instances: Vec<TypeInstance>,
     },
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct ConstructorType {
+    pub input_type: Option<Type>,
+    pub output_type: Rc<RefCell<ParametricType>>,
 }

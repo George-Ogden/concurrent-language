@@ -27,7 +27,7 @@ type K = Id;
 type V = Rc<RefCell<ParametricType>>;
 type V_ = Rc<RefCell<Option<Type>>>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct GenericVariables(HashMap<Id, V_>);
 
 impl GenericVariables {
@@ -55,6 +55,12 @@ impl Index<&K> for GenericVariables {
     type Output = V_;
     fn index<'a>(&'a self, index: &K) -> &'a V_ {
         &self.0[index]
+    }
+}
+
+impl From<Vec<(K, V_)>> for GenericVariables {
+    fn from(value: Vec<(K, V_)>) -> Self {
+        value.into_iter().collect::<HashMap<_, _>>().into()
     }
 }
 
@@ -881,6 +887,11 @@ impl TypeChecker {
             let mut generic_variables = generic_variables.clone();
             generic_variables
                 .extend(GenericVariables::from(&assignment.assignee.generic_variables).into_iter());
+            dbg!(&generic_variables
+                .clone()
+                .into_iter()
+                .map(|(id, p)| (id, p.as_ptr()))
+                .collect_vec());
             let typed_expression =
                 self.check_expression(&assignment.expression, &new_context, &generic_variables)?;
             let assignment = TypedAssignment {
@@ -902,8 +913,8 @@ impl TypeChecker {
                     parameters: assignment
                         .expression
                         .parameters
-                        .values()
-                        .cloned()
+                        .iter()
+                        .map(|(_, rc)| rc.clone())
                         .collect_vec(),
                 })),
             );
@@ -1027,6 +1038,11 @@ impl TypeChecker {
                         GenericVariables::from(assignment.expression.parameters.clone())
                             .into_iter(),
                     );
+                    dbg!(&generic_variables
+                        .clone()
+                        .into_iter()
+                        .map(|(id, p)| (id, p.as_ptr()))
+                        .collect_vec());
                     self.check_functions_in_expression(
                         &assignment.expression.expression,
                         context,
@@ -3087,6 +3103,42 @@ mod tests {
         )),
         TypeContext::new();
         "compound generic function"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: Box::new(Assignee {
+                        id: Id::from("extra"),
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    }),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Box::new(VariableAssignee("x")),
+                                type_: Typename("T").into(),
+                            }
+                        ],
+                        return_type: Typename("T").into(),
+                        body: ExpressionBlock(Variable("x").into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(
+                GenericVariable{
+                    id: Id::from("extra"),
+                    type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
+                }.into()
+            )
+        },
+        Some(Type::Function(
+            vec![
+                TYPE_INT
+            ],
+            Box::new(TYPE_INT)
+        )),
+        TypeContext::new();
+        "dual generic function"
     )]
     #[test_case(
         Block {
