@@ -59,7 +59,11 @@ pub enum Type {
 impl PartialEq for Type {
     fn eq(&self, other: &Type) -> bool {
         match (self, other) {
-            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2)) if r1 == r2 => t1 == t2,
+            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2))
+                if r1.as_ptr() == r2.as_ptr() =>
+            {
+                t1 == t2
+            }
             (Self::Instantiation(r1, t1), t2) | (t2, Self::Instantiation(r1, t1)) => {
                 t2 == &r1.borrow().instantiate(t1)
             }

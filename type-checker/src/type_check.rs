@@ -1,7 +1,7 @@
 use crate::type_check_nodes::{
-    ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type, TypeCheckError,
-    TypedAssignment, TypedBlock, TypedElementAccess, TypedExpression, TypedFunctionCall,
-    TypedFunctionDefinition, TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
+    ConstructorType, ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type,
+    TypeCheckError, TypedAssignment, TypedBlock, TypedElementAccess, TypedExpression,
+    TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
@@ -385,12 +385,49 @@ type TypeContext = TypeDefinitions;
 
 struct TypeChecker {
     type_definitions: TypeDefinitions,
+    constructors: HashMap<Id, ConstructorType>,
 }
 
 impl TypeChecker {
-    fn with_type_definitions(definitions: TypeDefinitions) -> Self {
-        TypeChecker {
+    fn with_type_definitions(definitions: TypeDefinitions) -> Result<Self, TypeCheckError> {
+        Ok(TypeChecker {
+            constructors: TypeChecker::generate_constructors(&definitions)?,
             type_definitions: definitions,
+        })
+    }
+    fn generate_constructors(
+        definitions: &TypeDefinitions,
+    ) -> Result<HashMap<Id, ConstructorType>, TypeCheckError> {
+        let constructors = definitions
+            .values()
+            .map(|output_type| {
+                if let Type::Union(items) = &output_type.borrow().type_ {
+                    items
+                        .into_iter()
+                        .map(|(id, input_type)| {
+                            (
+                                id.clone(),
+                                ConstructorType {
+                                    input_type: input_type.clone(),
+                                    output_type: output_type.clone(),
+                                },
+                            )
+                        })
+                        .collect_vec()
+                } else {
+                    Vec::new()
+                }
+            })
+            .concat();
+        if let Err(utils::UniqueError { duplicate }) =
+            utils::check_unique(constructors.iter().map(|(id, _)| id))
+        {
+            Err(TypeCheckError::DuplicatedName {
+                duplicate: duplicate.clone(),
+                reason: String::from("constructor"),
+            })
+        } else {
+            Ok(constructors.into_iter().collect::<HashMap<_, _>>())
         }
     }
     fn convert_ast_type(
@@ -1101,7 +1138,7 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        type_check_nodes::{TYPE_BOOL, TYPE_INT, TYPE_UNIT},
+        type_check_nodes::{ConstructorType, TYPE_BOOL, TYPE_INT, TYPE_UNIT},
         Assignee, Assignment, Block, Boolean, ElementAccess, ExpressionBlock, FunctionCall,
         FunctionDefinition, GenericTypeVariable, IfExpression, Integer, TupleExpression, TypeItem,
         TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL,
@@ -2482,7 +2519,9 @@ mod tests {
         expected_type: Option<Type>,
         context: TypeContext,
     ) {
-        let type_checker = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone());
+        let Ok(type_checker) = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone()) else {
+            panic!("Invalid type checker definition")
+        };
         let type_check_result =
             type_checker.check_expression(&expression, &context, &GenericVariables::new());
         match expected_type {
@@ -3182,7 +3221,9 @@ mod tests {
         "tuple generic function"
     )]
     fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
-        let type_checker = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone());
+        let Ok(type_checker) = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone()) else {
+            panic!("Invalid type checker definition")
+        };
         let type_check_result =
             type_checker.check_block(&block, &context, &GenericVariables::new());
         match expected_type {
@@ -3202,5 +3243,172 @@ mod tests {
                 assert!(&type_check_result.is_err());
             }
         }
+    }
+
+    #[test]
+    fn test_valid_constructor_list() {
+        let mut type_definitions = TypeDefinitions::from([
+            (Id::from("Tree"), {
+                let parameter = Rc::new(RefCell::new(None));
+                let tree_type = Rc::new(RefCell::new(ParametricType {
+                    parameters: vec![parameter.clone()],
+                    type_: Type::new(),
+                }));
+                tree_type.borrow_mut().type_ = Type::Union(HashMap::from([
+                    (
+                        Id::from("Node"),
+                        Some(Type::Tuple(vec![
+                            Type::Variable(parameter.clone()),
+                            Type::Instantiation(
+                                tree_type.clone(),
+                                vec![Type::Variable(parameter.clone())],
+                            ),
+                            Type::Variable(parameter.clone()),
+                        ])),
+                    ),
+                    (Id::from("Leaf"), None),
+                ]));
+                tree_type
+            }),
+            (
+                Id::from("Empty"),
+                Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([(Id::from("Empty"), None)])).into(),
+                )),
+            ),
+            (
+                Id::from("opaque_int"),
+                Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([(Id::from("opaque_int"), Some(TYPE_INT))])).into(),
+                )),
+            ),
+        ]);
+        type_definitions.insert(
+            Id::from("opaque_opaque_int"),
+            Rc::new(RefCell::new(
+                Type::Union(HashMap::from([(
+                    Id::from("opaque_opaque_int"),
+                    Some(Type::Instantiation(
+                        type_definitions[&Id::from("opaque_int")].clone(),
+                        Vec::new(),
+                    )),
+                )]))
+                .into(),
+            )),
+        );
+        type_definitions.insert(
+            Id::from("int_tree"),
+            Rc::new(RefCell::new(
+                Type::Union(HashMap::from([(
+                    Id::from("int_tree"),
+                    Some(Type::Instantiation(
+                        type_definitions[&Id::from("Tree")].clone(),
+                        vec![TYPE_INT],
+                    )),
+                )]))
+                .into(),
+            )),
+        );
+        let expected_constructors = HashMap::from([
+            {
+                let tree_type = type_definitions[&Id::from("Tree")].clone();
+                let tree_parameter = tree_type.borrow().parameters[0].clone();
+                (
+                    Id::from("Node"),
+                    ConstructorType {
+                        input_type: Some(Type::Tuple(vec![
+                            Type::Variable(tree_parameter.clone()),
+                            Type::Instantiation(
+                                tree_type.clone(),
+                                vec![Type::Variable(tree_parameter.clone())],
+                            ),
+                            Type::Variable(tree_parameter.clone()),
+                        ])),
+                        output_type: tree_type,
+                    },
+                )
+            },
+            (
+                Id::from("Leaf"),
+                ConstructorType {
+                    input_type: None,
+                    output_type: type_definitions[&Id::from("Tree")].clone(),
+                },
+            ),
+            (
+                Id::from("Empty"),
+                ConstructorType {
+                    input_type: None,
+                    output_type: type_definitions[&Id::from("Empty")].clone(),
+                },
+            ),
+            (
+                Id::from("opaque_int"),
+                ConstructorType {
+                    input_type: Some(TYPE_INT),
+                    output_type: type_definitions[&Id::from("opaque_int")].clone(),
+                },
+            ),
+            (
+                Id::from("opaque_opaque_int"),
+                ConstructorType {
+                    input_type: Some(Type::Instantiation(
+                        type_definitions[&Id::from("opaque_int")].clone(),
+                        Vec::new(),
+                    )),
+                    output_type: type_definitions[&Id::from("opaque_opaque_int")].clone(),
+                },
+            ),
+            (
+                Id::from("int_tree"),
+                ConstructorType {
+                    input_type: Some(Type::Instantiation(
+                        type_definitions[&Id::from("Tree")].clone(),
+                        vec![TYPE_INT],
+                    )),
+                    output_type: type_definitions[&Id::from("int_tree")].clone(),
+                },
+            ),
+        ]);
+        let Ok(type_checker) = TypeChecker::with_type_definitions(type_definitions) else {
+            panic!("Invalid type checker definition");
+        };
+        assert_eq!(type_checker.constructors, expected_constructors)
+    }
+
+    #[test]
+    fn test_invalid_constructor_list() {
+        let type_definitions = TypeDefinitions::from([
+            (Id::from("Tree"), {
+                let parameter = Rc::new(RefCell::new(None));
+                let tree_type = Rc::new(RefCell::new(ParametricType {
+                    parameters: vec![parameter.clone()],
+                    type_: Type::new(),
+                }));
+                tree_type.borrow_mut().type_ = Type::Union(HashMap::from([
+                    (
+                        Id::from("Node"),
+                        Some(Type::Tuple(vec![
+                            Type::Variable(parameter.clone()),
+                            Type::Instantiation(
+                                tree_type.clone(),
+                                vec![Type::Variable(parameter.clone())],
+                            ),
+                            Type::Variable(parameter.clone()),
+                        ])),
+                    ),
+                    (Id::from("Leaf"), None),
+                ]));
+                tree_type
+            }),
+            (
+                Id::from("Leaf"),
+                Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([(Id::from("Leaf"), None)])).into(),
+                )),
+            ),
+        ]);
+        let result = TypeChecker::with_type_definitions(type_definitions);
+        assert!(result.is_err())
     }
 }
