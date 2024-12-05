@@ -245,7 +245,7 @@ pub enum TypeCheckError {
     DefaultError(String),
     DuplicatedNameError {
         duplicate: Id,
-        type_: String,
+        reason: String,
     },
     InvalidConditionError {
         condition: TypedExpression,
@@ -264,5 +264,15 @@ pub enum TypeCheckError {
     UnknownTypeError {
         type_name: Id,
         type_names: Vec<Id>,
+    },
+    BuiltInOverrideError {
+        name: Id,
+        reason: String,
+    },
+    TypeAsParameterError {
+        type_name: Id,
+    },
+    RecursiveTypeAlias {
+        type_alias: Id,
     },
 }

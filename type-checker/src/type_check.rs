@@ -10,12 +10,11 @@ use crate::{
     GenericVariable, Id, IfExpression, OpaqueTypeDefinition, TransparentTypeDefinition,
     TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
-use counter::Counter;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
-use std::collections::hash_map::Keys;
-use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::{Keys, Values};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::rc::Rc;
 use strum::IntoEnumIterator;
@@ -43,6 +42,9 @@ impl TypeDefinitions {
     }
     pub fn keys(&self) -> Keys<'_, K, V> {
         self.0.keys()
+    }
+    pub fn values(&self) -> Values<'_, K, V> {
+        self.0.values()
     }
     fn references_index(&self) -> TypeReferencesIndex {
         self.0
@@ -374,58 +376,43 @@ impl TypeChecker {
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
             .collect_vec();
-        if !type_names
-            .clone()
-            .chain(predefined_type_names.iter())
-            .all_unique()
+        if let Err(UniqueError { duplicate }) =
+            utils::check_unique(type_names.clone().chain(predefined_type_names.iter()))
         {
-            let type_name_counts = type_names.collect::<Counter<_>>();
-            for (nam, count) in type_name_counts {
-                if predefined_type_names.contains(nam) {
-                    return Err(TypeCheckError::DefaultError(format!(
-                        "Attempt to override built-in type name {}",
-                        nam
-                    )));
-                }
-                if count > 1 {
-                    return Err(TypeCheckError::DefaultError(format!(
-                        "Duplicated type name {}",
-                        nam
-                    )));
-                }
+            if predefined_type_names.contains(&duplicate) {
+                return Err(TypeCheckError::BuiltInOverrideError {
+                    name: duplicate.clone(),
+                    reason: String::from("type name"),
+                });
+            } else {
+                return Err(TypeCheckError::DuplicatedNameError {
+                    duplicate: duplicate.clone(),
+                    reason: String::from("type name"),
+                });
             }
-            panic!("Type names were not unique but all counts were < 2");
         }
         for (type_name, type_parameters) in type_names.clone().zip(all_type_parameters.clone()) {
             if type_parameters.contains(type_name) {
-                return Err(TypeCheckError::DefaultError(format!(
-                    "Type {} contains itself as a parameter",
-                    type_name
-                )));
+                return Err(TypeCheckError::TypeAsParameterError {
+                    type_name: type_name.clone(),
+                });
             }
         }
         for type_parameters in all_type_parameters.clone() {
-            if !type_parameters
-                .iter()
-                .chain(predefined_type_names.iter())
-                .all_unique()
+            if let Err(UniqueError { duplicate }) =
+                utils::check_unique(type_parameters.iter().chain(predefined_type_names.iter()))
             {
-                let type_parameter_counts = type_parameters.into_iter().collect::<Counter<_>>();
-                for (parameter, count) in type_parameter_counts {
-                    if predefined_type_names.contains(&parameter) {
-                        return Err(TypeCheckError::DefaultError(format!(
-                            "Attempt to override built-in type name {}",
-                            parameter
-                        )));
-                    }
-                    if count > 1 {
-                        return Err(TypeCheckError::DefaultError(format!(
-                            "Duplicated parameter name {}",
-                            parameter
-                        )));
-                    }
+                if predefined_type_names.contains(&duplicate) {
+                    return Err(TypeCheckError::BuiltInOverrideError {
+                        name: duplicate.clone(),
+                        reason: String::from("type parameter"),
+                    });
+                } else {
+                    return Err(TypeCheckError::DuplicatedNameError {
+                        duplicate: duplicate.clone(),
+                        reason: String::from("type parameter"),
+                    });
                 }
-                panic!("Type names were not unique but all counts were < 2");
             }
         }
         let mut type_definitions: TypeDefinitions = type_names
@@ -472,7 +459,7 @@ impl TypeChecker {
                         Err(UniqueError { duplicate }) => {
                             return Err(TypeCheckError::DuplicatedNameError {
                                 duplicate: duplicate.clone(),
-                                type_: String::from("variant name"),
+                                reason: String::from("variant name"),
                             })
                         }
                     }
@@ -509,7 +496,71 @@ impl TypeChecker {
                 panic!("{} not found in type definitions", type_name)
             }
         }
+        for definition in definitions {
+            if let Definition::TransparentTypeDefinition(TransparentTypeDefinition {
+                variable:
+                    GenericTypeVariable {
+                        id,
+                        generic_variables: _,
+                    },
+                type_: _,
+            }) = definition
+            {
+                if TypeChecker::is_self_recursive(id, &type_definitions).is_err() {
+                    return Err(TypeCheckError::RecursiveTypeAlias {
+                        type_alias: id.clone(),
+                    });
+                }
+            }
+        }
         return Ok(type_definitions);
+    }
+    fn is_self_recursive(id: &Id, definitions: &TypeDefinitions) -> Result<(), ()> {
+        let start = definitions.get(id).unwrap();
+        let mut queue = VecDeque::from([start.clone()]);
+        let mut visited: HashMap<*mut ParametricType, bool> =
+            HashMap::from_iter(definitions.values().map(|p| (p.as_ptr(), false)));
+        fn update_queue(
+            type_: &Type,
+            start: &V,
+            queue: &mut VecDeque<V>,
+            visited: &mut HashMap<*mut ParametricType, bool>,
+        ) -> Result<(), ()> {
+            match type_ {
+                Type::Union(items) => {
+                    for type_ in items.values() {
+                        if let Some(type_) = type_ {
+                            update_queue(type_, start, queue, visited)?;
+                        }
+                    }
+                }
+                Type::Instantiation(rc, ts) => {
+                    if rc.as_ptr() == start.as_ptr() {
+                        return Err(());
+                    }
+                    if !visited.get(&rc.as_ptr()).unwrap() {
+                        visited.insert(rc.as_ptr(), true);
+                        queue.push_back(rc.clone());
+                    }
+                    update_queue(&Type::Tuple(ts.clone()), start, queue, visited)?
+                }
+                Type::Tuple(types) => {
+                    for type_ in types {
+                        update_queue(type_, start, queue, visited)?;
+                    }
+                }
+                Type::Function(argument_types, return_type) => {
+                    update_queue(&Type::Tuple(argument_types.clone()), start, queue, visited)?;
+                    update_queue(&*return_type, start, queue, visited)?;
+                }
+                _ => (),
+            }
+            Ok(())
+        }
+        while let Some(rc) = queue.pop_front() {
+            update_queue(&rc.borrow().type_, start, &mut queue, &mut visited)?;
+        }
+        Ok(())
     }
     fn check_expression(
         &self,
@@ -533,7 +584,7 @@ impl TypeChecker {
                         if type_instances.len() != type_.borrow().num_parameters as usize {
                             return Err(TypeCheckError::DefaultError(format!("wrong number parameters to instantiate type {} (expected {} got {})", id, type_.borrow().num_parameters, type_instances.len())))
                         }
-                        let type_ = if type_instances.len() == 0 {
+                        let type_ = if type_instances.is_empty() {
                             type_.borrow().type_.clone()
                         } else {
                             Type::Instantiation(
@@ -613,7 +664,7 @@ impl TypeChecker {
                 {
                     return Err(TypeCheckError::DuplicatedNameError {
                         duplicate: duplicate.clone(),
-                        type_: String::from("function parameter"),
+                        reason: String::from("function parameter"),
                     });
                 }
                 let parameter_types = parameters
@@ -657,7 +708,7 @@ impl TypeChecker {
             Err(UniqueError { duplicate }) => {
                 return Err(TypeCheckError::DuplicatedNameError {
                     duplicate,
-                    type_: String::from("assignment name"),
+                    reason: String::from("assignment name"),
                 })
             }
         }
@@ -1557,6 +1608,96 @@ mod tests {
             )])
         );
         "tree type"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: TypeVariable("recursive"),
+                type_: Typename("recursive").into(),
+            }.into(),
+        ],
+        None;
+        "recursive typealias"
+    )]
+    #[test_case(
+        vec![
+            OpaqueTypeDefinition{
+                variable: GenericTypeVariable{
+                    id: Id::from("Recursive"),
+                    generic_variables: vec![Id::from("T")]
+                },
+                type_: GenericType{
+                    id: Id::from("Recursive"),
+                    type_variables: vec![Typename("T").into()]
+                }.into(),
+            }.into(),
+            TransparentTypeDefinition{
+                variable: TypeVariable("recursive_alias"),
+                type_: GenericType{
+                    id: Id::from("Recursive"),
+                    type_variables: vec![Typename("recursive_alias").into()]
+                }.into(),
+            }.into(),
+        ],
+        None;
+        "indirectly recursive typealias"
+    )]
+    #[test_case(
+        vec![
+            TransparentTypeDefinition{
+                variable: TypeVariable("recursive1"),
+                type_: Typename("recursive2").into(),
+            }.into(),
+            TransparentTypeDefinition{
+                variable: TypeVariable("recursive2"),
+                type_: Typename("recursive1").into(),
+            }.into(),
+        ],
+        None;
+        "mutually recursive typealias"
+    )]
+    #[test_case(
+        vec![
+            UnionTypeDefinition {
+                variable: TypeVariable("int_list"),
+                items: vec![
+                    TypeItem{
+                        id: Id::from("Cons"),
+                        type_: Some(Typename("int_list").into())
+                    },
+                    TypeItem{
+                        id: Id::from("Nil"),
+                        type_: None
+                    },
+                ]
+            }.into(),
+            TransparentTypeDefinition {
+                variable: TypeVariable("int_list2"),
+                type_: Typename("int_list").into()
+            }.into()
+        ],
+        Some(TypeDefinitions::from(
+            {
+                let reference = Rc::new(RefCell::new(ParametricType::new()));
+                let union_type = Type::Union(HashMap::from([
+                    (
+                        Id::from("Cons"),
+                        Some(Type::Instantiation(Rc::clone(&reference), Vec::new())),
+                    ),
+                    (
+                        Id::from("Nil"),
+                        None,
+                    ),
+                ]));
+                *reference.borrow_mut() = union_type.into();
+                let instantiation = Rc::new(RefCell::new(Type::Instantiation(reference.clone(), Vec::new()).into()));
+                [
+                    (Id::from("int_list"),reference),
+                    (Id::from("int_list2"), instantiation)
+                ]
+            }
+        ));
+        "recursive type alias"
     )]
     fn test_check_type_definitions(
         definitions: Vec<Definition>,
