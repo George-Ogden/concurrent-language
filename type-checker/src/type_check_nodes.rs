@@ -320,5 +320,6 @@ pub enum TypeCheckError {
 #[derive(Clone, PartialEq, Debug)]
 pub struct ConstructorType {
     pub input_type: Option<Type>,
-    pub output_type: Rc<RefCell<ParametricType>>,
+    pub output_type: Type,
+    pub parameters: Vec<Rc<RefCell<Option<Type>>>>,
 }

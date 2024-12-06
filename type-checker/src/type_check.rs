@@ -409,7 +409,8 @@ impl TypeChecker {
                                 id.clone(),
                                 ConstructorType {
                                     input_type: input_type.clone(),
-                                    output_type: output_type.clone(),
+                                    output_type: output_type.borrow().type_.clone(),
+                                    parameters: output_type.borrow().parameters.clone(),
                                 },
                             )
                         })
@@ -3324,29 +3325,37 @@ mod tests {
                             ),
                             Type::Variable(tree_parameter.clone()),
                         ])),
-                        output_type: tree_type,
+                        output_type: tree_type.clone().borrow().type_.clone(),
+                        parameters: vec![tree_parameter],
                     },
                 )
             },
-            (
-                Id::from("Leaf"),
+            (Id::from("Leaf"), {
+                let tree_type = type_definitions[&Id::from("Tree")].clone();
+                let tree_parameter = tree_type.borrow().parameters[0].clone();
                 ConstructorType {
                     input_type: None,
-                    output_type: type_definitions[&Id::from("Tree")].clone(),
-                },
-            ),
+                    output_type: tree_type.clone().borrow().type_.clone(),
+                    parameters: vec![tree_parameter],
+                }
+            }),
             (
                 Id::from("Empty"),
                 ConstructorType {
                     input_type: None,
-                    output_type: type_definitions[&Id::from("Empty")].clone(),
+                    output_type: type_definitions[&Id::from("Empty")].borrow().type_.clone(),
+                    parameters: Vec::new(),
                 },
             ),
             (
                 Id::from("opaque_int"),
                 ConstructorType {
                     input_type: Some(TYPE_INT),
-                    output_type: type_definitions[&Id::from("opaque_int")].clone(),
+                    output_type: type_definitions[&Id::from("opaque_int")]
+                        .borrow()
+                        .type_
+                        .clone(),
+                    parameters: Vec::new(),
                 },
             ),
             (
@@ -3356,7 +3365,11 @@ mod tests {
                         type_definitions[&Id::from("opaque_int")].clone(),
                         Vec::new(),
                     )),
-                    output_type: type_definitions[&Id::from("opaque_opaque_int")].clone(),
+                    output_type: type_definitions[&Id::from("opaque_opaque_int")]
+                        .borrow()
+                        .type_
+                        .clone(),
+                    parameters: Vec::new(),
                 },
             ),
             (
@@ -3366,7 +3379,11 @@ mod tests {
                         type_definitions[&Id::from("Tree")].clone(),
                         vec![TYPE_INT],
                     )),
-                    output_type: type_definitions[&Id::from("int_tree")].clone(),
+                    output_type: Type::Instantiation(
+                        type_definitions[&Id::from("int_tree")].clone(),
+                        Vec::new(),
+                    ),
+                    parameters: Vec::new(),
                 },
             ),
         ]);
