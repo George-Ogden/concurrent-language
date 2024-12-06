@@ -433,25 +433,25 @@ impl TypeChecker {
         }
     }
     fn convert_ast_type(
-        type_instance: &TypeInstance,
+        type_instance: TypeInstance,
         type_definitions: &TypeDefinitions,
         generic_variables: &GenericVariables,
     ) -> Result<Type, TypeCheckError> {
         Ok(match type_instance {
             TypeInstance::AtomicType(AtomicType {
                 type_: atomic_type_enum,
-            }) => Type::Atomic(atomic_type_enum.clone()),
+            }) => Type::Atomic(atomic_type_enum),
             TypeInstance::GenericType(GenericType { id, type_variables }) => {
                 if let Some(reference) = generic_variables.get(&id) {
                     if type_variables.is_empty() {
                         Type::Variable(reference.clone())
                     } else {
                         return Err(TypeCheckError::InstantiationOfTypeVariable {
-                            variable: id.clone(),
+                            variable: id,
                             type_instances: type_variables.clone(),
                         });
                     }
-                } else if let Some(reference) = type_definitions.get(id) {
+                } else if let Some(reference) = type_definitions.get(&id) {
                     if type_variables.len() != reference.borrow().parameters.len() {
                         return Err(TypeCheckError::WrongNumberOfTypeParameters {
                             type_: reference.borrow().clone(),
@@ -473,7 +473,7 @@ impl TypeChecker {
                     )
                 } else {
                     return Err(TypeCheckError::UnknownError {
-                        id: id.clone(),
+                        id: id,
                         options: type_definitions
                             .keys()
                             .chain(generic_variables.keys())
@@ -485,7 +485,7 @@ impl TypeChecker {
             }
             TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
                 types
-                    .iter()
+                    .into_iter()
                     .map(|t| TypeChecker::convert_ast_type(t, type_definitions, generic_variables))
                     .collect::<Result<_, _>>()?,
             ),
@@ -494,13 +494,13 @@ impl TypeChecker {
                 return_type,
             }) => Type::Function(
                 argument_types
-                    .iter()
+                    .into_iter()
                     .map(|type_| {
                         TypeChecker::convert_ast_type(type_, type_definitions, generic_variables)
                     })
                     .collect::<Result<_, _>>()?,
                 Box::new(TypeChecker::convert_ast_type(
-                    &return_type,
+                    *return_type,
                     type_definitions,
                     generic_variables,
                 )?),
@@ -508,9 +508,9 @@ impl TypeChecker {
         })
     }
     fn check_type_definitions(
-        definitions: &Vec<Definition>,
+        definitions: Vec<Definition>,
     ) -> Result<TypeDefinitions, TypeCheckError> {
-        let type_names = definitions.iter().map(Definition::get_id);
+        let type_names = definitions.iter().map(|definition| definition.get_id());
         let all_type_parameters = definitions.iter().map(Definition::get_parameters);
         let predefined_type_names = AtomicTypeEnum::iter()
             .map(|a| AtomicTypeEnum::to_string(&a).to_lowercase())
@@ -531,7 +531,7 @@ impl TypeChecker {
             }
         }
         for (type_name, type_parameters) in type_names.clone().zip(all_type_parameters.clone()) {
-            if type_parameters.contains(type_name) {
+            if type_parameters.contains(&type_name) {
                 return Err(TypeCheckError::TypeAsParameter {
                     type_name: type_name.clone(),
                 });
@@ -568,9 +568,27 @@ impl TypeChecker {
                 )
             })
             .collect();
+        let transparent_definitions = definitions
+            .iter()
+            .map(|definition| {
+                if let Definition::TransparentTypeDefinition(TransparentTypeDefinition {
+                    variable:
+                        GenericTypeVariable {
+                            id,
+                            generic_variables: _,
+                        },
+                    type_: _,
+                }) = definition
+                {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
         for definition in definitions {
-            let type_name = definition.get_id();
-            let type_ = match &definition {
+            let type_name = definition.get_id().clone();
+            let type_ = match definition {
                 Definition::OpaqueTypeDefinition(OpaqueTypeDefinition {
                     variable:
                         GenericTypeVariable {
@@ -583,7 +601,7 @@ impl TypeChecker {
                     Some(TypeChecker::convert_ast_type(
                         type_,
                         &type_definitions,
-                        &GenericVariables::from((generic_variables, &type_definitions[id])),
+                        &GenericVariables::from((&generic_variables, &type_definitions[&id])),
                     )?),
                 )])),
                 Definition::UnionTypeDefinition(UnionTypeDefinition {
@@ -604,21 +622,20 @@ impl TypeChecker {
                             })
                         }
                     }
-                    let variants = items.iter().map(|item| {
+                    let variants = items.into_iter().map(|item| {
                         item.type_
-                            .as_ref()
                             .map(|type_instance| {
                                 TypeChecker::convert_ast_type(
                                     type_instance,
                                     &type_definitions,
                                     &GenericVariables::from((
-                                        generic_variables,
-                                        &type_definitions[id],
+                                        &generic_variables,
+                                        &type_definitions[&id],
                                     )),
                                 )
                             })
                             .transpose()
-                            .map(|type_| (item.id.clone(), type_))
+                            .map(|type_| (item.id, type_))
                     });
                     Type::Union(variants.collect::<Result<_, _>>()?)
                 }
@@ -632,35 +649,28 @@ impl TypeChecker {
                 }) => TypeChecker::convert_ast_type(
                     type_,
                     &type_definitions,
-                    &GenericVariables::from((generic_variables, &type_definitions[id])),
+                    &GenericVariables::from((&generic_variables, &type_definitions[&id])),
                 )?,
                 Definition::EmptyTypeDefinition(EmptyTypeDefinition { id }) => {
-                    Type::Union(HashMap::from([(id.clone(), None)]))
+                    Type::Union(HashMap::from([(id, None)]))
                 }
             };
-            if let Some(type_reference) = type_definitions.get_mut(type_name) {
+            if let Some(type_reference) = type_definitions.get_mut(&type_name) {
                 type_reference.borrow_mut().type_ = type_;
             } else {
                 panic!("{} not found in type definitions", type_name)
             }
         }
-        for definition in definitions {
-            if let Definition::TransparentTypeDefinition(TransparentTypeDefinition {
-                variable:
-                    GenericTypeVariable {
-                        id,
-                        generic_variables: _,
-                    },
-                type_: _,
-            }) = definition
-            {
-                if TypeChecker::is_self_recursive(id, &type_definitions).is_err() {
-                    return Err(TypeCheckError::RecursiveTypeAlias {
-                        type_alias: id.clone(),
-                    });
+        transparent_definitions.into_iter().try_for_each(|id| {
+            id.map_or(Ok(()), |id| {
+                if TypeChecker::is_self_recursive(&id, &type_definitions).is_err() {
+                    Err(TypeCheckError::RecursiveTypeAlias { type_alias: id })
+                } else {
+                    Ok(())
                 }
-            }
-        }
+            })
+        })?;
+
         return Ok(type_definitions);
     }
     fn is_self_recursive(id: &Id, definitions: &TypeDefinitions) -> Result<(), ()> {
@@ -712,28 +722,28 @@ impl TypeChecker {
     }
     fn check_expression(
         &self,
-        expression: &Expression,
+        expression: Expression,
         context: &TypeContext,
         generic_variables: &GenericVariables,
     ) -> Result<TypedExpression, TypeCheckError> {
         Ok(match expression {
-            Expression::Integer(i) => i.clone().into(),
-            Expression::Boolean(b) => b.clone().into(),
+            Expression::Integer(i) => i.into(),
+            Expression::Boolean(b) => b.into(),
             Expression::TupleExpression(TupleExpression { expressions }) => TypedTuple {
                 expressions: expressions
-                    .iter()
+                    .into_iter()
                     .map(|expression| self.check_expression(expression, context, generic_variables))
                     .collect::<Result<_, _>>()?,
             }
             .into(),
             Expression::GenericVariable(GenericVariable { id, type_instances }) => {
-                let variable_type = context.get(id);
+                let variable_type = context.get(&id);
                 match variable_type {
                     Some(type_) => {
                         if type_instances.len() != type_.borrow().parameters.len() {
                             return Err(TypeCheckError::WrongNumberOfTypeParameters {
                                 type_: type_.borrow().clone(),
-                                type_instances: type_instances.clone(),
+                                type_instances: type_instances,
                             });
                         }
                         let type_ = if type_instances.is_empty() {
@@ -742,7 +752,7 @@ impl TypeChecker {
                             Type::Instantiation(
                                 type_.clone(),
                                 type_instances
-                                    .iter()
+                                    .into_iter()
                                     .map(|type_instance| {
                                         TypeChecker::convert_ast_type(
                                             type_instance,
@@ -753,16 +763,13 @@ impl TypeChecker {
                                     .collect::<Result<_, _>>()?,
                             )
                         };
-                        TypedVariable {
-                            id: id.clone(),
-                            type_,
-                        }
+                        TypedVariable { id: id, type_ }
                     }
                     .into(),
                     None => {
                         return Err(TypeCheckError::UnknownError {
                             place: String::from("variable"),
-                            id: id.clone(),
+                            id: id,
                             options: context.keys().map(|id| id.clone()).collect_vec(),
                         })
                     }
@@ -770,22 +777,22 @@ impl TypeChecker {
             }
             Expression::ElementAccess(ElementAccess { expression, index }) => {
                 let typed_expression =
-                    self.check_expression(expression, context, generic_variables)?;
+                    self.check_expression(*expression, context, generic_variables)?;
                 let Type::Tuple(types) = typed_expression.type_() else {
                     return Err(TypeCheckError::InvalidAccess {
                         expression: typed_expression,
-                        index: *index,
+                        index,
                     });
                 };
-                if *index as usize >= types.len() {
+                if index as usize >= types.len() {
                     return Err(TypeCheckError::InvalidAccess {
-                        index: *index,
+                        index,
                         expression: typed_expression,
                     });
                 };
                 TypedElementAccess {
                     expression: Box::new(typed_expression),
-                    index: *index,
+                    index,
                 }
                 .into()
             }
@@ -794,7 +801,7 @@ impl TypeChecker {
                 true_block,
                 false_block,
             }) => {
-                let condition = self.check_expression(&*condition, context, generic_variables)?;
+                let condition = self.check_expression(*condition, context, generic_variables)?;
                 if condition.type_() != TYPE_BOOL {
                     return Err(TypeCheckError::InvalidCondition { condition });
                 }
@@ -835,7 +842,7 @@ impl TypeChecker {
                     .iter()
                     .map(|typed_assignee| {
                         TypeChecker::convert_ast_type(
-                            &typed_assignee.type_,
+                            typed_assignee.type_.clone(),
                             &self.type_definitions,
                             generic_variables,
                         )
@@ -849,7 +856,7 @@ impl TypeChecker {
                         &self.type_definitions,
                         generic_variables,
                     )?),
-                    body: body.clone(),
+                    body,
                 }
                 .into()
             }
@@ -857,10 +864,10 @@ impl TypeChecker {
                 function,
                 arguments,
             }) => {
-                let function = self.check_expression(&function, context, generic_variables)?;
+                let function = self.check_expression(*function, context, generic_variables)?;
                 let arguments_tuple = self.check_expression(
-                    &TupleExpression {
-                        expressions: arguments.clone(),
+                    TupleExpression {
+                        expressions: arguments,
                     }
                     .into(),
                     context,
@@ -910,12 +917,12 @@ impl TypeChecker {
                             type_: constructor_type.output_type.clone(),
                             parameters: constructor_type.parameters.clone(),
                         },
-                        type_instances: constructor.type_instances.clone(),
+                        type_instances: constructor.type_instances,
                     });
                 }
                 let arguments_tuple = self.check_expression(
-                    &TupleExpression {
-                        expressions: arguments.clone(),
+                    TupleExpression {
+                        expressions: arguments,
                     }
                     .into(),
                     context,
@@ -931,8 +938,8 @@ impl TypeChecker {
                     panic!("Tuple expression became non-tuple type.")
                 };
                 let Type::Tuple(type_variables) = TypeChecker::convert_ast_type(
-                    &TypeInstance::TupleType(TupleType {
-                        types: constructor.type_instances.clone(),
+                    TypeInstance::TupleType(TupleType {
+                        types: constructor.type_instances,
                     }),
                     &self.type_definitions,
                     generic_variables,
@@ -942,11 +949,11 @@ impl TypeChecker {
                 };
                 let (input_type, output_type) = constructor_type.instantiate(&type_variables);
                 match input_type {
-                    Some(ref type_) => {
+                    Some(type_) => {
                         if vec![type_.clone()] != types {
                             return Err(TypeCheckError::InvalidConstructorArguments {
                                 id: constructor.id.clone(),
-                                input_type,
+                                input_type: Some(type_),
                                 arguments,
                             });
                         }
@@ -973,7 +980,7 @@ impl TypeChecker {
     }
     fn check_block(
         &self,
-        block: &Block,
+        block: Block,
         context: &TypeContext,
         generic_variables: &GenericVariables,
     ) -> Result<TypedBlock, TypeCheckError> {
@@ -992,21 +999,21 @@ impl TypeChecker {
                 })
             }
         }
-        for assignment in &block.assignments {
+        for assignment in block.assignments {
             let mut generic_variables = generic_variables.clone();
             generic_variables
                 .extend(GenericVariables::from(&assignment.assignee.generic_variables).into_iter());
             let typed_expression =
-                self.check_expression(&assignment.expression, &new_context, &generic_variables)?;
+                self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
             let assignment = TypedAssignment {
-                id: assignment.assignee.id.clone(),
+                id: assignment.assignee.id,
                 expression: ParametricExpression {
                     expression: typed_expression,
                     parameters: assignment
                         .assignee
                         .generic_variables
-                        .iter()
-                        .map(|id| (id.clone(), generic_variables[id].clone()))
+                        .into_iter()
+                        .map(|id| (id.clone(), generic_variables[&id].clone()))
                         .collect(),
                 },
             };
@@ -1025,45 +1032,53 @@ impl TypeChecker {
             assignments.push(assignment);
         }
         let typed_expression =
-            self.check_expression(&block.expression, &new_context, generic_variables)?;
+            self.check_expression(*block.expression, &new_context, generic_variables)?;
         let block = TypedBlock {
             assignments,
             expression: Box::new(typed_expression),
         };
-        self.check_functions_in_block(&block, &new_context, generic_variables)
+        self.check_functions_in_block(block, &new_context, generic_variables)
+    }
+    fn check_functions_in_expressions(
+        &self,
+        expressions: Vec<TypedExpression>,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<Vec<TypedExpression>, TypeCheckError> {
+        expressions
+            .into_iter()
+            .map(|expression| {
+                self.check_functions_in_expression(expression, context, generic_variables)
+            })
+            .collect::<Result<_, _>>()
     }
     fn check_functions_in_expression(
         &self,
-        expression: &TypedExpression,
+        expression: TypedExpression,
         context: &TypeContext,
         generic_variables: &GenericVariables,
     ) -> Result<TypedExpression, TypeCheckError> {
         Ok(match expression {
             TypedExpression::Integer(_)
             | TypedExpression::Boolean(_)
-            | TypedExpression::TypedVariable(_) => expression.clone(),
+            | TypedExpression::TypedVariable(_) => expression,
             TypedExpression::TypedTuple(TypedTuple { expressions }) => {
                 TypedExpression::TypedTuple(TypedTuple {
-                    expressions: expressions
-                        .iter()
-                        .map(|expression| {
-                            self.check_functions_in_expression(
-                                expression,
-                                context,
-                                generic_variables,
-                            )
-                        })
-                        .collect::<Result<_, _>>()?,
+                    expressions: self.check_functions_in_expressions(
+                        expressions,
+                        context,
+                        generic_variables,
+                    )?,
                 })
             }
             TypedExpression::TypedElementAccess(TypedElementAccess { expression, index }) => {
                 TypedExpression::TypedElementAccess(TypedElementAccess {
                     expression: Box::new(self.check_functions_in_expression(
-                        &*expression,
+                        *expression,
                         context,
                         generic_variables,
                     )?),
-                    index: *index,
+                    index,
                 })
             }
             TypedExpression::TypedIf(TypedIf {
@@ -1072,7 +1087,7 @@ impl TypeChecker {
                 false_block,
             }) => TypedExpression::TypedIf(TypedIf {
                 condition: Box::new(self.check_functions_in_expression(
-                    condition,
+                    *condition,
                     context,
                     generic_variables,
                 )?),
@@ -1100,67 +1115,45 @@ impl TypeChecker {
             TypedExpression::TypedFunctionCall(TypedFunctionCall {
                 function,
                 arguments,
-            }) => {
-                let TypedExpression::TypedTuple(TypedTuple {
-                    expressions: arguments,
-                }) = self.check_functions_in_expression(
-                    &TypedTuple {
-                        expressions: arguments.clone(),
-                    }
-                    .into(),
+            }) => TypedFunctionCall {
+                function: Box::new(self.check_functions_in_expression(
+                    *function,
                     context,
                     generic_variables,
-                )?
-                else {
-                    panic!("Tuple expression has non-tuple type.")
-                };
-                TypedFunctionCall {
-                    function: Box::new(self.check_functions_in_expression(
-                        &*function,
-                        context,
-                        generic_variables,
-                    )?),
+                )?),
+                arguments: self.check_functions_in_expressions(
                     arguments,
-                }
-                .into()
+                    context,
+                    generic_variables,
+                )?,
             }
+            .into(),
             TypedExpression::TypedConstructorCall(TypedConstructorCall {
                 id,
                 output_type,
                 arguments,
-            }) => {
-                let TypedExpression::TypedTuple(TypedTuple {
-                    expressions: arguments,
-                }) = self.check_functions_in_expression(
-                    &TypedTuple {
-                        expressions: arguments.clone(),
-                    }
-                    .into(),
+            }) => TypedConstructorCall {
+                id: id,
+                output_type: output_type,
+                arguments: self.check_functions_in_expressions(
+                    arguments,
                     context,
                     generic_variables,
-                )?
-                else {
-                    panic!("Tuple expression has non-tuple type.")
-                };
-                TypedConstructorCall {
-                    id: id.clone(),
-                    output_type: output_type.clone(),
-                    arguments,
-                }
-                .into()
+                )?,
             }
+            .into(),
         })
     }
     fn check_functions_in_block(
         &self,
-        block: &TypedBlock,
+        block: TypedBlock,
         context: &TypeContext,
         generic_variables: &GenericVariables,
     ) -> Result<TypedBlock, TypeCheckError> {
         Ok(TypedBlock {
             assignments: block
                 .assignments
-                .iter()
+                .into_iter()
                 .map(|assignment| {
                     let mut generic_variables = generic_variables.clone();
                     generic_variables.extend(
@@ -1168,21 +1161,21 @@ impl TypeChecker {
                             .into_iter(),
                     );
                     self.check_functions_in_expression(
-                        &assignment.expression.expression,
+                        assignment.expression.expression,
                         context,
                         &generic_variables,
                     )
                     .map(|expression| TypedAssignment {
-                        id: assignment.id.clone(),
+                        id: assignment.id,
                         expression: ParametricExpression {
                             expression,
-                            parameters: assignment.expression.parameters.clone(),
+                            parameters: assignment.expression.parameters,
                         },
                     })
                 })
                 .collect::<Result<_, _>>()?,
             expression: Box::new(self.check_functions_in_expression(
-                &block.expression,
+                *block.expression,
                 context,
                 generic_variables,
             )?),
@@ -1190,7 +1183,7 @@ impl TypeChecker {
     }
     fn fully_type_function(
         &self,
-        function_definition: &PartiallyTypedFunctionDefinition,
+        function_definition: PartiallyTypedFunctionDefinition,
         context: &TypeContext,
         generic_variables: &GenericVariables,
     ) -> Result<TypedFunctionDefinition, TypeCheckError> {
@@ -1205,7 +1198,7 @@ impl TypeChecker {
                 Rc::new(RefCell::new(parameter_type.clone().into())),
             );
         }
-        let body = self.check_block(&function_definition.body, &new_context, generic_variables)?;
+        let body = self.check_block(function_definition.body, &new_context, generic_variables)?;
         if *function_definition.return_type != body.type_() {
             return Err(TypeCheckError::FunctionReturnTypeMismatch {
                 return_type: *function_definition.return_type.clone(),
@@ -2115,7 +2108,7 @@ mod tests {
         definitions: Vec<Definition>,
         expected_result: Option<TypeDefinitions>,
     ) {
-        let type_check_result = TypeChecker::check_type_definitions(&definitions);
+        let type_check_result = TypeChecker::check_type_definitions(definitions);
         match expected_result {
             Some(type_definitions) => {
                 assert_eq!(type_check_result, Ok(type_definitions))
@@ -2725,7 +2718,7 @@ mod tests {
             panic!("Invalid type checker definition")
         };
         let type_check_result =
-            type_checker.check_expression(&expression, &context, &GenericVariables::new());
+            type_checker.check_expression(expression, &context, &GenericVariables::new());
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {
@@ -3426,8 +3419,7 @@ mod tests {
         let Ok(type_checker) = TypeChecker::with_type_definitions(TYPE_DEFINITIONS.clone()) else {
             panic!("Invalid type checker definition")
         };
-        let type_check_result =
-            type_checker.check_block(&block, &context, &GenericVariables::new());
+        let type_check_result = type_checker.check_block(block, &context, &GenericVariables::new());
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {

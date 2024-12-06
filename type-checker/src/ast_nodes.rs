@@ -5,7 +5,7 @@ use strum_macros::EnumIter;
 pub type Id = String;
 use from_variants::FromVariants;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, EnumIter)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, EnumIter, Copy)]
 pub enum AtomicTypeEnum {
     INT,
     BOOL,
