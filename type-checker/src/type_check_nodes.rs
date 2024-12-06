@@ -331,7 +331,6 @@ impl TypedBlock {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeCheckError {
-    DefaultError(String),
     DuplicatedName {
         duplicate: Id,
         reason: String,

@@ -452,18 +452,11 @@ impl TypeChecker {
                         });
                     }
                 } else if let Some(reference) = type_definitions.get(id) {
-                    if type_variables.len() != (reference.borrow()).parameters.len() {
-                        let type_name = type_definitions
-                            .references_index()
-                            .get(&reference.as_ptr())
-                            .cloned();
-                        return Err(TypeCheckError::DefaultError(format!(
-                            "{} accepts {} type parameters but called with {:?} ({})",
-                            type_name.unwrap_or(String::from("unknown")),
-                            reference.borrow().parameters.len(),
-                            type_variables,
-                            type_variables.len()
-                        )));
+                    if type_variables.len() != reference.borrow().parameters.len() {
+                        return Err(TypeCheckError::WrongNumberOfTypeParameters {
+                            type_: reference.borrow().clone(),
+                            type_instances: type_variables.clone(),
+                        });
                     }
                     Type::Instantiation(
                         reference.clone(),
