@@ -253,6 +253,26 @@ pub struct FunctionCall {
     pub arguments: Vec<Expression>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct ConstructorCall {
+    pub constructor: GenericConstructor,
+    pub arguments: Vec<Expression>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct GenericConstructor {
+    pub id: Id,
+    pub type_instances: Vec<TypeInstance>,
+}
+
+#[allow(non_snake_case)]
+pub fn Constructor(id: &str) -> GenericConstructor {
+    GenericConstructor {
+        id: Id::from(id),
+        type_instances: Vec::new(),
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants, Clone)]
 pub enum Expression {
     Integer(Integer),
@@ -264,6 +284,7 @@ pub enum Expression {
     MatchExpression(MatchExpression),
     FunctionDefinition(FunctionDefinition),
     FunctionCall(FunctionCall),
+    ConstructorCall(ConstructorCall),
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

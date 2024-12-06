@@ -1,14 +1,15 @@
 use crate::type_check_nodes::{
     ConstructorType, ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type,
-    TypeCheckError, TypedAssignment, TypedBlock, TypedElementAccess, TypedExpression,
-    TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedTuple, TypedVariable, TYPE_BOOL,
+    TypeCheckError, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
+    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedTuple,
+    TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
-    utils, AtomicType, AtomicTypeEnum, Block, Definition, ElementAccess, EmptyTypeDefinition,
-    Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType, GenericTypeVariable,
-    GenericVariable, Id, IfExpression, OpaqueTypeDefinition, TransparentTypeDefinition,
-    TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
+    utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
+    EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
+    GenericTypeVariable, GenericVariable, Id, IfExpression, OpaqueTypeDefinition,
+    TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -478,13 +479,14 @@ impl TypeChecker {
                             .collect::<Result<_, _>>()?,
                     )
                 } else {
-                    return Err(TypeCheckError::UnknownType {
-                        type_name: id.clone(),
-                        type_names: type_definitions
+                    return Err(TypeCheckError::UnknownError {
+                        id: id.clone(),
+                        options: type_definitions
                             .keys()
                             .chain(generic_variables.keys())
                             .map(|id| id.clone())
                             .collect_vec(),
+                        place: String::from("type name"),
                     });
                 }
             }
@@ -765,10 +767,11 @@ impl TypeChecker {
                     }
                     .into(),
                     None => {
-                        return Err(TypeCheckError::DefaultError(format!(
-                            "{} not found in scope",
-                            id
-                        )))
+                        return Err(TypeCheckError::UnknownError {
+                            place: String::from("variable"),
+                            id: id.clone(),
+                            options: context.keys().map(|id| id.clone()).collect_vec(),
+                        })
                     }
                 }
             }
@@ -897,6 +900,81 @@ impl TypeChecker {
                 }
                 .into()
             }
+            Expression::ConstructorCall(ConstructorCall {
+                constructor,
+                arguments,
+            }) => {
+                let Some(constructor_type) = self.constructors.get(&constructor.id) else {
+                    return Err(TypeCheckError::UnknownError {
+                        id: constructor.id.clone(),
+                        options: self.constructors.keys().map(|id| id.clone()).collect_vec(),
+                        place: String::from("type constructor"),
+                    });
+                };
+                if constructor.type_instances.len() != constructor_type.parameters.len() {
+                    return Err(TypeCheckError::WrongNumberOfTypeParameters {
+                        type_: ParametricType {
+                            type_: constructor_type.output_type.clone(),
+                            parameters: constructor_type.parameters.clone(),
+                        },
+                        type_instances: constructor.type_instances.clone(),
+                    });
+                }
+                let arguments_tuple = self.check_expression(
+                    &TupleExpression {
+                        expressions: arguments.clone(),
+                    }
+                    .into(),
+                    context,
+                    generic_variables,
+                )?;
+                let Type::Tuple(types) = arguments_tuple.type_() else {
+                    panic!("Tuple expression has non-tuple type")
+                };
+                let TypedExpression::TypedTuple(TypedTuple {
+                    expressions: arguments,
+                }) = arguments_tuple
+                else {
+                    panic!("Tuple expression became non-tuple type.")
+                };
+                let Type::Tuple(type_variables) = TypeChecker::convert_ast_type(
+                    &TypeInstance::TupleType(TupleType {
+                        types: constructor.type_instances.clone(),
+                    }),
+                    &self.type_definitions,
+                    generic_variables,
+                )?
+                else {
+                    panic!("Tuple type converted to non-tuple type.");
+                };
+                let (input_type, output_type) = constructor_type.instantiate(&type_variables);
+                match input_type {
+                    Some(ref type_) => {
+                        if vec![type_.clone()] != types {
+                            return Err(TypeCheckError::InvalidConstructorArguments {
+                                id: constructor.id.clone(),
+                                input_type,
+                                arguments,
+                            });
+                        }
+                    }
+                    None => {
+                        if !types.is_empty() {
+                            return Err(TypeCheckError::InvalidConstructorArguments {
+                                id: constructor.id.clone(),
+                                input_type,
+                                arguments,
+                            });
+                        }
+                    }
+                }
+                TypedConstructorCall {
+                    id: constructor.id.clone(),
+                    arguments,
+                    output_type,
+                }
+                .into()
+            }
             _ => todo!(),
         })
     }
@@ -925,11 +1003,6 @@ impl TypeChecker {
             let mut generic_variables = generic_variables.clone();
             generic_variables
                 .extend(GenericVariables::from(&assignment.assignee.generic_variables).into_iter());
-            dbg!(&generic_variables
-                .clone()
-                .into_iter()
-                .map(|(id, p)| (id, p.as_ptr()))
-                .collect_vec());
             let typed_expression =
                 self.check_expression(&assignment.expression, &new_context, &generic_variables)?;
             let assignment = TypedAssignment {
@@ -1058,6 +1131,31 @@ impl TypeChecker {
                 }
                 .into()
             }
+            TypedExpression::TypedConstructorCall(TypedConstructorCall {
+                id,
+                output_type,
+                arguments,
+            }) => {
+                let TypedExpression::TypedTuple(TypedTuple {
+                    expressions: arguments,
+                }) = self.check_functions_in_expression(
+                    &TypedTuple {
+                        expressions: arguments.clone(),
+                    }
+                    .into(),
+                    context,
+                    generic_variables,
+                )?
+                else {
+                    panic!("Tuple expression has non-tuple type.")
+                };
+                TypedConstructorCall {
+                    id: id.clone(),
+                    output_type: output_type.clone(),
+                    arguments,
+                }
+                .into()
+            }
         })
     }
     fn check_functions_in_block(
@@ -1076,11 +1174,6 @@ impl TypeChecker {
                         GenericVariables::from(assignment.expression.parameters.clone())
                             .into_iter(),
                     );
-                    dbg!(&generic_variables
-                        .clone()
-                        .into_iter()
-                        .map(|(id, p)| (id, p.as_ptr()))
-                        .collect_vec());
                     self.check_functions_in_expression(
                         &assignment.expression.expression,
                         context,
@@ -1140,10 +1233,10 @@ mod tests {
 
     use crate::{
         type_check_nodes::{ConstructorType, TYPE_BOOL, TYPE_INT, TYPE_UNIT},
-        Assignee, Assignment, Block, Boolean, ElementAccess, ExpressionBlock, FunctionCall,
-        FunctionDefinition, GenericTypeVariable, IfExpression, Integer, TupleExpression, TypeItem,
-        TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL,
-        ATOMIC_TYPE_INT,
+        Assignee, Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess,
+        ExpressionBlock, FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable,
+        IfExpression, Integer, TupleExpression, TypeItem, TypeVariable, TypedAssignee, Typename,
+        Variable, VariableAssignee, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -2079,6 +2172,27 @@ mod tests {
                 .into();
                 reference
             }),
+            (Id::from("List"), {
+                let parameter = Rc::new(RefCell::new(None));
+                let list_type = Rc::new(RefCell::new(ParametricType {
+                    parameters: vec![parameter.clone()],
+                    type_: Type::new(),
+                }));
+                list_type.borrow_mut().type_ = Type::Union(HashMap::from([
+                    (
+                        Id::from("Cons"),
+                        Some(Type::Tuple(vec![
+                            Type::Variable(parameter.clone()),
+                            Type::Instantiation(
+                                list_type.clone(),
+                                vec![Type::Variable(parameter.clone())],
+                            ),
+                        ])),
+                    ),
+                    (Id::from("Nil"), None),
+                ]));
+                list_type
+            }),
         ])
     });
     #[test_case(
@@ -2514,6 +2628,100 @@ mod tests {
             )
         )]);
         "addition function call with aliases"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: Constructor("opaque_int"),
+            arguments: vec![
+                Integer{ value: 5}.into(),
+            ],
+        }.into(),
+        Some(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new())),
+        TypeContext::new();
+        "constructor call"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: Constructor("opaque_int"),
+            arguments: vec![
+                Boolean{ value: true}.into(),
+            ],
+        }.into(),
+        None,
+        TypeContext::new();
+        "constructor call wrong type arguments"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: Constructor("opaque_int"),
+            arguments: Vec::new(),
+        }.into(),
+        None,
+        TypeContext::new();
+        "constructor call wrong number arguments"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: GenericConstructor{
+                id: Id::from("opaque_int"),
+                type_instances: vec![ATOMIC_TYPE_INT.into()]
+            },
+            arguments: vec![
+                Integer{ value: 5}.into(),
+            ],
+        }.into(),
+        None,
+        TypeContext::new();
+        "constructor call wrong type parameters"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: GenericConstructor{
+                id: Id::from("Nil"),
+                type_instances: vec![ATOMIC_TYPE_INT.into()]
+            },
+            arguments: Vec::new(),
+        }.into(),
+        Some(TYPE_DEFINITIONS[&Id::from("List")].borrow().instantiate(&vec![TYPE_INT])),
+        TypeContext::new();
+        "constructor call output generic"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: GenericConstructor{
+                id: Id::from("Cons"),
+                type_instances: vec![ATOMIC_TYPE_INT.into()]
+            },
+            arguments: vec![
+                TupleExpression {
+                    expressions: vec![
+                        Integer{value: 3}.into(),
+                        ConstructorCall {
+                            constructor: GenericConstructor{
+                                id: Id::from("Nil"),
+                                type_instances: vec![ATOMIC_TYPE_INT.into()]
+                            },
+                            arguments: Vec::new(),
+                        }.into(),
+                    ]
+                }.into()
+            ],
+        }.into(),
+        Some(TYPE_DEFINITIONS[&Id::from("List")].borrow().instantiate(&vec![TYPE_INT])),
+        TypeContext::new();
+        "constructor call generic"
+    )]
+    #[test_case(
+        ConstructorCall {
+            constructor: GenericConstructor{
+                id: Id::from("Empty"),
+                type_instances: vec![ATOMIC_TYPE_INT.into()]
+            },
+            arguments: vec![],
+        }.into(),
+        None,
+        TypeContext::new();
+        "constructor call non-existant"
     )]
     fn test_check_expressions(
         expression: Expression,

@@ -29,13 +29,7 @@ impl ParametricType {
         }
     }
     pub fn instantiate(&self, type_variables: &Vec<Type>) -> Type {
-        dbg!(&self
-            .parameters
-            .clone()
-            .into_iter()
-            .map(|p| p.as_ptr())
-            .collect_vec());
-        for (parameter, variable) in self.parameters.iter().zip(type_variables) {
+        for (parameter, variable) in self.parameters.iter().zip_eq(type_variables) {
             *parameter.borrow_mut() = Some(variable.clone());
         }
         let type_ = self.type_.instantiate();
@@ -58,22 +52,7 @@ pub enum Type {
 
 impl PartialEq for Type {
     fn eq(&self, other: &Type) -> bool {
-        match (self, other) {
-            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2))
-                if r1.as_ptr() == r2.as_ptr() =>
-            {
-                t1 == t2
-            }
-            (Self::Instantiation(r1, t1), t2) | (t2, Self::Instantiation(r1, t1)) => {
-                t2 == &r1.borrow().instantiate(t1)
-            }
-            (Self::Atomic(a1), Self::Atomic(a2)) => a1 == a2,
-            (Self::Union(h1), Self::Union(h2)) => h1 == h2,
-            (Self::Tuple(t1), Self::Tuple(t2)) => t1 == t2,
-            (Self::Function(a1, r1), Self::Function(a2, r2)) => a1 == a2 && r1 == r2,
-            (Self::Variable(u1), Self::Variable(h2)) => u1 == h2,
-            _ => false,
-        }
+        return Type::type_equality(self, other, &mut HashMap::new());
     }
 }
 
@@ -104,6 +83,76 @@ impl Type {
             Self::Variable(i) => i.borrow().clone().unwrap_or(self.clone()),
         }
     }
+    pub fn types_equality(
+        t1: &Vec<Self>,
+        t2: &Vec<Self>,
+        equal_references: &mut HashMap<*mut ParametricType, *mut ParametricType>,
+    ) -> bool {
+        t1.len() == t2.len()
+            && t1
+                .iter()
+                .zip_eq(t2)
+                .all(|(t1, t2)| Type::type_equality(t1, t2, equal_references))
+    }
+    pub fn option_type_equality(
+        t1: &Option<Self>,
+        t2: &Option<Self>,
+        equal_references: &mut HashMap<*mut ParametricType, *mut ParametricType>,
+    ) -> bool {
+        match (t1, t2) {
+            (None, None) => true,
+            (Some(t1), Some(t2)) => Type::type_equality(t1, t2, equal_references),
+            _ => false,
+        }
+    }
+    pub fn type_equality(
+        t1: &Self,
+        t2: &Self,
+        equal_references: &mut HashMap<*mut ParametricType, *mut ParametricType>,
+    ) -> bool {
+        match (t1, t2) {
+            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2))
+                if r1.as_ptr() == r2.as_ptr() =>
+            {
+                Type::types_equality(t1, t2, equal_references)
+            }
+            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2))
+                if r1.as_ptr() != r2.as_ptr() =>
+            {
+                if equal_references.get(&r1.as_ptr()) == Some(&r2.as_ptr()) {
+                    true
+                } else {
+                    equal_references.insert(r1.as_ptr(), r2.as_ptr());
+                    Type::type_equality(
+                        &r1.borrow().instantiate(t1),
+                        &r2.borrow().instantiate(t2),
+                        equal_references,
+                    )
+                }
+            }
+            (Self::Instantiation(r1, t1), t2) | (t2, Self::Instantiation(r1, t1)) => {
+                Type::type_equality(t2, &r1.borrow().instantiate(t1), equal_references)
+            }
+            (Self::Atomic(a1), Self::Atomic(a2)) => a1 == a2,
+            (Self::Union(h1), Self::Union(h2)) => {
+                h1.keys().sorted().collect_vec() == h2.keys().sorted().collect_vec()
+                    && h1
+                        .keys()
+                        .all(|id| Type::option_type_equality(&h1[id], &h2[id], equal_references))
+            }
+            (Self::Tuple(t1), Self::Tuple(t2)) => Type::types_equality(t1, t2, equal_references),
+            (Self::Function(a1, r1), Self::Function(a2, r2)) => {
+                Type::types_equality(a1, a2, equal_references)
+                    && Type::type_equality(r1, r2, equal_references)
+            }
+            (Self::Variable(r1), Self::Variable(r2)) => {
+                r1.as_ptr() == r2.as_ptr()
+                    || Type::option_type_equality(&r1.borrow(), &r2.borrow(), equal_references)
+            }
+            // (Self::Variable(r1), Self::Variable(r2)) => r1 == r2,
+            _ => false,
+        }
+    }
 }
 
 pub const TYPE_INT: Type = Type::Atomic(AtomicTypeEnum::INT);
@@ -127,7 +176,7 @@ impl fmt::Debug for Type {
             Type::Function(argument_type, return_type) => {
                 write!(f, "Function({:?},{:?})", argument_type, return_type)
             }
-            Type::Variable(idx) => write!(f, "Variable({:?})", idx),
+            Type::Variable(idx) => write!(f, "Variable({:?})", idx.as_ptr()),
         }
     }
 }
@@ -178,6 +227,13 @@ pub struct TypedFunctionCall {
     pub arguments: Vec<TypedExpression>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedConstructorCall {
+    pub id: Id,
+    pub output_type: Type,
+    pub arguments: Vec<TypedExpression>,
+}
+
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedExpression {
     Integer(Integer),
@@ -189,6 +245,7 @@ pub enum TypedExpression {
     PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition),
     TypedFunctionDefinition(TypedFunctionDefinition),
     TypedFunctionCall(TypedFunctionCall),
+    TypedConstructorCall(TypedConstructorCall),
 }
 
 impl TypedExpression {
@@ -233,6 +290,11 @@ impl TypedExpression {
                 };
                 *return_type
             }
+            Self::TypedConstructorCall(TypedConstructorCall {
+                output_type,
+                id: _,
+                arguments: _,
+            }) => output_type.clone(),
         };
         let type_ = if let Type::Instantiation(r, t) = type_ {
             r.borrow().instantiate(&t)
@@ -289,9 +351,10 @@ pub enum TypeCheckError {
         return_type: Type,
         body: TypedBlock,
     },
-    UnknownType {
-        type_name: Id,
-        type_names: Vec<Id>,
+    UnknownError {
+        id: Id,
+        options: Vec<Id>,
+        place: String,
     },
     BuiltInOverride {
         name: Id,
@@ -315,11 +378,30 @@ pub enum TypeCheckError {
         type_: ParametricType,
         type_instances: Vec<TypeInstance>,
     },
+    InvalidConstructorArguments {
+        id: Id,
+        input_type: Option<Type>,
+        arguments: Vec<TypedExpression>,
+    },
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorType {
     pub input_type: Option<Type>,
     pub output_type: Type,
     pub parameters: Vec<Rc<RefCell<Option<Type>>>>,
+}
+
+impl ConstructorType {
+    pub fn instantiate(&self, type_variables: &Vec<Type>) -> (Option<Type>, Type) {
+        for (parameter, variable) in self.parameters.iter().zip_eq(type_variables) {
+            *parameter.borrow_mut() = Some(variable.clone());
+        }
+        let output_type = self.output_type.instantiate();
+        let input_type = self.input_type.as_ref().map(Type::instantiate);
+        for parameter in &self.parameters {
+            *parameter.borrow_mut() = None;
+        }
+        (input_type, output_type)
+    }
 }
