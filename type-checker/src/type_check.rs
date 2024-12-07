@@ -1,14 +1,14 @@
 use crate::type_check_nodes::{
     ConstructorType, ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type,
     TypeCheckError, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
-    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedTuple,
-    TypedVariable, TYPE_BOOL,
+    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedMatch,
+    TypedMatchBlock, TypedMatchItem, TypedTuple, TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
-    GenericTypeVariable, GenericVariable, Id, IfExpression, OpaqueTypeDefinition,
+    GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
 };
 use itertools::Itertools;
@@ -975,7 +975,77 @@ impl TypeChecker {
                 }
                 .into()
             }
-            _ => todo!(),
+            Expression::MatchExpression(MatchExpression { subject, blocks }) => {
+                let subject = self.check_expression(*subject, context, generic_variables)?;
+                let Type::Union(variants) = subject.type_() else {
+                    return Err(TypeCheckError::NonUnionTypeMatchSubject(subject));
+                };
+                let type_names = blocks
+                    .iter()
+                    .map(|block| {
+                        block
+                            .matches
+                            .iter()
+                            .map(|item| item.type_name.clone())
+                            .collect_vec()
+                    })
+                    .concat();
+                if let Err(UniqueError { duplicate }) = utils::check_unique(type_names.iter()) {
+                    return Err(TypeCheckError::DuplicatedName {
+                        duplicate: duplicate.clone(),
+                        reason: String::from("match block type name"),
+                    });
+                }
+                if type_names.into_iter().sorted().collect_vec()
+                    != variants.keys().cloned().sorted().collect_vec()
+                {
+                    return Err(TypeCheckError::IncorrectVariants { blocks });
+                }
+                let blocks = blocks
+                    .into_iter()
+                    .map(|block| {
+                        let matches = block
+                            .matches
+                            .into_iter()
+                            .map(|item| TypedMatchItem {
+                                type_name: item.type_name,
+                                assignee: item.assignee.map(|assignee| assignee.id),
+                            })
+                            .collect_vec();
+                        let block = self.check_block(block.block, context, generic_variables)?;
+                        Ok(TypedMatchBlock { block, matches })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if let Err(block_types) = blocks
+                    .iter()
+                    .map(|block| block.block.type_())
+                    .all_equal_value()
+                {
+                    match block_types {
+                        None => panic!("Match statement with no blocks."),
+                        Some(_) => {
+                            let mut blocks = blocks;
+                            let head = blocks.split_off(1);
+                            let head = head.first().unwrap();
+                            let head_type = head.block.type_();
+                            for block in blocks {
+                                if block.block.type_() != head_type {
+                                    return Err(TypeCheckError::DifferingMatchBlockTypes(
+                                        head.clone(),
+                                        block,
+                                    ));
+                                }
+                            }
+                            panic!("Match blocks have different types but they all match the first type.")
+                        }
+                    }
+                }
+                TypedMatch {
+                    subject: Box::new(subject),
+                    blocks,
+                }
+                .into()
+            }
         })
     }
     fn check_block(
@@ -1142,6 +1212,14 @@ impl TypeChecker {
                 )?,
             }
             .into(),
+            TypedExpression::TypedMatch(TypedMatch { subject, blocks }) => {
+                let subject = Box::new(self.check_functions_in_expression(
+                    *subject,
+                    context,
+                    generic_variables,
+                )?);
+                TypedMatch { subject, blocks }.into()
+            }
         })
     }
     fn check_functions_in_block(
@@ -1221,8 +1299,9 @@ mod tests {
         type_check_nodes::{ConstructorType, TYPE_BOOL, TYPE_INT, TYPE_UNIT},
         Assignee, Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess,
         ExpressionBlock, FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable,
-        IfExpression, Integer, TupleExpression, TypeItem, TypeVariable, TypedAssignee, Typename,
-        Variable, VariableAssignee, ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        IfExpression, Integer, MatchBlock, MatchExpression, MatchItem, TupleExpression, TypeItem,
+        TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL,
+        ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -2179,6 +2258,16 @@ mod tests {
                 ]));
                 list_type
             }),
+            (
+                Id::from("Bull"),
+                Rc::new(RefCell::new(
+                    Type::Union(HashMap::from([
+                        (Id::from("twoo"), None),
+                        (Id::from("faws"), None),
+                    ]))
+                    .into(),
+                )),
+            ),
         ])
     });
     #[test_case(
@@ -2708,6 +2797,137 @@ mod tests {
         None,
         TypeContext::new();
         "constructor call non-existant"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Variable("random_bull").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("twoo"),
+                            assignee: None
+                        },
+                        MatchItem {
+                            type_name: Id::from("faws"),
+                            assignee: None
+                        }
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                }
+            ]
+        }.into(),
+        Some(TYPE_UNIT),
+        TypeContext::from([(
+            Id::from("random_bull"),
+            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+        )]);
+        "basic match expression"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Variable("random_bull").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("twoo"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("faws"),
+                            assignee: None
+                        }
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                }
+            ]
+        }.into(),
+        Some(TYPE_UNIT),
+        TypeContext::from([(
+            Id::from("random_bull"),
+            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+        )]);
+        "split match expression"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Variable("random_bull").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("twoo"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(Boolean{ value: true }.into())
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("faws"),
+                            assignee: None
+                        }
+                    ],
+                    block: ExpressionBlock(Integer{ value: 4 }.into())
+                }
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("random_bull"),
+            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+        )]);
+        "differing match blocks"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Boolean {value: true}.into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("True"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                },
+
+            ]
+        }.into(),
+        None,
+        TypeContext::new();
+        "non-union type"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Variable("random_bull").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("twoo"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                },
+
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("random_bull"),
+            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+        )]);
+        "non-exhaustive matches"
     )]
     fn test_check_expressions(
         expression: Expression,

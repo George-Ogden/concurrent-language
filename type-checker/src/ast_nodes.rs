@@ -217,21 +217,21 @@ pub struct IfExpression {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct MatchItem {
-    type_name: Id,
-    assignee: Option<Assignee>,
+pub struct MatchItem {
+    pub type_name: Id,
+    pub assignee: Option<Assignee>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct MatchBlock {
-    matches: Vec<MatchItem>,
-    block: Block,
+pub struct MatchBlock {
+    pub matches: Vec<MatchItem>,
+    pub block: Block,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct MatchExpression {
-    subject: Box<Expression>,
-    blocks: Vec<MatchBlock>,
+pub struct MatchExpression {
+    pub subject: Box<Expression>,
+    pub blocks: Vec<MatchBlock>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

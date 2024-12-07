@@ -1,4 +1,4 @@
-use crate::{AtomicTypeEnum, Block, Boolean, Id, Integer, TypeInstance};
+use crate::{AtomicTypeEnum, Block, Boolean, Id, Integer, MatchBlock, TypeInstance};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -206,6 +206,24 @@ pub struct TypedIf {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct TypedMatchItem {
+    pub type_name: Id,
+    pub assignee: Option<Id>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedMatchBlock {
+    pub matches: Vec<TypedMatchItem>,
+    pub block: TypedBlock,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedMatch {
+    pub subject: Box<TypedExpression>,
+    pub blocks: Vec<TypedMatchBlock>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct PartiallyTypedFunctionDefinition {
     pub parameter_ids: Vec<Id>,
     pub parameter_types: Vec<Type>,
@@ -242,6 +260,7 @@ pub enum TypedExpression {
     TypedVariable(TypedVariable),
     TypedElementAccess(TypedElementAccess),
     TypedIf(TypedIf),
+    TypedMatch(TypedMatch),
     PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition),
     TypedFunctionDefinition(TypedFunctionDefinition),
     TypedFunctionCall(TypedFunctionCall),
@@ -295,6 +314,12 @@ impl TypedExpression {
                 id: _,
                 arguments: _,
             }) => output_type.clone(),
+            Self::TypedMatch(TypedMatch { subject: _, blocks }) => {
+                let Some(block) = blocks.first() else {
+                    panic!("Match block with no blocks.")
+                };
+                block.block.type_()
+            }
         };
         let type_ = if let Type::Instantiation(r, t) = type_ {
             r.borrow().instantiate(&t)
@@ -381,6 +406,11 @@ pub enum TypeCheckError {
         id: Id,
         input_type: Option<Type>,
         arguments: Vec<TypedExpression>,
+    },
+    DifferingMatchBlockTypes(TypedMatchBlock, TypedMatchBlock),
+    NonUnionTypeMatchSubject(TypedExpression),
+    IncorrectVariants {
+        blocks: Vec<MatchBlock>,
     },
 }
 
