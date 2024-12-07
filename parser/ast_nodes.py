@@ -118,6 +118,11 @@ class EmptyTypeDefinition(ASTNode):
 @dataclass
 class Assignee(ASTNode):
     id: Id
+
+
+@dataclass
+class ParametricAssignee(ASTNode):
+    assignee: Assignee
     generic_variables: list[Id]
 
 
@@ -220,7 +225,7 @@ Expression: TypeAlias = Union[
 
 @dataclass
 class Assignment(ASTNode):
-    assignee: Assignee
+    assignee: ParametricAssignee
     expression: Expression
 
 

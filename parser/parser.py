@@ -28,6 +28,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    ParametricAssignee,
     Program,
     TransparentTypeDefinition,
     TupleExpression,
@@ -214,17 +215,22 @@ class Visitor(GrammarVisitor):
     def visitId_list(self, ctx: GrammarParser.Id_listContext) -> list[str]:
         return self.visitList(ctx)
 
-    def visitGeneric_assignee(self, ctx: GrammarParser.Generic_assigneeContext) -> Assignee:
-        id = self.visit(ctx.id_())
-        generics = [] if ctx.id_list() is None else self.visit(ctx.id_list())
-        return Assignee(id, generics)
+    def visitNon_generic_assignee(self, ctx: GrammarParser.Non_generic_assigneeContext) -> Assignee:
+        return Assignee(ctx.getText())
 
-    def visitAssignee(self, ctx: GrammarParser.AssigneeContext) -> Assignee:
+    def visitGeneric_assignee(
+        self, ctx: GrammarParser.Generic_assigneeContext
+    ) -> ParametricAssignee:
+        id = self.visit(ctx.non_generic_assignee())
+        generics = [] if ctx.id_list() is None else self.visit(ctx.id_list())
+        return ParametricAssignee(id, generics)
+
+    def visitAssignee(self, ctx: GrammarParser.AssigneeContext) -> ParametricAssignee:
         if ctx.operator_id() is not None:
             id = re.match(r"^__(\S+)__$", ctx.getText()).group(1)
-            return Assignee(id, [])
+            return ParametricAssignee(Assignee(id), [])
         elif ctx.getText() == "__":
-            return Assignee("__", [])
+            return ParametricAssignee(Assignee("__"), [])
         return super().visit(ctx.generic_assignee())
 
     def visitAssignment(self, ctx: GrammarParser.AssignmentContext) -> Assignment:
@@ -249,7 +255,9 @@ class Visitor(GrammarVisitor):
 
     def visitMatch_item(self, ctx: GrammarParser.Match_itemContext) -> MatchItem:
         name = self.visit(ctx.id_())
-        assignee = None if ctx.assignee() is None else self.visit(ctx.assignee())
+        assignee = (
+            None if ctx.non_generic_assignee() is None else self.visit(ctx.non_generic_assignee())
+        )
         return MatchItem(name, assignee)
 
     def visitMatch_list(self, ctx: GrammarParser.Match_listContext) -> list[MatchItem]:
@@ -269,7 +277,7 @@ class Visitor(GrammarVisitor):
         return MatchExpression(subject, blocks)
 
     def visitTyped_assignee(self, ctx: GrammarParser.Typed_assigneeContext) -> TypedAssignee:
-        assignee = self.visit(ctx.assignee())
+        assignee = self.visit(ctx.non_generic_assignee())
         type_instance = self.visit(ctx.type_instance())
         return TypedAssignee(assignee, type_instance)
 
@@ -299,7 +307,7 @@ class Visitor(GrammarVisitor):
         self, ctx: GrammarParser.Generic_typevarContext
     ) -> GenericTypeVariable:
         assignee: Assignee = self.visit(ctx.generic_assignee())
-        return GenericTypeVariable(assignee.id, assignee.generic_variables)
+        return GenericTypeVariable(assignee.assignee.id, assignee.generic_variables)
 
     def visitType_item(self, ctx: GrammarParser.Type_itemContext) -> TypeItem:
         id = self.visit(ctx.id_())

@@ -1059,7 +1059,7 @@ impl TypeChecker {
         let assignment_names = block
             .assignments
             .iter()
-            .map(|assignment| assignment.assignee.id.clone());
+            .map(|assignment| assignment.assignee.assignee.id.clone());
         match utils::check_unique(assignment_names) {
             Ok(()) => {}
             Err(UniqueError { duplicate }) => {
@@ -1076,7 +1076,7 @@ impl TypeChecker {
             let typed_expression =
                 self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
             let assignment = TypedAssignment {
-                id: assignment.assignee.id,
+                id: assignment.assignee.assignee.id,
                 expression: ParametricExpression {
                     expression: typed_expression,
                     parameters: assignment
@@ -1297,11 +1297,11 @@ mod tests {
 
     use crate::{
         type_check_nodes::{ConstructorType, TYPE_BOOL, TYPE_INT, TYPE_UNIT},
-        Assignee, Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess,
-        ExpressionBlock, FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable,
-        IfExpression, Integer, MatchBlock, MatchExpression, MatchItem, TupleExpression, TypeItem,
-        TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee, ATOMIC_TYPE_BOOL,
-        ATOMIC_TYPE_INT,
+        Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess, ExpressionBlock,
+        FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable, IfExpression,
+        Integer, MatchBlock, MatchExpression, MatchItem, ParametricAssignee, TupleExpression,
+        TypeItem, TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee,
+        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -2533,7 +2533,7 @@ mod tests {
             true_block: Block{
                 assignments: vec![
                     Assignment {
-                        assignee: Box::new(VariableAssignee("x")),
+                        assignee: VariableAssignee("x"),
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
@@ -2551,7 +2551,7 @@ mod tests {
             true_block: Block{
                 assignments: vec![
                     Assignment {
-                        assignee: Box::new(VariableAssignee("x")),
+                        assignee: VariableAssignee("x"),
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
@@ -2572,7 +2572,7 @@ mod tests {
             true_block: Block{
                 assignments: vec![
                     Assignment {
-                        assignee: Box::new(VariableAssignee("x")),
+                        assignee: VariableAssignee("x"),
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
@@ -2593,7 +2593,7 @@ mod tests {
             true_block: Block{
                 assignments: vec![
                     Assignment {
-                        assignee: Box::new(VariableAssignee("x")),
+                        assignee: VariableAssignee("x"),
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
@@ -2632,11 +2632,11 @@ mod tests {
         FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: Id::from("y").into(),
                     type_: ATOMIC_TYPE_BOOL.into()
                 },
             ],
@@ -2968,7 +2968,7 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: VariableAssignee("x"),
                     expression: Box::new(Boolean{value: true}.into())
                 }
             ],
@@ -2982,7 +2982,7 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: VariableAssignee("x"),
                     expression: Box::new(Boolean{value: true}.into())
                 }
             ],
@@ -2996,11 +2996,11 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: VariableAssignee("x"),
                     expression: Box::new(Integer{value: 3}.into())
                 },
                 Assignment{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: VariableAssignee("y"),
                     expression: Box::new(Variable("x").into())
                 },
             ],
@@ -3014,11 +3014,11 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: VariableAssignee("x"),
                     expression: Box::new(Integer{value: 3}.into())
                 },
                 Assignment{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: VariableAssignee("x"),
                     expression: Box::new(Integer{value: 5}.into())
                 },
             ],
@@ -3032,11 +3032,11 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: VariableAssignee("y"),
                     expression: Box::new(Variable("x").into())
                 },
                 Assignment{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: VariableAssignee("x"),
                     expression: Box::new(Integer{value: 3}.into())
                 },
             ],
@@ -3050,11 +3050,11 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: Id::from("y").into(),
                     type_: ATOMIC_TYPE_BOOL.into()
                 },
             ],
@@ -3069,11 +3069,11 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: Id::from("y").into(),
                     type_: ATOMIC_TYPE_BOOL.into()
                 },
             ],
@@ -3088,11 +3088,11 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_BOOL.into()
                 },
             ],
@@ -3107,7 +3107,7 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: Typename("opaque_int").into()
                 },
             ],
@@ -3125,7 +3125,7 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: Typename("transparent_int").into()
                 },
             ],
@@ -3143,7 +3143,7 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: Typename("transparent_int").into()
                 },
             ],
@@ -3161,7 +3161,7 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: Typename("ii").into()
                 },
             ],
@@ -3182,7 +3182,7 @@ mod tests {
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: Typename("recursive").into()
                 },
             ],
@@ -3200,11 +3200,11 @@ mod tests {
         ExpressionBlock(FunctionDefinition{
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: Id::from("y").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
             ],
@@ -3234,11 +3234,11 @@ mod tests {
         ExpressionBlock(FunctionDefinition{
             parameters: vec![
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("x")),
+                    assignee: Id::from("x").into(),
                     type_: ATOMIC_TYPE_INT.into()
                 },
                 TypedAssignee{
-                    assignee: Box::new(VariableAssignee("y")),
+                    assignee: Id::from("y").into(),
                     type_: ATOMIC_TYPE_BOOL.into()
                 },
             ],
@@ -3265,10 +3265,10 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("x"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("x").into(),
                         generic_variables: vec![Id::from("T")]
-                    }),
+                    },
                     expression: Box::new(Integer {value: -12}.into())
                 },
             ],
@@ -3289,10 +3289,10 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("x"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("x").into(),
                         generic_variables: vec![Id::from("T")]
-                    }),
+                    },
                     expression: Box::new(Integer {value: -12}.into())
                 },
             ],
@@ -3314,14 +3314,14 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("id"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("id").into(),
                         generic_variables: vec![Id::from("T")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("T").into(),
                             }
                         ],
@@ -3348,14 +3348,14 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("id"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("id").into(),
                         generic_variables: vec![Id::from("T")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("T").into(),
                             }
                         ],
@@ -3364,14 +3364,14 @@ mod tests {
                     }.into())
                 },
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("id_"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("id_").into(),
                         generic_variables: vec![Id::from("U")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("U").into(),
                             }
                         ],
@@ -3404,14 +3404,14 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("id"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("id").into(),
                         generic_variables: vec![Id::from("T")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("T").into(),
                             }
                         ],
@@ -3419,14 +3419,14 @@ mod tests {
                         body: Block{
                             assignments: vec![
                                 Assignment {
-                                    assignee: Box::new(Assignee {
-                                        id: Id::from("hold"),
+                                    assignee: ParametricAssignee {
+                                        assignee: Id::from("hold").into(),
                                         generic_variables: vec![Id::from("U")]
-                                    }),
+                                    },
                                     expression: Box::new(FunctionDefinition{
                                         parameters: vec![
                                             TypedAssignee {
-                                                assignee: Box::new(VariableAssignee("y")),
+                                                assignee: Id::from("y").into(),
                                                 type_: Typename("U").into(),
                                             }
                                         ],
@@ -3466,14 +3466,14 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("id"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("id").into(),
                         generic_variables: vec![Id::from("T")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("T").into(),
                             }
                         ],
@@ -3515,21 +3515,21 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("apply"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("apply").into(),
                         generic_variables: vec![Id::from("T"), Id::from("U")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("f")),
+                                assignee: Id::from("f").into(),
                                 type_: FunctionType{
                                     argument_types: vec![Typename("T").into()],
                                     return_type: Box::new(Typename("U").into())
                                 }.into(),
                             },
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("T").into(),
                             }
                         ],
@@ -3562,14 +3562,14 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("extra"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("extra").into(),
                         generic_variables: vec![Id::from("T"), Id::from("U")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: Typename("T").into(),
                             }
                         ],
@@ -3598,14 +3598,14 @@ mod tests {
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(Assignee {
-                        id: Id::from("first"),
+                    assignee: ParametricAssignee {
+                        assignee: Id::from("first").into(),
                         generic_variables: vec![Id::from("T"), Id::from("U")]
-                    }),
+                    },
                     expression: Box::new(FunctionDefinition{
                         parameters: vec![
                             TypedAssignee {
-                                assignee: Box::new(VariableAssignee("x")),
+                                assignee: Id::from("x").into(),
                                 type_: TupleType{
                                     types: vec![Typename("T").into(), Typename("U").into()],
                                 }.into()

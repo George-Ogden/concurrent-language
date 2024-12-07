@@ -25,6 +25,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    ParametricAssignee,
     Program,
     TransparentTypeDefinition,
     TupleExpression,
@@ -554,62 +555,92 @@ from ast_nodes import (
             ),
             "expr",
         ),
-        ("a = 3", Assignment(Assignee("a", []), Integer(3)), "assignment"),
-        ("__a__ = 3", Assignment(Assignee("__a__", []), Integer(3)), "assignment"),
-        ("__&&__ = 3", Assignment(Assignee("&&", []), Integer(3)), "assignment"),
-        ("__>>__ = 3", Assignment(Assignee(">>", []), Integer(3)), "assignment"),
-        ("__>__ = 3", Assignment(Assignee(">", []), Integer(3)), "assignment"),
-        ("__$__ = 3", Assignment(Assignee("$", []), Integer(3)), "assignment"),
+        ("a = 3", Assignment(ParametricAssignee(Assignee("a"), []), Integer(3)), "assignment"),
+        (
+            "__a__ = 3",
+            Assignment(ParametricAssignee(Assignee("__a__"), []), Integer(3)),
+            "assignment",
+        ),
+        (
+            "__&&__ = 3",
+            Assignment(ParametricAssignee(Assignee("&&"), []), Integer(3)),
+            "assignment",
+        ),
+        (
+            "__>>__ = 3",
+            Assignment(ParametricAssignee(Assignee(">>"), []), Integer(3)),
+            "assignment",
+        ),
+        ("__>__ = 3", Assignment(ParametricAssignee(Assignee(">"), []), Integer(3)), "assignment"),
+        ("__$__ = 3", Assignment(ParametricAssignee(Assignee("$"), []), Integer(3)), "assignment"),
         ("__$ $__ = 3", None, "assignment"),
         ("a == 3", None, "assignment"),
         ("0 = 3", None, "assignment"),
         ("__=__ = 4", None, "assignment"),
         ("__.__ = 4", None, "assignment"),
-        ("__==__ = 4", Assignment(Assignee("==", []), Integer(4)), "assignment"),
-        ("a0 = 0", Assignment(Assignee("a0", []), Integer(0)), "assignment"),
-        ("_ = 0", Assignment(Assignee("_", []), Integer(0)), "assignment"),
-        ("__ = 0", Assignment(Assignee("__", []), Integer(0)), "assignment"),
-        ("___ = 0", Assignment(Assignee("___", []), Integer(0)), "assignment"),
-        ("____ = 0", Assignment(Assignee("____", []), Integer(0)), "assignment"),
-        ("_____ = 0", Assignment(Assignee("_____", []), Integer(0)), "assignment"),
         (
-            "a<T> = f<T>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Typename("T")])),
+            "__==__ = 4",
+            Assignment(ParametricAssignee(Assignee("=="), []), Integer(4)),
+            "assignment",
+        ),
+        ("a0 = 0", Assignment(ParametricAssignee(Assignee("a0"), []), Integer(0)), "assignment"),
+        ("_ = 0", Assignment(ParametricAssignee(Assignee("_"), []), Integer(0)), "assignment"),
+        ("__ = 0", Assignment(ParametricAssignee(Assignee("__"), []), Integer(0)), "assignment"),
+        ("___ = 0", Assignment(ParametricAssignee(Assignee("___"), []), Integer(0)), "assignment"),
+        (
+            "____ = 0",
+            Assignment(ParametricAssignee(Assignee("____"), []), Integer(0)),
+            "assignment",
+        ),
+        (
+            "_____ = 0",
+            Assignment(ParametricAssignee(Assignee("_____"), []), Integer(0)),
             "assignment",
         ),
         (
             "a<T> = f<T>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("f", [Typename("T")])),
+            Assignment(
+                ParametricAssignee(Assignee("a"), ["T"]), GenericVariable("f", [Typename("T")])
+            ),
+            "assignment",
+        ),
+        (
+            "a<T> = f<T>",
+            Assignment(
+                ParametricAssignee(Assignee("a"), ["T"]), GenericVariable("f", [Typename("T")])
+            ),
             "assignment",
         ),
         (
             "a<T,> = t<T,>",
-            Assignment(Assignee("a", ["T"]), GenericVariable("t", [Typename("T")])),
+            Assignment(
+                ParametricAssignee(Assignee("a"), ["T"]), GenericVariable("t", [Typename("T")])
+            ),
             "assignment",
         ),
         (
             "a<T,U> = -4",
-            Assignment(Assignee("a", ["T", "U"]), Integer(-4)),
+            Assignment(ParametricAssignee(Assignee("a"), ["T", "U"]), Integer(-4)),
             "assignment",
         ),
         (
             "a<T,U> = f<U,T>",
             Assignment(
-                Assignee("a", ["T", "U"]),
+                ParametricAssignee(Assignee("a"), ["T", "U"]),
                 GenericVariable("f", [Typename("U"), Typename("T")]),
             ),
             "assignment",
         ),
         (
             "a<T,U,> = 0",
-            Assignment(Assignee("a", ["T", "U"]), Integer(0)),
+            Assignment(ParametricAssignee(Assignee("a"), ["T", "U"]), Integer(0)),
             "assignment",
         ),
         ("{5}", Block([], Integer(5)), "block"),
         ("{}", None, "block"),
         (
             "{a = -9; 8}",
-            Block([Assignment(Assignee("a", []), Integer(-9))], Integer(8)),
+            Block([Assignment(ParametricAssignee(Assignee("a"), []), Integer(-9))], Integer(8)),
             "block",
         ),
         ("{a = -9}", None, "block"),
@@ -620,9 +651,9 @@ from ast_nodes import (
             "{w = x;y<T> = x<T,T>; -8}",
             Block(
                 [
-                    Assignment(Assignee("w", []), Variable("x")),
+                    Assignment(ParametricAssignee(Assignee("w"), []), Variable("x")),
                     Assignment(
-                        Assignee("y", ["T"]),
+                        ParametricAssignee(Assignee("y"), ["T"]),
                         GenericVariable("x", [Typename("T"), Typename("T")]),
                     ),
                 ],
@@ -632,7 +663,10 @@ from ast_nodes import (
         ),
         (
             "{w = x; ()}",
-            Block([Assignment(Assignee("w", []), Variable("x"))], TupleExpression([])),
+            Block(
+                [Assignment(ParametricAssignee(Assignee("w"), []), Variable("x"))],
+                TupleExpression([]),
+            ),
             "block",
         ),
         (
@@ -644,8 +678,12 @@ from ast_nodes import (
             "if (x > 0) { x = 0; true } else { x = 1; false }",
             IfExpression(
                 FunctionCall(Variable(">"), [Variable("x"), Integer(0)]),
-                Block([Assignment(Assignee("x", []), Integer(0))], Boolean(True)),
-                Block([Assignment(Assignee("x", []), Integer(1))], Boolean(False)),
+                Block(
+                    [Assignment(ParametricAssignee(Assignee("x"), []), Integer(0))], Boolean(True)
+                ),
+                Block(
+                    [Assignment(ParametricAssignee(Assignee("x"), []), Integer(1))], Boolean(False)
+                ),
             ),
             "expr",
         ),
@@ -654,7 +692,7 @@ from ast_nodes import (
             MatchExpression(
                 FunctionCall(Variable("maybe"), []),
                 [
-                    MatchBlock([MatchItem("Some", Assignee("x", []))], Block([], Variable("t"))),
+                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Variable("t"))),
                     MatchBlock([MatchItem("None", None)], Block([], Variable("y"))),
                 ],
             ),
@@ -665,7 +703,7 @@ from ast_nodes import (
             MatchExpression(
                 FunctionCall(Variable("maybe"), []),
                 [
-                    MatchBlock([MatchItem("Some", Assignee("x", []))], Block([], Variable("t"))),
+                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Variable("t"))),
                     MatchBlock([MatchItem("None", None)], Block([], Variable("y"))),
                 ],
             ),
@@ -677,7 +715,7 @@ from ast_nodes import (
                 TupleExpression([]),
                 [
                     MatchBlock(
-                        [MatchItem("Some", Assignee("x", [])), MatchItem("None", None)],
+                        [MatchItem("Some", Assignee("x")), MatchItem("None", None)],
                         Block([], TupleExpression([])),
                     ),
                 ],
@@ -719,18 +757,18 @@ from ast_nodes import (
         (
             "(x: int) -> int { a = 3; 9 }",
             FunctionDefinition(
-                [TypedAssignee(Assignee("x", []), AtomicType.INT)],
+                [TypedAssignee(Assignee("x"), AtomicType.INT)],
                 AtomicType.INT,
-                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+                Block([Assignment(ParametricAssignee(Assignee("a"), []), Integer(3))], Integer(9)),
             ),
             "expr",
         ),
         (
             "(x: int,) -> int { a = 3; 9 }",
             FunctionDefinition(
-                [TypedAssignee(Assignee("x", []), AtomicType.INT)],
+                [TypedAssignee(Assignee("x"), AtomicType.INT)],
                 AtomicType.INT,
-                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+                Block([Assignment(ParametricAssignee(Assignee("a"), []), Integer(3))], Integer(9)),
             ),
             "expr",
         ),
@@ -738,11 +776,11 @@ from ast_nodes import (
             "(x: int, y: ()) -> int { a = 3; 9 }",
             FunctionDefinition(
                 [
-                    TypedAssignee(Assignee("x", []), AtomicType.INT),
-                    TypedAssignee(Assignee("y", []), TupleType([])),
+                    TypedAssignee(Assignee("x"), AtomicType.INT),
+                    TypedAssignee(Assignee("y"), TupleType([])),
                 ],
                 AtomicType.INT,
-                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+                Block([Assignment(ParametricAssignee(Assignee("a"), []), Integer(3))], Integer(9)),
             ),
             "expr",
         ),
@@ -750,11 +788,11 @@ from ast_nodes import (
             "(x: int, y: (),) -> int { a = 3; 9 }",
             FunctionDefinition(
                 [
-                    TypedAssignee(Assignee("x", []), AtomicType.INT),
-                    TypedAssignee(Assignee("y", []), TupleType([])),
+                    TypedAssignee(Assignee("x"), AtomicType.INT),
+                    TypedAssignee(Assignee("y"), TupleType([])),
                 ],
                 AtomicType.INT,
-                Block([Assignment(Assignee("a", []), Integer(3))], Integer(9)),
+                Block([Assignment(ParametricAssignee(Assignee("a"), []), Integer(3))], Integer(9)),
             ),
             "expr",
         ),
@@ -919,7 +957,12 @@ from ast_nodes import (
             "z = -y;",
             Program(
                 [],
-                [Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")]))],
+                [
+                    Assignment(
+                        ParametricAssignee(Assignee("z"), []),
+                        FunctionCall(Variable("-"), [Variable("y")]),
+                    )
+                ],
             ),
             "program",
         ),
@@ -927,7 +970,12 @@ from ast_nodes import (
             "z = -y",
             Program(
                 [],
-                [Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")]))],
+                [
+                    Assignment(
+                        ParametricAssignee(Assignee("z"), []),
+                        FunctionCall(Variable("-"), [Variable("y")]),
+                    )
+                ],
             ),
             "program",
         ),
@@ -936,7 +984,10 @@ from ast_nodes import (
             Program(
                 [],
                 [
-                    Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")])),
+                    Assignment(
+                        ParametricAssignee(Assignee("z"), []),
+                        FunctionCall(Variable("-"), [Variable("y")]),
+                    ),
                     OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
                 ],
             ),
@@ -947,7 +998,10 @@ from ast_nodes import (
             Program(
                 [],
                 [
-                    Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")])),
+                    Assignment(
+                        ParametricAssignee(Assignee("z"), []),
+                        FunctionCall(Variable("-"), [Variable("y")]),
+                    ),
                     OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
                 ],
             ),
@@ -958,7 +1012,10 @@ from ast_nodes import (
             Program(
                 [],
                 [
-                    Assignment(Assignee("z", []), FunctionCall(Variable("-"), [Variable("y")])),
+                    Assignment(
+                        ParametricAssignee(Assignee("z"), []),
+                        FunctionCall(Variable("-"), [Variable("y")]),
+                    ),
                     OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
                 ],
             ),
@@ -1055,7 +1112,7 @@ from ast_nodes import (
             "x = 3 /*/ 4 // */",
             Program(
                 [],
-                [Assignment(Assignee("x", []), Integer(3))],
+                [Assignment(ParametricAssignee(Assignee("x"), []), Integer(3))],
             ),
             "program",
         ),
@@ -1065,7 +1122,8 @@ from ast_nodes import (
                 [],
                 [
                     Assignment(
-                        Assignee("x", []), FunctionCall(Variable("/-/"), [Integer(3), Integer(4)])
+                        ParametricAssignee(Assignee("x"), []),
+                        FunctionCall(Variable("/-/"), [Integer(3), Integer(4)]),
                     )
                 ],
             ),
@@ -1077,7 +1135,7 @@ from ast_nodes import (
                 [],
                 [
                     Assignment(
-                        Assignee("x", []),
+                        ParametricAssignee(Assignee("x"), []),
                         FunctionDefinition([], TupleType([]), Block([], Integer(3))),
                     )
                 ],

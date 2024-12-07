@@ -236,7 +236,7 @@ pub struct MatchExpression {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct TypedAssignee {
-    pub assignee: Box<Assignee>,
+    pub assignee: Assignee,
     pub type_: TypeInstance,
 }
 
@@ -290,20 +290,31 @@ pub enum Expression {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Assignee {
     pub id: Id,
+}
+
+impl From<Id> for Assignee {
+    fn from(value: Id) -> Self {
+        Assignee { id: value }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct ParametricAssignee {
+    pub assignee: Assignee,
     pub generic_variables: Vec<Id>,
 }
 
 #[allow(non_snake_case)]
-pub fn VariableAssignee(id: &str) -> Assignee {
-    Assignee {
-        id: Id::from(id),
+pub fn VariableAssignee(id: &str) -> ParametricAssignee {
+    ParametricAssignee {
+        assignee: Assignee::from(Id::from(id)),
         generic_variables: Vec::new(),
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Assignment {
-    pub assignee: Box<Assignee>,
+    pub assignee: ParametricAssignee,
     pub expression: Box<Expression>,
 }
 
@@ -570,17 +581,17 @@ mod tests {
         "nested element access"
     )]
     #[test_case(
-        r#"{"id":"a","generic_variables":[]}"#,
-        Assignee {
-            id: Id::from("a"),
+        r#"{"assignee":{"id":"a"},"generic_variables":[]}"#,
+        ParametricAssignee {
+            assignee: Id::from("a").into(),
             generic_variables: Vec::new()
         };
         "basic assignee"
     )]
     #[test_case(
-        r#"{"id":"f","generic_variables":["T","U"]}"#,
-        Assignee {
-            id: Id::from("f"),
+        r#"{"assignee":{"id":"f"},"generic_variables":["T","U"]}"#,
+        ParametricAssignee {
+            assignee: Id::from("f").into(),
             generic_variables: vec![
                 Id::from("T"),
                 Id::from("U")
@@ -589,22 +600,22 @@ mod tests {
         "generic assignee"
     )]
     #[test_case(
-        r#"{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"id":"b","type_instances":[]}}}"#,
+        r#"{"assignee":{"assignee":{"id":"a"},"generic_variables":[]},"expression":{"GenericVariable":{"id":"b","type_instances":[]}}}"#,
         Assignment {
-            assignee: Box::new(VariableAssignee("a")),
+            assignee: VariableAssignee("a"),
             expression: Box::new(Variable("b").into())
         };
         "variable assignment"
     )]
     #[test_case(
-        r#"{"assignee":{"id":"a","generic_variables":["T"]},"expression":{"GenericVariable":{"id":"b","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}}}"#,
+        r#"{"assignee":{"assignee":{"id":"a"},"generic_variables":["T"]},"expression":{"GenericVariable":{"id":"b","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}}}"#,
         Assignment {
-            assignee: Box::new(Assignee {
-                id: Id::from("a"),
+            assignee: ParametricAssignee {
+                assignee: Id::from("a").into(),
                 generic_variables: vec![
                     Id::from("T")
                 ]
-            }),
+            },
             expression: Box::new(GenericVariable{
                 id: Id::from("b"),
                 type_instances: vec![
@@ -621,15 +632,15 @@ mod tests {
         "assignment-free block"
     )]
     #[test_case(
-        r#"{"assignments":[{"assignee":{"id":"a","generic_variables":[]},"expression":{"GenericVariable":{"id":"x","type_instances":[]}}},{"assignee":{"id":"b","generic_variables":[]},"expression":{"Integer":{"value":3}}}],"expression":{"Integer":{"value":4}}}"#,
+        r#"{"assignments":[{"assignee":{"assignee":{"id":"a"},"generic_variables":[]},"expression":{"GenericVariable":{"id":"x","type_instances":[]}}},{"assignee":{"assignee":{"id":"b"},"generic_variables":[]},"expression":{"Integer":{"value":3}}}],"expression":{"Integer":{"value":4}}}"#,
         Block {
             assignments: vec![
                 Assignment {
-                    assignee: Box::new(VariableAssignee("a")),
+                    assignee: VariableAssignee("a"),
                     expression: Box::new(Variable("x").into())
                 },
                 Assignment {
-                    assignee: Box::new(VariableAssignee("b")),
+                    assignee: VariableAssignee("b"),
                     expression: Box::new(Integer{value:3}.into())
                 },
             ],
@@ -684,10 +695,10 @@ mod tests {
         "nested if expression"
     )]
     #[test_case(
-        r#"{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}"#,
+        r#"{"type_name":"Some","assignee":{"id":"x"}}"#,
         MatchItem {
             type_name: Id::from("Some"),
-            assignee: Some(VariableAssignee("x")),
+            assignee: Some(Id::from("x").into()),
         };
         "present match item"
     )]
@@ -700,7 +711,7 @@ mod tests {
         "absent match item"
     )]
     #[test_case(
-        r#"{"matches":[{"type_name":"None","assignee":null},{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}}"#,
+        r#"{"matches":[{"type_name":"None","assignee":null},{"type_name":"Some","assignee":{"id":"x"}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}}"#,
         MatchBlock {
             matches: vec![
                 MatchItem {
@@ -709,7 +720,7 @@ mod tests {
                 },
                 MatchItem {
                     type_name: Id::from("Some"),
-                    assignee: Some(VariableAssignee("x")),
+                    assignee: Some(Id::from("x").into()),
                 }
             ],
             block: Block{
@@ -722,7 +733,7 @@ mod tests {
         "match block"
     )]
     #[test_case(
-        r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}]}"#,
+        r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x"}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}]}"#,
         MatchExpression {
             subject: Box::new(Variable("maybe").into()),
             blocks: vec![
@@ -730,7 +741,7 @@ mod tests {
                     matches: vec![
                         MatchItem {
                             type_name: Id::from("Some"),
-                            assignee: Some(VariableAssignee("x")),
+                            assignee: Some(Id::from("x").into()),
                         }
                     ],
                     block: Block{
@@ -759,7 +770,7 @@ mod tests {
         "flat match expression"
     )]
     #[test_case(
-        r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x","generic_variables":[]}}],"block":{"assignments":[],"expression":{"MatchExpression":{"subject":{"GenericVariable":{"id":"x","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Positive","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":1}}}},{"matches":[{"type_name":"Negative","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}]}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":0}}}}]}"#,
+        r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x"}}],"block":{"assignments":[],"expression":{"MatchExpression":{"subject":{"GenericVariable":{"id":"x","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Positive","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":1}}}},{"matches":[{"type_name":"Negative","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}]}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":0}}}}]}"#,
         MatchExpression {
             subject: Box::new(Variable("maybe").into()),
             blocks: vec![
@@ -767,7 +778,7 @@ mod tests {
                     matches: vec![
                         MatchItem {
                             type_name: Id::from("Some"),
-                            assignee: Some(VariableAssignee("x")),
+                            assignee: Some(Id::from("x").into()),
                         }
                     ],
                     block: Block{

@@ -8,10 +8,12 @@ grammar: Grammar.g4
 	touch parser/$@/__init__.py
 	touch parser/$@
 
+parser: grammar
+
 test: parser
 	pytest .
 
 clean:
-	rm -rf parser
+	rm -rf parser/grammar
 
 .PHONY: clean parse

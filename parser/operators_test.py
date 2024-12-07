@@ -1,7 +1,7 @@
 from parser import Parser
 
 import pytest
-from ast_nodes import Assignee, Assignment, FunctionCall, Variable
+from ast_nodes import Assignee, Assignment, FunctionCall, ParametricAssignee, Variable
 from operators import Associativity, OperatorManager
 
 L = Associativity.LEFT
@@ -58,7 +58,7 @@ def test_parsing(operator):
 
     code = f"__{operator}__ = x"
     ast = Parser.parse(code, target="assignment")
-    node = Assignment(Assignee(operator, []), Variable("x"))
+    node = Assignment(ParametricAssignee(Assignee(operator), []), Variable("x"))
     assert ast == node
 
 

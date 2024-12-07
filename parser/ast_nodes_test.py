@@ -19,6 +19,7 @@ from ast_nodes import (
     MatchExpression,
     MatchItem,
     OpaqueTypeDefinition,
+    ParametricAssignee,
     TransparentTypeDefinition,
     TupleExpression,
     TupleType,
@@ -200,19 +201,28 @@ from ast_nodes import (
                 "index": 1,
             },
         ),
-        (Assignee("a", []), {"id": "a", "generic_variables": []}),
-        (Assignee("f", ["T", "U"]), {"id": "f", "generic_variables": ["T", "U"]}),
         (
-            Assignment(Assignee("a", []), Variable("b")),
+            ParametricAssignee(Assignee("a"), []),
+            {"assignee": {"id": "a"}, "generic_variables": []},
+        ),
+        (
+            ParametricAssignee(Assignee("f"), ["T", "U"]),
+            {"assignee": {"id": "f"}, "generic_variables": ["T", "U"]},
+        ),
+        (
+            Assignment(ParametricAssignee(Assignee("a"), []), Variable("b")),
             {
-                "assignee": {"id": "a", "generic_variables": []},
+                "assignee": {"assignee": {"id": "a"}, "generic_variables": []},
                 "expression": {"GenericVariable": {"id": "b", "type_instances": []}},
             },
         ),
         (
-            Assignment(Assignee("a", ["T"]), GenericVariable("b", [Typename("T")])),
+            Assignment(
+                ParametricAssignee(Assignee("a"), ["T"]),
+                GenericVariable("b", [Typename("T")]),
+            ),
             {
-                "assignee": {"id": "a", "generic_variables": ["T"]},
+                "assignee": {"assignee": {"id": "a"}, "generic_variables": ["T"]},
                 "expression": {
                     "GenericVariable": {
                         "id": "b",
@@ -224,19 +234,19 @@ from ast_nodes import (
         (
             Block(
                 [
-                    Assignment(Assignee("a", []), Variable("x")),
-                    Assignment(Assignee("b", []), Integer(3)),
+                    Assignment(ParametricAssignee(Assignee("a"), []), Variable("x")),
+                    Assignment(ParametricAssignee(Assignee("b"), []), Integer(3)),
                 ],
                 Integer(4),
             ),
             {
                 "assignments": [
                     {
-                        "assignee": {"id": "a", "generic_variables": []},
+                        "assignee": {"assignee": {"id": "a"}, "generic_variables": []},
                         "expression": {"GenericVariable": {"id": "x", "type_instances": []}},
                     },
                     {
-                        "assignee": {"id": "b", "generic_variables": []},
+                        "assignee": {"assignee": {"id": "b"}, "generic_variables": []},
                         "expression": {"Integer": {"value": 3}},
                     },
                 ],
@@ -303,22 +313,19 @@ from ast_nodes import (
             },
         ),
         (
-            MatchItem("Some", Assignee("x", [])),
-            {"type_name": "Some", "assignee": {"id": "x", "generic_variables": []}},
+            MatchItem("Some", Assignee("x")),
+            {"type_name": "Some", "assignee": {"id": "x"}},
         ),
         (MatchItem("None", None), {"type_name": "None", "assignee": None}),
         (
             MatchBlock(
-                [MatchItem("None", None), MatchItem("Some", Assignee("x", []))],
+                [MatchItem("None", None), MatchItem("Some", Assignee("x"))],
                 Block([], Boolean(True)),
             ),
             {
                 "matches": [
                     {"type_name": "None", "assignee": None},
-                    {
-                        "type_name": "Some",
-                        "assignee": {"id": "x", "generic_variables": []},
-                    },
+                    {"type_name": "Some", "assignee": {"id": "x"}},
                 ],
                 "block": {
                     "assignments": [],
@@ -330,7 +337,7 @@ from ast_nodes import (
             MatchExpression(
                 Variable("maybe"),
                 [
-                    MatchBlock([MatchItem("Some", Assignee("x", []))], Block([], Boolean(True))),
+                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Boolean(True))),
                     MatchBlock([MatchItem("None", None)], Block([], Boolean(False))),
                 ],
             ),
@@ -338,12 +345,7 @@ from ast_nodes import (
                 "subject": {"GenericVariable": {"id": "maybe", "type_instances": []}},
                 "blocks": [
                     {
-                        "matches": [
-                            {
-                                "type_name": "Some",
-                                "assignee": {"id": "x", "generic_variables": []},
-                            }
-                        ],
+                        "matches": [{"type_name": "Some", "assignee": {"id": "x"}}],
                         "block": {
                             "assignments": [],
                             "expression": {"Boolean": {"value": True}},
@@ -364,7 +366,7 @@ from ast_nodes import (
                 Variable("maybe"),
                 [
                     MatchBlock(
-                        [MatchItem("Some", Assignee("x", []))],
+                        [MatchItem("Some", Assignee("x"))],
                         Block(
                             [],
                             MatchExpression(
@@ -393,29 +395,18 @@ from ast_nodes import (
                 "subject": {"GenericVariable": {"id": "maybe", "type_instances": []}},
                 "blocks": [
                     {
-                        "matches": [
-                            {
-                                "type_name": "Some",
-                                "assignee": {"id": "x", "generic_variables": []},
-                            }
-                        ],
+                        "matches": [{"type_name": "Some", "assignee": {"id": "x"}}],
                         "block": {
                             "assignments": [],
                             "expression": {
                                 "MatchExpression": {
                                     "subject": {
-                                        "GenericVariable": {
-                                            "id": "x",
-                                            "type_instances": [],
-                                        }
+                                        "GenericVariable": {"id": "x", "type_instances": []}
                                     },
                                     "blocks": [
                                         {
                                             "matches": [
-                                                {
-                                                    "type_name": "Positive",
-                                                    "assignee": None,
-                                                }
+                                                {"type_name": "Positive", "assignee": None}
                                             ],
                                             "block": {
                                                 "assignments": [],
@@ -424,10 +415,7 @@ from ast_nodes import (
                                         },
                                         {
                                             "matches": [
-                                                {
-                                                    "type_name": "Negative",
-                                                    "assignee": None,
-                                                }
+                                                {"type_name": "Negative", "assignee": None}
                                             ],
                                             "block": {
                                                 "assignments": [],
@@ -441,10 +429,7 @@ from ast_nodes import (
                     },
                     {
                         "matches": [{"type_name": "None", "assignee": None}],
-                        "block": {
-                            "assignments": [],
-                            "expression": {"Integer": {"value": 0}},
-                        },
+                        "block": {"assignments": [], "expression": {"Integer": {"value": 0}}},
                     },
                 ],
             },
@@ -452,4 +437,5 @@ from ast_nodes import (
     ],
 )
 def test_to_json(node: ASTNode, json: str) -> None:
+    print(node)
     assert node.to_json() == json
