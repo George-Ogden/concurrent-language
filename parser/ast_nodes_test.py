@@ -7,9 +7,12 @@ from ast_nodes import (
     AtomicTypeEnum,
     Block,
     Boolean,
+    ConstructorCall,
     ElementAccess,
     EmptyTypeDefinition,
+    FunctionCall,
     FunctionType,
+    GenericConstructor,
     GenericType,
     GenericTypeVariable,
     GenericVariable,
@@ -431,6 +434,28 @@ from ast_nodes import (
                         "matches": [{"type_name": "None", "assignee": None}],
                         "block": {"assignments": [], "expression": {"Integer": {"value": 0}}},
                     },
+                ],
+            },
+        ),
+        (
+            FunctionCall(Variable("foo"), [Integer(3), Variable("x")]),
+            {
+                "function": {"GenericVariable": {"id": "foo", "type_instances": []}},
+                "arguments": [
+                    {"Integer": {"value": 3}},
+                    {"GenericVariable": {"id": "x", "type_instances": []}},
+                ],
+            },
+        ),
+        (
+            ConstructorCall(
+                GenericConstructor("foo", [AtomicType.INT]), [Integer(3), Variable("x")]
+            ),
+            {
+                "constructor": {"id": "foo", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
+                "arguments": [
+                    {"Integer": {"value": 3}},
+                    {"GenericVariable": {"id": "x", "type_instances": []}},
                 ],
             },
         ),

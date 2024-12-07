@@ -834,6 +834,26 @@ mod tests {
         };
         "nested match expression"
     )]
+    #[test_case(
+        r#"{"function":{"GenericVariable":{"id":"foo","type_instances":[]}},"arguments":[{"Integer":{"value":3}},{"GenericVariable":{"id":"x","type_instances":[]}}]}"#,
+        FunctionCall{
+            function: Box::new(Variable("foo").into()),
+            arguments: vec![Integer{value: 3}.into(), Variable("x").into()]
+        };
+        "function call expression"
+    )]
+    #[test_case(
+        r#"{"constructor":{"id":"foo","type_instances":[{"AtomicType":{"type_":"INT"}}]},"arguments":[{"Integer":{"value":3}},{"GenericVariable":{"id":"x","type_instances":[]}}]}"#,
+        ConstructorCall{
+            constructor: GenericConstructor{
+                id: Id::from("foo"),
+                type_instances: vec![ATOMIC_TYPE_INT.into()]
+
+            },
+            arguments: vec![Integer{value: 3}.into(), Variable("x").into()]
+        };
+        "constructor call expression"
+    )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
     >(
