@@ -11,6 +11,7 @@ from ast_nodes import (
     ElementAccess,
     EmptyTypeDefinition,
     FunctionCall,
+    FunctionDefinition,
     FunctionType,
     GenericConstructor,
     GenericType,
@@ -26,6 +27,7 @@ from ast_nodes import (
     TransparentTypeDefinition,
     TupleExpression,
     TupleType,
+    TypedAssignee,
     TypeItem,
     Typename,
     TypeVariable,
@@ -457,6 +459,27 @@ from ast_nodes import (
                     {"Integer": {"value": 3}},
                     {"GenericVariable": {"id": "x", "type_instances": []}},
                 ],
+            },
+        ),
+        (
+            FunctionDefinition(
+                [
+                    TypedAssignee(Assignee("x"), AtomicType.INT),
+                    TypedAssignee(Assignee("y"), AtomicType.BOOL),
+                ],
+                AtomicType.BOOL,
+                Block([], Variable("y")),
+            ),
+            {
+                "parameters": [
+                    {"assignee": {"id": "x"}, "type_": {"AtomicType": {"type_": "INT"}}},
+                    {"assignee": {"id": "y"}, "type_": {"AtomicType": {"type_": "BOOL"}}},
+                ],
+                "return_type": {"AtomicType": {"type_": "BOOL"}},
+                "body": {
+                    "assignments": [],
+                    "expression": {"GenericVariable": {"id": "y", "type_instances": []}},
+                },
             },
         ),
     ],

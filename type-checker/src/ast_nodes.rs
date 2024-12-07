@@ -854,6 +854,24 @@ mod tests {
         };
         "constructor call expression"
     )]
+    #[test_case(
+        r#"{"parameters":[{"assignee":{"id":"x"},"type_":{"AtomicType":{"type_":"INT"}}},{"assignee":{"id":"y"},"type_":{"AtomicType":{"type_":"BOOL"}}}],"return_type":{"AtomicType":{"type_":"BOOL"}},"body":{"assignments":[],"expression":{"GenericVariable":{"id":"y","type_instances":[]}}}}"#,
+        FunctionDefinition{
+            parameters: vec![
+                TypedAssignee {
+                    assignee: Assignee { id: Id::from("x") },
+                    type_: ATOMIC_TYPE_INT.into()
+                },
+                TypedAssignee {
+                    assignee: Assignee { id: Id::from("y") },
+                    type_: ATOMIC_TYPE_BOOL.into()
+                }
+            ],
+            return_type: ATOMIC_TYPE_BOOL.into(),
+            body: ExpressionBlock(Variable("y").into())
+        };
+        "function definition expression"
+    )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
     >(
