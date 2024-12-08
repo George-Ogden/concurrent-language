@@ -654,6 +654,7 @@ impl TypeChecker {
                 Definition::EmptyTypeDefinition(EmptyTypeDefinition { id }) => {
                     Type::Union(HashMap::from([(id, None)]))
                 }
+                Definition::Assignment(_) => continue,
             };
             if let Some(type_reference) = type_definitions.get_mut(&type_name) {
                 type_reference.borrow_mut().type_ = type_;

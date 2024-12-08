@@ -24,6 +24,7 @@ from ast_nodes import (
     MatchItem,
     OpaqueTypeDefinition,
     ParametricAssignee,
+    Program,
     TransparentTypeDefinition,
     TupleExpression,
     TupleType,
@@ -480,6 +481,64 @@ from ast_nodes import (
                     "assignments": [],
                     "expression": {"GenericVariable": {"id": "y", "type_instances": []}},
                 },
+            },
+        ),
+        (Program([]), {"definitions": []}),
+        (
+            Program(
+                [
+                    UnionTypeDefinition(
+                        GenericTypeVariable("Maybe", ["T"]),
+                        [TypeItem("Some", Typename("T")), TypeItem("None", None)],
+                    ),
+                    TransparentTypeDefinition(
+                        GenericTypeVariable("Pair", ["T", "U"]),
+                        TupleType([Typename("T"), Typename("U")]),
+                    ),
+                    Assignment(ParametricAssignee(Assignee("a"), []), Variable("x")),
+                    Assignment(ParametricAssignee(Assignee("b"), []), Integer(3)),
+                ]
+            ),
+            {
+                "definitions": [
+                    {
+                        "UnionTypeDefinition": {
+                            "variable": {"id": "Maybe", "generic_variables": ["T"]},
+                            "items": [
+                                {
+                                    "id": "Some",
+                                    "type_": {"GenericType": {"id": "T", "type_variables": []}},
+                                },
+                                {"id": "None", "type_": None},
+                            ],
+                        }
+                    },
+                    {
+                        "TransparentTypeDefinition": {
+                            "variable": {"id": "Pair", "generic_variables": ["T", "U"]},
+                            "type_": {
+                                "TupleType": {
+                                    "types": [
+                                        {"GenericType": {"id": "T", "type_variables": []}},
+                                        {"GenericType": {"id": "U", "type_variables": []}},
+                                    ]
+                                }
+                            },
+                        }
+                    },
+                    {
+                        "Assignment": {
+                            "assignee": {"assignee": {"id": "a"}, "generic_variables": []},
+                            "expression": {"GenericVariable": {"id": "x", "type_instances": []}},
+                        }
+                    },
+                    {
+                        "Assignment": {
+                            "assignee": {"assignee": {"id": "b"}, "generic_variables": []},
+                            "expression": {"Integer": {"value": 3}},
+                        }
+                    },
+                ]
             },
         ),
     ],

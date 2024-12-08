@@ -62,13 +62,13 @@ pub enum TypeInstance {
     GenericType(GenericType),
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct TypeItem {
     pub id: Id,
     pub type_: Option<TypeInstance>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct GenericTypeVariable {
     pub id: Id,
     pub generic_variables: Vec<Id>,
@@ -82,35 +82,36 @@ pub fn TypeVariable(id: &str) -> GenericTypeVariable {
     };
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct UnionTypeDefinition {
     pub variable: GenericTypeVariable,
     pub items: Vec<TypeItem>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct OpaqueTypeDefinition {
     pub variable: GenericTypeVariable,
     pub type_: TypeInstance,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct EmptyTypeDefinition {
     pub id: Id,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct TransparentTypeDefinition {
     pub variable: GenericTypeVariable,
     pub type_: TypeInstance,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, FromVariants, Clone)]
 pub enum Definition {
     UnionTypeDefinition(UnionTypeDefinition),
     OpaqueTypeDefinition(OpaqueTypeDefinition),
     TransparentTypeDefinition(TransparentTypeDefinition),
     EmptyTypeDefinition(EmptyTypeDefinition),
+    Assignment(Assignment),
 }
 
 impl Definition {
@@ -140,6 +141,14 @@ impl Definition {
                         generic_variables: _,
                     },
                 type_: _,
+            })
+            | Self::Assignment(Assignment {
+                assignee:
+                    ParametricAssignee {
+                        assignee: Assignee { id },
+                        generic_variables: _,
+                    },
+                expression: _,
             }) => id,
         }
     }
@@ -168,6 +177,14 @@ impl Definition {
                         generic_variables,
                     },
                 type_: _,
+            })
+            | Self::Assignment(Assignment {
+                assignee:
+                    ParametricAssignee {
+                        assignee: _,
+                        generic_variables,
+                    },
+                expression: _,
             }) => generic_variables.clone(),
             Self::EmptyTypeDefinition(EmptyTypeDefinition { id: _ }) => Vec::new(),
         }
@@ -330,6 +347,11 @@ pub fn ExpressionBlock(expression: Expression) -> Block {
         assignments: Vec::new(),
         expression: Box::new(expression),
     };
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct Program {
+    definitions: Vec<Definition>,
 }
 
 #[cfg(test)]
@@ -871,6 +893,54 @@ mod tests {
             body: ExpressionBlock(Variable("y").into())
         };
         "function definition expression"
+    )]
+    #[test_case(
+        r#"{"definitions":[]}"#,
+        Program{
+            definitions: Vec::new(),
+        };
+        "empty program"
+    )]
+    #[test_case(
+        r#"{"definitions":[{"UnionTypeDefinition":{"variable":{"id":"Maybe","generic_variables":["T"]},"items":[{"id":"Some","type_":{"GenericType":{"id":"T","type_variables":[]}}},{"id":"None","type_":null}]}},{"TransparentTypeDefinition":{"variable":{"id":"Pair","generic_variables":["T","U"]},"type_":{"TupleType":{"types":[{"GenericType":{"id":"T","type_variables":[]}},{"GenericType":{"id":"U","type_variables":[]}}]}}}},{"Assignment":{"assignee":{"assignee":{"id":"a"},"generic_variables":[]},"expression":{"GenericVariable":{"id":"x","type_instances":[]}}}},{"Assignment":{"assignee":{"assignee":{"id":"b"},"generic_variables":[]},"expression":{"Integer":{"value":3}}}}]}"#,
+        Program{
+            definitions: vec![
+                UnionTypeDefinition {
+                    variable: GenericTypeVariable{
+                        id: Id::from("Maybe"),
+                        generic_variables: vec![Id::from("T")]
+                    },
+                    items: vec![
+                        TypeItem {
+                            id: Id::from("Some"),
+                            type_: Some(Typename("T").into()),
+                        },
+                        TypeItem {
+                            id: Id::from("None"),
+                            type_: None
+                        }
+                    ]
+                }.into(),
+                TransparentTypeDefinition{
+                    variable: GenericTypeVariable{
+                        id: Id::from("Pair"),
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    },
+                    type_: TupleType{
+                        types: vec![Typename("T").into(), Typename("U").into()]
+                    }.into()
+                }.into(),
+                Assignment {
+                    assignee: VariableAssignee("a"),
+                    expression: Box::new(Variable("x").into())
+                }.into(),
+                Assignment {
+                    assignee: VariableAssignee("b"),
+                    expression: Box::new(Integer{value:3}.into())
+                }.into(),
+            ]
+        };
+        "non-empty program"
     )]
     fn test_deserialize_json<
         T: std::fmt::Debug + std::cmp::PartialEq + for<'a> serde::Deserialize<'a> + serde::Serialize,
