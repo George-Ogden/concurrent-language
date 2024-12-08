@@ -1,15 +1,16 @@
 use crate::type_check_nodes::{
     ConstructorType, ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type,
-    TypeCheckError, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
-    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedMatch,
-    TypedMatchBlock, TypedMatchItem, TypedTuple, TypedVariable, TYPE_BOOL,
+    TypeCheckError, TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall,
+    TypedElementAccess, TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf,
+    TypedMatch, TypedMatchBlock, TypedMatchItem, TypedTuple, TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
-    GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
+    GenericTypeVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
+    Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -382,7 +383,7 @@ impl PartialEq for TypeDefinitions {
     }
 }
 
-type TypeContext = TypeDefinitions;
+type TypeContext = HashMap<Id, TypedVariable>;
 
 struct TypeChecker {
     type_definitions: TypeDefinitions,
@@ -473,7 +474,7 @@ impl TypeChecker {
                     )
                 } else {
                     return Err(TypeCheckError::UnknownError {
-                        id: id,
+                        id,
                         options: type_definitions
                             .keys()
                             .chain(generic_variables.keys())
@@ -737,14 +738,15 @@ impl TypeChecker {
                     .collect::<Result<_, _>>()?,
             }
             .into(),
-            Expression::GenericVariable(GenericVariable { id, type_instances }) => {
-                let variable_type = context.get(&id);
-                match variable_type {
-                    Some(type_) => {
+            Expression::GenericVariable(Variable { id, type_instances }) => {
+                let variable = context.get(&id);
+                match variable {
+                    Some(typed_variable) => {
+                        let TypedVariable { variable, type_ } = typed_variable;
                         if type_instances.len() != type_.borrow().parameters.len() {
                             return Err(TypeCheckError::WrongNumberOfTypeParameters {
                                 type_: type_.borrow().clone(),
-                                type_instances: type_instances,
+                                type_instances,
                             });
                         }
                         let type_ = if type_instances.is_empty() {
@@ -764,13 +766,16 @@ impl TypeChecker {
                                     .collect::<Result<_, _>>()?,
                             )
                         };
-                        TypedVariable { id: id, type_ }
+                        TypedAccess {
+                            variable: variable.clone(),
+                            type_,
+                        }
+                        .into()
                     }
-                    .into(),
                     None => {
                         return Err(TypeCheckError::UnknownError {
                             place: String::from("variable"),
-                            id: id,
+                            id,
                             options: context.keys().map(|id| id.clone()).collect_vec(),
                         })
                     }
@@ -848,10 +853,22 @@ impl TypeChecker {
                             generic_variables,
                         )
                     })
-                    .collect::<Result<_, _>>()?;
+                    .collect::<Result<Vec<Type>, _>>()?;
+                let parameters = parameter_ids
+                    .into_iter()
+                    .zip_eq(parameter_types.into_iter())
+                    .map(|(id, type_)| {
+                        (
+                            id,
+                            TypedVariable {
+                                variable: Rc::new(RefCell::new(())),
+                                type_: Rc::new(RefCell::new(type_.into())),
+                            },
+                        )
+                    })
+                    .collect_vec();
                 PartiallyTypedFunctionDefinition {
-                    parameter_types,
-                    parameter_ids,
+                    parameters,
                     return_type: Box::new(TypeChecker::convert_ast_type(
                         return_type,
                         &self.type_definitions,
@@ -1076,8 +1093,9 @@ impl TypeChecker {
                 .extend(GenericVariables::from(&assignment.assignee.generic_variables).into_iter());
             let typed_expression =
                 self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
+            let id = assignment.assignee.assignee.id;
             let assignment = TypedAssignment {
-                id: assignment.assignee.assignee.id,
+                variable: Rc::new(RefCell::new(())),
                 expression: ParametricExpression {
                     expression: typed_expression,
                     parameters: assignment
@@ -1089,16 +1107,19 @@ impl TypeChecker {
                 },
             };
             new_context.insert(
-                assignment.id.clone(),
-                Rc::new(RefCell::new(ParametricType {
-                    type_: (assignment.expression.expression.type_()),
-                    parameters: assignment
-                        .expression
-                        .parameters
-                        .iter()
-                        .map(|(_, rc)| rc.clone())
-                        .collect_vec(),
-                })),
+                id,
+                TypedVariable {
+                    variable: assignment.variable.clone(),
+                    type_: Rc::new(RefCell::new(ParametricType {
+                        type_: (assignment.expression.expression.type_()),
+                        parameters: assignment
+                            .expression
+                            .parameters
+                            .iter()
+                            .map(|(_, rc)| rc.clone())
+                            .collect_vec(),
+                    })),
+                },
             );
             assignments.push(assignment);
         }
@@ -1132,7 +1153,7 @@ impl TypeChecker {
         Ok(match expression {
             TypedExpression::Integer(_)
             | TypedExpression::Boolean(_)
-            | TypedExpression::TypedVariable(_) => expression,
+            | TypedExpression::TypedAccess(_) => expression,
             TypedExpression::TypedTuple(TypedTuple { expressions }) => {
                 TypedExpression::TypedTuple(TypedTuple {
                     expressions: self.check_functions_in_expressions(
@@ -1245,7 +1266,7 @@ impl TypeChecker {
                         &generic_variables,
                     )
                     .map(|expression| TypedAssignment {
-                        id: assignment.id,
+                        variable: assignment.variable,
                         expression: ParametricExpression {
                             expression,
                             parameters: assignment.expression.parameters,
@@ -1267,15 +1288,8 @@ impl TypeChecker {
         generic_variables: &GenericVariables,
     ) -> Result<TypedFunctionDefinition, TypeCheckError> {
         let mut new_context = context.clone();
-        for (parameter_name, parameter_type) in function_definition
-            .parameter_ids
-            .iter()
-            .zip(function_definition.parameter_types.iter())
-        {
-            new_context.insert(
-                parameter_name.clone(),
-                Rc::new(RefCell::new(parameter_type.clone().into())),
-            );
+        for (id, variable) in &function_definition.parameters {
+            new_context.insert(id.clone(), variable.clone());
         }
         let body = self.check_block(function_definition.body, &new_context, generic_variables)?;
         if *function_definition.return_type != body.type_() {
@@ -1285,8 +1299,11 @@ impl TypeChecker {
             });
         }
         Ok(TypedFunctionDefinition {
-            parameter_ids: function_definition.parameter_ids.clone(),
-            parameter_types: function_definition.parameter_types.clone(),
+            parameters: function_definition
+                .parameters
+                .into_iter()
+                .map(|(_, variable)| variable)
+                .collect_vec(),
             return_type: function_definition.return_type.clone(),
             body,
         })
@@ -1301,8 +1318,8 @@ mod tests {
         Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess, ExpressionBlock,
         FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable, IfExpression,
         Integer, MatchBlock, MatchExpression, MatchItem, ParametricAssignee, TupleExpression,
-        TypeItem, TypeVariable, TypedAssignee, Typename, Variable, VariableAssignee,
-        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        TypeItem, TypeVariable, TypedAssignee, Typename, Var, VariableAssignee, ATOMIC_TYPE_BOOL,
+        ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -2338,23 +2355,23 @@ mod tests {
         "type check nested tuple"
     )]
     #[test_case(
-        Variable("a").into(),
+        Var("a").into(),
         Some(TYPE_INT),
         TypeContext::from([
             (
                 Id::from("a"),
-                Type::from(TYPE_INT)
+                Type::from(TYPE_INT).into()
             )
         ]);
         "type check variable"
     )]
     #[test_case(
-        Variable("b").into(),
+        Var("b").into(),
         None,
         TypeContext::from([
             (
                 Id::from("a"),
-                Type::from(TYPE_INT)
+                Type::from(TYPE_INT).into()
             )
         ]);
         "type check missing variable"
@@ -2362,9 +2379,9 @@ mod tests {
     #[test_case(
         TupleExpression{
             expressions: vec![
-                Variable("b").into(),
-                Variable("a").into(),
-                Variable("a").into(),
+                Var("b").into(),
+                Var("a").into(),
+                Var("a").into(),
             ]
         }.into(),
         Some(Type::Tuple(vec![
@@ -2375,17 +2392,17 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("a"),
-                Type::from(TYPE_INT)
+                Type::from(TYPE_INT).into()
             ),
             (
                 Id::from("b"),
-                Type::from(TYPE_BOOL)
+                Type::from(TYPE_BOOL).into()
             )
         ]);
         "type check multiple variables"
     )]
     #[test_case(
-        Variable("f").into(),
+        Var("f").into(),
         None,
         TypeContext::from([
             (
@@ -2395,14 +2412,14 @@ mod tests {
                     ParametricType{
                         type_: Type::Variable(parameter.clone()),
                         parameters: vec![parameter]
-                    }
+                    }.into()
                 }
             )
         ]);
         "type check wrong arguments"
     )]
     #[test_case(
-        GenericVariable {
+        Variable {
             id: Id::from("f"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         }.into(),
@@ -2410,7 +2427,7 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("f"),
-                ALPHA_TYPE.clone()
+                ALPHA_TYPE.clone().into()
             )
         ]);
         "type check parametric type"
@@ -2455,7 +2472,7 @@ mod tests {
     #[test_case(
         ElementAccess{
             expression: Box::new(ElementAccess {
-                expression: Box::new(Variable("a").into()),
+                expression: Box::new(Var("a").into()),
                 index: 0
             }.into()),
             index: 0
@@ -2469,12 +2486,12 @@ mod tests {
                         TYPE_UNIT
                     ]
                 )]
-            )
+            ).into()
         )]);
         "nested element access"
     )]
     #[test_case(
-        Variable("empty").into(),
+        Var("empty").into(),
         Some(Type::Union([(
             Id::from("Empty"),
             None
@@ -2484,7 +2501,7 @@ mod tests {
             Type::Union([(
                 Id::from("Empty"),
                 None
-            )].into())
+            )].into()).into()
         )]);
         "variable with empty type"
     )]
@@ -2521,7 +2538,7 @@ mod tests {
     #[test_case(
         IfExpression {
             condition: Box::new(Boolean{value: false}.into()),
-            true_block: ExpressionBlock(Variable("x").into()),
+            true_block: ExpressionBlock(Var("x").into()),
             false_block: ExpressionBlock(Boolean{value: false}.into())
         }.into(),
         None,
@@ -2538,7 +2555,7 @@ mod tests {
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
-                expression: Box::new(Variable("x").into())
+                expression: Box::new(Var("x").into())
             },
             false_block: ExpressionBlock(Integer{value: 5}.into())
         }.into(),
@@ -2556,14 +2573,14 @@ mod tests {
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
-                expression: Box::new(Variable("x").into())
+                expression: Box::new(Var("x").into())
             },
             false_block: ExpressionBlock(Integer{value: 5}.into())
         }.into(),
         Some(TYPE_INT.into()),
         TypeContext::from([(
             Id::from("x"),
-            TYPE_BOOL
+            TYPE_BOOL.into()
         )]);
         "if expression variable shadowed in block"
     )]
@@ -2577,14 +2594,14 @@ mod tests {
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
-                expression: Box::new(Variable("x").into())
+                expression: Box::new(Var("x").into())
             },
-            false_block: ExpressionBlock(Variable("x").into())
+            false_block: ExpressionBlock(Var("x").into())
         }.into(),
         None,
         TypeContext::from([(
             Id::from("x"),
-            TYPE_BOOL
+            TYPE_BOOL.into()
         )]);
         "if expression variable shadowed incorrectly block"
     )]
@@ -2598,11 +2615,11 @@ mod tests {
                         expression: Box::new(Integer{value: -5}.into())
                     }
                 ],
-                expression: Box::new(Variable("x").into())
+                expression: Box::new(Var("x").into())
             },
             false_block: ExpressionBlock(
                 ElementAccess {
-                    expression: Box::new(Variable("x").into()),
+                    expression: Box::new(Var("x").into()),
                     index: 1
                 }.into()
             ),
@@ -2615,7 +2632,7 @@ mod tests {
                     TYPE_BOOL,
                     TYPE_INT,
                 ]
-            )
+            ).into()
         )]);
         "if expression variable shadowed then accessed"
     )]
@@ -2642,7 +2659,7 @@ mod tests {
                 },
             ],
             return_type: ATOMIC_TYPE_INT.into(),
-            body: ExpressionBlock(Variable("x").into())
+            body: ExpressionBlock(Var("x").into())
         }.into(),
         Some(Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT))),
         TypeContext::new();
@@ -2650,7 +2667,7 @@ mod tests {
     )]
     #[test_case(
         FunctionCall {
-            function: Box::new(Variable("+").into()),
+            function: Box::new(Var("+").into()),
             arguments: vec![
                 Integer{ value: 3}.into(),
                 Integer{ value: 5}.into(),
@@ -2662,13 +2679,13 @@ mod tests {
             Type::Function(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            )
+            ).into()
         )]);
         "addition function call"
     )]
     #[test_case(
         FunctionCall {
-            function: Box::new(Variable("+").into()),
+            function: Box::new(Var("+").into()),
             arguments: vec![
                 Boolean{ value: true}.into(),
                 Integer{ value: 5}.into(),
@@ -2680,13 +2697,13 @@ mod tests {
             Type::Function(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            )
+            ).into()
         )]);
         "addition function call wrong type"
     )]
     #[test_case(
         FunctionCall {
-            function: Box::new(Variable("+").into()),
+            function: Box::new(Var("+").into()),
             arguments: vec![
                 Integer{ value: 3}.into(),
                 Integer{ value: 5}.into(),
@@ -2701,7 +2718,7 @@ mod tests {
                     Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())
                 ],
                 Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new()))
-            )
+            ).into()
         )]);
         "addition function call with aliases"
     )]
@@ -2801,7 +2818,7 @@ mod tests {
     )]
     #[test_case(
         MatchExpression {
-            subject: Box::new(Variable("random_bull").into()),
+            subject: Box::new(Var("random_bull").into()),
             blocks: vec![
                 MatchBlock {
                     matches: vec![
@@ -2821,13 +2838,13 @@ mod tests {
         Some(TYPE_UNIT),
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
         )]);
         "basic match expression"
     )]
     #[test_case(
         MatchExpression {
-            subject: Box::new(Variable("random_bull").into()),
+            subject: Box::new(Var("random_bull").into()),
             blocks: vec![
                 MatchBlock {
                     matches: vec![
@@ -2852,13 +2869,13 @@ mod tests {
         Some(TYPE_UNIT),
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
         )]);
         "split match expression"
     )]
     #[test_case(
         MatchExpression {
-            subject: Box::new(Variable("random_bull").into()),
+            subject: Box::new(Var("random_bull").into()),
             blocks: vec![
                 MatchBlock {
                     matches: vec![
@@ -2883,7 +2900,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
         )]);
         "differing match blocks"
     )]
@@ -2909,7 +2926,7 @@ mod tests {
     )]
     #[test_case(
         MatchExpression {
-            subject: Box::new(Variable("random_bull").into()),
+            subject: Box::new(Var("random_bull").into()),
             blocks: vec![
                 MatchBlock {
                     matches: vec![
@@ -2926,7 +2943,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone()
+            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
         )]);
         "non-exhaustive matches"
     )]
@@ -2987,7 +3004,7 @@ mod tests {
                     expression: Box::new(Boolean{value: true}.into())
                 }
             ],
-            expression: Box::new(Variable("x").into())
+            expression: Box::new(Var("x").into())
         },
         Some(TYPE_BOOL),
         TypeContext::new();
@@ -3002,10 +3019,10 @@ mod tests {
                 },
                 Assignment{
                     assignee: VariableAssignee("y"),
-                    expression: Box::new(Variable("x").into())
+                    expression: Box::new(Var("x").into())
                 },
             ],
-            expression: Box::new(Variable("y").into())
+            expression: Box::new(Var("y").into())
         },
         Some(TYPE_INT),
         TypeContext::new();
@@ -3034,14 +3051,14 @@ mod tests {
             assignments: vec![
                 Assignment{
                     assignee: VariableAssignee("y"),
-                    expression: Box::new(Variable("x").into())
+                    expression: Box::new(Var("x").into())
                 },
                 Assignment{
                     assignee: VariableAssignee("x"),
                     expression: Box::new(Integer{value: 3}.into())
                 },
             ],
-            expression: Box::new(Variable("y").into())
+            expression: Box::new(Var("y").into())
         },
         None,
         TypeContext::new();
@@ -3060,7 +3077,7 @@ mod tests {
                 },
             ],
             return_type: ATOMIC_TYPE_INT.into(),
-            body: ExpressionBlock(Variable("z").into())
+            body: ExpressionBlock(Var("z").into())
         }.into()),
         None,
         TypeContext::new();
@@ -3079,7 +3096,7 @@ mod tests {
                 },
             ],
             return_type: ATOMIC_TYPE_INT.into(),
-            body: ExpressionBlock(Variable("y").into())
+            body: ExpressionBlock(Var("y").into())
         }.into()),
         None,
         TypeContext::new();
@@ -3113,7 +3130,7 @@ mod tests {
                 },
             ],
             return_type: Typename("opaque_int").into(),
-            body: ExpressionBlock(Variable("x").into()),
+            body: ExpressionBlock(Var("x").into()),
         }.into()),
         Some(Type::Function(
             vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new())],
@@ -3131,7 +3148,7 @@ mod tests {
                 },
             ],
             return_type: ATOMIC_TYPE_INT.into(),
-            body: ExpressionBlock(Variable("x").into()),
+            body: ExpressionBlock(Var("x").into()),
         }.into()),
         Some(Type::Function(
             vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())],
@@ -3149,7 +3166,7 @@ mod tests {
                 },
             ],
             return_type: ATOMIC_TYPE_INT.into(),
-            body: ExpressionBlock(Variable("x").into()),
+            body: ExpressionBlock(Var("x").into()),
         }.into()),
         Some(Type::Function(
             vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())],
@@ -3168,7 +3185,7 @@ mod tests {
             ],
             return_type: ATOMIC_TYPE_INT.into(),
             body: ExpressionBlock(ElementAccess{
-                expression: Box::new(Variable("x").into()),
+                expression: Box::new(Var("x").into()),
                 index: 0
             }.into()),
         }.into()),
@@ -3189,7 +3206,7 @@ mod tests {
             ],
             return_type: Typename("recursive").into(),
             body: ExpressionBlock(ElementAccess{
-                expression: Box::new(Variable("x").into()),
+                expression: Box::new(Var("x").into()),
                 index: 0
             }.into()),
         }.into()),
@@ -3211,10 +3228,10 @@ mod tests {
             ],
             return_type: ATOMIC_TYPE_INT.into(),
             body: ExpressionBlock(FunctionCall {
-                function: Box::new(Variable("+").into()),
+                function: Box::new(Var("+").into()),
                 arguments: vec![
-                    Variable("x").into(),
-                    Variable("y").into(),
+                    Var("x").into(),
+                    Var("y").into(),
                 ],
             }.into())
         }.into()),
@@ -3227,7 +3244,7 @@ mod tests {
             Type::Function(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            )
+            ).into()
         )]);
         "add function definition"
     )]
@@ -3245,10 +3262,10 @@ mod tests {
             ],
             return_type: ATOMIC_TYPE_INT.into(),
             body: ExpressionBlock(FunctionCall {
-                function: Box::new(Variable("+").into()),
+                function: Box::new(Var("+").into()),
                 arguments: vec![
-                    Variable("x").into(),
-                    Variable("y").into(),
+                    Var("x").into(),
+                    Var("y").into(),
                 ],
             }.into())
         }.into()),
@@ -3258,7 +3275,7 @@ mod tests {
             Type::Function(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            )
+            ).into()
         )]);
         "add invalid function definition"
     )]
@@ -3274,7 +3291,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                GenericVariable {
+                Variable {
                     id: Id::from("x"),
                     type_instances: vec![
                         ATOMIC_TYPE_INT.into()
@@ -3298,7 +3315,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                GenericVariable {
+                Variable {
                     id: Id::from("x"),
                     type_instances: vec![
                         ATOMIC_TYPE_INT.into(),
@@ -3327,13 +3344,13 @@ mod tests {
                             }
                         ],
                         return_type: Typename("T").into(),
-                        body: ExpressionBlock(Variable("x").into())
+                        body: ExpressionBlock(Var("x").into())
                     }.into())
                 },
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(GenericVariable{
+                    function: Box::new(Variable{
                         id: Id::from("id"),
                         type_instances: vec![ATOMIC_TYPE_INT.into()]
                     }.into()),
@@ -3361,7 +3378,7 @@ mod tests {
                             }
                         ],
                         return_type: Typename("T").into(),
-                        body: ExpressionBlock(Variable("x").into())
+                        body: ExpressionBlock(Var("x").into())
                     }.into())
                 },
                 Assignment {
@@ -3378,18 +3395,18 @@ mod tests {
                         ],
                         return_type: Typename("U").into(),
                         body: ExpressionBlock(FunctionCall {
-                            function: Box::new(GenericVariable{
+                            function: Box::new(Variable{
                                 id: Id::from("id"),
                                 type_instances: vec![Typename("U").into()]
                             }.into()),
-                            arguments: vec![Variable("x").into()]
+                            arguments: vec![Var("x").into()]
                         }.into())
                     }.into())
                 },
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(GenericVariable{
+                    function: Box::new(Variable{
                         id: Id::from("id_"),
                         type_instances: vec![ATOMIC_TYPE_INT.into()]
                     }.into()),
@@ -3432,12 +3449,12 @@ mod tests {
                                             }
                                         ],
                                         return_type: Typename("T").into(),
-                                        body: ExpressionBlock(Variable("x").into())
+                                        body: ExpressionBlock(Var("x").into())
                                     }.into())
                                 },
                             ],
                             expression: Box::new(FunctionCall {
-                                function: Box::new(GenericVariable{
+                                function: Box::new(Variable{
                                     id: Id::from("hold"),
                                     type_instances: vec![ATOMIC_TYPE_BOOL.into()]
                                 }.into()),
@@ -3451,7 +3468,7 @@ mod tests {
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(GenericVariable{
+                    function: Box::new(Variable{
                         id: Id::from("id"),
                         type_instances: vec![ATOMIC_TYPE_INT.into()]
                     }.into()),
@@ -3479,23 +3496,23 @@ mod tests {
                             }
                         ],
                         return_type: Typename("T").into(),
-                        body: ExpressionBlock(Variable("x").into())
+                        body: ExpressionBlock(Var("x").into())
                     }.into())
                 },
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(Variable("&").into()),
+                    function: Box::new(Var("&").into()),
                     arguments: vec![
                         FunctionCall {
-                            function: Box::new(GenericVariable{
+                            function: Box::new(Variable{
                                 id: Id::from("id"),
                                 type_instances: vec![ATOMIC_TYPE_INT.into()]
                             }.into()),
                             arguments: vec![Integer{value: 5}.into()]
                         }.into(),
                         FunctionCall {
-                            function: Box::new(GenericVariable{
+                            function: Box::new(Variable{
                                 id: Id::from("id"),
                                 type_instances: vec![ATOMIC_TYPE_BOOL.into()]
                             }.into()),
@@ -3508,7 +3525,7 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("&"),
-            Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT))
+            Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT)).into()
         )]);
         "reused generic function"
     )]
@@ -3536,14 +3553,14 @@ mod tests {
                         ],
                         return_type: Typename("U").into(),
                         body: ExpressionBlock(FunctionCall {
-                            function: Box::new(Variable("f").into()),
-                            arguments: vec![Variable("x").into()]
+                            function: Box::new(Var("f").into()),
+                            arguments: vec![Var("x").into()]
                         }.into())
                     }.into())
                 },
             ],
             expression: Box::new(
-                GenericVariable{
+                Variable{
                     id: Id::from("apply"),
                     type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
                 }.into()
@@ -3575,12 +3592,12 @@ mod tests {
                             }
                         ],
                         return_type: Typename("T").into(),
-                        body: ExpressionBlock(Variable("x").into())
+                        body: ExpressionBlock(Var("x").into())
                     }.into())
                 },
             ],
             expression: Box::new(
-                GenericVariable{
+                Variable{
                     id: Id::from("extra"),
                     type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
                 }.into()
@@ -3614,14 +3631,14 @@ mod tests {
                         ],
                         return_type: Typename("T").into(),
                         body: ExpressionBlock(ElementAccess {
-                            expression: Box::new(Variable("x").into()),
+                            expression: Box::new(Var("x").into()),
                             index: 0
                         }.into())
                     }.into())
                 },
             ],
             expression: Box::new(
-                GenericVariable{
+                Variable{
                     id: Id::from("first"),
                     type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
                 }.into()

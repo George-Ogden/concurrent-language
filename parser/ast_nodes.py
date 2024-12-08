@@ -257,7 +257,7 @@ class Program(ASTNode):
     definitions: list[Definition]
 
 
-def Variable(id: Id) -> GenericVariable:
+def Var(id: Id) -> GenericVariable:
     return GenericVariable(id, [])
 
 

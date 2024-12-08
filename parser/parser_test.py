@@ -35,7 +35,7 @@ from ast_nodes import (
     Typename,
     TypeVariable,
     UnionTypeDefinition,
-    Variable,
+    Var,
 )
 
 
@@ -160,9 +160,9 @@ from ast_nodes import (
         ("00", None, "expr"),
         ("true", Boolean(True), "expr"),
         ("false", Boolean(False), "expr"),
-        ("x", Variable("x"), "expr"),
-        ("foo", Variable("foo"), "expr"),
-        ("r2d2", Variable("r2d2"), "expr"),
+        ("x", Var("x"), "expr"),
+        ("foo", Var("foo"), "expr"),
+        ("r2d2", Var("r2d2"), "expr"),
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<T>", GenericVariable("map", [Typename("T")]), "expr"),
@@ -216,45 +216,45 @@ from ast_nodes import (
             TupleExpression([TupleExpression([])]),
             "expr",
         ),
-        ("3 + 4", FunctionCall(Variable("+"), [Integer(3), Integer(4)]), "expr"),
-        ("3 * 4", FunctionCall(Variable("*"), [Integer(3), Integer(4)]), "expr"),
-        ("3 &&$& 4", FunctionCall(Variable("&&$&"), [Integer(3), Integer(4)]), "expr"),
+        ("3 + 4", FunctionCall(Var("+"), [Integer(3), Integer(4)]), "expr"),
+        ("3 * 4", FunctionCall(Var("*"), [Integer(3), Integer(4)]), "expr"),
+        ("3 &&$& 4", FunctionCall(Var("&&$&"), [Integer(3), Integer(4)]), "expr"),
         (
             "3 __add__ 4",
-            FunctionCall(Variable("add"), [Integer(3), Integer(4)]),
+            FunctionCall(Var("add"), [Integer(3), Integer(4)]),
             "expr",
         ),
         ("3 ____ 4", None, "expr"),
         ("3 __^__ 4", None, "expr"),
-        ("3 _____ 4", FunctionCall(Variable("_"), [Integer(3), Integer(4)]), "expr"),
-        ("3 ______ 4", FunctionCall(Variable("__"), [Integer(3), Integer(4)]), "expr"),
-        ("3 _______ 4", FunctionCall(Variable("___"), [Integer(3), Integer(4)]), "expr"),
-        ("3 ________ 4", FunctionCall(Variable("____"), [Integer(3), Integer(4)]), "expr"),
+        ("3 _____ 4", FunctionCall(Var("_"), [Integer(3), Integer(4)]), "expr"),
+        ("3 ______ 4", FunctionCall(Var("__"), [Integer(3), Integer(4)]), "expr"),
+        ("3 _______ 4", FunctionCall(Var("___"), [Integer(3), Integer(4)]), "expr"),
+        ("3 ________ 4", FunctionCall(Var("____"), [Integer(3), Integer(4)]), "expr"),
         (
             "3 + 4 + 5",
             FunctionCall(
-                Variable("+"),
-                [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)],
+                Var("+"),
+                [FunctionCall(Var("+"), [Integer(3), Integer(4)]), Integer(5)],
             ),
             "expr",
         ),
         (
             "3 * 4 + 5",
             FunctionCall(
-                Variable("+"),
-                [FunctionCall(Variable("*"), [Integer(3), Integer(4)]), Integer(5)],
+                Var("+"),
+                [FunctionCall(Var("*"), [Integer(3), Integer(4)]), Integer(5)],
             ),
             "expr",
         ),
         (
             "3 + 4 + 5 + 6",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
                     FunctionCall(
-                        Variable("+"),
+                        Var("+"),
                         [
-                            FunctionCall(Variable("+"), [Integer(3), Integer(4)]),
+                            FunctionCall(Var("+"), [Integer(3), Integer(4)]),
                             Integer(5),
                         ],
                     ),
@@ -266,14 +266,14 @@ from ast_nodes import (
         (
             "3 __add__ 4 __add__ 5 __add__ 6",
             FunctionCall(
-                Variable("add"),
+                Var("add"),
                 [
                     Integer(3),
                     FunctionCall(
-                        Variable("add"),
+                        Var("add"),
                         [
                             Integer(4),
-                            FunctionCall(Variable("add"), [Integer(5), Integer(6)]),
+                            FunctionCall(Var("add"), [Integer(5), Integer(6)]),
                         ],
                     ),
                 ],
@@ -283,26 +283,26 @@ from ast_nodes import (
         (
             "3 + 4 * 5",
             FunctionCall(
-                Variable("+"),
-                [Integer(3), FunctionCall(Variable("*"), [Integer(4), Integer(5)])],
+                Var("+"),
+                [Integer(3), FunctionCall(Var("*"), [Integer(4), Integer(5)])],
             ),
             "expr",
         ),
         (
             "(3 + 4) * 5",
             FunctionCall(
-                Variable("*"),
-                [FunctionCall(Variable("+"), [Integer(3), Integer(4)]), Integer(5)],
+                Var("*"),
+                [FunctionCall(Var("+"), [Integer(3), Integer(4)]), Integer(5)],
             ),
             "expr",
         ),
         (
             "2 * 3 + 4 * 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
-                    FunctionCall(Variable("*"), [Integer(2), Integer(3)]),
-                    FunctionCall(Variable("*"), [Integer(4), Integer(5)]),
+                    FunctionCall(Var("*"), [Integer(2), Integer(3)]),
+                    FunctionCall(Var("*"), [Integer(4), Integer(5)]),
                 ],
             ),
             "expr",
@@ -310,9 +310,9 @@ from ast_nodes import (
         (
             "3 __mul__ 4 + 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
-                    FunctionCall(Variable("mul"), [Integer(3), Integer(4)]),
+                    FunctionCall(Var("mul"), [Integer(3), Integer(4)]),
                     Integer(5),
                 ],
             ),
@@ -321,12 +321,12 @@ from ast_nodes import (
         (
             "2 * 3 + 4 + 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
                     FunctionCall(
-                        Variable("+"),
+                        Var("+"),
                         [
-                            FunctionCall(Variable("*"), [Integer(2), Integer(3)]),
+                            FunctionCall(Var("*"), [Integer(2), Integer(3)]),
                             Integer(4),
                         ],
                     ),
@@ -338,16 +338,16 @@ from ast_nodes import (
         (
             "2 + 3 + 4 * 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
                     FunctionCall(
-                        Variable("+"),
+                        Var("+"),
                         [
                             Integer(2),
                             Integer(3),
                         ],
                     ),
-                    FunctionCall(Variable("*"), [Integer(4), Integer(5)]),
+                    FunctionCall(Var("*"), [Integer(4), Integer(5)]),
                 ],
             ),
             "expr",
@@ -355,13 +355,13 @@ from ast_nodes import (
         (
             "2 + 3 * 4 + 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
                     FunctionCall(
-                        Variable("+"),
+                        Var("+"),
                         [
                             Integer(2),
-                            FunctionCall(Variable("*"), [Integer(3), Integer(4)]),
+                            FunctionCall(Var("*"), [Integer(3), Integer(4)]),
                         ],
                     ),
                     Integer(5),
@@ -372,13 +372,13 @@ from ast_nodes import (
         (
             "2 + 3 __mul__ 4 + 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
                     FunctionCall(
-                        Variable("+"),
+                        Var("+"),
                         [
                             Integer(2),
-                            FunctionCall(Variable("mul"), [Integer(3), Integer(4)]),
+                            FunctionCall(Var("mul"), [Integer(3), Integer(4)]),
                         ],
                     ),
                     Integer(5),
@@ -389,13 +389,13 @@ from ast_nodes import (
         (
             "2 + 3 <<!>> 4 + 5",
             FunctionCall(
-                Variable("+"),
+                Var("+"),
                 [
                     FunctionCall(
-                        Variable("+"),
+                        Var("+"),
                         [
                             Integer(2),
-                            FunctionCall(Variable("<<!>>"), [Integer(3), Integer(4)]),
+                            FunctionCall(Var("<<!>>"), [Integer(3), Integer(4)]),
                         ],
                     ),
                     Integer(5),
@@ -406,10 +406,10 @@ from ast_nodes import (
         (
             "2 __add__ 3 <<!>> 4 __add__ 5",
             FunctionCall(
-                Variable("<<!>>"),
+                Var("<<!>>"),
                 [
-                    FunctionCall(Variable("add"), [Integer(2), Integer(3)]),
-                    FunctionCall(Variable("add"), [Integer(4), Integer(5)]),
+                    FunctionCall(Var("add"), [Integer(2), Integer(3)]),
+                    FunctionCall(Var("add"), [Integer(4), Integer(5)]),
                 ],
             ),
             "expr",
@@ -417,20 +417,20 @@ from ast_nodes import (
         (
             "g $ h(x)",
             FunctionCall(
-                Variable("$"),
-                [Variable("g"), FunctionCall(Variable("h"), [Variable("x")])],
+                Var("$"),
+                [Var("g"), FunctionCall(Var("h"), [Var("x")])],
             ),
             "expr",
         ),
         (
             "g $ h $ i(x)",
             FunctionCall(
-                Variable("$"),
+                Var("$"),
                 [
-                    Variable("g"),
+                    Var("g"),
                     FunctionCall(
-                        Variable("$"),
-                        [Variable("h"), FunctionCall(Variable("i"), [Variable("x")])],
+                        Var("$"),
+                        [Var("h"), FunctionCall(Var("i"), [Var("x")])],
                     ),
                 ],
             ),
@@ -439,10 +439,10 @@ from ast_nodes import (
         (
             "x __add__ f __add__ g",
             FunctionCall(
-                Variable("add"),
+                Var("add"),
                 [
-                    Variable("x"),
-                    FunctionCall(Variable("add"), [Variable("f"), Variable("g")]),
+                    Var("x"),
+                    FunctionCall(Var("add"), [Var("f"), Var("g")]),
                 ],
             ),
             "expr",
@@ -450,10 +450,10 @@ from ast_nodes import (
         (
             "x |> f |> g",
             FunctionCall(
-                Variable("|>"),
+                Var("|>"),
                 [
-                    FunctionCall(Variable("|>"), [Variable("x"), Variable("f")]),
-                    Variable("g"),
+                    FunctionCall(Var("|>"), [Var("x"), Var("f")]),
+                    Var("g"),
                 ],
             ),
             "expr",
@@ -462,14 +462,14 @@ from ast_nodes import (
             "(h @ g @ f)(x)",
             FunctionCall(
                 FunctionCall(
-                    Variable("@"),
+                    Var("@"),
                     [
-                        Variable("h"),
-                        FunctionCall(Variable("@"), [Variable("g"), Variable("f")]),
+                        Var("h"),
+                        FunctionCall(Var("@"), [Var("g"), Var("f")]),
                     ],
                 ),
                 [
-                    Variable("x"),
+                    Var("x"),
                 ],
             ),
             "expr",
@@ -477,15 +477,15 @@ from ast_nodes import (
         (
             "3 :: 4 :: t",
             FunctionCall(
-                Variable("::"),
-                [Integer(3), FunctionCall(Variable("::"), [Integer(4), Variable("t")])],
+                Var("::"),
+                [Integer(3), FunctionCall(Var("::"), [Integer(4), Var("t")])],
             ),
             "expr",
         ),
         (
             "3 == 4",
             FunctionCall(
-                Variable("=="),
+                Var("=="),
                 [Integer(3), Integer(4)],
             ),
             "expr",
@@ -498,14 +498,14 @@ from ast_nodes import (
         (
             "(3 == 4) == (5 == 6)",
             FunctionCall(
-                Variable("=="),
+                Var("=="),
                 [
                     FunctionCall(
-                        Variable("=="),
+                        Var("=="),
                         [Integer(3), Integer(4)],
                     ),
                     FunctionCall(
-                        Variable("=="),
+                        Var("=="),
                         [Integer(5), Integer(6)],
                     ),
                 ],
@@ -514,44 +514,44 @@ from ast_nodes import (
         ),
         (
             "foo()",
-            FunctionCall(Variable("foo"), []),
+            FunctionCall(Var("foo"), []),
             "expr",
         ),
         (
             "foo(4,)",
-            FunctionCall(Variable("foo"), [Integer(4)]),
+            FunctionCall(Var("foo"), [Integer(4)]),
             "expr",
         ),
         (
             "foo(4)",
-            FunctionCall(Variable("foo"), [Integer(4)]),
+            FunctionCall(Var("foo"), [Integer(4)]),
             "expr",
         ),
         (
             "foo(4,5)",
-            FunctionCall(Variable("foo"), [Integer(4), Integer(5)]),
+            FunctionCall(Var("foo"), [Integer(4), Integer(5)]),
             "expr",
         ),
         (
             "foo(4,5,)",
-            FunctionCall(Variable("foo"), [Integer(4), Integer(5)]),
+            FunctionCall(Var("foo"), [Integer(4), Integer(5)]),
             "expr",
         ),
         (
             "(foo)(4)",
-            FunctionCall(Variable("foo"), [Integer(4)]),
+            FunctionCall(Var("foo"), [Integer(4)]),
             "expr",
         ),
         (
             "foo(4)(-5,0)",
-            FunctionCall(FunctionCall(Variable("foo"), [Integer(4)]), [Integer(-5), Integer(0)]),
+            FunctionCall(FunctionCall(Var("foo"), [Integer(4)]), [Integer(-5), Integer(0)]),
             "expr",
         ),
         (
             "foo(4)(a)(-5,bar(true))",
             FunctionCall(
-                FunctionCall(FunctionCall(Variable("foo"), [Integer(4)]), [Variable("a")]),
-                [Integer(-5), FunctionCall(Variable("bar"), [Boolean(True)])],
+                FunctionCall(FunctionCall(Var("foo"), [Integer(4)]), [Var("a")]),
+                [Integer(-5), FunctionCall(Var("bar"), [Boolean(True)])],
             ),
             "expr",
         ),
@@ -651,7 +651,7 @@ from ast_nodes import (
             "{w = x;y<T> = x<T,T>; -8}",
             Block(
                 [
-                    Assignment(ParametricAssignee(Assignee("w"), []), Variable("x")),
+                    Assignment(ParametricAssignee(Assignee("w"), []), Var("x")),
                     Assignment(
                         ParametricAssignee(Assignee("y"), ["T"]),
                         GenericVariable("x", [Typename("T"), Typename("T")]),
@@ -664,20 +664,20 @@ from ast_nodes import (
         (
             "{w = x; ()}",
             Block(
-                [Assignment(ParametricAssignee(Assignee("w"), []), Variable("x"))],
+                [Assignment(ParametricAssignee(Assignee("w"), []), Var("x"))],
                 TupleExpression([]),
             ),
             "block",
         ),
         (
             "if (g) { 1 } else { 2 }",
-            IfExpression(Variable("g"), Block([], Integer(1)), Block([], Integer(2))),
+            IfExpression(Var("g"), Block([], Integer(1)), Block([], Integer(2))),
             "expr",
         ),
         (
             "if (x > 0) { x = 0; true } else { x = 1; false }",
             IfExpression(
-                FunctionCall(Variable(">"), [Variable("x"), Integer(0)]),
+                FunctionCall(Var(">"), [Var("x"), Integer(0)]),
                 Block(
                     [Assignment(ParametricAssignee(Assignee("x"), []), Integer(0))], Boolean(True)
                 ),
@@ -690,10 +690,10 @@ from ast_nodes import (
         (
             "match (maybe()) { Some x: { t }; None : { y };}",
             MatchExpression(
-                FunctionCall(Variable("maybe"), []),
+                FunctionCall(Var("maybe"), []),
                 [
-                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Variable("t"))),
-                    MatchBlock([MatchItem("None", None)], Block([], Variable("y"))),
+                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Var("t"))),
+                    MatchBlock([MatchItem("None", None)], Block([], Var("y"))),
                 ],
             ),
             "expr",
@@ -701,10 +701,10 @@ from ast_nodes import (
         (
             "match (maybe()) { Some x: { t }; None : { y }}",
             MatchExpression(
-                FunctionCall(Variable("maybe"), []),
+                FunctionCall(Var("maybe"), []),
                 [
-                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Variable("t"))),
-                    MatchBlock([MatchItem("None", None)], Block([], Variable("y"))),
+                    MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Var("t"))),
+                    MatchBlock([MatchItem("None", None)], Block([], Var("y"))),
                 ],
             ),
             "expr",
@@ -722,19 +722,19 @@ from ast_nodes import (
             ),
             "expr",
         ),
-        ("x.0", ElementAccess(Variable("x"), 0), "expr"),
+        ("x.0", ElementAccess(Var("x"), 0), "expr"),
         (
             "(a, b).1",
-            ElementAccess(TupleExpression([Variable("a"), Variable("b")]), 1),
+            ElementAccess(TupleExpression([Var("a"), Var("b")]), 1),
             "expr",
         ),
-        ("x.-1", FunctionCall(Variable(".-"), [Variable("x"), Integer(1)]), "expr"),
-        ("f . g", FunctionCall(Variable("."), [Variable("f"), Variable("g")]), "expr"),
+        ("x.-1", FunctionCall(Var(".-"), [Var("x"), Integer(1)]), "expr"),
+        ("f . g", FunctionCall(Var("."), [Var("f"), Var("g")]), "expr"),
         (
             "(f . g)(x)",
             FunctionCall(
-                FunctionCall(Variable("."), [Variable("f"), Variable("g")]),
-                [Variable("x")],
+                FunctionCall(Var("."), [Var("f"), Var("g")]),
+                [Var("x")],
             ),
             "expr",
         ),
@@ -743,8 +743,8 @@ from ast_nodes import (
         (
             "x.0.4+1",
             FunctionCall(
-                Variable("+"),
-                [ElementAccess(ElementAccess(Variable("x"), 0), 4), Integer(1)],
+                Var("+"),
+                [ElementAccess(ElementAccess(Var("x"), 0), 4), Integer(1)],
             ),
             "expr",
         ),
@@ -802,20 +802,20 @@ from ast_nodes import (
         ("(x, y: bool) -> bool { a = 3; 9 }", None, "expr"),
         ("(x: int, y: bool) -> bool { a = 3;; 9 }", None, "expr"),
         ("(x: int, y: bool) -> bool { a = 3 }", None, "expr"),
-        ("++x", FunctionCall(Variable("++"), [Variable("x")]), "expr"),
-        ("-x", FunctionCall(Variable("-"), [Variable("x")]), "expr"),
+        ("++x", FunctionCall(Var("++"), [Var("x")]), "expr"),
+        ("-x", FunctionCall(Var("-"), [Var("x")]), "expr"),
         ("__add__ x", None, "expr"),
         (
             "++ (++x)",
-            FunctionCall(Variable("++"), [FunctionCall(Variable("++"), [Variable("x")])]),
+            FunctionCall(Var("++"), [FunctionCall(Var("++"), [Var("x")])]),
             "expr",
         ),
         (
             "++ ++x",
-            FunctionCall(Variable("++"), [FunctionCall(Variable("++"), [Variable("x")])]),
+            FunctionCall(Var("++"), [FunctionCall(Var("++"), [Var("x")])]),
             "expr",
         ),
-        ("++++x", FunctionCall(Variable("++++"), [Variable("x")]), "expr"),
+        ("++++x", FunctionCall(Var("++++"), [Var("x")]), "expr"),
         ("Integer{8}", ConstructorCall(Constructor("Integer"), [Integer(8)]), "expr"),
         (
             "typedef tuple (int, int)",
@@ -959,7 +959,7 @@ from ast_nodes import (
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
-                        FunctionCall(Variable("-"), [Variable("y")]),
+                        FunctionCall(Var("-"), [Var("y")]),
                     )
                 ],
             ),
@@ -971,7 +971,7 @@ from ast_nodes import (
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
-                        FunctionCall(Variable("-"), [Variable("y")]),
+                        FunctionCall(Var("-"), [Var("y")]),
                     )
                 ],
             ),
@@ -983,7 +983,7 @@ from ast_nodes import (
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
-                        FunctionCall(Variable("-"), [Variable("y")]),
+                        FunctionCall(Var("-"), [Var("y")]),
                     ),
                     OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
                 ],
@@ -996,7 +996,7 @@ from ast_nodes import (
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
-                        FunctionCall(Variable("-"), [Variable("y")]),
+                        FunctionCall(Var("-"), [Var("y")]),
                     ),
                     OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
                 ],
@@ -1009,7 +1009,7 @@ from ast_nodes import (
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
-                        FunctionCall(Variable("-"), [Variable("y")]),
+                        FunctionCall(Var("-"), [Var("y")]),
                     ),
                     OpaqueTypeDefinition(TypeVariable("int8"), AtomicType.INT),
                 ],
@@ -1107,7 +1107,7 @@ from ast_nodes import (
                 [
                     Assignment(
                         ParametricAssignee(Assignee("x"), []),
-                        FunctionCall(Variable("/-/"), [Integer(3), Integer(4)]),
+                        FunctionCall(Var("/-/"), [Integer(3), Integer(4)]),
                     )
                 ],
             ),

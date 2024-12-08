@@ -33,7 +33,7 @@ from ast_nodes import (
     Typename,
     TypeVariable,
     UnionTypeDefinition,
-    Variable,
+    Var,
 )
 
 
@@ -176,7 +176,7 @@ from ast_nodes import (
                 ]
             },
         ),
-        (Variable("foo"), {"id": "foo", "type_instances": []}),
+        (Var("foo"), {"id": "foo", "type_instances": []}),
         (
             GenericVariable("map", [AtomicType.INT]),
             {"id": "map", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
@@ -196,7 +196,7 @@ from ast_nodes import (
             },
         ),
         (
-            ElementAccess(ElementAccess(Variable("foo"), 13), 1),
+            ElementAccess(ElementAccess(Var("foo"), 13), 1),
             {
                 "expression": {
                     "ElementAccess": {
@@ -216,7 +216,7 @@ from ast_nodes import (
             {"assignee": {"id": "f"}, "generic_variables": ["T", "U"]},
         ),
         (
-            Assignment(ParametricAssignee(Assignee("a"), []), Variable("b")),
+            Assignment(ParametricAssignee(Assignee("a"), []), Var("b")),
             {
                 "assignee": {"assignee": {"id": "a"}, "generic_variables": []},
                 "expression": {"GenericVariable": {"id": "b", "type_instances": []}},
@@ -240,7 +240,7 @@ from ast_nodes import (
         (
             Block(
                 [
-                    Assignment(ParametricAssignee(Assignee("a"), []), Variable("x")),
+                    Assignment(ParametricAssignee(Assignee("a"), []), Var("x")),
                     Assignment(ParametricAssignee(Assignee("b"), []), Integer(3)),
                 ],
                 Integer(4),
@@ -341,7 +341,7 @@ from ast_nodes import (
         ),
         (
             MatchExpression(
-                Variable("maybe"),
+                Var("maybe"),
                 [
                     MatchBlock([MatchItem("Some", Assignee("x"))], Block([], Boolean(True))),
                     MatchBlock([MatchItem("None", None)], Block([], Boolean(False))),
@@ -369,14 +369,14 @@ from ast_nodes import (
         ),
         (
             MatchExpression(
-                Variable("maybe"),
+                Var("maybe"),
                 [
                     MatchBlock(
                         [MatchItem("Some", Assignee("x"))],
                         Block(
                             [],
                             MatchExpression(
-                                Variable("x"),
+                                Var("x"),
                                 [
                                     MatchBlock(
                                         [
@@ -441,7 +441,7 @@ from ast_nodes import (
             },
         ),
         (
-            FunctionCall(Variable("foo"), [Integer(3), Variable("x")]),
+            FunctionCall(Var("foo"), [Integer(3), Var("x")]),
             {
                 "function": {"GenericVariable": {"id": "foo", "type_instances": []}},
                 "arguments": [
@@ -451,9 +451,7 @@ from ast_nodes import (
             },
         ),
         (
-            ConstructorCall(
-                GenericConstructor("foo", [AtomicType.INT]), [Integer(3), Variable("x")]
-            ),
+            ConstructorCall(GenericConstructor("foo", [AtomicType.INT]), [Integer(3), Var("x")]),
             {
                 "constructor": {"id": "foo", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
                 "arguments": [
@@ -469,7 +467,7 @@ from ast_nodes import (
                     TypedAssignee(Assignee("y"), AtomicType.BOOL),
                 ],
                 AtomicType.BOOL,
-                Block([], Variable("y")),
+                Block([], Var("y")),
             ),
             {
                 "parameters": [
@@ -495,7 +493,7 @@ from ast_nodes import (
                         GenericTypeVariable("Pair", ["T", "U"]),
                         TupleType([Typename("T"), Typename("U")]),
                     ),
-                    Assignment(ParametricAssignee(Assignee("a"), []), Variable("x")),
+                    Assignment(ParametricAssignee(Assignee("a"), []), Var("x")),
                     Assignment(ParametricAssignee(Assignee("b"), []), Integer(3)),
                 ]
             ),

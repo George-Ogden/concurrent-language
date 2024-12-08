@@ -37,7 +37,7 @@ from ast_nodes import (
     TypeInstance,
     TypeItem,
     UnionTypeDefinition,
-    Variable,
+    Var,
 )
 from operators import Associativity, OperatorManager
 
@@ -177,7 +177,7 @@ class Visitor(GrammarVisitor):
         if not OperatorManager.check_operator(operator):
             raise VisitorError(f"Invalid prefix operator {operator}")
         argument = self.visit(ctx.expr())
-        return FunctionCall(Variable(operator), [argument])
+        return FunctionCall(Var(operator), [argument])
 
     def visitFn_call(self, ctx: GrammarParser.Fn_callContext) -> FunctionCall:
         function = self.visit(ctx.fn_call_head())

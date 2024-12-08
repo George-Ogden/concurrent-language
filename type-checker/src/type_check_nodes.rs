@@ -40,6 +40,33 @@ impl ParametricType {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedVariable {
+    pub variable: Variable,
+    pub type_: Rc<RefCell<ParametricType>>,
+}
+
+impl From<Rc<RefCell<ParametricType>>> for TypedVariable {
+    fn from(value: Rc<RefCell<ParametricType>>) -> Self {
+        TypedVariable {
+            variable: Rc::new(RefCell::new(())),
+            type_: value,
+        }
+    }
+}
+
+impl From<ParametricType> for TypedVariable {
+    fn from(value: ParametricType) -> Self {
+        TypedVariable::from(Rc::new(RefCell::new(value)))
+    }
+}
+
+impl From<Type> for TypedVariable {
+    fn from(value: Type) -> Self {
+        TypedVariable::from(ParametricType::from(value))
+    }
+}
+
 #[derive(Clone)]
 pub enum Type {
     Atomic(AtomicTypeEnum),
@@ -149,7 +176,6 @@ impl Type {
                 r1.as_ptr() == r2.as_ptr()
                     || Type::option_type_equality(&r1.borrow(), &r2.borrow(), equal_references)
             }
-            // (Self::Variable(r1), Self::Variable(r2)) => r1 == r2,
             _ => false,
         }
     }
@@ -181,14 +207,16 @@ impl fmt::Debug for Type {
     }
 }
 
+type Variable = Rc<RefCell<()>>;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedTuple {
     pub expressions: Vec<TypedExpression>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct TypedVariable {
-    pub id: Id,
+pub struct TypedAccess {
+    pub variable: Variable,
     pub type_: Type,
 }
 
@@ -225,16 +253,14 @@ pub struct TypedMatch {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PartiallyTypedFunctionDefinition {
-    pub parameter_ids: Vec<Id>,
-    pub parameter_types: Vec<Type>,
+    pub parameters: Vec<(Id, TypedVariable)>,
     pub return_type: Box<Type>,
     pub body: Block,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedFunctionDefinition {
-    pub parameter_ids: Vec<Id>,
-    pub parameter_types: Vec<Type>,
+    pub parameters: Vec<TypedVariable>,
     pub return_type: Box<Type>,
     pub body: TypedBlock,
 }
@@ -257,7 +283,7 @@ pub enum TypedExpression {
     Integer(Integer),
     Boolean(Boolean),
     TypedTuple(TypedTuple),
-    TypedVariable(TypedVariable),
+    TypedAccess(TypedAccess),
     TypedElementAccess(TypedElementAccess),
     TypedIf(TypedIf),
     TypedMatch(TypedMatch),
@@ -275,7 +301,7 @@ impl TypedExpression {
             Self::TypedTuple(TypedTuple { expressions }) => {
                 Type::Tuple(expressions.iter().map(TypedExpression::type_).collect_vec())
             }
-            Self::TypedVariable(TypedVariable { id: _, type_ }) => type_.clone(),
+            Self::TypedAccess(TypedAccess { variable: _, type_ }) => type_.clone(),
             Self::TypedElementAccess(TypedElementAccess { expression, index }) => {
                 if let Type::Tuple(types) = expression.type_() {
                     types[*index as usize].clone()
@@ -289,17 +315,27 @@ impl TypedExpression {
                 false_block: _,
             }) => true_block.type_(),
             Self::PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition {
-                parameter_ids: _,
-                parameter_types,
+                parameters,
                 return_type,
                 body: _,
-            })
-            | Self::TypedFunctionDefinition(TypedFunctionDefinition {
-                parameter_ids: _,
-                parameter_types,
+            }) => Type::Function(
+                parameters
+                    .iter()
+                    .map(|(_, parameter)| parameter.type_.borrow().type_.clone())
+                    .collect_vec(),
+                return_type.clone(),
+            ),
+            Self::TypedFunctionDefinition(TypedFunctionDefinition {
+                parameters,
                 return_type,
                 body: _,
-            }) => Type::Function(parameter_types.clone(), return_type.clone()),
+            }) => Type::Function(
+                parameters
+                    .iter()
+                    .map(|parameter| parameter.type_.borrow().type_.clone())
+                    .collect_vec(),
+                return_type.clone(),
+            ),
             Self::TypedFunctionCall(TypedFunctionCall {
                 function,
                 arguments: _,
@@ -338,7 +374,7 @@ pub struct ParametricExpression {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedAssignment {
-    pub id: Id,
+    pub variable: Variable,
     pub expression: ParametricExpression,
 }
 

@@ -207,14 +207,14 @@ pub struct TupleExpression {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct GenericVariable {
+pub struct Variable {
     pub id: Id,
     pub type_instances: Vec<TypeInstance>,
 }
 
 #[allow(non_snake_case)]
-pub fn Variable(id: &str) -> GenericVariable {
-    GenericVariable {
+pub fn Var(id: &str) -> Variable {
+    Variable {
         id: Id::from(id),
         type_instances: Vec::new(),
     }
@@ -295,7 +295,7 @@ pub enum Expression {
     Integer(Integer),
     Boolean(Boolean),
     TupleExpression(TupleExpression),
-    GenericVariable(GenericVariable),
+    GenericVariable(Variable),
     ElementAccess(ElementAccess),
     IfExpression(IfExpression),
     MatchExpression(MatchExpression),
@@ -556,12 +556,12 @@ mod tests {
     )]
     #[test_case(
         r#"{"id":"foo","type_instances":[]}"#,
-        Variable("foo");
+        Var("foo");
         "variable"
     )]
     #[test_case(
         r#"{"id":"map","type_instances":[{"AtomicType":{"type_":"INT"}}]}"#,
-        GenericVariable{
+        Variable{
             id: Id::from("map"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         };
@@ -569,7 +569,7 @@ mod tests {
     )]
     #[test_case(
         r#"{"id":"foo","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}"#,
-        GenericVariable{
+        Variable{
             id: Id::from("foo"),
             type_instances: vec![Typename("T").into()]
         };
@@ -593,7 +593,7 @@ mod tests {
             expression: Box::new(
                 ElementAccess{
                     expression: Box::new(
-                        Variable("foo").into()
+                        Var("foo").into()
                     ),
                     index: 13,
                 }.into()
@@ -625,7 +625,7 @@ mod tests {
         r#"{"assignee":{"assignee":{"id":"a"},"generic_variables":[]},"expression":{"GenericVariable":{"id":"b","type_instances":[]}}}"#,
         Assignment {
             assignee: VariableAssignee("a"),
-            expression: Box::new(Variable("b").into())
+            expression: Box::new(Var("b").into())
         };
         "variable assignment"
     )]
@@ -638,7 +638,7 @@ mod tests {
                     Id::from("T")
                 ]
             },
-            expression: Box::new(GenericVariable{
+            expression: Box::new(Variable{
                 id: Id::from("b"),
                 type_instances: vec![
                     Typename("T").into()
@@ -659,7 +659,7 @@ mod tests {
             assignments: vec![
                 Assignment {
                     assignee: VariableAssignee("a"),
-                    expression: Box::new(Variable("x").into())
+                    expression: Box::new(Var("x").into())
                 },
                 Assignment {
                     assignee: VariableAssignee("b"),
@@ -757,7 +757,7 @@ mod tests {
     #[test_case(
         r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x"}}],"block":{"assignments":[],"expression":{"Boolean":{"value":true}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Boolean":{"value":false}}}}]}"#,
         MatchExpression {
-            subject: Box::new(Variable("maybe").into()),
+            subject: Box::new(Var("maybe").into()),
             blocks: vec![
                 MatchBlock {
                     matches: vec![
@@ -794,7 +794,7 @@ mod tests {
     #[test_case(
         r#"{"subject":{"GenericVariable":{"id":"maybe","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Some","assignee":{"id":"x"}}],"block":{"assignments":[],"expression":{"MatchExpression":{"subject":{"GenericVariable":{"id":"x","type_instances":[]}},"blocks":[{"matches":[{"type_name":"Positive","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":1}}}},{"matches":[{"type_name":"Negative","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":-1}}}}]}}}},{"matches":[{"type_name":"None","assignee":null}],"block":{"assignments":[],"expression":{"Integer":{"value":0}}}}]}"#,
         MatchExpression {
-            subject: Box::new(Variable("maybe").into()),
+            subject: Box::new(Var("maybe").into()),
             blocks: vec![
                 MatchBlock {
                     matches: vec![
@@ -807,7 +807,7 @@ mod tests {
                         assignments: Vec::new(),
                         expression: Box::new(
                             MatchExpression {
-                                subject: Box::new(Variable("x").into()),
+                                subject: Box::new(Var("x").into()),
                                 blocks: vec![
                                     MatchBlock{
                                         matches: vec![
@@ -859,8 +859,8 @@ mod tests {
     #[test_case(
         r#"{"function":{"GenericVariable":{"id":"foo","type_instances":[]}},"arguments":[{"Integer":{"value":3}},{"GenericVariable":{"id":"x","type_instances":[]}}]}"#,
         FunctionCall{
-            function: Box::new(Variable("foo").into()),
-            arguments: vec![Integer{value: 3}.into(), Variable("x").into()]
+            function: Box::new(Var("foo").into()),
+            arguments: vec![Integer{value: 3}.into(), Var("x").into()]
         };
         "function call expression"
     )]
@@ -872,7 +872,7 @@ mod tests {
                 type_instances: vec![ATOMIC_TYPE_INT.into()]
 
             },
-            arguments: vec![Integer{value: 3}.into(), Variable("x").into()]
+            arguments: vec![Integer{value: 3}.into(), Var("x").into()]
         };
         "constructor call expression"
     )]
@@ -890,7 +890,7 @@ mod tests {
                 }
             ],
             return_type: ATOMIC_TYPE_BOOL.into(),
-            body: ExpressionBlock(Variable("y").into())
+            body: ExpressionBlock(Var("y").into())
         };
         "function definition expression"
     )]
@@ -932,7 +932,7 @@ mod tests {
                 }.into(),
                 Assignment {
                     assignee: VariableAssignee("a"),
-                    expression: Box::new(Variable("x").into())
+                    expression: Box::new(Var("x").into())
                 }.into(),
                 Assignment {
                     assignee: VariableAssignee("b"),
