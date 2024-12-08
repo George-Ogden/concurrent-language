@@ -344,7 +344,7 @@ class Visitor(GrammarVisitor):
 
     def visitProgram(self, ctx: GrammarParser.ProgramContext) -> Program:
         definitions = self.visit(ctx.definitions())
-        return Program([], definitions)
+        return Program(definitions)
 
 
 class Parser:

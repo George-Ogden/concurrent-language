@@ -51,10 +51,6 @@ Id: TypeAlias = str
 
 
 @dataclass
-class Import(ASTNode): ...
-
-
-@dataclass
 class FunctionType(ASTNode):
     argument_types: list[TypeInstance]
     return_type: TypeInstance
@@ -258,7 +254,6 @@ Definition: TypeAlias = Union[
 
 @dataclass
 class Program(ASTNode):
-    imports: list[Import]
     definitions: list[Definition]
 
 

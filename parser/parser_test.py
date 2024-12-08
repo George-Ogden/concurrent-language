@@ -956,7 +956,6 @@ from ast_nodes import (
         (
             "z = -y;",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
@@ -969,7 +968,6 @@ from ast_nodes import (
         (
             "z = -y",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
@@ -982,7 +980,6 @@ from ast_nodes import (
         (
             "z = -y; typedef int8 int",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
@@ -996,7 +993,6 @@ from ast_nodes import (
         (
             "z = -y; typedef int8 int;",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
@@ -1010,7 +1006,6 @@ from ast_nodes import (
         (
             "z = -y ; typedef int8 int ; ",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("z"), []),
@@ -1024,7 +1019,6 @@ from ast_nodes import (
         (
             "typedef None ",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1032,7 +1026,6 @@ from ast_nodes import (
         (
             "typedef /* None */ Nada",
             Program(
-                [],
                 [EmptyTypeDefinition("Nada")],
             ),
             "program",
@@ -1045,7 +1038,6 @@ from ast_nodes import (
         (
             "typedef  None // Nada",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1053,7 +1045,6 @@ from ast_nodes import (
         (
             "typedef  None ; // Nada",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1061,7 +1052,6 @@ from ast_nodes import (
         (
             "typedef // Nada \n None ;",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1069,7 +1059,6 @@ from ast_nodes import (
         (
             "typedef /* Nada \n Not */ None;",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1082,7 +1071,6 @@ from ast_nodes import (
         (
             "typedef /* Nada \n Not */ None // ;",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1095,7 +1083,6 @@ from ast_nodes import (
         (
             "typedef /* Nada \n Not /* */ None;",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1103,7 +1090,6 @@ from ast_nodes import (
         (
             "typedef /* Nada \n Not // */ None;",
             Program(
-                [],
                 [EmptyTypeDefinition("None")],
             ),
             "program",
@@ -1111,7 +1097,6 @@ from ast_nodes import (
         (
             "x = 3 /*/ 4 // */",
             Program(
-                [],
                 [Assignment(ParametricAssignee(Assignee("x"), []), Integer(3))],
             ),
             "program",
@@ -1119,7 +1104,6 @@ from ast_nodes import (
         (
             "x = 3 /-/ 4 // */",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("x"), []),
@@ -1132,7 +1116,6 @@ from ast_nodes import (
         (
             "x = () -> () { 3 }",
             Program(
-                [],
                 [
                     Assignment(
                         ParametricAssignee(Assignee("x"), []),
