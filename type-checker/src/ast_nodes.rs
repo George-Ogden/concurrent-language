@@ -351,7 +351,7 @@ pub fn ExpressionBlock(expression: Expression) -> Block {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Program {
-    definitions: Vec<Definition>,
+    pub definitions: Vec<Definition>,
 }
 
 #[cfg(test)]

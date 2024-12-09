@@ -1,8 +1,9 @@
 use crate::type_check_nodes::{
-    ConstructorType, ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type,
-    TypeCheckError, TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall,
-    TypedElementAccess, TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf,
-    TypedMatch, TypedMatchBlock, TypedMatchItem, TypedParametricVariable, TypedTuple,
+    ConstructorType, GenericVariables, ParametricExpression, ParametricType,
+    PartiallyTypedFunctionDefinition, Type, TypeCheckError, TypeContext, TypeDefinitions,
+    TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
+    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedMatch,
+    TypedMatchBlock, TypedMatchItem, TypedParametricVariable, TypedProgram, TypedTuple,
     TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
@@ -10,380 +11,15 @@ use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
-    TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
+    Program, TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance,
+    UnionTypeDefinition,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
-use std::collections::hash_map::{IntoIter, Keys, Values};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
-use std::ops::Index;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use strum::IntoEnumIterator;
-
-type TypeReferencesIndex = HashMap<*mut ParametricType, Id>;
-type GenericReferenceIndex = HashMap<*mut Option<Type>, usize>;
-
-type K = Id;
-type V = Rc<RefCell<ParametricType>>;
-type V_ = Rc<RefCell<Option<Type>>>;
-
-#[derive(Clone, Debug)]
-struct GenericVariables(HashMap<Id, V_>);
-
-impl GenericVariables {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-    pub fn get(&self, k: &Id) -> Option<&V_> {
-        self.0.get(k)
-    }
-    pub fn keys(&self) -> Keys<'_, K, V_> {
-        self.0.keys()
-    }
-    pub fn extend<T>(&mut self, iter: T)
-    where
-        T: IntoIterator<Item = (K, V_)>,
-    {
-        self.0.extend(iter)
-    }
-    pub fn into_iter(self) -> IntoIter<K, V_> {
-        self.0.into_iter()
-    }
-}
-
-impl Index<&K> for GenericVariables {
-    type Output = V_;
-    fn index<'a>(&'a self, index: &K) -> &'a V_ {
-        &self.0[index]
-    }
-}
-
-impl From<Vec<(K, V_)>> for GenericVariables {
-    fn from(value: Vec<(K, V_)>) -> Self {
-        value.into_iter().collect::<HashMap<_, _>>().into()
-    }
-}
-
-impl From<HashMap<K, V_>> for GenericVariables {
-    fn from(value: HashMap<K, V_>) -> Self {
-        GenericVariables(value)
-    }
-}
-
-impl From<&Vec<Id>> for GenericVariables {
-    fn from(value: &Vec<Id>) -> Self {
-        value
-            .iter()
-            .map(|variable| (variable.clone(), Rc::new(RefCell::new(None))))
-            .collect::<HashMap<_, _>>()
-            .into()
-    }
-}
-
-impl From<(&Vec<Id>, &V)> for GenericVariables {
-    fn from(value: (&Vec<Id>, &V)) -> Self {
-        let (generic_variables, rc) = value;
-        GenericVariables::from(
-            generic_variables
-                .iter()
-                .zip(&rc.borrow().parameters)
-                .map(|(id, rc)| (id.clone(), rc.clone()))
-                .collect::<HashMap<_, _>>(),
-        )
-    }
-}
-
-#[derive(Clone)]
-struct TypeDefinitions(HashMap<K, V>);
-
-impl TypeDefinitions {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-    pub fn get(&self, k: &Id) -> Option<&V> {
-        self.0.get(k)
-    }
-    pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
-        self.0.get_mut(k)
-    }
-    pub fn insert(&mut self, k: K, v: V) -> Option<V> {
-        self.0.insert(k, v)
-    }
-    pub fn keys(&self) -> Keys<'_, K, V> {
-        self.0.keys()
-    }
-    pub fn values(&self) -> Values<'_, K, V> {
-        self.0.values()
-    }
-    fn references_index(&self) -> TypeReferencesIndex {
-        self.0
-            .iter()
-            .map(|(key, value)| (value.clone().as_ptr(), key.clone()))
-            .collect::<HashMap<_, _>>()
-    }
-    fn type_equality(
-        self_references_index: &TypeReferencesIndex,
-        other_references_index: &TypeReferencesIndex,
-        self_generics_index: &GenericReferenceIndex,
-        other_generics_index: &GenericReferenceIndex,
-        t1: &Type,
-        t2: &Type,
-    ) -> bool {
-        match (t1, t2) {
-            (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
-            (Type::Union(v1), Type::Union(v2)) => {
-                v1.len() == v2.len()
-                    && v1
-                        .iter()
-                        .sorted_by_key(|(i1, _)| *i1)
-                        .zip(v2.iter().sorted_by_key(|(i1, _)| *i1))
-                        .all(|((i1, o1), (i2, o2))| {
-                            i1 == i2
-                                && match (&o1, &o2) {
-                                    (None, None) => true,
-                                    (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
-                                        self_references_index,
-                                        other_references_index,
-                                        self_generics_index,
-                                        other_generics_index,
-                                        t1,
-                                        t2,
-                                    ),
-                                    _ => false,
-                                }
-                        })
-            }
-            (Type::Instantiation(t1, i1), Type::Instantiation(t2, i2)) => {
-                self_references_index.get(&t1.as_ptr()) == other_references_index.get(&t2.as_ptr())
-                    && i1.len() == i2.len()
-                    && i1.into_iter().zip(i2.into_iter()).all(|(t1, t2)| {
-                        TypeDefinitions::type_equality(
-                            self_references_index,
-                            other_references_index,
-                            self_generics_index,
-                            other_generics_index,
-                            t1,
-                            t2,
-                        )
-                    })
-            }
-            (Type::Tuple(t1), Type::Tuple(t2)) => {
-                t1.len() == t2.len()
-                    && t1.iter().zip(t2.iter()).all(|(t1, t2)| {
-                        TypeDefinitions::type_equality(
-                            self_references_index,
-                            other_references_index,
-                            self_generics_index,
-                            other_generics_index,
-                            t1,
-                            t2,
-                        )
-                    })
-            }
-            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
-                TypeDefinitions::type_equality(
-                    self_references_index,
-                    other_references_index,
-                    self_generics_index,
-                    other_generics_index,
-                    &Type::Tuple(a1.clone()),
-                    &Type::Tuple(a2.clone()),
-                ) && TypeDefinitions::type_equality(
-                    self_references_index,
-                    other_references_index,
-                    self_generics_index,
-                    other_generics_index,
-                    r1,
-                    r2,
-                )
-            }
-            (Type::Variable(r1), Type::Variable(r2)) => {
-                self_generics_index[&r1.as_ptr()] == other_generics_index[&r2.as_ptr()]
-            }
-            _ => false,
-        }
-    }
-}
-
-impl Index<&K> for TypeDefinitions {
-    type Output = V;
-    fn index<'a>(&'a self, index: &K) -> &'a V {
-        &self.0[index]
-    }
-}
-
-impl From<HashMap<Id, Rc<RefCell<ParametricType>>>> for TypeDefinitions {
-    fn from(value: HashMap<Id, Rc<RefCell<ParametricType>>>) -> Self {
-        TypeDefinitions(value)
-    }
-}
-
-impl<const N: usize> From<[(Id, Rc<RefCell<ParametricType>>); N]> for TypeDefinitions {
-    fn from(arr: [(Id, Rc<RefCell<ParametricType>>); N]) -> Self {
-        HashMap::from(arr).into()
-    }
-}
-
-impl FromIterator<(Id, ParametricType)> for TypeDefinitions {
-    fn from_iter<T: IntoIterator<Item = (Id, ParametricType)>>(iter: T) -> Self {
-        HashMap::from_iter(iter).into()
-    }
-}
-
-impl From<HashMap<Id, ParametricType>> for TypeDefinitions {
-    fn from(value: HashMap<Id, ParametricType>) -> Self {
-        value
-            .into_iter()
-            .map(|(id, type_)| (id, Rc::from(RefCell::from(type_))))
-            .collect::<HashMap<_, _>>()
-            .into()
-    }
-}
-
-impl<const N: usize> From<[(Id, ParametricType); N]> for TypeDefinitions {
-    fn from(arr: [(Id, ParametricType); N]) -> Self {
-        HashMap::from(arr).into()
-    }
-}
-
-impl From<HashMap<Id, Type>> for TypeDefinitions {
-    fn from(value: HashMap<Id, Type>) -> Self {
-        value
-            .into_iter()
-            .map(|(id, type_)| (id, type_.into()))
-            .collect::<HashMap<_, ParametricType>>()
-            .into()
-    }
-}
-
-impl<const N: usize> From<[(Id, Type); N]> for TypeDefinitions {
-    fn from(arr: [(Id, Type); N]) -> Self {
-        arr.into_iter().collect()
-    }
-}
-impl FromIterator<(Id, Type)> for TypeDefinitions {
-    fn from_iter<T: IntoIterator<Item = (Id, Type)>>(iter: T) -> Self {
-        HashMap::from_iter(iter).into()
-    }
-}
-
-impl fmt::Debug for TypeDefinitions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let references_index = Box::new(self.references_index());
-        f.debug_map()
-            .entries(self.0.iter().map(|(key, value)| {
-                (
-                    key,
-                    (
-                        value.borrow().clone().parameters,
-                        DebugTypeWrapper(value.borrow().clone().type_, references_index.clone()),
-                    ),
-                )
-            }))
-            .finish()
-    }
-}
-
-struct DebugTypeWrapper(Type, Box<HashMap<*mut ParametricType, Id>>);
-impl fmt::Debug for DebugTypeWrapper {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let references_index = &self.1;
-        match self.0.clone() {
-            Type::Union(variants) => {
-                write!(
-                    f,
-                    "Union({:?})",
-                    variants
-                        .into_iter()
-                        .map(|(id, type_)| {
-                            (
-                                id,
-                                type_
-                                    .map(|type_| DebugTypeWrapper(type_, references_index.clone())),
-                            )
-                        })
-                        .collect_vec()
-                )
-            }
-            Type::Instantiation(rc, instances) => {
-                write!(
-                    f,
-                    "Instantation({}, {:?})",
-                    references_index
-                        .get(&rc.as_ptr())
-                        .unwrap_or(&Id::from("unknown")),
-                    instances
-                        .into_iter()
-                        .map(|type_| DebugTypeWrapper(type_, references_index.clone()))
-                        .collect_vec()
-                )
-            }
-            Type::Tuple(types) => {
-                write!(
-                    f,
-                    "Tuple({:?})",
-                    types
-                        .into_iter()
-                        .map(|type_| DebugTypeWrapper(type_, references_index.clone()))
-                        .collect_vec()
-                )
-            }
-            Type::Function(argument_types, return_type) => {
-                write!(
-                    f,
-                    "Function({:?},{:?})",
-                    argument_types
-                        .into_iter()
-                        .map(|type_| DebugTypeWrapper(type_, references_index.clone()))
-                        .collect_vec(),
-                    DebugTypeWrapper(*return_type, references_index.clone()),
-                )
-            }
-            type_ => write!(f, "{:?}", type_),
-        }
-    }
-}
-
-impl PartialEq for TypeDefinitions {
-    fn eq(&self, other: &Self) -> bool {
-        if self.0.keys().collect::<HashSet<_>>() != other.0.keys().collect::<HashSet<_>>() {
-            return false;
-        }
-        let self_references_index = &self.references_index();
-        let other_references_index = &other.references_index();
-        self.0
-            .keys()
-            .map(|key| (self.0.get(key), other.0.get(key)))
-            .all(|(v1, v2)| match (v1, v2) {
-                (Some(t1), Some(t2)) => {
-                    let p1 = &*&t1.borrow();
-                    let p2 = &*&t2.borrow();
-                    p1.parameters.len() == p2.parameters.len()
-                        && TypeDefinitions::type_equality(
-                            self_references_index,
-                            other_references_index,
-                            &p1.parameters
-                                .iter()
-                                .enumerate()
-                                .map(|(i, r)| (r.as_ptr(), i))
-                                .collect(),
-                            &p2.parameters
-                                .iter()
-                                .enumerate()
-                                .map(|(i, r)| (r.as_ptr(), i))
-                                .collect(),
-                            &p1.type_,
-                            &p2.type_,
-                        )
-                }
-                _ => false,
-            })
-    }
-}
-
-type TypeContext = HashMap<Id, TypedParametricVariable>;
 
 struct TypeChecker {
     type_definitions: TypeDefinitions,
@@ -682,8 +318,8 @@ impl TypeChecker {
             HashMap::from_iter(definitions.values().map(|p| (p.as_ptr(), false)));
         fn update_queue(
             type_: &Type,
-            start: &V,
-            queue: &mut VecDeque<V>,
+            start: &Rc<RefCell<ParametricType>>,
+            queue: &mut VecDeque<Rc<RefCell<ParametricType>>>,
             visited: &mut HashMap<*mut ParametricType, bool>,
         ) -> Result<(), ()> {
             match type_ {
@@ -1336,6 +972,63 @@ impl TypeChecker {
                 .collect_vec(),
             return_type: function_definition.return_type.clone(),
             body,
+        })
+    }
+    fn check_program(
+        program: Program,
+        context: &TypeContext,
+    ) -> Result<TypedProgram, TypeCheckError> {
+        let mut definitions = program.definitions;
+        let (assignments, type_definitions): (Vec<_>, Vec<_>) = definitions
+            .into_iter()
+            .partition(|definition| matches!(definition, Definition::Assignment(_)));
+
+        let assignments = assignments
+            .into_iter()
+            .map(|definition| {
+                let Definition::Assignment(assignment) = definition else {
+                    panic!("Program filtered only assignments.")
+                };
+                assignment.clone()
+            })
+            .collect_vec();
+        let type_definitions = TypeChecker::check_type_definitions(type_definitions)?;
+        let type_checker = TypeChecker::with_type_definitions(type_definitions)?;
+        let program_block = Block {
+            assignments,
+            expression: Box::new(
+                FunctionCall {
+                    function: Box::new(
+                        GenericVariable {
+                            id: Id::from("main"),
+                            type_instances: Vec::new(),
+                        }
+                        .into(),
+                    ),
+                    arguments: Vec::new(),
+                }
+                .into(),
+            ),
+        };
+        let typed_block =
+            type_checker.check_block(program_block, context, &GenericVariables::new())?;
+        let TypedExpression::TypedFunctionCall(TypedFunctionCall {
+            function,
+            arguments,
+        }) = *typed_block.expression
+        else {
+            panic!("Main function call changed form.")
+        };
+        if arguments.len() != 0 {
+            panic!("Main function call changed form.")
+        }
+        let TypedExpression::TypedAccess(TypedAccess { variable }) = *function else {
+            panic!("Main function call changed form.")
+        };
+        Ok(TypedProgram {
+            type_definitions: type_checker.type_definitions,
+            main: variable,
+            assignments: typed_block.assignments,
         })
     }
 }
@@ -4229,5 +3922,370 @@ mod tests {
         ]);
         let result = TypeChecker::with_type_definitions(type_definitions);
         assert!(result.is_err())
+    }
+
+    #[test_case(
+        Program{
+            definitions: Vec::new()
+        },
+        Err(()),
+        TypeContext::new();
+        "empty program"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Integer{value: 0}.into())
+                    }.into())
+                }.into()
+            ]
+        },
+        Ok(()),
+        TypeContext::new();
+        "basic program"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(
+                            FunctionCall {
+                                arguments: vec![
+                                    Integer{value: 1}.into(),
+                                    Integer{value: -1}.into()
+                                ],
+                                function: Box::new(Var("+").into())
+                            }.into()
+                        )
+                    }.into())
+                }.into()
+            ]
+        },
+        Ok(()),
+        TypeContext::from([(
+            Id::from("+"),
+            Type::Function(
+                vec![TYPE_INT, TYPE_INT],
+                Box::new(TYPE_INT)
+            ).into()
+        )]);
+        "basic using context"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(
+                            FunctionCall {
+                                arguments: vec![
+                                    Integer{value: 1}.into(),
+                                    Integer{value: -1}.into()
+                                ],
+                                function: Box::new(Var("+").into())
+                            }.into()
+                        )
+                    }.into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "basic outside of context"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                OpaqueTypeDefinition {
+                    variable: GenericTypeVariable {
+                        id: Id::from("opaque_int"),
+                        generic_variables: Vec::new()
+                    },
+                    type_: ATOMIC_TYPE_INT.into()
+                }.into(),
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(
+                            ConstructorCall {
+                                arguments: vec![
+                                    Integer{value: -1}.into(),
+                                ],
+                                constructor: GenericConstructor {
+                                    id: Id::from("opaque_int"),
+                                    type_instances: Vec::new()
+                                }
+                            }.into()
+                        )
+                    }.into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "opaque type definition usage"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                OpaqueTypeDefinition {
+                    variable: GenericTypeVariable {
+                        id: Id::from("opaque_int"),
+                        generic_variables: Vec::new()
+                    },
+                    type_: ATOMIC_TYPE_INT.into()
+                }.into(),
+                TransparentTypeDefinition {
+                    variable: GenericTypeVariable {
+                        id: Id::from("transparent_int"),
+                        generic_variables: Vec::new()
+                    },
+                    type_: ATOMIC_TYPE_INT.into()
+                }.into(),
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: Typename("transparent_int").into(),
+                        body: Block{
+                            assignments: vec![
+                                Assignment {
+                                    assignee: VariableAssignee("x"),
+                                    expression: Box::new(ConstructorCall {
+                                        arguments: vec![
+                                            Integer{value: -1}.into(),
+                                        ],
+                                        constructor: GenericConstructor {
+                                            id: Id::from("opaque_int"),
+                                            type_instances: Vec::new()
+                                        }
+                                    }.into())
+                                },
+                            ],
+                            expression: Box::new(MatchExpression {
+                                subject: Box::new(Var("x").into()),
+                                blocks: vec![
+                                    MatchBlock {
+                                        matches: vec![
+                                            MatchItem {
+                                                type_name: Id::from("opaque_int"),
+                                                assignee: Some(Assignee{
+                                                    id: Id::from("x")
+                                                })
+                                            },
+                                        ],
+                                        block: ExpressionBlock(Var("x").into())
+                                    }
+                                ]
+                            }.into()),
+                        }
+                    }.into())
+                }.into()
+            ]
+        },
+        Ok(()),
+        TypeContext::new();
+        "type definition match expression"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                UnionTypeDefinition {
+                    variable: GenericTypeVariable{
+                        id: Id::from("Maybe"),
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    },
+                    items: vec![
+                        TypeItem {
+                            id: Id::from("Left"),
+                            type_: Some(Typename("T").into())
+                        },
+                        TypeItem {
+                            id: Id::from("Right"),
+                            type_: Some(Typename("U").into())
+                        }
+                    ]
+                }.into(),
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: Block{
+                            assignments: vec![
+                                Assignment {
+                                    assignee: VariableAssignee("x"),
+                                    expression: Box::new(ConstructorCall {
+                                        arguments: vec![
+                                            Integer{value: 0}.into(),
+                                        ],
+                                        constructor: GenericConstructor {
+                                            id: Id::from("Left"),
+                                            type_instances: vec![
+                                                ATOMIC_TYPE_INT.into(),
+                                                ATOMIC_TYPE_BOOL.into()
+                                            ]
+                                        }
+                                    }.into())
+                                },
+                            ],
+                            expression: Box::new(MatchExpression {
+                                subject: Box::new(Var("x").into()),
+                                blocks: vec![
+                                    MatchBlock {
+                                        matches: vec![
+                                            MatchItem {
+                                                type_name: Id::from("Left"),
+                                                assignee: Some(Assignee{
+                                                    id: Id::from("x")
+                                                })
+                                            },
+                                        ],
+                                        block: ExpressionBlock(Var("x").into())
+                                    },
+                                    MatchBlock {
+                                        matches: vec![
+                                            MatchItem {
+                                                type_name: Id::from("Right"),
+                                                assignee: Some(Assignee{
+                                                    id: Id::from("x")
+                                                })
+                                            },
+                                        ],
+                                        block: ExpressionBlock(IfExpression{
+                                            condition: Box::new(Var("x").into()),
+                                            true_block: ExpressionBlock(Integer{value: 1}.into()),
+                                            false_block: ExpressionBlock(Integer{value: -1}.into()),
+                                        }.into())
+                                    }
+                                ]
+                            }.into()),
+                        }
+                    }.into())
+                }.into()
+            ]
+        },
+        Ok(()),
+        TypeContext::new();
+        "union type instantiation"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Assignee { id: Id::from("x") },
+                                type_: TupleType { types: Vec::new() }.into()
+                            }
+                        ],
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(
+                            Integer{value: 1}.into(),
+                        )
+                    }.into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "too many arguments"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: ParametricAssignee {
+                        assignee: Assignee {
+                            id: Id::from("main")
+                        },
+                        generic_variables: vec![Id::from("T")]
+                    },
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![],
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(
+                            Integer{value: 1}.into(),
+                        )
+                    }.into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "parametric main"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(FunctionCall{
+                            function: Box::new(GenericVariable{
+                                id: Id::from("identity"),
+                                type_instances: vec![ATOMIC_TYPE_INT.into()]
+                            }.into()),
+                            arguments: vec![
+                                Integer{ value: 11 }.into()
+                            ]
+                        }.into())
+                    }.into())
+                }.into(),
+                Assignment{
+                    assignee: ParametricAssignee{
+                        assignee: Assignee { id: Id::from("identity") },
+                        generic_variables: vec![Id::from("T")]
+                    },
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Assignee {
+                                    id: Id::from("x")
+                                },
+                                type_: Typename("T").into()
+                            }
+                        ],
+                        return_type: Typename("T").into(),
+                        body: ExpressionBlock(Var("x").into())
+                    }.into())
+                }.into()
+            ]
+        },
+        Ok(()),
+        TypeContext::new();
+        "function type instantiation"
+    )]
+    fn test_program(program: Program, result: Result<(), ()>, context: TypeContext) {
+        let type_check_result = TypeChecker::check_program(program, &context);
+        match (type_check_result.clone(), result) {
+            (Ok(program), Err(())) => {
+                dbg!(program);
+                assert!(type_check_result.is_err())
+            }
+            (Err(msg), Ok(())) => {
+                dbg!(msg);
+                assert!(type_check_result.is_ok())
+            }
+            _ => (),
+        }
     }
 }
