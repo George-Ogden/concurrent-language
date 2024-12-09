@@ -13,7 +13,6 @@ pub fn derive_from_variants(input: TokenStream) -> TokenStream {
         for variant in data_enum.variants {
             let variant_name = variant.ident;
 
-            // Assume single unnamed field (tuple variant)
             if let Fields::Unnamed(fields) = variant.fields {
                 if fields.unnamed.len() == 1 {
                     let field_type = &fields.unnamed[0].ty;
@@ -26,7 +25,6 @@ pub fn derive_from_variants(input: TokenStream) -> TokenStream {
                         }
                     });
                 } else {
-                    // Handle cases with no fields or multiple fields if needed
                     panic!("Only single unnamed fields in variants are supported");
                 }
             }
@@ -40,15 +38,4 @@ pub fn derive_from_variants(input: TokenStream) -> TokenStream {
     };
 
     output.into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
 }
