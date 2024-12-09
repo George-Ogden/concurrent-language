@@ -207,14 +207,14 @@ pub struct TupleExpression {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct Variable {
+pub struct GenericVariable {
     pub id: Id,
     pub type_instances: Vec<TypeInstance>,
 }
 
 #[allow(non_snake_case)]
-pub fn Var(id: &str) -> Variable {
-    Variable {
+pub fn Var(id: &str) -> GenericVariable {
+    GenericVariable {
         id: Id::from(id),
         type_instances: Vec::new(),
     }
@@ -295,7 +295,7 @@ pub enum Expression {
     Integer(Integer),
     Boolean(Boolean),
     TupleExpression(TupleExpression),
-    GenericVariable(Variable),
+    GenericVariable(GenericVariable),
     ElementAccess(ElementAccess),
     IfExpression(IfExpression),
     MatchExpression(MatchExpression),
@@ -561,7 +561,7 @@ mod tests {
     )]
     #[test_case(
         r#"{"id":"map","type_instances":[{"AtomicType":{"type_":"INT"}}]}"#,
-        Variable{
+        GenericVariable{
             id: Id::from("map"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         };
@@ -569,7 +569,7 @@ mod tests {
     )]
     #[test_case(
         r#"{"id":"foo","type_instances":[{"GenericType":{"id":"T","type_variables":[]}}]}"#,
-        Variable{
+        GenericVariable{
             id: Id::from("foo"),
             type_instances: vec![Typename("T").into()]
         };
@@ -638,7 +638,7 @@ mod tests {
                     Id::from("T")
                 ]
             },
-            expression: Box::new(Variable{
+            expression: Box::new(GenericVariable{
                 id: Id::from("b"),
                 type_instances: vec![
                     Typename("T").into()

@@ -1,4 +1,4 @@
-use crate::{AtomicTypeEnum, Block, Boolean, Id, Integer, MatchBlock, TypeInstance};
+use crate::{Assignee, AtomicTypeEnum, Block, Boolean, Id, Integer, MatchBlock, TypeInstance};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -41,29 +41,53 @@ impl ParametricType {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct TypedVariable {
+pub struct TypedParametricVariable {
     pub variable: Variable,
     pub type_: Rc<RefCell<ParametricType>>,
 }
 
-impl From<Rc<RefCell<ParametricType>>> for TypedVariable {
+impl From<Rc<RefCell<ParametricType>>> for TypedParametricVariable {
     fn from(value: Rc<RefCell<ParametricType>>) -> Self {
-        TypedVariable {
+        TypedParametricVariable {
             variable: Rc::new(RefCell::new(())),
             type_: value,
         }
     }
 }
 
-impl From<ParametricType> for TypedVariable {
+impl From<ParametricType> for TypedParametricVariable {
     fn from(value: ParametricType) -> Self {
-        TypedVariable::from(Rc::new(RefCell::new(value)))
+        TypedParametricVariable::from(Rc::new(RefCell::new(value)))
     }
+}
+
+impl From<Type> for TypedParametricVariable {
+    fn from(value: Type) -> Self {
+        TypedParametricVariable::from(ParametricType::from(value))
+    }
+}
+
+impl From<TypedVariable> for TypedParametricVariable {
+    fn from(value: TypedVariable) -> Self {
+        TypedParametricVariable {
+            variable: value.variable,
+            type_: Rc::new(RefCell::new(value.type_.into())),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedVariable {
+    pub variable: Variable,
+    pub type_: Type,
 }
 
 impl From<Type> for TypedVariable {
     fn from(value: Type) -> Self {
-        TypedVariable::from(ParametricType::from(value))
+        TypedVariable {
+            variable: Rc::new(RefCell::new(())),
+            type_: value,
+        }
     }
 }
 
@@ -216,8 +240,7 @@ pub struct TypedTuple {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedAccess {
-    pub variable: Variable,
-    pub type_: Type,
+    pub variable: TypedVariable,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -236,7 +259,7 @@ pub struct TypedIf {
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedMatchItem {
     pub type_name: Id,
-    pub assignee: Option<Id>,
+    pub assignee: Option<TypedVariable>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -301,7 +324,9 @@ impl TypedExpression {
             Self::TypedTuple(TypedTuple { expressions }) => {
                 Type::Tuple(expressions.iter().map(TypedExpression::type_).collect_vec())
             }
-            Self::TypedAccess(TypedAccess { variable: _, type_ }) => type_.clone(),
+            Self::TypedAccess(TypedAccess {
+                variable: TypedVariable { variable: _, type_ },
+            }) => type_.clone(),
             Self::TypedElementAccess(TypedElementAccess { expression, index }) => {
                 if let Type::Tuple(types) = expression.type_() {
                     types[*index as usize].clone()
@@ -321,7 +346,7 @@ impl TypedExpression {
             }) => Type::Function(
                 parameters
                     .iter()
-                    .map(|(_, parameter)| parameter.type_.borrow().type_.clone())
+                    .map(|(_, parameter)| parameter.type_.clone())
                     .collect_vec(),
                 return_type.clone(),
             ),
@@ -332,7 +357,7 @@ impl TypedExpression {
             }) => Type::Function(
                 parameters
                     .iter()
-                    .map(|parameter| parameter.type_.borrow().type_.clone())
+                    .map(|parameter| parameter.type_.clone())
                     .collect_vec(),
                 return_type.clone(),
             ),
@@ -447,6 +472,11 @@ pub enum TypeCheckError {
     NonUnionTypeMatchSubject(TypedExpression),
     IncorrectVariants {
         blocks: Vec<MatchBlock>,
+    },
+    MismatchedVariant {
+        type_: Type,
+        variant_id: Id,
+        assignee: Option<Assignee>,
     },
 }
 

@@ -2,15 +2,15 @@ use crate::type_check_nodes::{
     ConstructorType, ParametricExpression, ParametricType, PartiallyTypedFunctionDefinition, Type,
     TypeCheckError, TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall,
     TypedElementAccess, TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf,
-    TypedMatch, TypedMatchBlock, TypedMatchItem, TypedTuple, TypedVariable, TYPE_BOOL,
+    TypedMatch, TypedMatchBlock, TypedMatchItem, TypedParametricVariable, TypedTuple,
+    TypedVariable, TYPE_BOOL,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
-    GenericTypeVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
+    GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance, UnionTypeDefinition,
-    Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -383,7 +383,7 @@ impl PartialEq for TypeDefinitions {
     }
 }
 
-type TypeContext = HashMap<Id, TypedVariable>;
+type TypeContext = HashMap<Id, TypedParametricVariable>;
 
 struct TypeChecker {
     type_definitions: TypeDefinitions,
@@ -738,11 +738,11 @@ impl TypeChecker {
                     .collect::<Result<_, _>>()?,
             }
             .into(),
-            Expression::GenericVariable(Variable { id, type_instances }) => {
+            Expression::GenericVariable(GenericVariable { id, type_instances }) => {
                 let variable = context.get(&id);
                 match variable {
                     Some(typed_variable) => {
-                        let TypedVariable { variable, type_ } = typed_variable;
+                        let TypedParametricVariable { variable, type_ } = typed_variable;
                         if type_instances.len() != type_.borrow().parameters.len() {
                             return Err(TypeCheckError::WrongNumberOfTypeParameters {
                                 type_: type_.borrow().clone(),
@@ -767,8 +767,10 @@ impl TypeChecker {
                             )
                         };
                         TypedAccess {
-                            variable: variable.clone(),
-                            type_,
+                            variable: TypedVariable {
+                                variable: variable.clone(),
+                                type_,
+                            },
                         }
                         .into()
                     }
@@ -862,7 +864,7 @@ impl TypeChecker {
                             id,
                             TypedVariable {
                                 variable: Rc::new(RefCell::new(())),
-                                type_: Rc::new(RefCell::new(type_.into())),
+                                type_: type_.into(),
                             },
                         )
                     })
@@ -1022,16 +1024,44 @@ impl TypeChecker {
                 let blocks = blocks
                     .into_iter()
                     .map(|block| {
-                        let matches = block
+                        let assignments = block
+                            .matches
+                            .iter()
+                            .map(|item| match (&item.assignee, &variants[&item.type_name]) {
+                                (Some(assignee), Some(type_)) => {
+                                    Ok(Some((assignee.id.clone(), type_)))
+                                }
+                                (None, None) => Ok(None),
+                                (assignee, _) => Err(TypeCheckError::MismatchedVariant {
+                                    type_: subject.type_(),
+                                    variant_id: item.type_name.clone(),
+                                    assignee: assignee.clone(),
+                                }),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let assignee = if assignments.iter().all_equal() {
+                            assignments.first().unwrap().clone()
+                        } else {
+                            None
+                        };
+                        let mut context = context.clone();
+                        let variable = assignee.map(|(id, type_)| {
+                            context.insert(id, type_.clone().into());
+                            TypedVariable::from(type_.clone())
+                        });
+                        let match_items = block
                             .matches
                             .into_iter()
                             .map(|item| TypedMatchItem {
-                                type_name: item.type_name,
-                                assignee: item.assignee.map(|assignee| assignee.id),
+                                type_name: item.type_name.clone(),
+                                assignee: variable.clone(),
                             })
                             .collect_vec();
-                        let block = self.check_block(block.block, context, generic_variables)?;
-                        Ok(TypedMatchBlock { block, matches })
+                        let block = self.check_block(block.block, &context, generic_variables)?;
+                        Ok(TypedMatchBlock {
+                            block,
+                            matches: match_items,
+                        })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Err(block_types) = blocks
@@ -1108,7 +1138,7 @@ impl TypeChecker {
             };
             new_context.insert(
                 id,
-                TypedVariable {
+                TypedParametricVariable {
                     variable: assignment.variable.clone(),
                     type_: Rc::new(RefCell::new(ParametricType {
                         type_: (assignment.expression.expression.type_()),
@@ -1289,7 +1319,7 @@ impl TypeChecker {
     ) -> Result<TypedFunctionDefinition, TypeCheckError> {
         let mut new_context = context.clone();
         for (id, variable) in &function_definition.parameters {
-            new_context.insert(id.clone(), variable.clone());
+            new_context.insert(id.clone(), variable.clone().into());
         }
         let body = self.check_block(function_definition.body, &new_context, generic_variables)?;
         if *function_definition.return_type != body.type_() {
@@ -1315,11 +1345,11 @@ mod tests {
 
     use crate::{
         type_check_nodes::{ConstructorType, TYPE_BOOL, TYPE_INT, TYPE_UNIT},
-        Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess, ExpressionBlock,
-        FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable, IfExpression,
-        Integer, MatchBlock, MatchExpression, MatchItem, ParametricAssignee, TupleExpression,
-        TypeItem, TypeVariable, TypedAssignee, Typename, Var, VariableAssignee, ATOMIC_TYPE_BOOL,
-        ATOMIC_TYPE_INT,
+        Assignee, Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess,
+        ExpressionBlock, FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable,
+        IfExpression, Integer, MatchBlock, MatchExpression, MatchItem, ParametricAssignee,
+        TupleExpression, TypeItem, TypeVariable, TypedAssignee, Typename, Var, VariableAssignee,
+        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -2286,6 +2316,27 @@ mod tests {
                     .into(),
                 )),
             ),
+            (Id::from("Option"), {
+                let parameter = Rc::new(RefCell::new(None));
+                Rc::new(RefCell::new(ParametricType {
+                    parameters: vec![parameter.clone()],
+                    type_: Type::Union(HashMap::from([
+                        (Id::from("Some"), Some(Type::Variable(parameter))),
+                        (Id::from("None"), None),
+                    ])),
+                }))
+            }),
+            (Id::from("Either"), {
+                let left_parameter = Rc::new(RefCell::new(None));
+                let right_parameter = Rc::new(RefCell::new(None));
+                Rc::new(RefCell::new(ParametricType {
+                    parameters: vec![left_parameter.clone(), right_parameter.clone()],
+                    type_: Type::Union(HashMap::from([
+                        (Id::from("Left"), Some(Type::Variable(left_parameter))),
+                        (Id::from("Right"), Some(Type::Variable(right_parameter))),
+                    ])),
+                }))
+            }),
         ])
     });
     #[test_case(
@@ -2419,7 +2470,7 @@ mod tests {
         "type check wrong arguments"
     )]
     #[test_case(
-        Variable {
+        GenericVariable {
             id: Id::from("f"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         }.into(),
@@ -2947,6 +2998,326 @@ mod tests {
         )]);
         "non-exhaustive matches"
     )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("random_bull").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("faws"),
+                            assignee: Some(Assignee {
+                                id: Id::from("x")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("twoo"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
+                },
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("random_bull"),
+            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+        )]);
+        "empty match assignee"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(Integer{value: 3}.into())
+                },
+            ]
+        }.into(),
+        Some(TYPE_INT),
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+        )]);
+        "valid match assignment"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(Integer{value: -3}.into())
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(Integer{value: 3}.into())
+                },
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+        )]);
+        "missing variant assignee"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+        )]);
+        "match out-of-scope variable"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+        )]);
+        "match partially-used variable"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Left"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                        MatchItem {
+                            type_name: Id::from("Right"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+            ]
+        }.into(),
+        Some(TYPE_INT),
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS[&String::from("transparent_int")].clone(),Vec::new())]).into()
+        )]);
+        "match same type variable"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Left"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                        MatchItem {
+                            type_name: Id::from("Right"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS[&String::from("opaque_int")].clone(),Vec::new())]).into()
+        )]);
+        "match different type variables"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Left"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                        MatchItem {
+                            type_name: Id::from("Right"),
+                            assignee: Some(Assignee {
+                                id: Id::from("z")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(GenericVariable{id:Id::from("y"), type_instances: Vec::new()}.into())
+                },
+            ]
+        }.into(),
+        None,
+        TypeContext::from([(
+            Id::from("x"),
+            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS[&String::from("transparent_int")].clone(),Vec::new())]).into()
+        )]);
+        "different variable names"
+    )]
+    #[test_case(
+        MatchExpression {
+            subject: Box::new(Var("x").into()),
+            blocks: vec![
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("Some"),
+                            assignee: Some(Assignee {
+                                id: Id::from("y")
+                            })
+                        },
+                    ],
+                    block: ExpressionBlock(
+                        MatchExpression {
+                            subject: Box::new(Var("y").into()),
+                            blocks: vec![
+                                MatchBlock {
+                                    matches: vec![
+                                        MatchItem {
+                                            type_name: Id::from("Left"),
+                                            assignee: Some(Assignee {
+                                                id: Id::from("y")
+                                            })
+                                        },
+                                    ],
+                                    block: ExpressionBlock(Var("y").into())
+                                },
+                                MatchBlock {
+                                    matches: vec![
+                                        MatchItem {
+                                            type_name: Id::from("Right"),
+                                            assignee: Some(Assignee {
+                                                id: Id::from("r")
+                                            })
+                                        },
+                                    ],
+                                    block: ExpressionBlock(
+                                        FunctionCall {
+                                            function: Box::new(Var("*").into()),
+                                            arguments: vec![Var("y").into(), Var("r").into()]
+                                        }.into()
+                                    )
+                                },
+                            ]
+                        }.into(),
+                    )
+                },
+                MatchBlock {
+                    matches: vec![
+                        MatchItem {
+                            type_name: Id::from("None"),
+                            assignee: None
+                        },
+                    ],
+                    block: ExpressionBlock(Integer{value: 0}.into())
+                }
+            ]
+        }.into(),
+        Some(TYPE_INT),
+        TypeContext::from([
+            (
+                Id::from("x"),
+                Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,TYPE_BOOL]).into()]).into()
+            ),
+            (
+                Id::from("*"),
+                Type::Function(vec![Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,TYPE_BOOL]).into(),TYPE_BOOL], Box::new(TYPE_INT)).into()
+            ),
+        ]);
+        "nested match"
+    )]
     fn test_check_expressions(
         expression: Expression,
         expected_type: Option<Type>,
@@ -3291,7 +3662,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                Variable {
+                GenericVariable {
                     id: Id::from("x"),
                     type_instances: vec![
                         ATOMIC_TYPE_INT.into()
@@ -3315,7 +3686,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                Variable {
+                GenericVariable {
                     id: Id::from("x"),
                     type_instances: vec![
                         ATOMIC_TYPE_INT.into(),
@@ -3350,7 +3721,7 @@ mod tests {
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(Variable{
+                    function: Box::new(GenericVariable{
                         id: Id::from("id"),
                         type_instances: vec![ATOMIC_TYPE_INT.into()]
                     }.into()),
@@ -3395,7 +3766,7 @@ mod tests {
                         ],
                         return_type: Typename("U").into(),
                         body: ExpressionBlock(FunctionCall {
-                            function: Box::new(Variable{
+                            function: Box::new(GenericVariable{
                                 id: Id::from("id"),
                                 type_instances: vec![Typename("U").into()]
                             }.into()),
@@ -3406,7 +3777,7 @@ mod tests {
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(Variable{
+                    function: Box::new(GenericVariable{
                         id: Id::from("id_"),
                         type_instances: vec![ATOMIC_TYPE_INT.into()]
                     }.into()),
@@ -3454,7 +3825,7 @@ mod tests {
                                 },
                             ],
                             expression: Box::new(FunctionCall {
-                                function: Box::new(Variable{
+                                function: Box::new(GenericVariable{
                                     id: Id::from("hold"),
                                     type_instances: vec![ATOMIC_TYPE_BOOL.into()]
                                 }.into()),
@@ -3468,7 +3839,7 @@ mod tests {
             ],
             expression: Box::new(
                 FunctionCall {
-                    function: Box::new(Variable{
+                    function: Box::new(GenericVariable{
                         id: Id::from("id"),
                         type_instances: vec![ATOMIC_TYPE_INT.into()]
                     }.into()),
@@ -3505,14 +3876,14 @@ mod tests {
                     function: Box::new(Var("&").into()),
                     arguments: vec![
                         FunctionCall {
-                            function: Box::new(Variable{
+                            function: Box::new(GenericVariable{
                                 id: Id::from("id"),
                                 type_instances: vec![ATOMIC_TYPE_INT.into()]
                             }.into()),
                             arguments: vec![Integer{value: 5}.into()]
                         }.into(),
                         FunctionCall {
-                            function: Box::new(Variable{
+                            function: Box::new(GenericVariable{
                                 id: Id::from("id"),
                                 type_instances: vec![ATOMIC_TYPE_BOOL.into()]
                             }.into()),
@@ -3560,7 +3931,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                Variable{
+                GenericVariable{
                     id: Id::from("apply"),
                     type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
                 }.into()
@@ -3597,7 +3968,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                Variable{
+                GenericVariable{
                     id: Id::from("extra"),
                     type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
                 }.into()
@@ -3638,7 +4009,7 @@ mod tests {
                 },
             ],
             expression: Box::new(
-                Variable{
+                GenericVariable{
                     id: Id::from("first"),
                     type_instances: vec![ATOMIC_TYPE_INT.into(), ATOMIC_TYPE_BOOL.into()]
                 }.into()
