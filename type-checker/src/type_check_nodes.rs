@@ -422,7 +422,7 @@ impl TypedBlock {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TypedProgram {
     pub type_definitions: TypeDefinitions,
     pub main: TypedVariable,
@@ -577,6 +577,9 @@ impl From<(&Vec<Id>, &V)> for GenericVariables {
 pub struct TypeDefinitions(HashMap<K, V>);
 
 impl TypeDefinitions {
+    pub fn new() -> Self {
+        TypeDefinitions(HashMap::new())
+    }
     pub fn get(&self, k: &Id) -> Option<&V> {
         self.0.get(k)
     }
