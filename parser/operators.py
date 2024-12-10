@@ -21,6 +21,7 @@ class OperatorManager:
         "<<": 8,
         "::": 9,
         "++": 9,
+        "--": 9,
         "<=>": 10,
         "<": 11,
         "<=": 11,
@@ -37,7 +38,7 @@ class OperatorManager:
         "$": 18,
     }
 
-    LEFT_ASSOCIATIVE_OPERATORS = {"$", "@", "::", "**", "++"}
+    LEFT_ASSOCIATIVE_OPERATORS = {"$", "@", "::", "**", "++", "--"}
     NON_ASSOCIATIVE_OPERATORS = {"<", ">", "<=", ">=", "<=>", "==", "!="}
     OPERATOR_REGEX = r"^[&!+/\-^$<>@:*|%=.]+$"
 

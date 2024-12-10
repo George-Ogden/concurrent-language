@@ -5,12 +5,23 @@ mod utils;
 
 use ast_nodes::*;
 use std::io::{self, Read};
+use type_check::TypeChecker;
 
 fn main() {
     let mut input = String::new();
     io::stdin()
         .read_to_string(&mut input)
         .expect("Failed to read from stdin");
-    let node = serde_json::from_str::<TypeInstance>(&input);
-    println!("{:?}", node);
+    dbg!(&input);
+    match serde_json::from_str::<Program>(&input) {
+        Ok(program) => match TypeChecker::type_check(program) {
+            Ok(type_checked_program) => {
+                println!("{:?}", type_checked_program)
+            }
+            Err(e) => {
+                println!("{:?}", e)
+            }
+        },
+        Err(msg) => println!("{}", msg),
+    }
 }

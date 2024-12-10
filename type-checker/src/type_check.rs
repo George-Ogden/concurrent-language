@@ -4,7 +4,7 @@ use crate::type_check_nodes::{
     TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
     TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedMatch,
     TypedMatchBlock, TypedMatchItem, TypedParametricVariable, TypedProgram, TypedTuple,
-    TypedVariable, TYPE_BOOL,
+    TypedVariable, TYPE_BOOL, TYPE_INT,
 };
 use crate::utils::UniqueError;
 use crate::{
@@ -21,7 +21,45 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use strum::IntoEnumIterator;
 
-const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| TypeContext::new());
+const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
+    let integer_binary_operators = [
+        "**", "*", "/", "%", "+", "-", ">>", "<<", "<=>", "&", "^", "|",
+    ]
+    .into_iter()
+    .map(|operator| {
+        (
+            Id::from(operator),
+            Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_INT)),
+        )
+    });
+    let integer_unary_operators = ["++", "--"].into_iter().map(|operator| {
+        (
+            Id::from(operator),
+            Type::Function(vec![TYPE_INT], Box::new(TYPE_INT)),
+        )
+    });
+    let boolean_binary_operators = ["&&", "||"].into_iter().map(|operator| {
+        (
+            Id::from(operator),
+            Type::Function(vec![TYPE_BOOL, TYPE_BOOL], Box::new(TYPE_BOOL)),
+        )
+    });
+    let integer_comparisons = ["<", "<=", ">", ">=", "==", "!="]
+        .into_iter()
+        .map(|operator| {
+            (
+                Id::from(operator),
+                Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_BOOL)),
+            )
+        });
+    TypeContext::from_iter(
+        integer_binary_operators
+            .chain(boolean_binary_operators)
+            .chain(integer_comparisons)
+            .chain(integer_unary_operators)
+            .map(|(id, type_)| (id, type_.into())),
+    )
+});
 
 #[derive(Debug)]
 pub struct TypeChecker {
@@ -4385,6 +4423,46 @@ mod tests {
     )]
     fn test_program(program: Program, result: Result<(), ()>, context: TypeContext) {
         let type_check_result = TypeChecker::check_program(program, &context);
+        match (type_check_result.clone(), result) {
+            (Ok(program), Err(())) => {
+                dbg!(program);
+                assert!(type_check_result.is_err())
+            }
+            (Err(msg), Ok(())) => {
+                dbg!(msg);
+                assert!(type_check_result.is_ok())
+            }
+            _ => (),
+        }
+    }
+
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(FunctionCall{
+                            function: Box::new(GenericVariable{
+                                id: Id::from("+"),
+                                type_instances: Vec::new()
+                            }.into()),
+                            arguments: vec![
+                                Integer{ value: -1 }.into(),
+                                Integer{ value: 2 }.into(),
+                            ]
+                        }.into())
+                    }.into())
+                }.into(),
+            ]
+        },
+        Ok(());
+        "default operator usage"
+    )]
+    fn test_default_program(program: Program, result: Result<(), ()>) {
+        let type_check_result = TypeChecker::type_check(program);
         match (type_check_result.clone(), result) {
             (Ok(program), Err(())) => {
                 dbg!(program);
