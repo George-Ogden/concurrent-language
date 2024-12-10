@@ -34,6 +34,9 @@ jobs:
 
     - name: Set up Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        rustflags: " "
+
 
     - name: Build parser and type checker
       run: |
