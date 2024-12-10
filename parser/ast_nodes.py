@@ -46,6 +46,16 @@ class ASTNode:
         elif isinstance(value, (Id, NoneType, int)):
             return value
 
+    def __post_init__(self) -> None:
+        for key in self.__match_args__:
+            if isinstance(self, enum.Enum):
+                continue
+            annotation = inspect.get_annotations(self.__init__)[key]
+            value = getattr(self, key)
+            if isinstance(annotation, str):
+                if annotation.startswith("list"):
+                    assert isinstance(value, list), f"{value} should be a list"
+
 
 Id: TypeAlias = str
 

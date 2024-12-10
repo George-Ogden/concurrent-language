@@ -412,6 +412,23 @@ mod tests {
         "function type single tuple argument"
     )]
     #[test_case(
+        r#"{"argument_types":[{"FunctionType":{"argument_types":[{"AtomicType":{"type_":"INT"}}],"return_type":{"AtomicType":{"type_":"INT"}}}}],"return_type":{"AtomicType":{"type_":"INT"}}}"#,
+        FunctionType{
+            argument_types: vec![
+                FunctionType{
+                    argument_types: vec![ATOMIC_TYPE_INT.into()],
+                    return_type: Box::new(
+                        ATOMIC_TYPE_INT.into()
+                    )
+                }.into()
+            ],
+            return_type: Box::new(
+                ATOMIC_TYPE_INT.into()
+            )
+        };
+        "higher-order function type"
+    )]
+    #[test_case(
         r#"{"id":"map","type_variables":[{"AtomicType":{"type_":"INT"}},{"AtomicType":{"type_":"BOOL"}}]}"#,
         GenericType{
             id: Id::from("map"),
@@ -475,6 +492,29 @@ mod tests {
             }.into()
         };
         "opaque type definition"
+    )]
+    #[test_case(
+        r#"{"variable":{"id":"F","generic_variables":[]},"type_":{"FunctionType":{"argument_types":[{"FunctionType":{"argument_types":[{"AtomicType":{"type_":"INT"}}],"return_type":{"AtomicType":{"type_":"INT"}}}}],"return_type":{"AtomicType":{"type_":"INT"}}}}}"#,
+        OpaqueTypeDefinition{
+            variable: GenericTypeVariable{
+                id: Id::from("F"),
+                generic_variables: Vec::new()
+            },
+            type_: FunctionType{
+                argument_types: vec![
+                    FunctionType{
+                        argument_types: vec![ATOMIC_TYPE_INT.into()],
+                        return_type: Box::new(
+                            ATOMIC_TYPE_INT.into()
+                        )
+                    }.into()
+                ],
+                return_type: Box::new(
+                    ATOMIC_TYPE_INT.into()
+                )
+            }.into()
+        };
+        "opaque function type definition"
     )]
     #[test_case(
         r#"{"id":"None"}"#,
@@ -902,6 +942,33 @@ mod tests {
         "empty program"
     )]
     #[test_case(
+        r#"{"definitions":[{"OpaqueTypeDefinition":{"variable":{"id":"F","generic_variables":[]},"type_":{"FunctionType":{"argument_types":[{"FunctionType":{"argument_types":[{"AtomicType":{"type_":"INT"}}],"return_type":{"AtomicType":{"type_":"INT"}}}}],"return_type":{"AtomicType":{"type_":"INT"}}}}}}]}"#,
+        Program{
+            definitions: vec![
+                OpaqueTypeDefinition{
+                    variable: GenericTypeVariable{
+                        id: Id::from("F"),
+                        generic_variables: Vec::new()
+                    },
+                    type_: FunctionType{
+                        argument_types: vec![
+                            FunctionType{
+                                argument_types: vec![ATOMIC_TYPE_INT.into()],
+                                return_type: Box::new(
+                                    ATOMIC_TYPE_INT.into()
+                                )
+                            }.into()
+                        ],
+                        return_type: Box::new(
+                            ATOMIC_TYPE_INT.into()
+                        )
+                    }.into()
+                }.into()
+            ]
+        };
+        "short program"
+    )]
+    #[test_case(
         r#"{"definitions":[{"UnionTypeDefinition":{"variable":{"id":"Maybe","generic_variables":["T"]},"items":[{"id":"Some","type_":{"GenericType":{"id":"T","type_variables":[]}}},{"id":"None","type_":null}]}},{"TransparentTypeDefinition":{"variable":{"id":"Pair","generic_variables":["T","U"]},"type_":{"TupleType":{"types":[{"GenericType":{"id":"T","type_variables":[]}},{"GenericType":{"id":"U","type_variables":[]}}]}}}},{"Assignment":{"assignee":{"assignee":{"id":"a"},"generic_variables":[]},"expression":{"GenericVariable":{"id":"x","type_instances":[]}}}},{"Assignment":{"assignee":{"assignee":{"id":"b"},"generic_variables":[]},"expression":{"Integer":{"value":3}}}}]}"#,
         Program{
             definitions: vec![
@@ -954,5 +1021,13 @@ mod tests {
         }
         assert!(result.is_ok());
         let _ = result.inspect(|ast| assert_eq!(ast, &node));
+    }
+
+    #[test]
+    fn test() {
+        let string = "{\"definitions\": []}\n";
+        let result = serde_json::from_str::<Program>(&string);
+        dbg!(&result);
+        assert!(result.is_ok())
     }
 }

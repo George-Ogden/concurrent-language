@@ -68,6 +68,20 @@ from ast_nodes import (
             },
         ),
         (
+            FunctionType([FunctionType([AtomicType.INT], AtomicType.INT)], AtomicType.INT),
+            {
+                "argument_types": [
+                    {
+                        "FunctionType": {
+                            "argument_types": [{"AtomicType": {"type_": "INT"}}],
+                            "return_type": {"AtomicType": {"type_": "INT"}},
+                        }
+                    }
+                ],
+                "return_type": {"AtomicType": {"type_": "INT"}},
+            },
+        ),
+        (
             GenericType("map", [AtomicType.INT, AtomicType.BOOL]),
             {
                 "id": "map",
@@ -127,6 +141,28 @@ from ast_nodes import (
                             {"GenericType": {"id": "T", "type_variables": []}},
                             {"GenericType": {"id": "U", "type_variables": []}},
                         ]
+                    }
+                },
+            },
+        ),
+        (
+            OpaqueTypeDefinition(
+                GenericTypeVariable("F", []),
+                FunctionType([FunctionType([AtomicType.INT], AtomicType.INT)], AtomicType.INT),
+            ),
+            {
+                "variable": {"id": "F", "generic_variables": []},
+                "type_": {
+                    "FunctionType": {
+                        "argument_types": [
+                            {
+                                "FunctionType": {
+                                    "argument_types": [{"AtomicType": {"type_": "INT"}}],
+                                    "return_type": {"AtomicType": {"type_": "INT"}},
+                                }
+                            }
+                        ],
+                        "return_type": {"AtomicType": {"type_": "INT"}},
                     }
                 },
             },
@@ -407,12 +443,18 @@ from ast_nodes import (
                             "expression": {
                                 "MatchExpression": {
                                     "subject": {
-                                        "GenericVariable": {"id": "x", "type_instances": []}
+                                        "GenericVariable": {
+                                            "id": "x",
+                                            "type_instances": [],
+                                        }
                                     },
                                     "blocks": [
                                         {
                                             "matches": [
-                                                {"type_name": "Positive", "assignee": None}
+                                                {
+                                                    "type_name": "Positive",
+                                                    "assignee": None,
+                                                }
                                             ],
                                             "block": {
                                                 "assignments": [],
@@ -421,7 +463,10 @@ from ast_nodes import (
                                         },
                                         {
                                             "matches": [
-                                                {"type_name": "Negative", "assignee": None}
+                                                {
+                                                    "type_name": "Negative",
+                                                    "assignee": None,
+                                                }
                                             ],
                                             "block": {
                                                 "assignments": [],
@@ -435,7 +480,10 @@ from ast_nodes import (
                     },
                     {
                         "matches": [{"type_name": "None", "assignee": None}],
-                        "block": {"assignments": [], "expression": {"Integer": {"value": 0}}},
+                        "block": {
+                            "assignments": [],
+                            "expression": {"Integer": {"value": 0}},
+                        },
                     },
                 ],
             },
@@ -453,7 +501,10 @@ from ast_nodes import (
         (
             ConstructorCall(GenericConstructor("foo", [AtomicType.INT]), [Integer(3), Var("x")]),
             {
-                "constructor": {"id": "foo", "type_instances": [{"AtomicType": {"type_": "INT"}}]},
+                "constructor": {
+                    "id": "foo",
+                    "type_instances": [{"AtomicType": {"type_": "INT"}}],
+                },
                 "arguments": [
                     {"Integer": {"value": 3}},
                     {"GenericVariable": {"id": "x", "type_instances": []}},
@@ -471,8 +522,14 @@ from ast_nodes import (
             ),
             {
                 "parameters": [
-                    {"assignee": {"id": "x"}, "type_": {"AtomicType": {"type_": "INT"}}},
-                    {"assignee": {"id": "y"}, "type_": {"AtomicType": {"type_": "BOOL"}}},
+                    {
+                        "assignee": {"id": "x"},
+                        "type_": {"AtomicType": {"type_": "INT"}},
+                    },
+                    {
+                        "assignee": {"id": "y"},
+                        "type_": {"AtomicType": {"type_": "BOOL"}},
+                    },
                 ],
                 "return_type": {"AtomicType": {"type_": "BOOL"}},
                 "body": {
@@ -482,6 +539,43 @@ from ast_nodes import (
             },
         ),
         (Program([]), {"definitions": []}),
+        (
+            Program(
+                [
+                    OpaqueTypeDefinition(
+                        GenericTypeVariable("F", []),
+                        FunctionType(
+                            [FunctionType([AtomicType.INT], AtomicType.INT)],
+                            AtomicType.INT,
+                        ),
+                    )
+                ]
+            ),
+            {
+                "definitions": [
+                    {
+                        "OpaqueTypeDefinition": {
+                            "variable": {"id": "F", "generic_variables": []},
+                            "type_": {
+                                "FunctionType": {
+                                    "argument_types": [
+                                        {
+                                            "FunctionType": {
+                                                "argument_types": [
+                                                    {"AtomicType": {"type_": "INT"}}
+                                                ],
+                                                "return_type": {"AtomicType": {"type_": "INT"}},
+                                            }
+                                        }
+                                    ],
+                                    "return_type": {"AtomicType": {"type_": "INT"}},
+                                }
+                            },
+                        }
+                    }
+                ]
+            },
+        ),
         (
             Program(
                 [
@@ -517,8 +611,18 @@ from ast_nodes import (
                             "type_": {
                                 "TupleType": {
                                     "types": [
-                                        {"GenericType": {"id": "T", "type_variables": []}},
-                                        {"GenericType": {"id": "U", "type_variables": []}},
+                                        {
+                                            "GenericType": {
+                                                "id": "T",
+                                                "type_variables": [],
+                                            }
+                                        },
+                                        {
+                                            "GenericType": {
+                                                "id": "U",
+                                                "type_variables": [],
+                                            }
+                                        },
                                     ]
                                 }
                             },
@@ -526,13 +630,19 @@ from ast_nodes import (
                     },
                     {
                         "Assignment": {
-                            "assignee": {"assignee": {"id": "a"}, "generic_variables": []},
+                            "assignee": {
+                                "assignee": {"id": "a"},
+                                "generic_variables": [],
+                            },
                             "expression": {"GenericVariable": {"id": "x", "type_instances": []}},
                         }
                     },
                     {
                         "Assignment": {
-                            "assignee": {"assignee": {"id": "b"}, "generic_variables": []},
+                            "assignee": {
+                                "assignee": {"id": "b"},
+                                "generic_variables": [],
+                            },
                             "expression": {"Integer": {"value": 3}},
                         }
                     },

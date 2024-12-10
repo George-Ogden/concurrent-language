@@ -21,8 +21,10 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use strum::IntoEnumIterator;
 
+const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| TypeContext::new());
+
 #[derive(Debug)]
-struct TypeChecker {
+pub struct TypeChecker {
     type_definitions: TypeDefinitions,
     constructors: HashMap<Id, ConstructorType>,
 }
@@ -1058,6 +1060,9 @@ impl TypeChecker {
             main: variable,
             assignments: typed_block.assignments,
         })
+    }
+    pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {
+        Self::check_program(program, &DEFAULT_CONTEXT)
     }
 }
 

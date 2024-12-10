@@ -87,11 +87,15 @@ class Visitor(GrammarVisitor):
     def visitTuple_type(self, ctx: GrammarParser.Tuple_typeContext) -> TupleType:
         return TupleType(self.visit(ctx.type_list()))
 
-    def visitFn_type_head(self, ctx: GrammarParser.Fn_type_headContext) -> TypeInstance:
+    def visitFn_type_head(self, ctx: GrammarParser.Fn_type_headContext) -> list[TypeInstance]:
         if ctx.return_type() is not None:
-            return self.visit(ctx.return_type())
+            return_type = self.visit(ctx.return_type())
+            if isinstance(return_type, TupleType):
+                return return_type.types
+            else:
+                return [return_type]
         else:
-            return self.visit(ctx.type_instance())
+            return [self.visit(ctx.type_instance())]
 
     def visitFn_type(self, ctx: GrammarParser.Fn_typeContext) -> FunctionType:
         argument_types = self.visit(ctx.fn_type_head())
