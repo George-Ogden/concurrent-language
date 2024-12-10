@@ -39,11 +39,10 @@ from ast_nodes import (
     UnionTypeDefinition,
     Var,
 )
-from operators import Associativity, OperatorManager
-
 from grammar.GrammarLexer import GrammarLexer
 from grammar.GrammarParser import GrammarParser
 from grammar.GrammarVisitor import GrammarVisitor
+from operators import Associativity, OperatorManager
 
 
 class VisitorError(Exception): ...
