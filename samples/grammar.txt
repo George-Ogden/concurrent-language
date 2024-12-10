@@ -38,15 +38,15 @@ t = if (a > 4) {
 e = match (maybe()) {
     Some x: {
         t
-    };
+    },
     None : {
         y
-    };
+    },
 };
 m = match (f) {
     Some x | None: {
         t
-    };
+    },
 };
 a = () -> () {
     ()

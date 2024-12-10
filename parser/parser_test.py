@@ -688,7 +688,7 @@ from ast_nodes import (
             "expr",
         ),
         (
-            "match (maybe()) { Some x: { t }; None : { y };}",
+            "match (maybe()) { Some x: { t }, None : { y },}",
             MatchExpression(
                 FunctionCall(Var("maybe"), []),
                 [
@@ -699,7 +699,7 @@ from ast_nodes import (
             "expr",
         ),
         (
-            "match (maybe()) { Some x: { t }; None : { y }}",
+            "match (maybe()) { Some x: { t }, None : { y }}",
             MatchExpression(
                 FunctionCall(Var("maybe"), []),
                 [
@@ -710,7 +710,7 @@ from ast_nodes import (
             "expr",
         ),
         (
-            "match(()) { Some x | None: { () }; }",
+            "match(()) { Some x | None: { () }, }",
             MatchExpression(
                 TupleExpression([]),
                 [

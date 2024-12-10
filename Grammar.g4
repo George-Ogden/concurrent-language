@@ -160,7 +160,7 @@ expr_list: expr | non_singleton_expr_list ;
 
 if_expr : IF WS* '(' WS* expr WS* ')' WS* block WS* ELSE WS* block ;
 match_expr : MATCH WS* '(' WS* expr WS* ')' WS* '{' WS* match_block_list WS* '}' ;
-match_block_list : (WS* match_block WS* ';')* WS* match_block? ;
+match_block_list : (WS* match_block WS* ',')* WS* match_block? ;
 match_block : match_list WS* ':' WS* block ;
 match_list : match_item (WS* '|' WS* match_item)*;
 match_item: id WS* non_generic_assignee ?;
