@@ -25,6 +25,9 @@ type-check: $(TYPE_CHECKER)
 test: $(PARSER)
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv
+	for sample in samples/triangular.txt samples/list.txt; do \
+		cat $$sample | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER); \
+	done;
 
 clean:
 	rm -rf $(GRAMMAR)
