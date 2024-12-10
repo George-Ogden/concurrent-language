@@ -96,7 +96,7 @@ impl From<Type> for TypedVariable {
 #[derive(Clone)]
 pub enum Type {
     Atomic(AtomicTypeEnum),
-    Union(HashMap<Id, Option<Type>>),
+    Union(Id, Vec<Option<Type>>),
     Instantiation(Rc<RefCell<ParametricType>>, Vec<Type>),
     Tuple(Vec<Type>),
     Function(Vec<Type>, Box<Type>),
@@ -120,10 +120,11 @@ impl Type {
         match self {
             Self::Atomic(_) => self.clone(),
             Self::Tuple(types) => Type::Tuple(Type::instantiate_types(types)),
-            Self::Union(types) => Type::Union(
+            Self::Union(id, types) => Type::Union(
+                id.clone(),
                 types
                     .iter()
-                    .map(|(id, type_)| (id.clone(), type_.clone().map(|type_| type_.instantiate())))
+                    .map(|type_| type_.clone().map(|type_| type_.instantiate()))
                     .collect(),
             ),
             Self::Instantiation(parametric_type, types) => {
@@ -187,11 +188,13 @@ impl Type {
                 Type::type_equality(t2, &r1.borrow().instantiate(t1), equal_references)
             }
             (Self::Atomic(a1), Self::Atomic(a2)) => a1 == a2,
-            (Self::Union(h1), Self::Union(h2)) => {
-                h1.keys().sorted().collect_vec() == h2.keys().sorted().collect_vec()
-                    && h1
-                        .keys()
-                        .all(|id| Type::option_type_equality(&h1[id], &h2[id], equal_references))
+            (Self::Union(i1, t1), Self::Union(i2, t2)) => {
+                i1 == i2
+                    && t1.len() == t2.len()
+                    && t1
+                        .iter()
+                        .zip_eq(t2.iter())
+                        .all(|(t1, t2)| Type::option_type_equality(t1, t2, equal_references))
             }
             (Self::Tuple(t1), Self::Tuple(t2)) => Type::types_equality(t1, t2, equal_references),
             (Self::Function(a1, r1), Self::Function(a2, r2)) => {
@@ -215,7 +218,9 @@ impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Atomic(atomic_type) => write!(f, "Atomic({:?})", atomic_type),
-            Type::Union(variants) => write!(f, "Union({:?})", variants.iter().collect_vec()),
+            Type::Union(id, variants) => {
+                write!(f, "Union({:?},{:?})", id, variants.iter().collect_vec())
+            }
             Type::Instantiation(reference, instances) => {
                 write!(
                     f,
@@ -491,23 +496,8 @@ pub enum TypeCheckError {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorType {
-    pub input_type: Option<Type>,
-    pub output_type: Type,
-    pub parameters: Vec<Rc<RefCell<Option<Type>>>>,
-}
-
-impl ConstructorType {
-    pub fn instantiate(&self, type_variables: &Vec<Type>) -> (Option<Type>, Type) {
-        for (parameter, variable) in self.parameters.iter().zip_eq(type_variables) {
-            *parameter.borrow_mut() = Some(variable.clone());
-        }
-        let output_type = self.output_type.instantiate();
-        let input_type = self.input_type.as_ref().map(Type::instantiate);
-        for parameter in &self.parameters {
-            *parameter.borrow_mut() = None;
-        }
-        (input_type, output_type)
-    }
+    pub type_: Rc<RefCell<ParametricType>>,
+    pub index: u32,
 }
 
 type TypeReferencesIndex = HashMap<*mut ParametricType, Id>;
@@ -596,9 +586,6 @@ impl TypeDefinitions {
     pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
         self.0.get_mut(k)
     }
-    pub fn insert(&mut self, k: K, v: V) -> Option<V> {
-        self.0.insert(k, v)
-    }
     pub fn keys(&self) -> Keys<'_, K, V> {
         self.0.keys()
     }
@@ -621,26 +608,23 @@ impl TypeDefinitions {
     ) -> bool {
         match (t1, t2) {
             (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
-            (Type::Union(v1), Type::Union(v2)) => {
-                v1.len() == v2.len()
+            (Type::Union(i1, v1), Type::Union(i2, v2)) => {
+                i1 == i2
+                    && v1.len() == v2.len()
                     && v1
                         .iter()
-                        .sorted_by_key(|(i1, _)| *i1)
-                        .zip(v2.iter().sorted_by_key(|(i1, _)| *i1))
-                        .all(|((i1, o1), (i2, o2))| {
-                            i1 == i2
-                                && match (&o1, &o2) {
-                                    (None, None) => true,
-                                    (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
-                                        self_references_index,
-                                        other_references_index,
-                                        self_generics_index,
-                                        other_generics_index,
-                                        t1,
-                                        t2,
-                                    ),
-                                    _ => false,
-                                }
+                        .zip_eq(v2.iter())
+                        .all(|(i1, i2)| match (&i1, &i2) {
+                            (None, None) => true,
+                            (Some(t1), Some(t2)) => TypeDefinitions::type_equality(
+                                self_references_index,
+                                other_references_index,
+                                self_generics_index,
+                                other_generics_index,
+                                t1,
+                                t2,
+                            ),
+                            _ => false,
                         })
             }
             (Type::Instantiation(t1, i1), Type::Instantiation(t2, i2)) => {
@@ -779,19 +763,15 @@ impl fmt::Debug for DebugTypeWrapper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let references_index = &self.1;
         match self.0.clone() {
-            Type::Union(variants) => {
+            Type::Union(id, variants) => {
                 write!(
                     f,
-                    "Union({:?})",
+                    "Union({:?},{:?})",
+                    id,
                     variants
                         .into_iter()
-                        .map(|(id, type_)| {
-                            (
-                                id,
-                                type_
-                                    .map(|type_| DebugTypeWrapper(type_, references_index.clone())),
-                            )
-                        })
+                        .map(|type_| type_
+                            .map(|type_| DebugTypeWrapper(type_, references_index.clone())))
                         .collect_vec()
                 )
             }
