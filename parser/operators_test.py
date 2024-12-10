@@ -1,8 +1,8 @@
-import pytest
+from parser import Parser
 
-from ast_nodes import Assignee, Assignment, FunctionCall, Variable
+import pytest
+from ast_nodes import Assignee, Assignment, FunctionCall, ParametricAssignee, Var
 from operators import Associativity, OperatorManager
-from parse import Parser
 
 L = Associativity.LEFT
 R = Associativity.RIGHT
@@ -21,6 +21,7 @@ operators = [
     ("<<", R, 8),
     ("::", L, 9),
     ("++", L, 9),
+    ("--", L, 9),
     ("<=>", N, 10),
     ("<", N, 11),
     ("<=", N, 11),
@@ -53,12 +54,12 @@ def test_associativity(operator, associativity):
 def test_parsing(operator):
     code = f"x {operator} y"
     ast = Parser.parse(code, target="expr")
-    node = FunctionCall(Variable(operator), [Variable("x"), Variable("y")])
+    node = FunctionCall(Var(operator), [Var("x"), Var("y")])
     assert ast == node
 
     code = f"__{operator}__ = x"
     ast = Parser.parse(code, target="assignment")
-    node = Assignment(Assignee(operator, []), Variable("x"))
+    node = Assignment(ParametricAssignee(Assignee(operator), []), Var("x"))
     assert ast == node
 
 
@@ -66,7 +67,7 @@ def test_parsing_valid_operator():
     operator = ".."
     code = f"x {operator} y"
     ast = Parser.parse(code, target="expr")
-    node = FunctionCall(Variable(".."), [Variable("x"), Variable("y")])
+    node = FunctionCall(Var(".."), [Var("x"), Var("y")])
     assert ast == node
 
     code = f"x{operator}y"

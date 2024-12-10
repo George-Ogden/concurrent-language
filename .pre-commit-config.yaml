@@ -1,4 +1,4 @@
-default_stages: [ "commit", "commit-msg", "push" ]
+default_stages: [ "pre-commit", "commit-msg", "pre-push" ]
 default_language_version:
   python: python3
 
@@ -34,3 +34,11 @@ repos:
       - id: isort
         args:
         - --profile=black
+
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+    -   id: fmt
+        args: ['--manifest-path', 'type-checker/Cargo.toml', '--']
+    -   id: cargo-check
+        args: ['--manifest-path', 'type-checker/Cargo.toml']

@@ -1,0 +1,17 @@
+[package]
+name = "type-checker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+counter = "0.6.0"
+itertools = "0.13.0"
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0.133"
+strum = "0.26.3"
+strum_macros = "0.26.4"
+from_variants = { path = "../from_variants" }
+once_cell = "1.20.2"
+
+[dev-dependencies]
+test-case = "3.3.1"

@@ -33,9 +33,7 @@ ID: [a-zA-Z_][a-zA-Z0-9_]* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+;
 
-program : imports WS* definitions WS* EOF ;
-
-imports: ;
+program : definitions WS* EOF ;
 
 definitions : | definition WS* (';' WS* definition WS*)* ';' ?;
 
@@ -54,7 +52,8 @@ operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot;
 operator_id: '__' operator '__';
 
 id_list : | id  WS* (',' WS* id WS* )* ','? ;
-generic_assignee : id ('<' WS* id_list WS* '>')? ;
+generic_assignee : non_generic_assignee ('<' WS* id_list WS* '>')? ;
+non_generic_assignee: id | '__';
 
 generic_list : | type_instance WS* (',' WS* type_instance WS*)* ','? WS* ;
 generic_instance : id ('<' generic_list '>')? ;
@@ -104,8 +103,8 @@ assignment_list : | (assignment WS* ';' WS*)*;
 
 assignee
     : generic_assignee
+    | non_generic_assignee
     | operator_id
-    | '__'
 //    | tuple_assignee
 //    | record_assignee
     ;
@@ -161,13 +160,13 @@ expr_list: expr | non_singleton_expr_list ;
 
 if_expr : IF WS* '(' WS* expr WS* ')' WS* block WS* ELSE WS* block ;
 match_expr : MATCH WS* '(' WS* expr WS* ')' WS* '{' WS* match_block_list WS* '}' ;
-match_block_list : (WS* match_block WS* ';')* WS* match_block? ;
+match_block_list : (WS* match_block WS* ',')* WS* match_block? ;
 match_block : match_list WS* ':' WS* block ;
 match_list : match_item (WS* '|' WS* match_item)*;
-match_item: id WS* assignee ?;
+match_item: id WS* non_generic_assignee ?;
 
 fn_def : '(' WS* typed_assignee_list WS* ')' WS* RIGHTARROW WS* type_instance WS* block;
 typed_assignee_list : | typed_assignee (WS* ',' WS* typed_assignee)* ',' ?;
-typed_assignee : assignee WS* ':' WS* type_instance ;
+typed_assignee : non_generic_assignee WS* ':' WS* type_instance ;
 
 block : '{' WS* assignment_list WS* expr WS* '}' ;
