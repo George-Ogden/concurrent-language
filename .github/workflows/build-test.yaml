@@ -32,10 +32,13 @@ jobs:
       run: |
         pip install -r requirements-dev.txt
 
-    - name: Build parser
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+
+    - name: Build parser and type checker
       run: |
         make
 
-    - name: Run Python Tests
+    - name: Run Tests
       run: |
-        pytest . -vv
+        make test

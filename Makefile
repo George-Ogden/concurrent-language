@@ -17,14 +17,14 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 parse: $(GRAMMAR)
-	cat sample.txt | xargs -0 python $(PARSER)
+	cat samples/grammar.txt | xargs -0 python $(PARSER)
 
 type-check: $(TYPE_CHECKER)
-	cat sample.txt | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER)
+	cat samples/triangular.txt | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER)
 
 test: $(PARSER)
-	pytest .
-	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST)
+	pytest . -vv
+	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv
 
 clean:
 	rm -rf $(GRAMMAR)
