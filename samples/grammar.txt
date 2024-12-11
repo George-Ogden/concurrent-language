@@ -86,3 +86,6 @@ right = Right<int,int,>{x};
 pair = Pair<bool,bool>{x, y};
 pair = Pair<bool,bool,>{x, y};
 unknown = Integer{8};
+__^__ = 3;
+y = __^__;
+y = __^__(3, 4);
