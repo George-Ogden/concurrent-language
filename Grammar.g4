@@ -45,7 +45,7 @@ definition
 //    | trait_impl
     ;
 
-id: ID | '_' | INFIX_ID | operator_id;
+id: ID | '_' | INFIX_ID;
 operator_symbol_without_eq_dot: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*' | '%' | '/');
 operator_symbol: operator_symbol_without_eq_dot | '=' | '.';
 operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot;
@@ -56,7 +56,7 @@ generic_assignee : non_generic_assignee ('<' WS* id_list WS* '>')? ;
 non_generic_assignee: id | '__';
 
 generic_list : | type_instance WS* (',' WS* type_instance WS*)* ','? WS* ;
-generic_instance : id ('<' generic_list '>')?;
+generic_instance : id ('<' generic_list '>')? |  operator_id;
 
 atomic_type
     : BOOL

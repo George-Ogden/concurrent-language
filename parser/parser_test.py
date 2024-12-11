@@ -163,6 +163,9 @@ from ast_nodes import (
         ("x", Var("x"), "expr"),
         ("foo", Var("foo"), "expr"),
         ("r2d2", Var("r2d2"), "expr"),
+        ("__^__", Var("^"), "expr"),
+        ("___^__", None, "expr"),
+        ("__^^^__", Var("^^^"), "expr"),
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<T>", GenericVariable("map", [Typename("T")]), "expr"),
@@ -540,6 +543,11 @@ from ast_nodes import (
         (
             "(foo)(4)",
             FunctionCall(Var("foo"), [Integer(4)]),
+            "expr",
+        ),
+        (
+            "__^__(4)",
+            FunctionCall(Var("^"), [Integer(4)]),
             "expr",
         ),
         (
