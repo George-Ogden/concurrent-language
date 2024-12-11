@@ -308,7 +308,9 @@ class Visitor(GrammarVisitor):
         return GenericConstructor(generic_instance.id, generic_instance.type_instances)
 
     def visitConstructor_call(self, ctx: GrammarParser.Constructor_callContext) -> ConstructorCall:
-        constructor = self.visit(ctx.generic_constructor())
+        constructor: GenericConstructor = self.visit(ctx.generic_constructor())
+        if OperatorManager.check_operator(constructor.id):
+            raise VisitorError(f"Invalid constructor id {constructor.id}")
         arguments = self.visit(ctx.expr_list())
         return ConstructorCall(constructor, arguments)
 

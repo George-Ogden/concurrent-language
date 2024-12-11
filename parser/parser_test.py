@@ -825,6 +825,7 @@ from ast_nodes import (
         ),
         ("++++x", FunctionCall(Var("++++"), [Var("x")]), "expr"),
         ("Integer{8}", ConstructorCall(Constructor("Integer"), [Integer(8)]), "expr"),
+        ("__^__{8}", None, "expr"),
         (
             "typedef tuple (int, int)",
             OpaqueTypeDefinition(
