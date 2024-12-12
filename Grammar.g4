@@ -28,8 +28,8 @@ TRUE: 'true';
 FALSE: 'false';
 BOOL: 'bool';
 
-INFIX_ID: '_''_'[a-zA-Z_][a-zA-Z0-9_]*'_''_' ;
-ID: [a-zA-Z_][a-zA-Z0-9_]* ;
+INFIX_ID: '_''_'[a-zA-Z_][a-zA-Z0-9_]* '\''* '_''_' ;
+ID: [a-zA-Z_][a-zA-Z0-9_]* '\''* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+;
 
