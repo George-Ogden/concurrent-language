@@ -91,3 +91,38 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple(new Increment__BuiltIn{}, [](Int x) { return ++x; }),
         std::make_tuple(new Decrement__BuiltIn{}, [](Int x) { return --x; })));
+
+class BinaryComparisonsTests
+    : public ::testing::TestWithParam<std::tuple<
+          ParametricFn<Bool, Int, Int> *, std::function<Bool(Int, Int)>>> {};
+
+TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
+    auto &[fn, op] = GetParam();
+
+    const std::vector<Int> xs{-1000000009LL, -55,   24,
+                              200,           10024, 1000000000224LL};
+    for (Int x : xs) {
+        for (Int y : xs) {
+            Bool r = 0;
+            fn->args = std::make_tuple(&x, &y);
+            fn->ret = &r;
+            ASSERT_EQ(r, 0);
+
+            fn->run();
+            Bool expected = op(x, y);
+            ASSERT_EQ(r, expected);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BinaryComparisons, BinaryComparisonsTests,
+    ::testing::Values(
+        std::make_tuple(new Comparison_LT__BuiltIn{}, std::less<Int>()),
+        std::make_tuple(new Comparison_GT__BuiltIn{}, std::greater<Int>()),
+        std::make_tuple(new Comparison_LE__BuiltIn{}, std::less_equal<Int>()),
+        std::make_tuple(new Comparison_GE__BuiltIn{},
+                        std::greater_equal<Int>()),
+        std::make_tuple(new Comparison_EQ__BuiltIn{}, std::equal_to<Int>()),
+        std::make_tuple(new Comparison_NE__BuiltIn{},
+                        std::not_equal_to<Int>())));

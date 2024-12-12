@@ -18,6 +18,7 @@ struct Op__BuiltIn : public ParametricFn<R, Ts...> {
 
 using Unary_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int>;
 using Binary_Int_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int, Int>;
+using Binary_Int_Int_Bool_Op__BuiltIn = Op__BuiltIn<Bool, Int, Int>;
 
 struct Plus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     Int op(const Int x, const Int y) const override { return x + y; }
@@ -91,4 +92,28 @@ struct Increment__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
 
 struct Decrement__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
     Int op(const Int x) const override { return x - 1; }
+};
+
+struct Comparison_LT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
+    Bool op(const Int x, const Int y) const override { return x < y; }
+};
+
+struct Comparison_LE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
+    Bool op(const Int x, const Int y) const override { return x <= y; }
+};
+
+struct Comparison_GT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
+    Bool op(const Int x, const Int y) const override { return x > y; }
+};
+
+struct Comparison_GE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
+    Bool op(const Int x, const Int y) const override { return x >= y; }
+};
+
+struct Comparison_EQ__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
+    Bool op(const Int x, const Int y) const override { return x == y; }
+};
+
+struct Comparison_NE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
+    Bool op(const Int x, const Int y) const override { return x != y; }
 };
