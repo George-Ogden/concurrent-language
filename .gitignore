@@ -192,3 +192,8 @@ Cargo.lock
 # Added by cargo
 
 /target
+
+# Build files
+main
+bin/
+build/
