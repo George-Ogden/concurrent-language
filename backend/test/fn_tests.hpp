@@ -5,6 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <utility>
+#include <vector>
+
 struct IdentityInt : ParametricFn<int, int> {
     void body() override { *ret = *std::get<0>(args); }
 };
@@ -196,4 +199,77 @@ GTEST_TEST(FnTests, TupleTest) {
     ASSERT_EQ(x, 5);
     ASSERT_TRUE(y);
     ASSERT_EQ(r, std::make_tuple(x, y));
+}
+
+using Bull = Variant<std::monostate, std::monostate>;
+
+struct BoolUnion : ParametricFn<Bool, Bull> {
+    void body() { *ret = std::get<0>(args)->tag == 0; }
+};
+
+GTEST_TEST(FnTests, ValueFreeUnionTest) {
+    {
+        BoolUnion fn{};
+        Bool r;
+        Bull bull{};
+        bull.tag = 0;
+        std::get<0>(fn.args) = &bull;
+        fn.ret = &r;
+
+        fn.run();
+        ASSERT_TRUE(r);
+    }
+
+    {
+        BoolUnion fn{};
+        Bool r;
+        Bull bull{};
+        bull.tag = 1;
+        std::get<0>(fn.args) = &bull;
+        fn.ret = &r;
+
+        fn.run();
+        ASSERT_FALSE(r);
+    }
+}
+
+using EitherIntBool = Variant<Int, Bool>;
+
+struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
+    void body() {
+        EitherIntBool tagged_union = *std::get<0>(args);
+        switch (tagged_union.tag) {
+        case 0:
+            *ret = *reinterpret_cast<int *>(&tagged_union.value) > 10;
+            break;
+        case 1:
+            *ret = *reinterpret_cast<bool *>(&tagged_union.value);
+            break;
+        }
+    }
+};
+
+GTEST_TEST(FnTests, ValueIncludedUnionTest) {
+    for (const auto &[tag, value, result] :
+         std::vector<std::tuple<int, int, bool>>{{1, 0, false},
+                                                 {1, 1, true},
+                                                 {0, 0, false},
+                                                 {0, 5, false},
+                                                 {0, 15, true}}) {
+        EitherIntBool either{};
+        either.tag = tag;
+        if (tag == 0) {
+            *reinterpret_cast<int *>(&either.value) = value;
+        } else {
+            *reinterpret_cast<bool *>(&either.value) = value;
+        }
+
+        EitherIntBoolExtractor fn{};
+        Bool r;
+        std::get<0>(fn.args) = &either;
+        fn.ret = &r;
+
+        fn.run();
+        ASSERT_EQ(r, result);
+    }
 }
