@@ -177,3 +177,23 @@ GTEST_TEST(FnTests, HigherOrderFunctionTest) {
     ASSERT_EQ(x, 5);
     ASSERT_TRUE(r);
 }
+
+struct PairIntBool : ParametricFn<std::tuple<Int, Bool>, Int, Bool> {
+    void body() {
+        *ret = std::make_tuple(*std::get<0>(args), *std::get<1>(args));
+    }
+};
+
+GTEST_TEST(FnTests, TupleTest) {
+    PairIntBool pair{};
+    Int x = 5;
+    Bool y = true;
+    Tuple<Int, Bool> r;
+    pair.args = std::make_tuple(&x, &y);
+    pair.ret = &r;
+
+    pair.run();
+    ASSERT_EQ(x, 5);
+    ASSERT_TRUE(y);
+    ASSERT_EQ(r, std::make_tuple(x, y));
+}
