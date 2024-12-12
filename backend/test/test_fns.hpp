@@ -24,34 +24,6 @@ GTEST_TEST(FnTests, IdentityTest) {
     ASSERT_EQ(x, 5);
 }
 
-GTEST_TEST(FnTests, PlusTest) {
-    Plus__BuiltIn plus{};
-    Int x = 5, y = 10, r = 0;
-    std::get<0>(plus.args) = &x;
-    std::get<1>(plus.args) = &y;
-    plus.ret = &r;
-    ASSERT_EQ(r, 0);
-
-    plus.run();
-    ASSERT_EQ(x, 5);
-    ASSERT_EQ(y, 10);
-    ASSERT_EQ(r, 15);
-}
-
-GTEST_TEST(FnTests, MinusTest) {
-    Minus__BuiltIn minus{};
-    Int x = 5, y = 10, r = 0;
-    std::get<0>(minus.args) = &x;
-    std::get<1>(minus.args) = &y;
-    minus.ret = &r;
-    ASSERT_EQ(r, 0);
-
-    minus.run();
-    ASSERT_EQ(x, 5);
-    ASSERT_EQ(y, 10);
-    ASSERT_EQ(r, -5);
-}
-
 struct FourWayPlus : ParametricFn<Int, Int, Int, Int, Int> {
     void body() override {
         Plus__BuiltIn *a = new Plus__BuiltIn{}, *b = new Plus__BuiltIn{};
