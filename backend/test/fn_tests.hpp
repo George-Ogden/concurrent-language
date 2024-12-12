@@ -149,3 +149,31 @@ GTEST_TEST(FnTests, NegativeBranchingExampleTest) {
     ASSERT_EQ(z, 22);
     ASSERT_EQ(r, 21);
 }
+
+struct EvenOrOdd : ParametricFn<Bool, Int> {
+    void body() override { *ret = static_cast<bool>(*std::get<0>(args) & 1); }
+};
+
+struct ApplyIntBool : ParametricFn<Bool, ParametricFn<Bool, Int>, Int> {
+    void body() override {
+        ParametricFn<Bool, Int> *f = std::get<0>(args);
+        Int *x = std::get<1>(args);
+        f->args = {x};
+        f->ret = ret;
+        f->run();
+    }
+};
+
+GTEST_TEST(FnTests, HigherOrderFunctionTest) {
+    ApplyIntBool apply{};
+    EvenOrOdd f{};
+    Int x = 5;
+    Bool r = false;
+    apply.args = std::make_tuple(&f, &x);
+    apply.ret = &r;
+    ASSERT_FALSE(r);
+
+    apply.run();
+    ASSERT_EQ(x, 5);
+    ASSERT_TRUE(r);
+}
