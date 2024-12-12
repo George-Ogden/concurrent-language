@@ -4,11 +4,20 @@
 #include "types/predefined.hpp"
 
 #include <compare>
+#include <type_traits>
+#include <utility>
 
-struct Binary_Int_Int_Int_Op__BuiltIn : public ParametricFn<Int, Int, Int> {
-    void body() override { *ret = op(*std::get<0>(args), *std::get<1>(args)); }
-    virtual Int op(const Int x, const Int y) const = 0;
+template <typename R, typename... Ts>
+struct Op__BuiltIn : public ParametricFn<R, Ts...> {
+    void body() override { apply(std::index_sequence_for<Ts...>{}); }
+    template <std::size_t... I> void apply(std::index_sequence<I...>) {
+        (*this->ret) = op(*std::get<I>(this->args)...);
+    }
+    virtual std::decay_t<R> op(std::add_const_t<Ts>...) const = 0;
 };
+
+using Unary_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int>;
+using Binary_Int_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int, Int>;
 
 struct Plus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     Int op(const Int x, const Int y) const override { return x + y; }
@@ -74,4 +83,12 @@ struct Bitwise_Or__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
 
 struct Bitwise_Xor__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     Int op(const Int x, const Int y) const override { return x ^ y; }
+};
+
+struct Increment__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
+    Int op(const Int x) const override { return x + 1; }
+};
+
+struct Decrement__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
+    Int op(const Int x) const override { return x - 1; }
 };

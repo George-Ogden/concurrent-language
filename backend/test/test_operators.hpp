@@ -8,11 +8,11 @@
 #include <compare>
 #include <functional>
 
-class FnTest
+class BinaryOperatorsTests
     : public ::testing::TestWithParam<std::tuple<
           ParametricFn<Int, Int, Int> *, std::function<Int(Int, Int)>>> {};
 
-TEST_P(FnTest, Operators) {
+TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
     auto &[fn, op] = GetParam();
 
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
@@ -31,7 +31,7 @@ TEST_P(FnTest, Operators) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    FnOperators, FnTest,
+    BinaryOperators, BinaryOperatorsTests,
     ::testing::Values(
         std::make_tuple(new Plus__BuiltIn{}, std::plus<Int>()),
         std::make_tuple(new Minus__BuiltIn{}, std::minus<Int>()),
@@ -66,3 +66,28 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(new Bitwise_And__BuiltIn{}, std::bit_and<Int>()),
         std::make_tuple(new Bitwise_Or__BuiltIn{}, std::bit_or<Int>()),
         std::make_tuple(new Bitwise_Xor__BuiltIn{}, std::bit_xor<Int>())));
+
+class UnaryOperatorsTests
+    : public ::testing::TestWithParam<
+          std::tuple<ParametricFn<Int, Int> *, std::function<Int(Int)>>> {};
+
+TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
+    auto &[fn, op] = GetParam();
+
+    for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
+                                  1000000000224LL}) {
+        Int r = 0;
+        fn->args = std::make_tuple(&x);
+        fn->ret = &r;
+        ASSERT_EQ(r, 0);
+
+        fn->run();
+        Int expected = op(x);
+        ASSERT_EQ(r, expected);
+    }
+}
+INSTANTIATE_TEST_SUITE_P(
+    UnaryOperators, UnaryOperatorsTests,
+    ::testing::Values(
+        std::make_tuple(new Increment__BuiltIn{}, [](Int x) { return ++x; }),
+        std::make_tuple(new Decrement__BuiltIn{}, [](Int x) { return --x; })));
