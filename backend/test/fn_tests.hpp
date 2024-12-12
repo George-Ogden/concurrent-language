@@ -91,3 +91,61 @@ GTEST_TEST(FnTests, FourWayPlusTest) {
     ASSERT_EQ(z, 22);
     ASSERT_EQ(r, 48);
 }
+
+struct BranchingExample : ParametricFn<Int, Int, Int, Int> {
+    void body() override {
+        Int x = *std::get<0>(args);
+        Int *y = std::get<1>(args);
+        Int *z = std::get<2>(args);
+        Int *t = new Int{};
+
+        Minus__BuiltIn *post_branch = new Minus__BuiltIn{};
+        post_branch->args = std::make_tuple(t, new Int{2});
+        post_branch->ret = ret;
+        post_branch->deps = 1;
+
+        Plus__BuiltIn *positive_branch = new Plus__BuiltIn;
+        positive_branch->args = std::make_tuple(y, new Int{1});
+        positive_branch->ret = t;
+        positive_branch->conts = {post_branch};
+
+        Plus__BuiltIn *negative_branch = new Plus__BuiltIn;
+        negative_branch->args = std::make_tuple(z, new Int{1});
+        negative_branch->ret = t;
+        negative_branch->conts = {post_branch};
+
+        if (x >= 0) {
+            positive_branch->run();
+        } else {
+            negative_branch->run();
+        }
+    }
+};
+
+GTEST_TEST(FnTests, PositiveBranchingExampleTest) {
+    BranchingExample branching{};
+    Int x = 5, y = 10, z = 22, r = 0;
+    branching.args = std::make_tuple(&x, &y, &z);
+    branching.ret = &r;
+    ASSERT_EQ(r, 0);
+
+    branching.run();
+    ASSERT_EQ(x, 5);
+    ASSERT_EQ(y, 10);
+    ASSERT_EQ(z, 22);
+    ASSERT_EQ(r, 9);
+}
+
+GTEST_TEST(FnTests, NegativeBranchingExampleTest) {
+    BranchingExample branching{};
+    Int x = -5, y = 10, z = 22, r = 0;
+    branching.args = std::make_tuple(&x, &y, &z);
+    branching.ret = &r;
+    ASSERT_EQ(r, 0);
+
+    branching.run();
+    ASSERT_EQ(x, -5);
+    ASSERT_EQ(y, 10);
+    ASSERT_EQ(z, 22);
+    ASSERT_EQ(r, 21);
+}
