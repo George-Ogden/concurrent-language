@@ -2,24 +2,36 @@
 
 #include "fn/fn.hpp"
 #include "fn/predefined.hpp"
+#include "system/workers.hpp"
 
 #include <gtest/gtest.h>
 
 #include <utility>
 #include <vector>
 
+class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
+  protected:
+    void SetUp() override {
+        auto num_cpus = GetParam();
+        ThreadManager::override_concurrency(num_cpus);
+    }
+
+    void TearDown() override { ThreadManager::reset_concurrency_override(); }
+};
+
 struct IdentityInt : ParametricFn<int, int> {
     void body() override { *ret = *std::get<0>(args); }
 };
 
-GTEST_TEST(FnTests, IdentityTest) {
-    IdentityInt id{};
+TEST_P(FnCorrectnessTest, IdentityTest) {
+    IdentityInt *id = new IdentityInt{};
     int x = 5, r = 0;
-    std::get<0>(id.args) = &x;
-    id.ret = &r;
+    std::get<0>(id->args) = &x;
+    id->ret = &r;
     ASSERT_EQ(r, 0);
 
-    id.run();
+    Workers::run(id);
+
     ASSERT_EQ(r, 5);
     ASSERT_EQ(x, 5);
 }
@@ -39,27 +51,28 @@ struct FourWayPlus : ParametricFn<Int, Int, Int, Int, Int> {
         std::get<0>(c->args) = x;
         std::get<1>(c->args) = y;
         c->ret = ret;
+        std::swap(c->conts, this->conts);
 
         a->conts = {c};
         b->conts = {c};
         c->deps = 2;
 
-        a->run();
-        b->run();
+        a->call();
+        b->call();
     }
 };
 
-GTEST_TEST(FnTests, FourWayPlusTest) {
-    FourWayPlus plus{};
+TEST_P(FnCorrectnessTest, FourWayPlusTest) {
+    FourWayPlus *plus = new FourWayPlus{};
     Int w = 11, x = 5, y = 10, z = 22, r = 0;
-    std::get<0>(plus.args) = &w;
-    std::get<1>(plus.args) = &x;
-    std::get<2>(plus.args) = &y;
-    std::get<3>(plus.args) = &z;
-    plus.ret = &r;
+    std::get<0>(plus->args) = &w;
+    std::get<1>(plus->args) = &x;
+    std::get<2>(plus->args) = &y;
+    std::get<3>(plus->args) = &z;
+    plus->ret = &r;
     ASSERT_EQ(r, 0);
 
-    plus.run();
+    Workers::run(plus);
     ASSERT_EQ(w, 11);
     ASSERT_EQ(x, 5);
     ASSERT_EQ(y, 10);
@@ -78,6 +91,7 @@ struct BranchingExample : ParametricFn<Int, Int, Int, Int> {
         post_branch->args = std::make_tuple(t, new Int{2});
         post_branch->ret = ret;
         post_branch->deps = 1;
+        std::swap(post_branch->conts, this->conts);
 
         Plus__BuiltIn *positive_branch = new Plus__BuiltIn;
         positive_branch->args = std::make_tuple(y, new Int{1});
@@ -90,35 +104,35 @@ struct BranchingExample : ParametricFn<Int, Int, Int, Int> {
         negative_branch->conts = {post_branch};
 
         if (x >= 0) {
-            positive_branch->run();
+            positive_branch->call();
         } else {
-            negative_branch->run();
+            negative_branch->call();
         }
     }
 };
 
-GTEST_TEST(FnTests, PositiveBranchingExampleTest) {
-    BranchingExample branching{};
+TEST_P(FnCorrectnessTest, PositiveBranchingExampleTest) {
+    BranchingExample *branching = new BranchingExample{};
     Int x = 5, y = 10, z = 22, r = 0;
-    branching.args = std::make_tuple(&x, &y, &z);
-    branching.ret = &r;
+    branching->args = std::make_tuple(&x, &y, &z);
+    branching->ret = &r;
     ASSERT_EQ(r, 0);
 
-    branching.run();
+    Workers::run(branching);
     ASSERT_EQ(x, 5);
     ASSERT_EQ(y, 10);
     ASSERT_EQ(z, 22);
     ASSERT_EQ(r, 9);
 }
 
-GTEST_TEST(FnTests, NegativeBranchingExampleTest) {
-    BranchingExample branching{};
+TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
+    BranchingExample *branching = new BranchingExample{};
     Int x = -5, y = 10, z = 22, r = 0;
-    branching.args = std::make_tuple(&x, &y, &z);
-    branching.ret = &r;
+    branching->args = std::make_tuple(&x, &y, &z);
+    branching->ret = &r;
     ASSERT_EQ(r, 0);
 
-    branching.run();
+    Workers::run(branching);
     ASSERT_EQ(x, -5);
     ASSERT_EQ(y, 10);
     ASSERT_EQ(z, 22);
@@ -135,20 +149,21 @@ struct ApplyIntBool : ParametricFn<Bool, ParametricFn<Bool, Int>, Int> {
         Int *x = std::get<1>(args);
         f->args = {x};
         f->ret = ret;
-        f->run();
+        std::swap(f->conts, this->conts);
+        f->call();
     }
 };
 
-GTEST_TEST(FnTests, HigherOrderFunctionTest) {
-    ApplyIntBool apply{};
-    EvenOrOdd f{};
+TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
+    ApplyIntBool *apply = new ApplyIntBool{};
+    EvenOrOdd *f = new EvenOrOdd{};
     Int x = 5;
     Bool r = false;
-    apply.args = std::make_tuple(&f, &x);
-    apply.ret = &r;
+    apply->args = std::make_tuple(f, &x);
+    apply->ret = &r;
     ASSERT_FALSE(r);
 
-    apply.run();
+    Workers::run(apply);
     ASSERT_EQ(x, 5);
     ASSERT_TRUE(r);
 }
@@ -159,15 +174,15 @@ struct PairIntBool : ParametricFn<std::tuple<Int, Bool>, Int, Bool> {
     }
 };
 
-GTEST_TEST(FnTests, TupleTest) {
-    PairIntBool pair{};
+TEST_P(FnCorrectnessTest, TupleTest) {
+    PairIntBool *pair = new PairIntBool{};
     Int x = 5;
     Bool y = true;
     Tuple<Int, Bool> r;
-    pair.args = std::make_tuple(&x, &y);
-    pair.ret = &r;
+    pair->args = std::make_tuple(&x, &y);
+    pair->ret = &r;
 
-    pair.run();
+    Workers::run(pair);
     ASSERT_EQ(x, 5);
     ASSERT_TRUE(y);
     ASSERT_EQ(r, std::make_tuple(x, y));
@@ -179,28 +194,28 @@ struct BoolUnion : ParametricFn<Bool, Bull> {
     void body() { *ret = std::get<0>(args)->tag == 0; }
 };
 
-GTEST_TEST(FnTests, ValueFreeUnionTest) {
+TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
     {
-        BoolUnion fn{};
+        BoolUnion *fn = new BoolUnion{};
         Bool r;
         Bull bull{};
         bull.tag = 0;
-        std::get<0>(fn.args) = &bull;
-        fn.ret = &r;
+        std::get<0>(fn->args) = &bull;
+        fn->ret = &r;
 
-        fn.run();
+        Workers::run(fn);
         ASSERT_TRUE(r);
     }
 
     {
-        BoolUnion fn{};
+        BoolUnion *fn = new BoolUnion{};
         Bool r;
         Bull bull{};
         bull.tag = 1;
-        std::get<0>(fn.args) = &bull;
-        fn.ret = &r;
+        std::get<0>(fn->args) = &bull;
+        fn->ret = &r;
 
-        fn.run();
+        Workers::run(fn);
         ASSERT_FALSE(r);
     }
 }
@@ -221,7 +236,7 @@ struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
     }
 };
 
-GTEST_TEST(FnTests, ValueIncludedUnionTest) {
+TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
     for (const auto &[tag, value, result] :
          std::vector<std::tuple<int, int, bool>>{{1, 0, false},
                                                  {1, 1, true},
@@ -237,12 +252,12 @@ GTEST_TEST(FnTests, ValueIncludedUnionTest) {
             *reinterpret_cast<bool *>(&either.value) = value;
         }
 
-        EitherIntBoolExtractor fn{};
+        EitherIntBoolExtractor *fn = new EitherIntBoolExtractor{};
         Bool r;
-        std::get<0>(fn.args) = &either;
-        fn.ret = &r;
+        std::get<0>(fn->args) = &either;
+        fn->ret = &r;
 
-        fn.run();
+        Workers::run(fn);
         ASSERT_EQ(r, result);
     }
 }
@@ -275,9 +290,10 @@ struct ListIntSum : ParametricFn<Int, ListInt> {
             plus->ret = this->ret;
             plus->args = std::make_tuple(r, head);
             plus->deps = 1;
+            std::swap(plus->conts, this->conts);
 
             tail_sum->conts = {plus};
-            tail_sum->run();
+            tail_sum->call();
 
             break;
         }
@@ -288,7 +304,7 @@ struct ListIntSum : ParametricFn<Int, ListInt> {
     }
 };
 
-GTEST_TEST(FnTests, RecursiveTypeTest) {
+TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ListInt tail{};
     tail.tag = 1;
     ListInt_ wrapped_tail = tail;
@@ -305,11 +321,15 @@ GTEST_TEST(FnTests, RecursiveTypeTest) {
     *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
 
     Int r = 0;
-    ListIntSum adder{};
-    adder.args = std::make_tuple(&first);
-    adder.ret = &r;
+    ListIntSum *adder = new ListIntSum{};
+    adder->args = std::make_tuple(&first);
+    adder->ret = &r;
     ASSERT_EQ(r, 0);
 
-    adder.run();
+    Workers::run(adder);
     ASSERT_EQ(r, 3);
 }
+
+const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
+INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
+                         ::testing::ValuesIn(cpu_counts));

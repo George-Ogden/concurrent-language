@@ -107,11 +107,14 @@ class ThreadManager {
         try {
             thread_setup(cpu_id, verbose);
             R result = f(std::forward<T>(arg));
-            if (verbose) {
-                m.lock();
-                std::cout << "Thread on CPU " << cpu_id
-                          << " finished with result " << result << std::endl;
-                m.unlock();
+            if constexpr (std::is_convertible_v<T, std::ostream &>) {
+                if (verbose) {
+                    m.lock();
+                    std::cout << "Thread on CPU " << cpu_id
+                              << " finished with result " << result
+                              << std::endl;
+                    m.unlock();
+                }
             }
             return result;
         } catch (const std::exception &e) {
@@ -124,7 +127,7 @@ class ThreadManager {
 
     struct RunConfig {
         unsigned int num_cpus;
-        bool verbose = true;
+        bool verbose = false;
     };
 
     template <typename F, typename T>
