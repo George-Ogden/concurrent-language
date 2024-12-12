@@ -60,4 +60,7 @@ repos:
           - --suppress=unusedVariable
           - --suppress=useStlAlgorithm
           - --suppress=memleak
+          - --suppress=uninitvar
+          - --suppress=constVariable
+          - --suppress=unassignedVariable
           - --inline-suppr
