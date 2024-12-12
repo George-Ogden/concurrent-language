@@ -231,6 +231,7 @@ GTEST_TEST(FnTests, ValueIncludedUnionTest) {
         EitherIntBool either{};
         either.tag = tag;
         if (tag == 0) {
+
             *reinterpret_cast<int *>(&either.value) = value;
         } else {
             *reinterpret_cast<bool *>(&either.value) = value;
@@ -244,4 +245,71 @@ GTEST_TEST(FnTests, ValueIncludedUnionTest) {
         fn.run();
         ASSERT_EQ(r, result);
     }
+}
+
+struct ListInt_;
+typedef Tuple<Int, ListInt_ *> Cons;
+struct ListInt_ {
+    using type = Variant<Cons, Tuple<>>;
+    type value;
+    // cppcheck-suppress noExplicitConstructor
+    ListInt_(type value) : value(value) {}
+};
+using ListInt = ListInt_::type;
+
+struct ListIntSum : ParametricFn<Int, ListInt> {
+    void body() {
+        ListInt list = *std::get<0>(args);
+        switch (list.tag) {
+        case 0: {
+            Cons cons = *reinterpret_cast<Cons *>(&list.value);
+            ListInt_ *tail = std::get<1>(cons);
+            Int *head = new Int{std::get<0>(cons)};
+
+            Int *r = new Int{};
+            ListIntSum *tail_sum = new ListIntSum{};
+            tail_sum->args = std::make_tuple(&tail->value);
+            tail_sum->ret = r;
+
+            Plus__BuiltIn *plus = new Plus__BuiltIn{};
+            plus->ret = this->ret;
+            plus->args = std::make_tuple(r, head);
+            plus->deps = 1;
+
+            tail_sum->conts = {plus};
+            tail_sum->run();
+
+            break;
+        }
+        case 1:
+            *ret = 0;
+            break;
+        }
+    }
+};
+
+GTEST_TEST(FnTests, RecursiveTypeTest) {
+    ListInt tail{};
+    tail.tag = 1;
+    ListInt_ wrapped_tail = tail;
+    ListInt third{};
+    third.tag = 0;
+    *reinterpret_cast<Cons *>(&third.value) = Cons(8, &wrapped_tail);
+    ListInt_ wrapped_third = third;
+    ListInt second{};
+    second.tag = 0;
+    *reinterpret_cast<Cons *>(&second.value) = Cons(4, &wrapped_third);
+    ListInt_ wrapped_second = second;
+    ListInt first{};
+    first.tag = 0;
+    *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
+
+    Int r = 0;
+    ListIntSum adder{};
+    adder.args = std::make_tuple(&first);
+    adder.ret = &r;
+    ASSERT_EQ(r, 0);
+
+    adder.run();
+    ASSERT_EQ(r, 3);
 }
