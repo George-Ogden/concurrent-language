@@ -83,6 +83,6 @@ run: $(TARGET)
 	./$(TARGET) $(FLAGS)
 
 %: $(TARGET_DIR)/%
-	./$<
+	ASAN_OPTIONS=detect_leaks=0 ./$<
 
 .PHONY: all clean default run

@@ -48,3 +48,46 @@ GTEST_TEST(FnTests, MinusTest) {
     ASSERT_EQ(y, 10);
     ASSERT_EQ(r, -5);
 }
+
+struct FourWayPlus : ParametricFn<Int, Int, Int, Int, Int> {
+    void body() override {
+        Plus__BuiltIn *a = new Plus__BuiltIn{}, *b = new Plus__BuiltIn{};
+        std::get<0>(a->args) = std::get<0>(args);
+        std::get<1>(a->args) = std::get<1>(args);
+        std::get<0>(b->args) = std::get<2>(args);
+        std::get<1>(b->args) = std::get<3>(args);
+        Int *x = new Int{}, *y = new Int{};
+        a->ret = x;
+        b->ret = y;
+
+        Plus__BuiltIn *c = new Plus__BuiltIn{};
+        std::get<0>(c->args) = x;
+        std::get<1>(c->args) = y;
+        c->ret = ret;
+
+        a->conts = {c};
+        b->conts = {c};
+        c->deps = 2;
+
+        a->run();
+        b->run();
+    }
+};
+
+GTEST_TEST(FnTests, FourWayPlusTest) {
+    FourWayPlus plus{};
+    Int w = 11, x = 5, y = 10, z = 22, r = 0;
+    std::get<0>(plus.args) = &w;
+    std::get<1>(plus.args) = &x;
+    std::get<2>(plus.args) = &y;
+    std::get<3>(plus.args) = &z;
+    plus.ret = &r;
+    ASSERT_EQ(r, 0);
+
+    plus.run();
+    ASSERT_EQ(w, 11);
+    ASSERT_EQ(x, 5);
+    ASSERT_EQ(y, 10);
+    ASSERT_EQ(z, 22);
+    ASSERT_EQ(r, 48);
+}
