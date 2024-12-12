@@ -34,3 +34,17 @@ GTEST_TEST(FnTests, PlusTest) {
     ASSERT_EQ(y, 10);
     ASSERT_EQ(r, 15);
 }
+
+GTEST_TEST(FnTests, MinusTest) {
+    Minus__BuiltIn minus{};
+    Int x = 5, y = 10, r = 0;
+    std::get<0>(minus.args) = &x;
+    std::get<1>(minus.args) = &y;
+    minus.ret = &r;
+    ASSERT_EQ(r, 0);
+
+    minus.run();
+    ASSERT_EQ(x, 5);
+    ASSERT_EQ(y, 10);
+    ASSERT_EQ(r, -5);
+}
