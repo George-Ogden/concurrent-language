@@ -1,7 +1,7 @@
 CXX := g++
 CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors
 OPTIMIZATION := -Ofast
-LIBS :=
+LIBS := -lpthread
 INCLUDE := -Iinclude
 
 TARGET_DIR := bin
@@ -18,7 +18,7 @@ COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)
 TESTDIR := test
 TEST_LIBS := -lgtest -lgtest_main
 TEST_BUILDDIR := $(BUILD_DIR)/test
-TEST_FLAGS := -g -fsanitize=address -Wl,--wrap=sysconf,--wrap=pthread_setschedparam
+TEST_FLAGS := -g -fsanitize=address -Wl,--wrap=sysconf,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
 TEST_INCLUDE := $(wildcard $(TESTDIR)/*.hpp)
 TEST_FILE := $(TEST_BUILDDIR)/test.cpp
 TEST_EXECS := $(patsubst $(TESTDIR)/test_%.hpp, $(TARGET_DIR)/test_%, $(filter $(TESTDIR)/test_%.hpp, $(TEST_INCLUDE)))
