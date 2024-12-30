@@ -1,0 +1,8 @@
+[package]
+name = "lowering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+from_variants = { version = "0.1.0", path = "../from_variants" }
+type-checker = { version = "0.1.0", path = "../type-checker" }

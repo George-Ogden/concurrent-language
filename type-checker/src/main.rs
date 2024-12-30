@@ -1,11 +1,6 @@
-mod ast_nodes;
-mod type_check;
-mod type_check_nodes;
-mod utils;
-
-use ast_nodes::*;
 use std::io::{self, Read};
-use type_check::TypeChecker;
+use type_checker::Program;
+use type_checker::TypeChecker;
 
 fn main() {
     let mut input = String::new();
