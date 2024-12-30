@@ -1,22 +1,11 @@
 #pragma once
 
-#include "utils/time_utils.hpp"
-#include "work/sleep.hpp"
+#include "time/sleep.hpp"
+#include "time/utils.hpp"
 
 #include <gtest/gtest.h>
 
 #include <chrono>
-
-TEST(DISABLED_BusyWait, TestBusyWait) {
-    auto duration = std::chrono::seconds(5);
-    auto start = time_utils::now();
-
-    busy_work(Unit());
-
-    auto elapsed = time_utils::now() - start;
-    EXPECT_LT(elapsed, duration + std::chrono::milliseconds(100));
-    EXPECT_GE(elapsed, duration);
-}
 
 TEST(DISABLED_SleepTest, SleepsForTwoSeconds) {
     auto duration = std::chrono::seconds(2);
