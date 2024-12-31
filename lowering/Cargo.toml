@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 from_variants = { version = "0.1.0", path = "../from_variants" }
+test-case = "3.3.1"
 type_checker = { version = "0.1.0", path = "../type-checker" }

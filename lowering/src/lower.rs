@@ -48,26 +48,23 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_lower_int_expressions() {
-        let expression = TypedExpression::Integer(Integer { value: 4 });
-        let scope = Scope::new();
+    use test_case::test_case;
+
+    #[test_case(
+        TypedExpression::Integer(Integer { value: 4 }),
+        BuiltIn::Integer(Integer { value: 4 }).into(),
+        Scope::new();
+        "integer"
+    )]
+    #[test_case(
+        TypedExpression::Boolean(Boolean { value: true }),
+        BuiltIn::Boolean(Boolean { value: true }).into(),
+        Scope::new();
+        "boolean"
+    )]
+    fn test_lower_expression(expression: TypedExpression, value: Value, scope: Scope) {
         let mut history = History::new();
         let computation = Lowerer::lower_computations(expression, &scope, &mut history);
-        assert_eq!(
-            computation,
-            Value::BuiltIn(BuiltIn::Integer(Integer { value: 4 }))
-        )
-    }
-    #[test]
-    fn test_lower_bool_expressions() {
-        let expression = TypedExpression::Boolean(Boolean { value: true });
-        let scope = Scope::new();
-        let mut history = History::new();
-        let computation = Lowerer::lower_computations(expression, &scope, &mut history);
-        assert_eq!(
-            computation,
-            Value::BuiltIn(BuiltIn::Boolean(Boolean { value: true }))
-        )
+        assert_eq!(computation, value)
     }
 }
