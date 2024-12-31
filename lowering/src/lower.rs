@@ -30,12 +30,16 @@ type History = HashMap<Value, Register>;
 
 struct Lowerer {}
 impl Lowerer {
-    fn extract_computations(
+    fn lower_computations(
         expression: TypedExpression,
         scope: &Scope,
         history: &mut History,
     ) -> Value {
-        BuiltIn::from(Integer { value: 4 }).into()
+        match expression {
+            TypedExpression::Integer(integer) => BuiltIn::Integer(integer).into(),
+            TypedExpression::Boolean(boolean) => BuiltIn::Boolean(boolean).into(),
+            _ => todo!(),
+        }
     }
 }
 
@@ -45,14 +49,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_int_expressions() {
+    fn test_lower_int_expressions() {
         let expression = TypedExpression::Integer(Integer { value: 4 });
         let scope = Scope::new();
         let mut history = History::new();
-        let computation = Lowerer::extract_computations(expression, &scope, &mut history);
+        let computation = Lowerer::lower_computations(expression, &scope, &mut history);
         assert_eq!(
             computation,
             Value::BuiltIn(BuiltIn::Integer(Integer { value: 4 }))
+        )
+    }
+    #[test]
+    fn test_lower_bool_expressions() {
+        let expression = TypedExpression::Boolean(Boolean { value: true });
+        let scope = Scope::new();
+        let mut history = History::new();
+        let computation = Lowerer::lower_computations(expression, &scope, &mut history);
+        assert_eq!(
+            computation,
+            Value::BuiltIn(BuiltIn::Boolean(Boolean { value: true }))
         )
     }
 }
