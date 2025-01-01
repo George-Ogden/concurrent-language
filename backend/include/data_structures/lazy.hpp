@@ -6,6 +6,7 @@ template <typename T> struct Lazy {
     virtual bool done() const = 0;
     virtual T value() = 0;
     virtual void add_continuation(Continuation c) = 0;
+    virtual ~Lazy(){};
 };
 
 template <typename T> class LazyConstant : public Lazy<T> {

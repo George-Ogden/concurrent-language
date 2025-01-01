@@ -9,10 +9,9 @@
 
 template <typename R, typename... Ts>
 struct Op__BuiltIn : public ParametricFn<R, Ts...> {
-    void body() override { apply(std::index_sequence_for<Ts...>{}); }
-    template <std::size_t... I> void apply(std::index_sequence<I...>) {
-        (*this->ret) = op(*std::get<I>(this->args)...);
-    }
+    virtual std::decay_t<R> body(std::add_const_t<Ts>... args) override {
+        return op(args...);
+    };
     virtual std::decay_t<R> op(std::add_const_t<Ts>...) const = 0;
 };
 
