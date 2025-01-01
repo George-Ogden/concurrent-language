@@ -1,7 +1,7 @@
 #pragma once
 
 #include "fn/fn.hpp"
-#include "fn/predefined.hpp"
+#include "fn/operators.hpp"
 
 #include <gtest/gtest.h>
 

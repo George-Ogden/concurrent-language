@@ -6,6 +6,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 #include <variant>
 
 struct Lock {
@@ -91,3 +92,15 @@ Lock *Lock::from_type(Lock::LockType type) {
     }
     return nullptr;
 }
+
+template <typename T, typename LockT = ExchangeLock> struct Locked {
+    static_assert(std::is_base_of_v<Lock, LockT>);
+    LockT lock;
+    T value;
+    T &operator*() { return value; }
+    T *operator->() { return &value; }
+    bool try_acquire() { return lock.try_acquire(); }
+    bool release() { return lock.release(); }
+    void acquire() { return lock.acquire(); }
+    bool held() const { return lock.held(); }
+};
