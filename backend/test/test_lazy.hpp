@@ -5,7 +5,7 @@
 #include "fn/continuation.hpp"
 #include "fn/operators.hpp"
 #include "system/thread_manager.hpp"
-#include "types/predefined.hpp"
+#include "types/builtin.hpp"
 
 #include <gtest/gtest.h>
 

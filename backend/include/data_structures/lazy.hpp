@@ -27,8 +27,7 @@ template <typename T> class LazyConstant : public Lazy<T> {
     const T data;
 
   public:
-    // cppcheck-suppress noExplicitConstructor
-    LazyConstant(const T &data) : data(data) {}
+    explicit LazyConstant(const T &data) : data(data) {}
     bool done() const override { return true; }
     T value() override { return data; }
     void add_continuation(Continuation c) override {

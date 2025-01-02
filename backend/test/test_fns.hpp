@@ -4,6 +4,8 @@
 #include "fn/fn.hpp"
 #include "fn/operators.hpp"
 #include "system/work_manager.hpp"
+#include "types/builtin.hpp"
+#include "types/compound.hpp"
 
 #include <gtest/gtest.h>
 
@@ -300,9 +302,9 @@ struct EvenOrOdd : ParametricFn<Bool, Int> {
     Bool body(Int &x) override { return static_cast<bool>(x); }
 };
 
-struct ApplyIntBool : ParametricFn<Bool, ParametricFn<Bool, Int> *, Int> {
-    using ParametricFn<Bool, ParametricFn<Bool, Int> *, Int>::ParametricFn;
-    Bool body(ParametricFn<Bool, Int> *&f, Int &x) override {
+struct ApplyIntBool : ParametricFn<Bool, FnT<Bool, Int>, Int> {
+    using ParametricFn<Bool, FnT<Bool, Int>, Int>::ParametricFn;
+    Bool body(FnT<Bool, Int> &f, Int &x) override {
         f->args = reference_all(x);
         f->run();
         return f->value();
@@ -310,7 +312,7 @@ struct ApplyIntBool : ParametricFn<Bool, ParametricFn<Bool, Int> *, Int> {
 };
 
 TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
-    ParametricFn<Bool, Int> *f = new EvenOrOdd{};
+    FnT<Bool, Int> f = new EvenOrOdd{};
     Int x = 5;
     ApplyIntBool *apply = new ApplyIntBool{f, x};
 
@@ -318,9 +320,9 @@ TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
     ASSERT_TRUE(apply->ret);
 }
 
-struct PairIntBool : ParametricFn<std::tuple<Int, Bool>, Int, Bool> {
-    using ParametricFn<std::tuple<Int, Bool>, Int, Bool>::ParametricFn;
-    std::tuple<Int, Bool> body(Int &x, Bool &y) override {
+struct PairIntBool : ParametricFn<TupleT<Int, Bool>, Int, Bool> {
+    using ParametricFn<TupleT<Int, Bool>, Int, Bool>::ParametricFn;
+    TupleT<Int, Bool> body(Int &x, Bool &y) override {
         return std::make_tuple(x, y);
     }
 };
@@ -334,7 +336,7 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     ASSERT_EQ(pair->ret, std::make_tuple(5, true));
 }
 
-using Bull = Variant<std::monostate, std::monostate>;
+using Bull = VariantT<std::monostate, std::monostate>;
 
 struct BoolUnion : ParametricFn<Bool, Bull> {
     using ParametricFn<Bool, Bull>::ParametricFn;
@@ -361,7 +363,7 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
     }
 }
 
-using EitherIntBool = Variant<Int, Bool>;
+using EitherIntBool = VariantT<Int, Bool>;
 
 struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
     using ParametricFn<Bool, EitherIntBool>::ParametricFn;
@@ -400,9 +402,9 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
 }
 
 struct ListInt_;
-typedef Tuple<Int, ListInt_ *> Cons;
+typedef TupleT<Int, ListInt_ *> Cons;
 struct ListInt_ {
-    using type = Variant<Cons, Tuple<>>;
+    using type = VariantT<Cons, TupleT<>>;
     type value;
     // cppcheck-suppress noExplicitConstructor
     ListInt_(type value) : value(value) {}
