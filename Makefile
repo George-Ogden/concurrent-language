@@ -39,5 +39,8 @@ test: $(PARSER)
 
 clean:
 	rm -rf $(GRAMMAR)
+	cargo clean --manifest-path $(TYPE_CHECKER_MANIFEST)
+	make -C backend clean
+	find -path '*/__pycache__*' -delete
 
 .PHONY: all clean parse type-check
