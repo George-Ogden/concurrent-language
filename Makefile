@@ -2,7 +2,7 @@
 
 PARSER := parser
 GRAMMAR := parser/grammar
-TYPE_CHECKER := type-checker/target/debug/type-checker
+TYPE_CHECKER := type-checker/target/debug/type_checker
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
 BACKEND := backend/bin/main
 
@@ -28,7 +28,7 @@ parse: $(GRAMMAR)
 type-check: $(TYPE_CHECKER)
 	cat samples/triangular.txt | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER)
 
-test: $(PARSER)
+test: $(PARSER) $(TYPE_CHECKER)
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv
 	make -C backend bin/test
