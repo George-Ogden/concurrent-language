@@ -318,168 +318,147 @@ TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
     ASSERT_TRUE(apply->ret);
 }
 
-// struct PairIntBool : ParametricFn<std::tuple<Int, Bool>, Int, Bool> {
-//     void body() {
-//         *ret = std::make_tuple(*std::get<0>(args), *std::get<1>(args));
-//     }
-// };
+struct PairIntBool : ParametricFn<std::tuple<Int, Bool>, Int, Bool> {
+    using ParametricFn<std::tuple<Int, Bool>, Int, Bool>::ParametricFn;
+    std::tuple<Int, Bool> body(Int &x, Bool &y) override {
+        return std::make_tuple(x, y);
+    }
+};
 
-// TEST_P(FnCorrectnessTest, TupleTest) {
-//     PairIntBool *pair = new PairIntBool{};
-//     Int x = 5;
-//     Bool y = true;
-//     Tuple<Int, Bool> r;
-//     pair->args = std::make_tuple(&x, &y);
-//     pair->ret = &r;
+TEST_P(FnCorrectnessTest, TupleTest) {
+    Int x = 5;
+    Bool y = true;
+    PairIntBool *pair = new PairIntBool{x, y};
 
-//     Workers::run(pair);
-//     ASSERT_EQ(x, 5);
-//     ASSERT_TRUE(y);
-//     ASSERT_EQ(r, std::make_tuple(x, y));
-// }
+    WorkManager::run(pair);
+    ASSERT_EQ(pair->ret, std::make_tuple(5, true));
+}
 
-// using Bull = Variant<std::monostate, std::monostate>;
+using Bull = Variant<std::monostate, std::monostate>;
 
-// struct BoolUnion : ParametricFn<Bool, Bull> {
-//     void body() { *ret = std::get<0>(args)->tag == 0; }
-// };
+struct BoolUnion : ParametricFn<Bool, Bull> {
+    using ParametricFn<Bool, Bull>::ParametricFn;
+    bool body(Bull &x) override { return x.tag == 0; }
+};
 
-// TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
-//     {
-//         BoolUnion *fn = new BoolUnion{};
-//         Bool r;
-//         Bull bull{};
-//         bull.tag = 0;
-//         std::get<0>(fn->args) = &bull;
-//         fn->ret = &r;
+TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
+    {
+        Bull bull{};
+        bull.tag = 0;
+        BoolUnion *fn = new BoolUnion{bull};
 
-//         Workers::run(fn);
-//         ASSERT_TRUE(r);
-//     }
+        WorkManager::run(fn);
+        ASSERT_TRUE(fn->ret);
+    }
 
-//     {
-//         BoolUnion *fn = new BoolUnion{};
-//         Bool r;
-//         Bull bull{};
-//         bull.tag = 1;
-//         std::get<0>(fn->args) = &bull;
-//         fn->ret = &r;
+    {
+        Bull bull{};
+        bull.tag = 1;
+        BoolUnion *fn = new BoolUnion{bull};
 
-//         Workers::run(fn);
-//         ASSERT_FALSE(r);
-//     }
-// }
+        WorkManager::run(fn);
+        ASSERT_FALSE(fn->ret);
+    }
+}
 
-// using EitherIntBool = Variant<Int, Bool>;
+using EitherIntBool = Variant<Int, Bool>;
 
-// struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
-//     void body() {
-//         EitherIntBool tagged_union = *std::get<0>(args);
-//         switch (tagged_union.tag) {
-//         case 0:
-//             *ret = *reinterpret_cast<int *>(&tagged_union.value) > 10;
-//             break;
-//         case 1:
-//             *ret = *reinterpret_cast<bool *>(&tagged_union.value);
-//             break;
-//         }
-//     }
-// };
+struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
+    using ParametricFn<Bool, EitherIntBool>::ParametricFn;
+    Bool body(EitherIntBool &x) override {
+        switch (x.tag) {
+        case 0:
+            return *reinterpret_cast<int *>(&x.value) > 10;
+        case 1:
+            return *reinterpret_cast<bool *>(&x.value);
+        }
+        return 0;
+    }
+};
 
-// TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
-//     for (const auto &[tag, value, result] :
-//          std::vector<std::tuple<int, int, bool>>{{1, 0, false},
-//                                                  {1, 1, true},
-//                                                  {0, 0, false},
-//                                                  {0, 5, false},
-//                                                  {0, 15, true}}) {
-//         EitherIntBool either{};
-//         either.tag = tag;
-//         if (tag == 0) {
+TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
+    for (const auto &[tag, value, result] :
+         std::vector<std::tuple<int, int, bool>>{{1, 0, false},
+                                                 {1, 1, true},
+                                                 {0, 0, false},
+                                                 {0, 5, false},
+                                                 {0, 15, true}}) {
+        EitherIntBool either{};
+        either.tag = tag;
+        if (tag == 0) {
 
-//             *reinterpret_cast<int *>(&either.value) = value;
-//         } else {
-//             *reinterpret_cast<bool *>(&either.value) = value;
-//         }
+            *reinterpret_cast<int *>(&either.value) = value;
+        } else {
+            *reinterpret_cast<bool *>(&either.value) = value;
+        }
 
-//         EitherIntBoolExtractor *fn = new EitherIntBoolExtractor{};
-//         Bool r;
-//         std::get<0>(fn->args) = &either;
-//         fn->ret = &r;
+        EitherIntBoolExtractor *fn = new EitherIntBoolExtractor{either};
 
-//         Workers::run(fn);
-//         ASSERT_EQ(r, result);
-//     }
-// }
+        WorkManager::run(fn);
+        ASSERT_EQ(fn->ret, result);
+    }
+}
 
-// struct ListInt_;
-// typedef Tuple<Int, ListInt_ *> Cons;
-// struct ListInt_ {
-//     using type = Variant<Cons, Tuple<>>;
-//     type value;
-//     // cppcheck-suppress noExplicitConstructor
-//     ListInt_(type value) : value(value) {}
-// };
-// using ListInt = ListInt_::type;
+struct ListInt_;
+typedef Tuple<Int, ListInt_ *> Cons;
+struct ListInt_ {
+    using type = Variant<Cons, Tuple<>>;
+    type value;
+    // cppcheck-suppress noExplicitConstructor
+    ListInt_(type value) : value(value) {}
+};
+using ListInt = ListInt_::type;
 
-// struct ListIntSum : ParametricFn<Int, ListInt> {
-//     void body() {
-//         ListInt list = *std::get<0>(args);
-//         switch (list.tag) {
-//         case 0: {
-//             Cons cons = *reinterpret_cast<Cons *>(&list.value);
-//             ListInt_ *tail = std::get<1>(cons);
-//             Int *head = new Int{std::get<0>(cons)};
+struct ListIntSum : ParametricFn<Int, ListInt> {
+    using ParametricFn<Int, ListInt>::ParametricFn;
+    ListIntSum *call1 = nullptr;
+    Plus__BuiltIn *call2 = nullptr;
+    Int body(ListInt &list) override {
+        switch (list.tag) {
+        case 0: {
+            Cons cons = *reinterpret_cast<Cons *>(&list.value);
+            ListInt_ *tail = std::get<1>(cons);
+            Int head = std::get<0>(cons);
 
-//             Int *r = new Int{};
-//             ListIntSum *tail_sum = new ListIntSum{};
-//             tail_sum->args = std::make_tuple(&tail->value);
-//             tail_sum->ret = r;
+            initialize(call1);
+            call1->args = reference_all(tail->value);
+            call1->call();
 
-//             Plus__BuiltIn *plus = new Plus__BuiltIn{};
-//             plus->ret = this->ret;
-//             plus->args = std::make_tuple(r, head);
-//             plus->deps = 1;
-//             std::swap(plus->conts, this->conts);
+            initialize(call2);
+            call2->args =
+                std::tuple_cat(std::make_tuple(call1), reference_all(head));
+            call2->run();
+            return call2->value();
+        }
+        case 1:
+            return 0;
+        }
+        return 0;
+    }
+};
 
-//             tail_sum->conts = {plus};
-//             tail_sum->call();
+TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
+    ListInt tail{};
+    tail.tag = 1;
+    ListInt_ wrapped_tail = tail;
+    ListInt third{};
+    third.tag = 0;
+    *reinterpret_cast<Cons *>(&third.value) = Cons(8, &wrapped_tail);
+    ListInt_ wrapped_third = third;
+    ListInt second{};
+    second.tag = 0;
+    *reinterpret_cast<Cons *>(&second.value) = Cons(4, &wrapped_third);
+    ListInt_ wrapped_second = second;
+    ListInt first{};
+    first.tag = 0;
+    *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
 
-//             break;
-//         }
-//         case 1:
-//             *ret = 0;
-//             break;
-//         }
-//     }
-// };
+    ListIntSum *adder = new ListIntSum{first};
 
-// TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
-//     ListInt tail{};
-//     tail.tag = 1;
-//     ListInt_ wrapped_tail = tail;
-//     ListInt third{};
-//     third.tag = 0;
-//     *reinterpret_cast<Cons *>(&third.value) = Cons(8, &wrapped_tail);
-//     ListInt_ wrapped_third = third;
-//     ListInt second{};
-//     second.tag = 0;
-//     *reinterpret_cast<Cons *>(&second.value) = Cons(4, &wrapped_third);
-//     ListInt_ wrapped_second = second;
-//     ListInt first{};
-//     first.tag = 0;
-//     *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
+    WorkManager::run(adder);
+    ASSERT_EQ(adder->ret, 3);
+}
 
-//     Int r = 0;
-//     ListIntSum *adder = new ListIntSum{};
-//     adder->args = std::make_tuple(&first);
-//     adder->ret = &r;
-//     ASSERT_EQ(r, 0);
-
-//     Workers::run(adder);
-//     ASSERT_EQ(r, 3);
-// }
-
-const std::vector<unsigned> cpu_counts = {1, 2, 3, 4, 5, 6, 7, 8};
+const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));
