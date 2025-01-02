@@ -41,6 +41,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     ArgsT args;
     R ret;
     ParametricFn() {}
+    template <typename = std::enable_if<(sizeof...(Args) > 0)>>
     explicit ParametricFn(
         std::add_const_t<std::add_lvalue_reference_t<Args>>... args)
         : args(reference_all(args...)) {}
@@ -55,7 +56,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         done_flag.store(true, std::memory_order_release);
         continuations.acquire();
         for (const Continuation &c : *continuations) {
-            update_continuation(c);
+            Lazy<Ret>::update_continuation(c);
         }
         continuations.release();
     }
@@ -85,15 +86,10 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         continuations.acquire();
         if (done()) {
             continuations.release();
-            update_continuation(c);
+            Lazy<Ret>::update_continuation(c);
         } else {
             continuations->push_back(c);
             continuations.release();
-        }
-    }
-    void update_continuation(Continuation c) {
-        if (c.remaining.fetch_sub(1, std::memory_order_relaxed) == 1) {
-            c.counter.fetch_add(1, std::memory_order_relaxed);
         }
     }
 };
@@ -102,3 +98,17 @@ class FinishWork : public Fn {
     void run() override{};
     bool done() const override { return true; };
 };
+
+template <typename T> struct BlockFn : public ParametricFn<T> {
+    std::function<T()> body_fn;
+    T body() override { return body_fn(); }
+    bool done() const override { return ParametricFn<T>::done(); }
+    explicit BlockFn(std::function<T()> &&f) : body_fn(std::move(f)){};
+};
+
+template <typename F> auto Block(F &&f) {
+    using T = std::invoke_result_t<F>;
+    return BlockFn<std::decay_t<T>>{std::function<T()>{std::forward<F>(f)}};
+}
+
+#include "system/work_manager.hpp"

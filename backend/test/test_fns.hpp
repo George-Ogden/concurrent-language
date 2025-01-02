@@ -126,6 +126,127 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
     ASSERT_EQ(branching->ret, 21);
 }
 
+struct FlatBlockExample : ParametricFn<Int, Int> {
+    using ParametricFn<Int, Int>::ParametricFn;
+    Increment__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3;
+    ParametricFn<Int> *block1 = nullptr, *block2 = nullptr, *block3 = nullptr;
+    Int body(Int &x) override {
+        if (block1 == nullptr) {
+            block1 = new BlockFn<Int>([&]() {
+                initialize(call1);
+                call1->args = reference_all(x);
+                call1->run();
+                return call1->value();
+            });
+        }
+        block1->run();
+        return block1->value();
+    }
+};
+
+TEST_P(FnCorrectnessTest, FlatBlockExampleTest) {
+    Int x = 5;
+    FlatBlockExample *block = new FlatBlockExample{x};
+
+    WorkManager::run(block);
+    ASSERT_EQ(block->ret, 6);
+}
+
+struct NestedBlockExample : ParametricFn<Int, Int> {
+    using ParametricFn<Int, Int>::ParametricFn;
+    Increment__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
+    ParametricFn<Int> *block1 = nullptr, *block2 = nullptr, *block3 = nullptr;
+    Int body(Int &x) override {
+        if (block1 == nullptr) {
+            block1 = new BlockFn<Int>([&]() {
+                initialize(call1);
+                call1->args = reference_all(x);
+                call1->call();
+                if (block2 == nullptr) {
+                    block2 = new BlockFn<Int>([&]() {
+                        initialize(call2);
+                        call2->args = std::make_tuple(call1);
+                        call2->call();
+                        if (block3 == nullptr) {
+                            block3 = new BlockFn<Int>([&] {
+                                initialize(call3);
+                                call3->args = std::make_tuple(call2);
+                                call3->run();
+                                return call3->value();
+                            });
+                        }
+                        block3->run();
+                        return block3->value();
+                    });
+                }
+                block2->run();
+                return block2->value();
+            });
+        }
+        block1->run();
+        return block1->value();
+    }
+};
+
+TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
+    Int x = 5;
+    NestedBlockExample *block = new NestedBlockExample{x};
+
+    WorkManager::run(block);
+    ASSERT_EQ(block->ret, 8);
+}
+
+struct IfStatementExample : ParametricFn<Int, Int, Int, Int> {
+    using ParametricFn<Int, Int, Int, Int>::ParametricFn;
+    Comparison_GE__BuiltIn *call1 = nullptr;
+    ParametricFn<Int> *branch = nullptr;
+    Plus__BuiltIn *call2_1 = nullptr, *call2_2 = nullptr;
+    Minus__BuiltIn *call3 = nullptr;
+    Int body(Int &x, Int &y, Int &z) override {
+        Int a = 1;
+        auto branch1 = Block([&]() {
+            initialize(call2_1);
+            call2_1->args = reference_all(y, a);
+            call2_1->run();
+            return call2_1->value();
+        });
+        auto branch2 = Block([&]() {
+            initialize(call2_2);
+            call2_2->args = reference_all(z, a);
+            call2_2->run();
+            return call2_2->value();
+        });
+
+        initialize(call1);
+        call1->args = reference_all(x, Int(0));
+        call1->run();
+        if (call1->value()) {
+            if (branch == nullptr) {
+                branch = &branch1;
+            }
+            branch->call();
+        } else {
+            if (branch == nullptr) {
+                branch = &branch2;
+            };
+            branch->call();
+        }
+        initialize(call3);
+        call3->args =
+            std::tuple_cat(std::make_tuple(branch), reference_all(Int(2)));
+        call3->run();
+        return call3->value();
+    }
+};
+
+TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
+    Int x = 5, y = 10, z = 22;
+    IfStatementExample *branching = new IfStatementExample{x, y, z};
+
+    WorkManager::run(branching);
+    ASSERT_EQ(branching->ret, 9);
+}
+
 // struct EvenOrOdd : ParametricFn<Bool, Int> {
 //     void body() override { *ret = static_cast<bool>(*std::get<0>(args) & 1);
 //     }

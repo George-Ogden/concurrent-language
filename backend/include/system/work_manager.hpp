@@ -59,6 +59,9 @@ Fn *WorkManager::get_work() {
 
 template <typename... Vs> void WorkManager::await(Vs &...vs) {
     unsigned n = sizeof...(vs);
+    if (n == 0) {
+        return;
+    }
     std::atomic<unsigned> remaining{n};
     std::atomic<unsigned> &counter = counters[ThreadManager::get_id()];
     Continuation c{remaining, counter};

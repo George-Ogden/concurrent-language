@@ -44,6 +44,7 @@ class LazyFunctionTest : public ::testing::Test {
     void SetUp() override {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
+        WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
         lazy_fn = new Increment__BuiltIn{};
         lazy_fn->args = std::make_tuple(&x);
     }
