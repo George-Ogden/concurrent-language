@@ -1,14 +1,13 @@
 #pragma once
 
-#include <cstdint>
 #include <type_traits>
 
-typedef int64_t Int;
-typedef bool Bool;
-template <typename... Ts> using Tuple = std::tuple<Ts...>;
+#include "fn/fn.hpp"
 
-template <typename... Types> struct Variant {
-    static_assert(sizeof...(Types) > 0, "Variant must have at least one type");
+template <typename... Ts> using TupleT = std::tuple<Ts...>;
+
+template <typename... Types> struct VariantT {
+    static_assert(sizeof...(Types) > 0, "VariantT must have at least one type");
 
     using TagType =
         std::conditional_t<(sizeof...(Types) <= 256), std::uint8_t,
@@ -17,5 +16,7 @@ template <typename... Types> struct Variant {
     TagType tag;
     std::aligned_union_t<0, Types...> value;
 
-    Variant() = default;
+    VariantT() = default;
 };
+
+template <typename R, typename... As> using FnT = ParametricFn<R, As...> *;

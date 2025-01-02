@@ -2,7 +2,6 @@
 
 #include <pthread.h>
 #include <sched.h>
-#include <stdio.h>
 #include <system/thread_manager.hpp>
 
 extern "C" {

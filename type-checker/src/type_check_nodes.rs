@@ -238,7 +238,7 @@ impl fmt::Debug for Type {
     }
 }
 
-type Variable = Rc<RefCell<()>>;
+pub type Variable = Rc<RefCell<()>>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedTuple {

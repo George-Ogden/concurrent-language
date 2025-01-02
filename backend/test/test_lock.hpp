@@ -8,6 +8,7 @@
 
 #include <array>
 #include <numeric>
+#include <vector>
 
 template <typename T> class LockAcquireTest : public ::testing::Test {
   public:
@@ -138,4 +139,26 @@ TEST_F(LockCreationTest, ExchangeLockCreation) {
     this->lock = Lock::from_type(Lock::LockType::Atomic);
     ASSERT_NE(dynamic_cast<ExchangeLock *>(lock), nullptr);
     ASSERT_EQ(this->lock->type(), Lock::LockType::Atomic);
+}
+
+TEST(LockWrapperTest, LockWrapperDereference) {
+    Locked<int> x;
+    *x = 3;
+    ASSERT_EQ(*x, 3);
+}
+
+TEST(LockWrapperTest, LockWrapperPointer) {
+    Locked<std::vector<int>> x;
+    *x = {8, 3};
+    ASSERT_EQ(x->size(), 2);
+}
+
+TEST(LockWrapperTest, LockWrapperLock) {
+    Locked<bool> x;
+    x.acquire();
+    ASSERT_TRUE(x.lock.held());
+    ASSERT_TRUE(x.held());
+    x.release();
+    ASSERT_FALSE(x.lock.held());
+    ASSERT_FALSE(x.held());
 }
