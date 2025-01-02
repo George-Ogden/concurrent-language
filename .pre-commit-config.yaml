@@ -63,4 +63,5 @@ repos:
           - --suppress=uninitvar
           - --suppress=constVariable
           - --suppress=unassignedVariable
+          - --suppress=nullPointerRedundantCheck
           - --inline-suppr
