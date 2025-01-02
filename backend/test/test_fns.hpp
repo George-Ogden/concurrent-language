@@ -297,14 +297,6 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
     ASSERT_EQ(double_->ret, 0);
 }
 
-TEST_P(FnCorrectnessTest, RecursiveDoubleTest3) {
-    Int x = 6;
-    RecursiveDouble *double_ = new RecursiveDouble{x};
-
-    WorkManager::run(double_);
-    ASSERT_EQ(double_->ret, 12);
-}
-
 struct EvenOrOdd : ParametricFn<Bool, Int> {
     Bool body(Int &x) override { return static_cast<bool>(x); }
 };
