@@ -2,6 +2,8 @@
 
 #include "fn/continuation.hpp"
 
+#include <type_traits>
+
 template <typename T> struct Lazy {
     virtual bool done() const = 0;
     virtual T value() = 0;

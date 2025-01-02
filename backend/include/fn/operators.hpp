@@ -9,10 +9,22 @@
 
 template <typename R, typename... Ts>
 struct Op__BuiltIn : public ParametricFn<R, Ts...> {
-    virtual std::decay_t<R> body(std::add_const_t<Ts>... args) override {
+    using ParametricFn<R, Ts...>::ParametricFn;
+    std::decay_t<R> body(
+        std::add_const_t<std::add_lvalue_reference_t<std::decay_t<Ts>>>... args)
+        override {
         return op(args...);
     };
     virtual std::decay_t<R> op(std::add_const_t<Ts>...) const = 0;
+    template <typename Tuple> auto expand_values(Tuple &&t) const {
+        return []<std::size_t... I>(auto &&t, std::index_sequence<I...>) {
+            return std::make_tuple(
+                (std::get<I>(std::forward<decltype(t)>(t)).value())...);
+        }
+        (std::forward<Tuple>(t),
+         std::make_index_sequence<
+             std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
+    }
 };
 
 using Unary_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int>;
