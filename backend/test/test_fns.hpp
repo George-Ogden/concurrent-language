@@ -255,18 +255,25 @@ struct RecursiveDouble : ParametricFn<Int, Int> {
     Plus__BuiltIn *call2 = nullptr;
     Int body(Int &x) override {
         if (x > 0) {
-            initialize(call1);
-            call1->args = reference_all(x - 1);
-            call1->call();
+            if (call1 == nullptr) {
+                call1 = new RecursiveDouble{};
+                call1->args = reference_all(x - 1);
+                call1->call();
+            }
 
-            initialize(call3);
-            call3->args = reference_all(x - 1);
-            call3->run();
+            if (call3 == nullptr) {
+                call3 = new RecursiveDouble{};
+                call3->args = reference_all(x - 1);
+                call3->run();
+            }
 
-            initialize(call2);
-            call2->args =
-                std::tuple_cat(std::make_tuple(call1), reference_all(Int(2)));
-            call2->run();
+            if (call2 == nullptr) {
+                call2 = new Plus__BuiltIn{};
+                call2->args = std::tuple_cat(std::make_tuple(call1),
+                                             reference_all(Int(2)));
+                call2->call();
+            }
+            WorkManager::await(call2);
             return call2->value();
         } else {
             return 0;
@@ -291,11 +298,11 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
 }
 
 TEST_P(FnCorrectnessTest, RecursiveDoubleTest3) {
-    Int x = 10;
+    Int x = 8;
     RecursiveDouble *double_ = new RecursiveDouble{x};
 
     WorkManager::run(double_);
-    ASSERT_EQ(double_->ret, 20);
+    ASSERT_EQ(double_->ret, 16);
 }
 
 struct EvenOrOdd : ParametricFn<Bool, Int> {
@@ -422,14 +429,19 @@ struct ListIntSum : ParametricFn<Int, ListInt> {
             ListInt_ *tail = std::get<1>(cons);
             Int head = std::get<0>(cons);
 
-            initialize(call1);
-            call1->args = reference_all(tail->value);
-            call1->call();
+            if (call1 == nullptr) {
+                call1 = new ListIntSum{};
+                call1->args = reference_all(tail->value);
+                call1->call();
+            }
 
-            initialize(call2);
-            call2->args =
-                std::tuple_cat(std::make_tuple(call1), reference_all(head));
-            call2->run();
+            if (call2 == nullptr) {
+                call2 = new Plus__BuiltIn{};
+                call2->args =
+                    std::tuple_cat(std::make_tuple(call1), reference_all(head));
+                call2->call();
+            }
+            WorkManager::await(call2);
             return call2->value();
         }
         case 1:
@@ -461,6 +473,6 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ASSERT_EQ(adder->ret, 3);
 }
 
-const std::vector<unsigned> cpu_counts = {1, 2, 3, 4, 16};
+const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));

@@ -71,11 +71,12 @@ struct ParametricFn : public Fn, Lazy<Ret> {
             args);
         ret = std::apply([this](auto &&...t) { return body(t...); },
                          expand_values(args));
-        done_flag.store(true, std::memory_order_release);
         continuations.acquire();
         for (const Continuation &c : *continuations) {
             Lazy<Ret>::update_continuation(c);
         }
+        continuations->clear();
+        done_flag.store(true, std::memory_order_relaxed);
         continuations.release();
     }
     bool done() const override {
@@ -102,7 +103,6 @@ class FinishWork : public Fn {
 template <typename T> struct BlockFn : public ParametricFn<T> {
     std::function<T()> body_fn;
     T body() override { return body_fn(); }
-    bool done() const override { return ParametricFn<T>::done(); }
     explicit BlockFn(std::function<T()> &&f) : body_fn(std::move(f)){};
 };
 

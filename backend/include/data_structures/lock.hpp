@@ -104,5 +104,5 @@ template <typename T, typename LockT = ExchangeLock> struct Locked {
     void acquire() { return lock.acquire(); }
     bool held() const { return lock.held(); }
     Locked() = default;
-    explicit Locked(T &&value) : value(value) {}
+    template <typename Args> explicit Locked(Args &&value) : value(value) {}
 };

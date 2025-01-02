@@ -5,7 +5,6 @@
 #include "system/work_manager_pre.hpp"
 
 #include <atomic>
-#include <cassert>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -18,7 +17,7 @@ void WorkManager::run(Fn *fn) {
     WorkManager::counters = std::vector<std::atomic<unsigned>>(
         ThreadManager::available_concurrency());
     ThreadManager::run_multithreaded(main, &ref, config);
-    WorkManager::queue->pop_front();
+    WorkManager::queue->clear();
 }
 
 std::monostate WorkManager::main(std::atomic<Fn *> *ref) {
@@ -78,11 +77,7 @@ template <typename... Vs> void WorkManager::await(Vs &...vs) {
                 throw stack_inversion{};
             }
             if (fn != nullptr) {
-                if (dynamic_cast<FinishWork *>(fn) == nullptr) {
-                    fn->run();
-                } else {
-                    fn->call();
-                }
+                fn->run();
             }
         } catch (stack_inversion &e) {
             if (fn != nullptr && !fn->done()) {
