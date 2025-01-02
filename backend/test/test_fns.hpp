@@ -298,11 +298,11 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
 }
 
 TEST_P(FnCorrectnessTest, RecursiveDoubleTest3) {
-    Int x = 8;
+    Int x = 6;
     RecursiveDouble *double_ = new RecursiveDouble{x};
 
     WorkManager::run(double_);
-    ASSERT_EQ(double_->ret, 16);
+    ASSERT_EQ(double_->ret, 12);
 }
 
 struct EvenOrOdd : ParametricFn<Bool, Int> {
