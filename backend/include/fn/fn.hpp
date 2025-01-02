@@ -30,6 +30,24 @@ class Fn {
         WorkManager::queue->push_back(this);
         WorkManager::queue.release();
     }
+    template <typename Tuple> auto static expand_values(Tuple &&t) {
+        return []<std::size_t... I>(auto &&t, std::index_sequence<I...>) {
+            return std::make_tuple(
+                (std::get<I>(std::forward<decltype(t)>(t))->value())...);
+        }
+        (std::forward<Tuple>(t),
+         std::make_index_sequence<
+             std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
+    }
+    template <typename... Ts> auto static reference_all(Ts... args) {
+        return std::make_tuple(new LazyConstant<std::decay_t<Ts>>(args)...);
+    }
+    template <typename T, typename... Ts>
+    static void initialize(T *&fn, Ts &&...args) {
+        if (fn == nullptr) {
+            fn = new T(std::forward<Ts>(args)...);
+        }
+    }
 };
 
 template <typename Ret, typename... Args>
@@ -59,24 +77,6 @@ struct ParametricFn : public Fn, Lazy<Ret> {
             Lazy<Ret>::update_continuation(c);
         }
         continuations.release();
-    }
-    template <typename Tuple> auto expand_values(Tuple &&t) const {
-        return []<std::size_t... I>(auto &&t, std::index_sequence<I...>) {
-            return std::make_tuple(
-                (std::get<I>(std::forward<decltype(t)>(t))->value())...);
-        }
-        (std::forward<Tuple>(t),
-         std::make_index_sequence<
-             std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
-    }
-    template <typename... Ts> auto reference_all(Ts... args) const {
-        return std::make_tuple(new LazyConstant<std::decay_t<Ts>>(args)...);
-    }
-    template <typename T, typename... Ts>
-    static void initialize(T *&fn, Ts &&...args) {
-        if (fn == nullptr) {
-            fn = new T(std::forward<Ts>(args)...);
-        }
     }
     bool done() const override {
         return done_flag.load(std::memory_order_relaxed);

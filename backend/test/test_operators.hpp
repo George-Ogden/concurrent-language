@@ -2,6 +2,7 @@
 
 #include "fn/fn.hpp"
 #include "fn/operators.hpp"
+#include "system/work_manager.hpp"
 
 #include <gtest/gtest.h>
 
@@ -18,14 +19,11 @@ TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
                                   1000000000224LL}) {
         for (Int y : {-8, 4, 3, 17}) {
-            Int r = 0;
-            fn->args = std::make_tuple(&x, &y);
-            fn->ret = &r;
-            ASSERT_EQ(r, 0);
+            fn->args = Fn::reference_all(x, y);
 
-            fn->run();
+            WorkManager::run(fn);
             Int expected = op(x, y);
-            ASSERT_EQ(r, expected);
+            ASSERT_EQ(fn->ret, expected);
         }
     }
 }
@@ -76,14 +74,11 @@ TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
 
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
                                   1000000000224LL}) {
-        Int r = 0;
-        fn->args = std::make_tuple(&x);
-        fn->ret = &r;
-        ASSERT_EQ(r, 0);
+        fn->args = Fn::reference_all(x);
 
-        fn->run();
+        WorkManager::run(fn);
         Int expected = op(x);
-        ASSERT_EQ(r, expected);
+        ASSERT_EQ(fn->ret, expected);
     }
 }
 INSTANTIATE_TEST_SUITE_P(
@@ -103,14 +98,11 @@ TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
                               200,           10024, 1000000000224LL};
     for (Int x : xs) {
         for (Int y : xs) {
-            Bool r = 0;
-            fn->args = std::make_tuple(&x, &y);
-            fn->ret = &r;
-            ASSERT_EQ(r, 0);
+            fn->args = Fn::reference_all(x, y);
 
-            fn->run();
+            WorkManager::run(fn);
             Bool expected = op(x, y);
-            ASSERT_EQ(r, expected);
+            ASSERT_EQ(fn->ret, expected);
         }
     }
 }
