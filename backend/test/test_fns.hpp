@@ -247,6 +247,55 @@ TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
     ASSERT_EQ(branching->ret, 9);
 }
 
+struct RecursiveDouble : ParametricFn<Int, Int> {
+    using ParametricFn<Int, Int>::ParametricFn;
+    RecursiveDouble *call1 = nullptr, *call3 = nullptr;
+    Plus__BuiltIn *call2 = nullptr;
+    Int body(Int &x) override {
+        if (x > 0) {
+            initialize(call1);
+            call1->args = reference_all(x - 1);
+            call1->call();
+
+            initialize(call3);
+            call3->args = reference_all(x - 1);
+            call3->run();
+
+            initialize(call2);
+            call2->args =
+                std::tuple_cat(std::make_tuple(call1), reference_all(Int(2)));
+            call2->run();
+            return call2->value();
+        } else {
+            return 0;
+        }
+    }
+};
+
+TEST_P(FnCorrectnessTest, RecursiveDoubleTest1) {
+    Int x = 2;
+    RecursiveDouble *double_ = new RecursiveDouble{x};
+
+    WorkManager::run(double_);
+    ASSERT_EQ(double_->ret, 4);
+}
+
+TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
+    Int x = -5;
+    RecursiveDouble *double_ = new RecursiveDouble{x};
+
+    WorkManager::run(double_);
+    ASSERT_EQ(double_->ret, 0);
+}
+
+TEST_P(FnCorrectnessTest, RecursiveDoubleTest3) {
+    Int x = 8;
+    RecursiveDouble *double_ = new RecursiveDouble{x};
+
+    WorkManager::run(double_);
+    ASSERT_EQ(double_->ret, 16);
+}
+
 // struct EvenOrOdd : ParametricFn<Bool, Int> {
 //     void body() override { *ret = static_cast<bool>(*std::get<0>(args) & 1);
 //     }
@@ -439,6 +488,6 @@ TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
 //     ASSERT_EQ(r, 3);
 // }
 
-const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
+const std::vector<unsigned> cpu_counts = {1, 2, 3, 4, 5, 6, 7, 8};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));

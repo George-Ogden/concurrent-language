@@ -17,7 +17,7 @@
 using namespace std::literals::chrono_literals;
 
 class Fn {
-    friend class WorkManager;
+    friend struct WorkManager;
 
   protected:
     virtual void run() = 0;

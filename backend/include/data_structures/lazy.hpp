@@ -11,7 +11,14 @@ template <typename T> struct Lazy {
     virtual ~Lazy(){};
     void update_continuation(Continuation c) {
         if (c.remaining.fetch_sub(1, std::memory_order_relaxed) == 1) {
-            c.counter.fetch_add(1, std::memory_order_relaxed);
+            if (!*c.valid)
+                return;
+            c.valid.acquire();
+            if (*c.valid) {
+                *c.valid = false;
+                c.counter.fetch_add(1, std::memory_order_relaxed);
+            }
+            c.valid.release();
         }
     }
 };
