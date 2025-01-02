@@ -291,11 +291,11 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
 }
 
 TEST_P(FnCorrectnessTest, RecursiveDoubleTest3) {
-    Int x = 8;
+    Int x = 10;
     RecursiveDouble *double_ = new RecursiveDouble{x};
 
     WorkManager::run(double_);
-    ASSERT_EQ(double_->ret, 16);
+    ASSERT_EQ(double_->ret, 20);
 }
 
 struct EvenOrOdd : ParametricFn<Bool, Int> {
@@ -461,6 +461,6 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ASSERT_EQ(adder->ret, 3);
 }
 
-const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
+const std::vector<unsigned> cpu_counts = {1, 2, 3, 4, 16};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));

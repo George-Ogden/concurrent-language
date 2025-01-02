@@ -84,8 +84,8 @@ class ThreadManager {
         return param.sched_priority;
     }
 
+    static inline std::atomic<int> waiting_threads;
     static void thread_setup(size_t cpu_id, bool verbose = false) {
-        static std::atomic<int> num_threads = available_concurrency();
         size_t cpu = set_affinity(cpu_id);
         int priority = set_priority();
         m.lock();
@@ -94,9 +94,9 @@ class ThreadManager {
                       << priority << std::endl;
         }
         register_self(cpu_id);
-        num_threads.fetch_add(-1, std::memory_order_acq_rel);
+        waiting_threads.fetch_add(-1, std::memory_order_relaxed);
         m.unlock();
-        while (num_threads.load(std::memory_order_acquire) > 0) {
+        while (waiting_threads.load(std::memory_order_relaxed) > 0) {
         }
     }
 
@@ -136,6 +136,7 @@ class ThreadManager {
         override_concurrency(run_config.num_cpus);
         std::vector<ThreadId> cpu_ids(run_config.num_cpus);
         ranges::iota(cpu_ids, 0);
+        waiting_threads.store(run_config.num_cpus, std::memory_order_relaxed);
 
         std::vector<std::thread> threads;
         ranges::transform(
