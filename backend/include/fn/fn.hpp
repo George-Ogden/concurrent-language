@@ -58,7 +58,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     Locked<std::vector<Continuation>> continuations;
     ArgsT args;
     R ret;
-    ParametricFn() {}
+    ParametricFn() = default;
     template <typename = std::enable_if<(sizeof...(Args) > 0)>>
     explicit ParametricFn(
         std::add_const_t<std::add_lvalue_reference_t<Args>>... args)

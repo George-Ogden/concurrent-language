@@ -296,35 +296,27 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest3) {
     ASSERT_EQ(double_->ret, 16);
 }
 
-// struct EvenOrOdd : ParametricFn<Bool, Int> {
-//     void body() override { *ret = static_cast<bool>(*std::get<0>(args) & 1);
-//     }
-// };
+struct EvenOrOdd : ParametricFn<Bool, Int> {
+    Bool body(Int &x) override { return static_cast<bool>(x); }
+};
 
-// struct ApplyIntBool : ParametricFn<Bool, ParametricFn<Bool, Int>, Int> {
-//     void body() override {
-//         ParametricFn<Bool, Int> *f = std::get<0>(args);
-//         Int *x = std::get<1>(args);
-//         f->args = {x};
-//         f->ret = ret;
-//         std::swap(f->conts, this->conts);
-//         f->call();
-//     }
-// };
+struct ApplyIntBool : ParametricFn<Bool, ParametricFn<Bool, Int> *, Int> {
+    using ParametricFn<Bool, ParametricFn<Bool, Int> *, Int>::ParametricFn;
+    Bool body(ParametricFn<Bool, Int> *&f, Int &x) override {
+        f->args = reference_all(x);
+        f->run();
+        return f->value();
+    }
+};
 
-// TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
-//     ApplyIntBool *apply = new ApplyIntBool{};
-//     EvenOrOdd *f = new EvenOrOdd{};
-//     Int x = 5;
-//     Bool r = false;
-//     apply->args = std::make_tuple(f, &x);
-//     apply->ret = &r;
-//     ASSERT_FALSE(r);
+TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
+    ParametricFn<Bool, Int> *f = new EvenOrOdd{};
+    Int x = 5;
+    ApplyIntBool *apply = new ApplyIntBool{f, x};
 
-//     Workers::run(apply);
-//     ASSERT_EQ(x, 5);
-//     ASSERT_TRUE(r);
-// }
+    WorkManager::run(apply);
+    ASSERT_TRUE(apply->ret);
+}
 
 // struct PairIntBool : ParametricFn<std::tuple<Int, Bool>, Int, Bool> {
 //     void body() {
