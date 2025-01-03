@@ -27,26 +27,41 @@ using Binary_Int_Int_Bool_Op__BuiltIn = Op__BuiltIn<Bool, Int, Int>;
 
 struct Plus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Plus__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x + y; }
 };
 
 struct Minus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Minus__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x - y; }
 };
 
 struct Multiply__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Multiply__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x * y; }
 };
 
 struct Divide__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Divide__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x / y; }
 };
 
 struct Exponentiate__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Exponentiate__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override {
         if (y < 0)
             return 0;
@@ -63,21 +78,33 @@ struct Exponentiate__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
 
 struct Modulo__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Modulo__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x % y; }
 };
 
 struct Left_Shift__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Left_Shift__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x << y; }
 };
 
 struct Right_Shift__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Right_Shift__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x >> y; }
 };
 
 struct Spaceship__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Spaceship__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override {
         const auto o = (x <=> y);
         if (o == std::strong_ordering::less)
@@ -90,55 +117,88 @@ struct Spaceship__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
 
 struct Bitwise_And__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Bitwise_And__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x & y; }
 };
 
 struct Bitwise_Or__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Bitwise_Or__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x | y; }
 };
 
 struct Bitwise_Xor__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Int_Op__BuiltIn *clone() const override {
+        return new Bitwise_Xor__BuiltIn{};
+    }
     Int op(const Int x, const Int y) const override { return x ^ y; }
 };
 
 struct Increment__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
     using Unary_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Unary_Int_Int_Op__BuiltIn *clone() const override {
+        return new Increment__BuiltIn{};
+    }
     Int op(const Int x) const override { return x + 1; }
 };
 
 struct Decrement__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
     using Unary_Int_Int_Op__BuiltIn::Op__BuiltIn;
+    Unary_Int_Int_Op__BuiltIn *clone() const override {
+        return new Decrement__BuiltIn{};
+    }
     Int op(const Int x) const override { return x - 1; }
 };
 
 struct Comparison_LT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Bool_Op__BuiltIn *clone() const override {
+        return new Comparison_LT__BuiltIn{};
+    }
     Bool op(const Int x, const Int y) const override { return x < y; }
 };
 
 struct Comparison_LE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Bool_Op__BuiltIn *clone() const override {
+        return new Comparison_LE__BuiltIn{};
+    }
     Bool op(const Int x, const Int y) const override { return x <= y; }
 };
 
 struct Comparison_GT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Bool_Op__BuiltIn *clone() const override {
+        return new Comparison_GT__BuiltIn{};
+    }
     Bool op(const Int x, const Int y) const override { return x > y; }
 };
 
 struct Comparison_GE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Bool_Op__BuiltIn *clone() const override {
+        return new Comparison_GE__BuiltIn{};
+    }
     Bool op(const Int x, const Int y) const override { return x >= y; }
 };
 
 struct Comparison_EQ__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Bool_Op__BuiltIn *clone() const override {
+        return new Comparison_EQ__BuiltIn{};
+    }
     Bool op(const Int x, const Int y) const override { return x == y; }
 };
 
 struct Comparison_NE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
+    Binary_Int_Int_Bool_Op__BuiltIn *clone() const override {
+        return new Comparison_NE__BuiltIn{};
+    }
     Bool op(const Int x, const Int y) const override { return x != y; }
 };

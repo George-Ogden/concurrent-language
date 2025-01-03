@@ -59,7 +59,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
                               Args>>... args) requires(sizeof...(Args) > 0)
         : args(reference_all(args...)) {}
-
+    virtual ParametricFn<Ret, Args...> *clone() const = 0;
     virtual Lazy<R> *body(std::add_lvalue_reference_t<
                           std::add_pointer_t<Lazy<std::decay_t<Args>>>>...) = 0;
     void run() override {
@@ -91,6 +91,12 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     }
 };
 
+template <typename F, typename R, typename... A>
+struct EasyCloneFn : ParametricFn<R, A...> {
+    using ParametricFn<R, A...>::ParametricFn;
+    ParametricFn<R, A...> *clone() const override { return new F{}; }
+};
+
 class FinishWork : public Fn {
     void run() override{};
     bool done() const override { return true; };
@@ -100,6 +106,8 @@ template <typename T> struct BlockFn : public ParametricFn<T> {
     std::function<Lazy<T> *()> body_fn;
     Lazy<T> *body() override { return body_fn(); }
     explicit BlockFn(std::function<Lazy<T> *()> &&f) : body_fn(std::move(f)){};
+    explicit BlockFn(const std::function<Lazy<T> *()> &f) : body_fn(f){};
+    ParametricFn<T> *clone() const override { return new BlockFn<T>{body_fn}; }
 };
 
 #include "system/work_manager.hpp"
