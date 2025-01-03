@@ -25,7 +25,7 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
 
 struct IdentityInt : ParametricFn<Int, Int> {
     using ParametricFn<Int, Int>::ParametricFn;
-    Int body(Int &x) override { return x; }
+    Lazy<Int> *body(Lazy<Int> *&x) override { return x; }
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
@@ -39,34 +39,42 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
 struct FourWayPlusV1 : ParametricFn<Int, Int, Int, Int, Int> {
     using ParametricFn<Int, Int, Int, Int, Int>::ParametricFn;
     Plus__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
-    Int body(Int &a, Int &b, Int &c, Int &d) override {
-        initialize(call1);
-        call1->args = reference_all(a, b);
-        call1->call();
-        initialize(call2);
-        call2->args = reference_all(c, d);
-        call2->call();
-        initialize(call3);
-        call3->args = std::make_tuple(call1, call2);
-        call3->run();
-        return call3->value();
+    Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
+                    Lazy<Int> *&d) override {
+        if (call1 == nullptr) {
+            call1 = new Plus__BuiltIn(a, b);
+            call1->call();
+        }
+        if (call2 == nullptr) {
+            call2 = new Plus__BuiltIn(c, d);
+            call2->call();
+        }
+        if (call3 == nullptr) {
+            call3 = new Plus__BuiltIn(call1, call2);
+            call3->call();
+        }
+        return call3;
     }
 };
 
 struct FourWayPlusV2 : ParametricFn<Int, Int, Int, Int, Int> {
     using ParametricFn<Int, Int, Int, Int, Int>::ParametricFn;
     Plus__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
-    Int body(Int &a, Int &b, Int &c, Int &d) override {
-        initialize(call1);
-        call1->args = reference_all(a, b);
-        call1->call();
-        initialize(call2);
-        call2->args = std::tuple_cat(std::make_tuple(call1), reference_all(c));
-        call2->call();
-        initialize(call3);
-        call3->args = std::tuple_cat(std::make_tuple(call2), reference_all(d));
-        call3->run();
-        return call3->value();
+    Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
+                    Lazy<Int> *&d) override {
+        if (call1 == nullptr) {
+            call1 = new Plus__BuiltIn(a, b);
+            call1->call();
+        }
+        if (call2 == nullptr) {
+            call2 = new Plus__BuiltIn(call1, c);
+            call2->call();
+        }
+        if (call3 == nullptr) {
+            call3 = new Plus__BuiltIn(call2, d);
+            call3->call();
+        }
+        return call3;
     }
 };
 
@@ -91,24 +99,29 @@ struct BranchingExample : ParametricFn<Int, Int, Int, Int> {
     Comparison_GE__BuiltIn *call1 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
     Minus__BuiltIn *call3 = nullptr;
-    Int body(Int &x, Int &y, Int &z) override {
-        initialize(call1);
-        call1->args = reference_all(x, Int(0));
+    Lazy<Int> *body(Lazy<Int> *&x, Lazy<Int> *&y, Lazy<Int> *&z) override {
+        if (call1 == nullptr) {
+            call1 = new Comparison_GE__BuiltIn{x, new LazyConstant<Int>(0)};
+            call1->call();
+        }
+        WorkManager::await(call1);
         call1->run();
         if (call1->value()) {
-            initialize(call2);
-            call2->args = reference_all(y, Int(1));
-            call2->call();
+            if (call2 == nullptr) {
+                call2 = new Plus__BuiltIn{y, new LazyConstant<Int>(1)};
+                call2->call();
+            }
         } else {
-            initialize(call2);
-            call2->args = reference_all(z, Int(1));
-            call2->call();
+            if (call2 == nullptr) {
+                call2 = new Plus__BuiltIn{z, new LazyConstant<Int>(1)};
+                call2->call();
+            }
         }
-        initialize(call3);
-        call3->args =
-            std::tuple_cat(std::make_tuple(call2), reference_all(Int(2)));
-        call3->run();
-        return call3->value();
+        if (call3 == nullptr) {
+            call3 = new Minus__BuiltIn{call2, new LazyConstant<Int>(2)};
+            call3->call();
+        }
+        return call3;
     }
 };
 
@@ -130,19 +143,20 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
 
 struct FlatBlockExample : ParametricFn<Int, Int> {
     using ParametricFn<Int, Int>::ParametricFn;
-    Increment__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3;
-    ParametricFn<Int> *block1 = nullptr, *block2 = nullptr, *block3 = nullptr;
-    Int body(Int &x) override {
+    Increment__BuiltIn *call1 = nullptr;
+    ParametricFn<Int> *block1 = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
         if (block1 == nullptr) {
             block1 = new BlockFn<Int>([&]() {
-                initialize(call1);
-                call1->args = reference_all(x);
-                call1->run();
-                return call1->value();
+                if (call1 == nullptr) {
+                    call1 = new Increment__BuiltIn{x};
+                    call1->call();
+                }
+                return call1;
             });
+            block1->call();
         }
-        block1->run();
-        return block1->value();
+        return block1;
     }
 };
 
@@ -158,35 +172,38 @@ struct NestedBlockExample : ParametricFn<Int, Int> {
     using ParametricFn<Int, Int>::ParametricFn;
     Increment__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
     ParametricFn<Int> *block1 = nullptr, *block2 = nullptr, *block3 = nullptr;
-    Int body(Int &x) override {
+    Lazy<Int> *body(Lazy<Int> *&x) override {
         if (block1 == nullptr) {
             block1 = new BlockFn<Int>([&]() {
-                initialize(call1);
-                call1->args = reference_all(x);
-                call1->call();
+                if (call1 == nullptr) {
+                    call1 = new Increment__BuiltIn{x};
+                    call1->call();
+                }
                 if (block2 == nullptr) {
                     block2 = new BlockFn<Int>([&]() {
-                        initialize(call2);
-                        call2->args = std::make_tuple(call1);
-                        call2->call();
+                        if (call2 == nullptr) {
+                            call2 = new Increment__BuiltIn{call1};
+                            call2->call();
+                        }
                         if (block3 == nullptr) {
                             block3 = new BlockFn<Int>([&] {
-                                initialize(call3);
-                                call3->args = std::make_tuple(call2);
-                                call3->run();
-                                return call3->value();
+                                if (call3 == nullptr) {
+                                    call3 = new Increment__BuiltIn{call2};
+                                    call3->call();
+                                }
+                                return call3;
                             });
+                            block3->call();
                         }
-                        block3->run();
-                        return block3->value();
+                        return block3;
                     });
+                    block2->call();
                 }
-                block2->run();
-                return block2->value();
+                return block2;
             });
+            block1->call();
         }
-        block1->run();
-        return block1->value();
+        return block1;
     }
 };
 
@@ -201,43 +218,50 @@ TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
 struct IfStatementExample : ParametricFn<Int, Int, Int, Int> {
     using ParametricFn<Int, Int, Int, Int>::ParametricFn;
     Comparison_GE__BuiltIn *call1 = nullptr;
-    ParametricFn<Int> *branch = nullptr;
+    ParametricFn<Int> *branch1 = nullptr, *branch2 = nullptr, *branch = nullptr;
     Plus__BuiltIn *call2_1 = nullptr, *call2_2 = nullptr;
     Minus__BuiltIn *call3 = nullptr;
-    Int body(Int &x, Int &y, Int &z) override {
-        Int a = 1;
-        auto branch1 = Block([&]() {
-            initialize(call2_1);
-            call2_1->args = reference_all(y, a);
-            call2_1->run();
-            return call2_1->value();
-        });
-        auto branch2 = Block([&]() {
-            initialize(call2_2);
-            call2_2->args = reference_all(z, a);
-            call2_2->run();
-            return call2_2->value();
-        });
+    Lazy<Int> *body(Lazy<Int> *&x, Lazy<Int> *&y, Lazy<Int> *&z) override {
+        if (branch1 == nullptr) {
+            branch1 = new BlockFn<Int>([&]() {
+                if (call2_1 == nullptr) {
+                    call2_1 = new Plus__BuiltIn{y, new LazyConstant<Int>(1)};
+                    call2_1->call();
+                }
+                return call2_1;
+            });
+        }
+        if (branch2 == nullptr) {
+            branch2 = new BlockFn<Int>([&]() {
+                if (call2_2 == nullptr) {
+                    call2_2 = new Plus__BuiltIn{z, new LazyConstant<Int>(1)};
+                    call2_2->call();
+                }
+                return call2_2;
+            });
+        }
 
-        initialize(call1);
-        call1->args = reference_all(x, Int(0));
-        call1->run();
+        if (call1 == nullptr) {
+            call1 = new Comparison_GE__BuiltIn{x, new LazyConstant<Int>(0)};
+            call1->call();
+        }
+        WorkManager::await(call1);
         if (call1->value()) {
             if (branch == nullptr) {
-                branch = &branch1;
+                branch = branch1;
+                branch->call();
             }
-            branch->call();
         } else {
             if (branch == nullptr) {
-                branch = &branch2;
+                branch = branch2;
+                branch->call();
             };
-            branch->call();
         }
-        initialize(call3);
-        call3->args =
-            std::tuple_cat(std::make_tuple(branch), reference_all(Int(2)));
-        call3->run();
-        return call3->value();
+        if (call3 == nullptr) {
+            call3 = new Minus__BuiltIn{branch, new LazyConstant<Int>(2)};
+            call3->call();
+        }
+        return call3;
     }
 };
 
@@ -253,30 +277,30 @@ struct RecursiveDouble : ParametricFn<Int, Int> {
     using ParametricFn<Int, Int>::ParametricFn;
     RecursiveDouble *call1 = nullptr, *call3 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
-    Int body(Int &x) override {
-        if (x > 0) {
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        WorkManager::await(x);
+        if (x->value() > 0) {
             if (call1 == nullptr) {
-                call1 = new RecursiveDouble{};
-                call1->args = reference_all(x - 1);
+                auto arg = new Decrement__BuiltIn{x};
+                arg->call();
+                call1 = new RecursiveDouble{arg};
                 call1->call();
             }
 
             if (call3 == nullptr) {
-                call3 = new RecursiveDouble{};
-                call3->args = reference_all(x - 1);
+                auto arg = new Decrement__BuiltIn{x};
+                arg->call();
+                call3 = new RecursiveDouble{arg};
                 call3->run();
             }
 
             if (call2 == nullptr) {
-                call2 = new Plus__BuiltIn{};
-                call2->args = std::tuple_cat(std::make_tuple(call1),
-                                             reference_all(Int(2)));
+                call2 = new Plus__BuiltIn{call1, new LazyConstant<Int>(2)};
                 call2->call();
             }
-            WorkManager::await(call2);
-            return call2->value();
+            return call2;
         } else {
-            return 0;
+            return new LazyConstant<Int>(0);
         }
     }
 };
@@ -298,15 +322,20 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
 }
 
 struct EvenOrOdd : ParametricFn<Bool, Int> {
-    Bool body(Int &x) override { return static_cast<bool>(x); }
+    Lazy<Bool> *body(Lazy<Int> *&x) override {
+        WorkManager::await(x);
+        return new LazyConstant<Bool>(x->value() & 1);
+    }
 };
 
 struct ApplyIntBool : ParametricFn<Bool, FnT<Bool, Int>, Int> {
     using ParametricFn<Bool, FnT<Bool, Int>, Int>::ParametricFn;
-    Bool body(FnT<Bool, Int> &f, Int &x) override {
-        f->args = reference_all(x);
-        f->run();
-        return f->value();
+    Lazy<Bool> *body(Lazy<FnT<Bool, Int>> *&f, Lazy<Int> *&x) override {
+        WorkManager::await(f);
+        auto g = f->value();
+        g->args = std::make_tuple(x);
+        g->call();
+        return g;
     }
 };
 
@@ -321,8 +350,10 @@ TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
 
 struct PairIntBool : ParametricFn<TupleT<Int, Bool>, Int, Bool> {
     using ParametricFn<TupleT<Int, Bool>, Int, Bool>::ParametricFn;
-    TupleT<Int, Bool> body(Int &x, Bool &y) override {
-        return std::make_tuple(x, y);
+    Lazy<TupleT<Int, Bool>> *body(Lazy<Int> *&x, Lazy<Bool> *&y) override {
+        WorkManager::await(x, y);
+        return new LazyConstant<TupleT<Int, Bool>>(
+            std::make_tuple(x->value(), y->value()));
     }
 };
 
@@ -339,7 +370,10 @@ using Bull = VariantT<std::monostate, std::monostate>;
 
 struct BoolUnion : ParametricFn<Bool, Bull> {
     using ParametricFn<Bool, Bull>::ParametricFn;
-    bool body(Bull &x) override { return x.tag == 0; }
+    Lazy<Bool> *body(Lazy<Bull> *&x) override {
+        WorkManager::await(x);
+        return new LazyConstant<Bool>(x->value().tag == 0);
+    }
 };
 
 TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
@@ -366,12 +400,15 @@ using EitherIntBool = VariantT<Int, Bool>;
 
 struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
     using ParametricFn<Bool, EitherIntBool>::ParametricFn;
-    Bool body(EitherIntBool &x) override {
+    Lazy<Bool> *body(Lazy<EitherIntBool> *&either) override {
+        WorkManager::await(either);
+        EitherIntBool x = either->value();
         switch (x.tag) {
         case 0:
-            return *reinterpret_cast<int *>(&x.value) > 10;
+            return new LazyConstant<Bool>(*reinterpret_cast<int *>(&x.value) >
+                                          10);
         case 1:
-            return *reinterpret_cast<bool *>(&x.value);
+            return new LazyConstant<Bool>(*reinterpret_cast<bool *>(&x.value));
         }
         return 0;
     }
@@ -414,7 +451,9 @@ struct ListIntSum : ParametricFn<Int, ListInt> {
     using ParametricFn<Int, ListInt>::ParametricFn;
     ListIntSum *call1 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
-    Int body(ListInt &list) override {
+    Lazy<Int> *body(Lazy<ListInt> *&lazy_list) override {
+        WorkManager::await(lazy_list);
+        ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
             Cons cons = *reinterpret_cast<Cons *>(&list.value);
@@ -433,13 +472,12 @@ struct ListIntSum : ParametricFn<Int, ListInt> {
                     std::tuple_cat(std::make_tuple(call1), reference_all(head));
                 call2->call();
             }
-            WorkManager::await(call2);
-            return call2->value();
+            return call2;
         }
         case 1:
-            return 0;
+            return new LazyConstant<Int>(0);
         }
-        return 0;
+        return nullptr;
     }
 };
 

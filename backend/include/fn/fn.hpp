@@ -30,15 +30,6 @@ class Fn {
         WorkManager::queue->push_back(this);
         WorkManager::queue.release();
     }
-    template <typename Tuple> auto static expand_values(Tuple &&t) {
-        return []<std::size_t... I>(auto &&t, std::index_sequence<I...>) {
-            return std::make_tuple(
-                (std::get<I>(std::forward<decltype(t)>(t))->value())...);
-        }
-        (std::forward<Tuple>(t),
-         std::make_index_sequence<
-             std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
-    }
     template <typename... Ts> auto static reference_all(Ts... args) {
         return std::make_tuple(new LazyConstant<std::decay_t<Ts>>(args)...);
     }
@@ -59,18 +50,23 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     ArgsT args;
     R ret;
     ParametricFn() = default;
-    template <typename = std::enable_if<(sizeof...(Args) > 0)>>
+
     explicit ParametricFn(
-        std::add_const_t<std::add_lvalue_reference_t<Args>>... args)
+        std::add_pointer_t<
+            Lazy<std::decay_t<Args>>>... args) requires(sizeof...(Args) > 0)
+        : args(args...) {}
+
+    explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
+                              Args>>... args) requires(sizeof...(Args) > 0)
         : args(reference_all(args...)) {}
-    virtual R body(std::add_const_t<
-                   std::add_lvalue_reference_t<std::decay_t<Args>>>...) = 0;
+
+    virtual Lazy<R> *body(std::add_lvalue_reference_t<
+                          std::add_pointer_t<Lazy<std::decay_t<Args>>>>...) = 0;
     void run() override {
-        std::apply(
-            WorkManager::await<std::add_pointer_t<Lazy<std::decay_t<Args>>>...>,
-            args);
-        ret = std::apply([this](auto &&...t) { return body(t...); },
-                         expand_values(args));
+        Lazy<R> *return_ =
+            std::apply([this](auto &&...t) { return body(t...); }, args);
+        WorkManager::await(return_);
+        ret = return_->value();
         continuations.acquire();
         for (const Continuation &c : *continuations) {
             Lazy<Ret>::update_continuation(c);
@@ -101,14 +97,9 @@ class FinishWork : public Fn {
 };
 
 template <typename T> struct BlockFn : public ParametricFn<T> {
-    std::function<T()> body_fn;
-    T body() override { return body_fn(); }
-    explicit BlockFn(std::function<T()> &&f) : body_fn(std::move(f)){};
+    std::function<Lazy<T> *()> body_fn;
+    Lazy<T> *body() override { return body_fn(); }
+    explicit BlockFn(std::function<Lazy<T> *()> &&f) : body_fn(std::move(f)){};
 };
-
-template <typename F> auto Block(F &&f) {
-    using T = std::invoke_result_t<F>;
-    return BlockFn<std::decay_t<T>>{std::function<T()>{std::forward<F>(f)}};
-}
 
 #include "system/work_manager.hpp"
