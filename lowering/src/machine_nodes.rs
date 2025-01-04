@@ -5,7 +5,7 @@ use type_checker::AtomicTypeEnum;
 pub enum MachineType {
     AtomicType(AtomicType),
     TupleType(TupleType),
-    FunctionType(FunctionType),
+    FnType(FnType),
     UnionType(UnionType),
 }
 
@@ -15,6 +15,6 @@ pub struct AtomicType(pub AtomicTypeEnum);
 #[derive(Debug, Clone)]
 pub struct TupleType(pub Vec<MachineType>);
 #[derive(Debug, Clone)]
-pub struct FunctionType(pub Vec<MachineType>, pub Box<MachineType>);
+pub struct FnType(pub Vec<MachineType>, pub Box<MachineType>);
 #[derive(Debug, Clone)]
 pub struct UnionType(pub String, pub Vec<MachineType>);

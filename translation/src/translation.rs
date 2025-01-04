@@ -1,7 +1,7 @@
 use core::fmt;
 use std::fmt::Formatter;
 
-use lowering::{AtomicType, AtomicTypeEnum, MachineType, TupleType};
+use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType};
 
 struct Translator {}
 
@@ -16,7 +16,17 @@ impl fmt::Display for TypeFormatter<'_> {
             MachineType::TupleType(TupleType(types)) => {
                 write!(f, "TupleT<{}>", TypesFormatter(types))
             }
-            MachineType::FunctionType(function_type) => todo!(),
+            MachineType::FnType(FnType(args, ret)) => {
+                write!(
+                    f,
+                    "FnT<{}>",
+                    TypesFormatter(
+                        &std::iter::once(*ret.clone())
+                            .chain(args.clone().into_iter())
+                            .collect()
+                    )
+                )
+            }
             MachineType::UnionType(union_type) => todo!(),
         }
     }
@@ -48,7 +58,7 @@ impl Translator {
 mod tests {
     use super::*;
 
-    use lowering::TupleType;
+    use lowering::{FnType, TupleType};
     use regex::Regex;
     use test_case::test_case;
 
@@ -142,6 +152,46 @@ mod tests {
         ]).into(),
         "TupleT<TupleT<Int,Bool>,TupleT<>>";
         "nested tuple type"
+    )]
+    #[test_case(
+        FnType(Vec::new(), Box::new(TupleType(Vec::new()).into())).into(),
+        "FnT<TupleT<>>";
+        "unit fn type"
+    )]
+    #[test_case(
+        FnType(
+            vec![AtomicType(AtomicTypeEnum::INT).into()],
+            Box::new(AtomicType(AtomicTypeEnum::INT).into())
+        ).into(),
+        "FnT<Int,Int>";
+        "int identity fn"
+    )]
+    #[test_case(
+        FnType(
+            vec![
+                AtomicType(AtomicTypeEnum::INT).into(),
+                AtomicType(AtomicTypeEnum::INT).into()
+            ],
+            Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+        ).into(),
+        "FnT<Bool,Int,Int>";
+        "int comparison fn"
+    )]
+    #[test_case(
+        FnType(
+            vec![
+                FnType(
+                    vec![
+                        AtomicType(AtomicTypeEnum::INT).into()
+                    ],
+                    Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+                ).into(),
+                AtomicType(AtomicTypeEnum::INT).into()
+            ],
+            Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+        ).into(),
+        "FnT<Bool,FnT<Bool,Int>,Int>";
+        "higher order fn"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(type_);
