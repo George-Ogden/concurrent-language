@@ -1,18 +1,21 @@
 use core::fmt;
 use std::fmt::Formatter;
 
-use lowering::{Atomic, AtomicTypeEnum, MachineType};
+use lowering::{AtomicType, AtomicTypeEnum, MachineType};
 
 struct Translator {}
 
 struct TypeFormatter(MachineType);
 impl fmt::Display for TypeFormatter {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self.0 {
-            MachineType::Atomic(Atomic(atomic)) => match atomic {
+        match &self.0 {
+            MachineType::AtomicType(AtomicType(atomic)) => match atomic {
                 AtomicTypeEnum::INT => write!(f, "Int"),
                 AtomicTypeEnum::BOOL => write!(f, "Bool"),
             },
+            MachineType::TupleType(tuple_type) => todo!(),
+            MachineType::FunctionType(function_type) => todo!(),
+            MachineType::UnionType(union_type) => todo!(),
         }
     }
 }
@@ -83,12 +86,12 @@ mod tests {
     }
 
     #[test_case(
-        Atomic(AtomicTypeEnum::INT).into(),
+        AtomicType(AtomicTypeEnum::INT).into(),
         "Int";
         "atomic int"
     )]
     #[test_case(
-        Atomic(AtomicTypeEnum::BOOL).into(),
+        AtomicType(AtomicTypeEnum::BOOL).into(),
         "Bool";
         "atomic bool"
     )]
