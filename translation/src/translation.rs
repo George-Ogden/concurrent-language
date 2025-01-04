@@ -1,7 +1,7 @@
 use core::fmt;
 use std::fmt::Formatter;
 
-use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType};
+use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, UnionType};
 
 struct Translator {}
 
@@ -27,7 +27,9 @@ impl fmt::Display for TypeFormatter<'_> {
                     )
                 )
             }
-            MachineType::UnionType(union_type) => todo!(),
+            MachineType::UnionType(UnionType(type_names)) => {
+                write!(f, "VariantT<{}>", type_names.join(","))
+            }
         }
     }
 }
@@ -58,7 +60,6 @@ impl Translator {
 mod tests {
     use super::*;
 
-    use lowering::{FnType, TupleType};
     use regex::Regex;
     use test_case::test_case;
 
@@ -192,6 +193,30 @@ mod tests {
         ).into(),
         "FnT<Bool,FnT<Bool,Int>,Int>";
         "higher order fn"
+    )]
+    #[test_case(
+        UnionType(
+            vec![
+                String::from("Twoo"),
+                String::from("Faws"),
+            ]
+        ).into(),
+        "VariantT<Twoo,Faws>";
+        "bull type"
+    )]
+    #[test_case(
+        UnionType(
+            vec![
+                String::from("Wrapper"),
+            ]
+        ).into(),
+        "VariantT<Wrapper>";
+        "int wrapper variant"
+    )]
+    #[test_case(
+        UnionType(vec![String::from("Cons"), String::from("Nil")]).into(),
+        "VariantT<Cons,Nil>";
+        "list int type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(type_);

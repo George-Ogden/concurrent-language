@@ -478,8 +478,9 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
 
 struct ListInt_;
 typedef TupleT<Int, ListInt_ *> Cons;
+typedef TupleT<> Nil;
 struct ListInt_ {
-    using type = VariantT<Cons, TupleT<>>;
+    using type = VariantT<Cons, Nil>;
     type value;
     // cppcheck-suppress noExplicitConstructor
     ListInt_(type value) : value(value) {}

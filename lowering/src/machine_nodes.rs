@@ -17,4 +17,4 @@ pub struct TupleType(pub Vec<MachineType>);
 #[derive(Debug, Clone)]
 pub struct FnType(pub Vec<MachineType>, pub Box<MachineType>);
 #[derive(Debug, Clone)]
-pub struct UnionType(pub String, pub Vec<MachineType>);
+pub struct UnionType(pub Vec<String>);
