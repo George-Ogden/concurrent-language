@@ -1,28 +1,46 @@
 use core::fmt;
 use std::fmt::Formatter;
 
-use lowering::{AtomicType, AtomicTypeEnum, MachineType};
+use lowering::{AtomicType, AtomicTypeEnum, MachineType, TupleType};
 
 struct Translator {}
 
-struct TypeFormatter(MachineType);
-impl fmt::Display for TypeFormatter {
+struct TypeFormatter<'a>(&'a MachineType);
+impl fmt::Display for TypeFormatter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match &self.0 {
             MachineType::AtomicType(AtomicType(atomic)) => match atomic {
                 AtomicTypeEnum::INT => write!(f, "Int"),
                 AtomicTypeEnum::BOOL => write!(f, "Bool"),
             },
-            MachineType::TupleType(tuple_type) => todo!(),
+            MachineType::TupleType(TupleType(types)) => {
+                write!(f, "TupleT<{}>", TypesFormatter(types))
+            }
             MachineType::FunctionType(function_type) => todo!(),
             MachineType::UnionType(union_type) => todo!(),
         }
     }
 }
 
+struct TypesFormatter<'a>(&'a Vec<MachineType>);
+impl fmt::Display for TypesFormatter<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{}",
+            &self
+                .0
+                .iter()
+                .map(|machine_type| format!("{}", TypeFormatter(machine_type)))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+}
+
 impl Translator {
     fn translate_type(type_: MachineType) -> String {
-        format!("{}", TypeFormatter(type_))
+        format!("{}", TypeFormatter(&type_))
     }
 }
 
@@ -30,6 +48,7 @@ impl Translator {
 mod tests {
     use super::*;
 
+    use lowering::TupleType;
     use regex::Regex;
     use test_case::test_case;
 
@@ -94,6 +113,35 @@ mod tests {
         AtomicType(AtomicTypeEnum::BOOL).into(),
         "Bool";
         "atomic bool"
+    )]
+    #[test_case(
+        TupleType(Vec::new()).into(),
+        "TupleT<>";
+        "empty tuple type"
+    )]
+    #[test_case(
+        TupleType(vec![AtomicType(AtomicTypeEnum::INT).into()]).into(),
+        "TupleT<Int>";
+        "singleton tuple type"
+    )]
+    #[test_case(
+        TupleType(vec![
+            AtomicType(AtomicTypeEnum::INT).into(),
+            AtomicType(AtomicTypeEnum::BOOL).into()
+        ]).into(),
+        "TupleT<Int,Bool>";
+        "double tuple type"
+    )]
+    #[test_case(
+        TupleType(vec![
+            TupleType(vec![
+                AtomicType(AtomicTypeEnum::INT).into(),
+                AtomicType(AtomicTypeEnum::BOOL).into()
+            ]).into(),
+            TupleType(Vec::new()).into(),
+        ]).into(),
+        "TupleT<TupleT<Int,Bool>,TupleT<>>";
+        "nested tuple type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(type_);
