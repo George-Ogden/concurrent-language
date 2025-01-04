@@ -1,11 +1,25 @@
+use core::fmt;
+use std::fmt::Formatter;
+
 use lowering::{Atomic, AtomicTypeEnum, MachineType};
-use regex::{Captures, Regex};
 
 struct Translator {}
 
+struct TypeFormatter(MachineType);
+impl fmt::Display for TypeFormatter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self.0 {
+            MachineType::Atomic(Atomic(atomic)) => match atomic {
+                AtomicTypeEnum::INT => write!(f, "Int"),
+                AtomicTypeEnum::BOOL => write!(f, "Bool"),
+            },
+        }
+    }
+}
+
 impl Translator {
     fn translate_type(type_: MachineType) -> String {
-        return String::from("Int");
+        format!("{}", TypeFormatter(type_))
     }
 }
 
@@ -13,6 +27,7 @@ impl Translator {
 mod tests {
     use super::*;
 
+    use regex::Regex;
     use test_case::test_case;
 
     fn normalize_code(code: String) -> String {
@@ -21,7 +36,7 @@ mod tests {
 
         let mut result = code;
         let mut code = String::new();
-        while (result != code) {
+        while result != code {
             code = result;
             result = regex.replace_all(&*code, "${2}${5}${3}${6}").to_string();
         }
@@ -67,11 +82,19 @@ mod tests {
         assert_eq!(normalize_code(String::from(code)), String::from(expected))
     }
 
-    #[test]
-    fn test_type_translation() {
-        let type_: MachineType = Atomic(AtomicTypeEnum::INT).into();
+    #[test_case(
+        Atomic(AtomicTypeEnum::INT).into(),
+        "Int";
+        "atomic int"
+    )]
+    #[test_case(
+        Atomic(AtomicTypeEnum::BOOL).into(),
+        "Bool";
+        "atomic bool"
+    )]
+    fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(type_);
-        let expected_code = String::from("Int");
+        let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
 }
