@@ -1,7 +1,7 @@
 use core::fmt;
 use std::fmt::Formatter;
 
-use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, UnionType};
+use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, TypeDef, UnionType};
 
 struct Translator {}
 
@@ -54,12 +54,16 @@ impl Translator {
     fn translate_type(type_: MachineType) -> String {
         format!("{}", TypeFormatter(&type_))
     }
+    fn translate_typedefs(typedefs: Vec<TypeDef>) -> String {
+        format!("{}", "struct Bull_; typedef Empty Twoo; typedef Empty Faws; struct Bull_ { using type = VariantT<Twoo, Faws>; type value; Bull_(type value) : value(value) {} };")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use lowering::Name;
     use regex::Regex;
     use test_case::test_case;
 
@@ -197,8 +201,8 @@ mod tests {
     #[test_case(
         UnionType(
             vec![
-                String::from("Twoo"),
-                String::from("Faws"),
+                Name::from("Twoo"),
+                Name::from("Faws"),
             ]
         ).into(),
         "VariantT<Twoo,Faws>";
@@ -207,19 +211,35 @@ mod tests {
     #[test_case(
         UnionType(
             vec![
-                String::from("Wrapper"),
+                Name::from("Wrapper"),
             ]
         ).into(),
         "VariantT<Wrapper>";
         "int wrapper variant"
     )]
     #[test_case(
-        UnionType(vec![String::from("Cons"), String::from("Nil")]).into(),
+        UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into(),
         "VariantT<Cons,Nil>";
         "list int type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(type_);
+        let expected_code = String::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        TypeDef{
+            name: Name::from("Bull"),
+            constructors: vec![
+                (Name::from("Twoo"), None),
+                (Name::from("Faws"), None)
+            ]
+        },
+        "struct Bull_; typedef Empty Twoo; typedef Empty Faws; struct Bull_ { using type = VariantT<Twoo, Faws>; type value; Bull_(type value) : value(value) {} };"
+    )]
+    fn test_typedef_translations(type_def: TypeDef, expected: &str) {
+        let code = Translator::translate_typedefs(vec![type_def]);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }

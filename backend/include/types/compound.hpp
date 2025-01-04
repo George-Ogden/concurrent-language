@@ -20,3 +20,5 @@ template <typename... Types> struct VariantT {
 };
 
 template <typename R, typename... As> using FnT = ParametricFn<R, As...> *;
+
+typedef std::monostate Empty;

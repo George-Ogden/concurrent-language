@@ -478,7 +478,7 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
 
 struct ListInt_;
 typedef TupleT<Int, ListInt_ *> Cons;
-typedef TupleT<> Nil;
+typedef Empty Nil;
 struct ListInt_ {
     using type = VariantT<Cons, Nil>;
     type value;
