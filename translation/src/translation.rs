@@ -57,7 +57,10 @@ impl Translator {
         )
     }
     fn translate_value(value: Value) -> String {
-        String::new()
+        match value {
+            Value::BuiltIn(value) => Translator::translate_builtin(value),
+            Value::Store(store) => Translator::translate_store(store),
+        }
     }
     fn translate_builtin(value: BuiltIn) -> String {
         match value {
@@ -460,6 +463,42 @@ mod tests {
     )]
     fn test_store_translation(store: Store, expected: &str) {
         let code = Translator::translate_store(store);
+        let expected_code = String::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Store::Register(
+            Id::from("baz"),
+            FnType(
+                vec![AtomicType(AtomicTypeEnum::INT).into()],
+                Box::new(AtomicType(AtomicTypeEnum::INT).into())
+            ).into(),
+        ).into(),
+        "baz";
+        "value store translation"
+    )]
+    #[test_case(
+        BuiltIn::BuiltInFn(
+            Name::from("Comparison_LT__BuiltIn"),
+            FnType(
+                vec![
+                    AtomicType(AtomicTypeEnum::INT).into(),
+                    AtomicType(AtomicTypeEnum::INT).into()
+                ],
+                Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+            ).into()
+        ).into(),
+        "Comparison_LT__BuiltIn";
+        "builtin function translation"
+    )]
+    #[test_case(
+        BuiltIn::Integer(Integer{value: -1}).into(),
+        "-1LL";
+        "builtin integer translation"
+    )]
+    fn test_value_translation(value: Value, expected: &str) {
+        let code = Translator::translate_value(value);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
