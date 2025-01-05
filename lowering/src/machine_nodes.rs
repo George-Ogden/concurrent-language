@@ -9,6 +9,7 @@ pub enum MachineType {
     TupleType(TupleType),
     FnType(FnType),
     UnionType(UnionType),
+    NamedType(Name),
 }
 
 #[derive(Debug, Clone)]
@@ -24,11 +25,5 @@ pub struct UnionType(pub Vec<Name>);
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: Name,
-    pub constructors: Vec<(Name, Option<TypeRef>)>,
-}
-
-#[derive(Debug, Clone)]
-pub enum TypeRef {
-    Type(MachineType),
-    Name(Name),
+    pub constructors: Vec<(Name, Option<MachineType>)>,
 }

@@ -1,4 +1,5 @@
 use core::fmt;
+use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, TypeDef, UnionType};
@@ -30,6 +31,7 @@ impl fmt::Display for TypeFormatter<'_> {
             MachineType::UnionType(UnionType(type_names)) => {
                 write!(f, "VariantT<{}>", type_names.join(","))
             }
+            MachineType::NamedType(name) => write!(f, "{}_*", name),
         }
     }
 }
@@ -51,11 +53,50 @@ impl fmt::Display for TypesFormatter<'_> {
 }
 
 impl Translator {
-    fn translate_type(type_: MachineType) -> String {
-        format!("{}", TypeFormatter(&type_))
+    fn translate_type(type_: &MachineType) -> String {
+        format!("{}", TypeFormatter(type_))
     }
-    fn translate_typedefs(typedefs: Vec<TypeDef>) -> String {
-        format!("{}", "struct Bull_; typedef Empty Twoo; typedef Empty Faws; struct Bull_ { using type = VariantT<Twoo, Faws>; type value; Bull_(type value) : value(value) {} };")
+    fn translate_type_defs(type_defs: Vec<TypeDef>) -> String {
+        let type_forward_definitions = type_defs
+            .iter()
+            .map(|type_def| format!("struct {}_;", type_def.name));
+        let constructor_definitions = type_defs
+            .iter()
+            .map(|type_def| {
+                type_def.constructors.iter().map(|constructor| {
+                    format!(
+                        "typedef {} {} ;",
+                        constructor
+                            .1
+                            .as_ref()
+                            .map_or(String::from("Empty"), |type_| {
+                                Translator::translate_type(type_)
+                            }),
+                        constructor.0
+                    )
+                })
+            })
+            .flatten();
+        let struct_definitions = type_defs.iter().map(|type_def| {
+            format!(
+                "struct {}_ {{ using type = {}; type value; {}_(type value) : value(value) {{}} }};",
+                type_def.name,
+                Translator::translate_type(&UnionType(
+                    type_def
+                        .constructors
+                        .iter()
+                        .map(|constructor| constructor.0.clone())
+                        .collect_vec()
+                ).into()),
+                type_def.name,
+            )
+        });
+        format!(
+            "{} {} {}",
+            itertools::join(type_forward_definitions, "\n"),
+            itertools::join(constructor_definitions, "\n"),
+            itertools::join(struct_definitions, "\n")
+        )
     }
 }
 
@@ -218,12 +259,12 @@ mod tests {
         "int wrapper variant"
     )]
     #[test_case(
-        UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into(),
-        "VariantT<Cons,Nil>";
+        UnionType(vec![Name::from("Cons_Int"), Name::from("Nil_Int")]).into(),
+        "VariantT<Cons_Int,Nil_Int>";
         "list int type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
-        let code = Translator::translate_type(type_);
+        let code = Translator::translate_type(&type_);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -236,10 +277,49 @@ mod tests {
                 (Name::from("Faws"), None)
             ]
         },
-        "struct Bull_; typedef Empty Twoo; typedef Empty Faws; struct Bull_ { using type = VariantT<Twoo, Faws>; type value; Bull_(type value) : value(value) {} };"
+        "struct Bull_; typedef Empty Twoo; typedef Empty Faws; struct Bull_ { using type = VariantT<Twoo, Faws>; type value; Bull_(type value) : value(value) {} };";
+        "bull union"
+    )]
+    #[test_case(
+        TypeDef{
+            name: Name::from("EitherIntBool"),
+            constructors: vec![
+                (
+                    Name::from("Left_IntBool"),
+                    Some(
+                        AtomicType(AtomicTypeEnum::INT).into(),
+                    )
+                ),
+                (
+                    Name::from("Right_IntBool"),
+                    Some(
+                        AtomicType(AtomicTypeEnum::BOOL).into(),
+                    )
+                ),
+            ]
+        },
+        "struct EitherIntBool_; typedef Int Left_IntBool; typedef Bool Right_IntBool; struct EitherIntBool_ { using type = VariantT<Left_IntBool, Right_IntBool>; type value; EitherIntBool_(type value) : value(value) {} };";
+        "either int bool"
+    )]
+    #[test_case(
+        TypeDef{
+            name: Name::from("ListInt"),
+            constructors: vec![
+                (
+                    Name::from("Cons_Int"),
+                    Some(TupleType(vec![
+                        AtomicType(AtomicTypeEnum::INT).into(),
+                        MachineType::NamedType(Name::from("ListInt"))
+                    ]).into())
+                ),
+                (Name::from("Nil_Int"), None)
+            ]
+        },
+        "struct ListInt_; typedef TupleT<Int, ListInt_ *> Cons_Int; typedef Empty Nil_Int; struct ListInt_ { using type = VariantT<Cons_Int, Nil_Int>; type value; ListInt_(type value) : value(value) {} };";
+        "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
-        let code = Translator::translate_typedefs(vec![type_def]);
+        let code = Translator::translate_type_defs(vec![type_def]);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
