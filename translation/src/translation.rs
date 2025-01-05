@@ -2,55 +2,11 @@ use core::fmt;
 use itertools::Itertools;
 use std::fmt::Formatter;
 
-use lowering::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, TypeDef, UnionType};
+use lowering::{
+    AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, TypeDef, UnionType, Value,
+};
 
 struct Translator {}
-
-struct TypeFormatter<'a>(&'a MachineType);
-impl fmt::Display for TypeFormatter<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match &self.0 {
-            MachineType::AtomicType(AtomicType(atomic)) => match atomic {
-                AtomicTypeEnum::INT => write!(f, "Int"),
-                AtomicTypeEnum::BOOL => write!(f, "Bool"),
-            },
-            MachineType::TupleType(TupleType(types)) => {
-                write!(f, "TupleT<{}>", TypesFormatter(types))
-            }
-            MachineType::FnType(FnType(args, ret)) => {
-                write!(
-                    f,
-                    "FnT<{}>",
-                    TypesFormatter(
-                        &std::iter::once(*ret.clone())
-                            .chain(args.clone().into_iter())
-                            .collect()
-                    )
-                )
-            }
-            MachineType::UnionType(UnionType(type_names)) => {
-                write!(f, "VariantT<{}>", type_names.join(","))
-            }
-            MachineType::NamedType(name) => write!(f, "{}*", name),
-        }
-    }
-}
-
-struct TypesFormatter<'a>(&'a Vec<MachineType>);
-impl fmt::Display for TypesFormatter<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "{}",
-            &self
-                .0
-                .iter()
-                .map(|machine_type| format!("{}", TypeFormatter(machine_type)))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
-}
 
 impl Translator {
     fn translate_type(type_: &MachineType) -> String {
@@ -97,6 +53,55 @@ impl Translator {
             itertools::join(type_forward_definitions, "\n"),
             itertools::join(constructor_definitions, "\n"),
             itertools::join(struct_definitions, "\n")
+        )
+    }
+    fn translate_value(value: Value) -> String {
+        String::new()
+    }
+}
+
+struct TypeFormatter<'a>(&'a MachineType);
+impl fmt::Display for TypeFormatter<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match &self.0 {
+            MachineType::AtomicType(AtomicType(atomic)) => match atomic {
+                AtomicTypeEnum::INT => write!(f, "Int"),
+                AtomicTypeEnum::BOOL => write!(f, "Bool"),
+            },
+            MachineType::TupleType(TupleType(types)) => {
+                write!(f, "TupleT<{}>", TypesFormatter(types))
+            }
+            MachineType::FnType(FnType(args, ret)) => {
+                write!(
+                    f,
+                    "FnT<{}>",
+                    TypesFormatter(
+                        &std::iter::once(*ret.clone())
+                            .chain(args.clone().into_iter())
+                            .collect()
+                    )
+                )
+            }
+            MachineType::UnionType(UnionType(type_names)) => {
+                write!(f, "VariantT<{}>", type_names.join(","))
+            }
+            MachineType::NamedType(name) => write!(f, "{}*", name),
+        }
+    }
+}
+
+struct TypesFormatter<'a>(&'a Vec<MachineType>);
+impl fmt::Display for TypesFormatter<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{}",
+            &self
+                .0
+                .iter()
+                .map(|machine_type| format!("{}", TypeFormatter(machine_type)))
+                .collect::<Vec<_>>()
+                .join(",")
         )
     }
 }
@@ -364,6 +369,12 @@ mod tests {
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
         let code = Translator::translate_type_defs(type_defs);
+        let expected_code = String::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    fn test_value_translation(value: Value, expected: &str) {
+        let code = Translator::translate_value(value);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }

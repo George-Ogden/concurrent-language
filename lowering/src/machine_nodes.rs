@@ -1,7 +1,8 @@
 use from_variants::FromVariants;
-use type_checker::AtomicTypeEnum;
+use type_checker::{AtomicTypeEnum, Boolean, Integer};
 
 pub type Name = String;
+pub type Id = String;
 
 #[derive(Debug, Clone, FromVariants)]
 pub enum MachineType {
@@ -26,4 +27,23 @@ pub struct UnionType(pub Vec<Name>);
 pub struct TypeDef {
     pub name: Name,
     pub constructors: Vec<(Name, Option<MachineType>)>,
+}
+
+#[derive(Debug, Clone, FromVariants)]
+pub enum Value {
+    BuiltIn(BuiltIn),
+    Store(Store),
+}
+
+#[derive(Debug, Clone)]
+pub enum Store {
+    Memory(Id, MachineType),
+    Register(Id, MachineType),
+}
+
+#[derive(Debug, Clone, FromVariants)]
+pub enum BuiltIn {
+    Integer(Integer),
+    Boolean(Boolean),
+    Fn(Name, MachineType),
 }

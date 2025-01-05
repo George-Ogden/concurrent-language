@@ -24,8 +24,6 @@ pub fn derive_from_variants(input: TokenStream) -> TokenStream {
                             }
                         }
                     });
-                } else {
-                    panic!("Only single unnamed fields in variants are supported");
                 }
             }
         }
