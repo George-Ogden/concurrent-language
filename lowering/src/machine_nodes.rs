@@ -45,5 +45,5 @@ pub enum Store {
 pub enum BuiltIn {
     Integer(Integer),
     Boolean(Boolean),
-    Fn(Name, MachineType),
+    BuiltInFn(Name, MachineType),
 }

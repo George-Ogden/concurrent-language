@@ -3,7 +3,8 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, TypeDef, UnionType, Value,
+    AtomicType, AtomicTypeEnum, Boolean, BuiltIn, FnType, Integer, MachineType, TupleType, TypeDef,
+    UnionType, Value,
 };
 
 struct Translator {}
@@ -57,6 +58,13 @@ impl Translator {
     }
     fn translate_value(value: Value) -> String {
         String::new()
+    }
+    fn translate_builtin(value: BuiltIn) -> String {
+        match value {
+            BuiltIn::Integer(Integer { value }) => format!("{}LL", value),
+            BuiltIn::Boolean(Boolean { value }) => format!("{}", value),
+            BuiltIn::BuiltInFn(name, _) => name,
+        }
     }
 }
 
@@ -373,8 +381,66 @@ mod tests {
         assert_eq_code(code, expected_code);
     }
 
-    fn test_value_translation(value: Value, expected: &str) {
-        let code = Translator::translate_value(value);
+    #[test_case(
+        Integer{value: 24}.into(),
+        "24LL";
+        "integer translation"
+    )]
+    #[test_case(
+        Integer{value: -24}.into(),
+        "-24LL";
+        "negative integer translation"
+    )]
+    #[test_case(
+        Integer{value: 0}.into(),
+        "0LL";
+        "zero translation"
+    )]
+    #[test_case(
+        Integer{value: 10000000000009}.into(),
+        "10000000000009LL";
+        "large integer translation"
+    )]
+    #[test_case(
+        Boolean{value: true}.into(),
+        "true";
+        "true translation"
+    )]
+    #[test_case(
+        Boolean{value: false}.into(),
+        "false";
+        "false translation"
+    )]
+    #[test_case(
+        BuiltIn::BuiltInFn(
+            Name::from("Plus__BuiltIn"),
+            FnType(
+                vec![
+                    AtomicType(AtomicTypeEnum::INT).into(),
+                    AtomicType(AtomicTypeEnum::INT).into()
+                ],
+                Box::new(AtomicType(AtomicTypeEnum::INT).into())
+            ).into()
+        ),
+        "Plus__BuiltIn";
+        "builtin plus translation"
+    )]
+    #[test_case(
+        BuiltIn::BuiltInFn(
+            Name::from("Comparison_GE__BuiltIn"),
+            FnType(
+                vec![
+                    AtomicType(AtomicTypeEnum::INT).into(),
+                    AtomicType(AtomicTypeEnum::INT).into()
+                ],
+                Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+            ).into()
+        ),
+        "Comparison_GE__BuiltIn";
+        "builtin greater than or equal to translation"
+    )]
+    fn test_builtin_translation(value: BuiltIn, expected: &str) {
+        let code = Translator::translate_builtin(value);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
