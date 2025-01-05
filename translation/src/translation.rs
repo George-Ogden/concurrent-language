@@ -31,7 +31,7 @@ impl fmt::Display for TypeFormatter<'_> {
             MachineType::UnionType(UnionType(type_names)) => {
                 write!(f, "VariantT<{}>", type_names.join(","))
             }
-            MachineType::NamedType(name) => write!(f, "{}_*", name),
+            MachineType::NamedType(name) => write!(f, "{}*", name),
         }
     }
 }
@@ -59,7 +59,7 @@ impl Translator {
     fn translate_type_defs(type_defs: Vec<TypeDef>) -> String {
         let type_forward_definitions = type_defs
             .iter()
-            .map(|type_def| format!("struct {}_;", type_def.name));
+            .map(|type_def| format!("struct {};", type_def.name));
         let constructor_definitions = type_defs
             .iter()
             .map(|type_def| {
@@ -77,9 +77,10 @@ impl Translator {
                 })
             })
             .flatten();
-        let struct_definitions = type_defs.iter().map(|type_def| {
-            format!(
-                "struct {}_ {{ using type = {}; type value; {}_(type value) : value(value) {{}} }};",
+        let struct_definitions =
+            type_defs.iter().map(|type_def| {
+                format!(
+                "struct {} {{ using type = {}; type value; {}(type value) : value(value) {{}} }};",
                 type_def.name,
                 Translator::translate_type(&UnionType(
                     type_def
@@ -90,7 +91,7 @@ impl Translator {
                 ).into()),
                 type_def.name,
             )
-        });
+            });
         format!(
             "{} {} {}",
             itertools::join(type_forward_definitions, "\n"),
@@ -277,7 +278,7 @@ mod tests {
                 (Name::from("Faws"), None)
             ]
         },
-        "struct Bull_; typedef Empty Twoo; typedef Empty Faws; struct Bull_ { using type = VariantT<Twoo, Faws>; type value; Bull_(type value) : value(value) {} };";
+        "struct Bull; typedef Empty Twoo; typedef Empty Faws; struct Bull { using type = VariantT<Twoo, Faws>; type value; Bull(type value) : value(value) {} };";
         "bull union"
     )]
     #[test_case(
@@ -298,7 +299,7 @@ mod tests {
                 ),
             ]
         },
-        "struct EitherIntBool_; typedef Int Left_IntBool; typedef Bool Right_IntBool; struct EitherIntBool_ { using type = VariantT<Left_IntBool, Right_IntBool>; type value; EitherIntBool_(type value) : value(value) {} };";
+        "struct EitherIntBool; typedef Int Left_IntBool; typedef Bool Right_IntBool; struct EitherIntBool { using type = VariantT<Left_IntBool, Right_IntBool>; type value; EitherIntBool(type value) : value(value) {} };";
         "either int bool"
     )]
     #[test_case(
@@ -315,11 +316,54 @@ mod tests {
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct ListInt_; typedef TupleT<Int, ListInt_ *> Cons_Int; typedef Empty Nil_Int; struct ListInt_ { using type = VariantT<Cons_Int, Nil_Int>; type value; ListInt_(type value) : value(value) {} };";
+        "struct ListInt; typedef TupleT<Int, ListInt *> Cons_Int; typedef Empty Nil_Int; struct ListInt { using type = VariantT<Cons_Int, Nil_Int>; type value; ListInt(type value) : value(value) {} };";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
         let code = Translator::translate_type_defs(vec![type_def]);
+        let expected_code = String::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        vec![
+            TypeDef{
+                name: Name::from("Expression"),
+                constructors: vec![
+                    (
+                        Name::from("Basic"),
+                        Some(AtomicType(AtomicTypeEnum::INT).into())
+                    ),
+                    (
+                        Name::from("Complex"),
+                        Some(TupleType(
+                            vec![
+                                MachineType::NamedType(Name::from("Value")),
+                                MachineType::NamedType(Name::from("Value")),
+                            ]
+                        ).into())
+                    ),
+                ]
+            },
+            TypeDef{
+                name: Name::from("Value"),
+                constructors: vec![
+                    (
+                        Name::from("None"),
+                        None
+                    ),
+                    (
+                        Name::from("Some"),
+                        Some(MachineType::NamedType(Name::from("Expression")))
+                    ),
+                ]
+            }
+        ],
+        "struct Expression; struct Value; typedef Int Basic; typedef TupleT<Value*, Value*> Complex; typedef Empty None; typedef Expression* Some; struct Expression { using type = VariantT<Basic,Complex>; type value; Expression(type value) : value(value) {} }; struct Value { using type = VariantT<None,Some>; type value; Value(type value) : value(value) {} };";
+        "mutually recursive types"
+    )]
+    fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
+        let code = Translator::translate_type_defs(type_defs);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
