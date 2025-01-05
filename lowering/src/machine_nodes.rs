@@ -41,6 +41,14 @@ pub enum Store {
     Register(Id, MachineType),
 }
 
+impl Store {
+    pub fn id(&self) -> Id {
+        match &self {
+            Self::Memory(id, _) | Self::Register(id, _) => id.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, FromVariants)]
 pub enum BuiltIn {
     Integer(Integer),

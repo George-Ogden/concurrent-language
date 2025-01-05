@@ -3,8 +3,8 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    AtomicType, AtomicTypeEnum, Boolean, BuiltIn, FnType, Integer, MachineType, TupleType, TypeDef,
-    UnionType, Value,
+    AtomicType, AtomicTypeEnum, Boolean, BuiltIn, FnType, Integer, MachineType, Store, TupleType,
+    TypeDef, UnionType, Value,
 };
 
 struct Translator {}
@@ -66,6 +66,9 @@ impl Translator {
             BuiltIn::BuiltInFn(name, _) => name,
         }
     }
+    fn translate_store(store: Store) -> String {
+        store.id()
+    }
 }
 
 struct TypeFormatter<'a>(&'a MachineType);
@@ -118,7 +121,7 @@ impl fmt::Display for TypesFormatter<'_> {
 mod tests {
     use super::*;
 
-    use lowering::Name;
+    use lowering::{Id, Name};
     use regex::Regex;
     use test_case::test_case;
 
@@ -441,6 +444,22 @@ mod tests {
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
         let code = Translator::translate_builtin(value);
+        let expected_code = String::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Store::Memory(Id::from("x"), AtomicType(AtomicTypeEnum::BOOL).into()),
+        "x";
+        "memory translation"
+    )]
+    #[test_case(
+        Store::Register(Id::from("bar"), AtomicType(AtomicTypeEnum::BOOL).into()),
+        "bar";
+        "register translation"
+    )]
+    fn test_store_translation(store: Store, expected: &str) {
+        let code = Translator::translate_store(store);
         let expected_code = String::from(expected);
         assert_eq_code(code, expected_code);
     }
