@@ -497,8 +497,8 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
         switch (list.tag) {
         case 0: {
             Cons cons = *reinterpret_cast<Cons *>(&list.value);
-            ListInt_ *tail = std::get<1>(cons);
-            Int head = std::get<0>(cons);
+            ListInt_ *tail = std::get<1ULL>(cons);
+            Int head = std::get<0ULL>(cons);
 
             if (call1 == nullptr) {
                 call1 = new ListIntSum{};

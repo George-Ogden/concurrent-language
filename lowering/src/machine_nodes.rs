@@ -55,3 +55,15 @@ pub enum BuiltIn {
     Boolean(Boolean),
     BuiltInFn(Name, MachineType),
 }
+
+#[derive(Debug, Clone, FromVariants)]
+pub enum Expression {
+    Value(Value),
+    ElementAccess(ElementAccess),
+}
+
+#[derive(Debug, Clone)]
+pub struct ElementAccess {
+    pub value: Value,
+    pub idx: usize,
+}

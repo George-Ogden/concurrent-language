@@ -223,7 +223,7 @@ pub fn Var(id: &str) -> GenericVariable {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct ElementAccess {
     pub expression: Box<Expression>,
-    pub index: u32,
+    pub index: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

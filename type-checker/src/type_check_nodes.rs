@@ -253,7 +253,7 @@ pub struct TypedAccess {
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedElementAccess {
     pub expression: Box<TypedExpression>,
-    pub index: u32,
+    pub index: usize,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -440,7 +440,7 @@ pub enum TypeCheckError {
     },
     InvalidAccess {
         expression: TypedExpression,
-        index: u32,
+        index: usize,
     },
     NonMatchingIfBlocks {
         true_block: TypedBlock,
@@ -497,7 +497,7 @@ pub enum TypeCheckError {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorType {
     pub type_: Rc<RefCell<ParametricType>>,
-    pub index: u32,
+    pub index: usize,
 }
 
 type TypeReferencesIndex = HashMap<*mut ParametricType, Id>;

@@ -3,17 +3,19 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    AtomicType, AtomicTypeEnum, Boolean, BuiltIn, FnType, Integer, MachineType, Store, TupleType,
-    TypeDef, UnionType, Value,
+    AtomicType, AtomicTypeEnum, Boolean, BuiltIn, ElementAccess, Expression, FnType, Integer,
+    MachineType, Store, TupleType, TypeDef, UnionType, Value,
 };
+
+type Code = String;
 
 struct Translator {}
 
 impl Translator {
-    fn translate_type(type_: &MachineType) -> String {
+    fn translate_type(type_: &MachineType) -> Code {
         format!("{}", TypeFormatter(type_))
     }
-    fn translate_type_defs(type_defs: Vec<TypeDef>) -> String {
+    fn translate_type_defs(type_defs: Vec<TypeDef>) -> Code {
         let type_forward_definitions = type_defs
             .iter()
             .map(|type_def| format!("struct {};", type_def.name));
@@ -23,12 +25,9 @@ impl Translator {
                 type_def.constructors.iter().map(|constructor| {
                     format!(
                         "typedef {} {} ;",
-                        constructor
-                            .1
-                            .as_ref()
-                            .map_or(String::from("Empty"), |type_| {
-                                Translator::translate_type(type_)
-                            }),
+                        constructor.1.as_ref().map_or(Code::from("Empty"), |type_| {
+                            Translator::translate_type(type_)
+                        }),
                         constructor.0
                     )
                 })
@@ -56,21 +55,32 @@ impl Translator {
             itertools::join(struct_definitions, "\n")
         )
     }
-    fn translate_value(value: Value) -> String {
+    fn translate_value(value: Value) -> Code {
         match value {
             Value::BuiltIn(value) => Translator::translate_builtin(value),
             Value::Store(store) => Translator::translate_store(store),
         }
     }
-    fn translate_builtin(value: BuiltIn) -> String {
+    fn translate_builtin(value: BuiltIn) -> Code {
         match value {
             BuiltIn::Integer(Integer { value }) => format!("{}LL", value),
             BuiltIn::Boolean(Boolean { value }) => format!("{}", value),
             BuiltIn::BuiltInFn(name, _) => name,
         }
     }
-    fn translate_store(store: Store) -> String {
+    fn translate_store(store: Store) -> Code {
         store.id()
+    }
+    fn translate_expression(expression: Expression) -> Code {
+        match expression {
+            Expression::ElementAccess(ElementAccess { value, idx }) => format!(
+                "std::get<{}ULL>({})",
+                idx,
+                Translator::translate_value(value)
+            ),
+            Expression::Value(value) => Translator::translate_value(value),
+            _ => todo!(),
+        }
     }
 }
 
@@ -128,12 +138,12 @@ mod tests {
     use regex::Regex;
     use test_case::test_case;
 
-    fn normalize_code(code: String) -> String {
+    fn normalize_code(code: Code) -> Code {
         let regex = Regex::new(r"((^|[^[:space:]])[[:space:]]+([^[:space:][:word:]]|$))|((^|[^[:space:][:word:]])[[:space:]]+([^[:space:]]|$))")
         .unwrap();
 
         let mut result = code;
-        let mut code = String::new();
+        let mut code = Code::new();
         while result != code {
             code = result;
             result = regex.replace_all(&*code, "${2}${5}${3}${6}").to_string();
@@ -142,7 +152,7 @@ mod tests {
         return result;
     }
 
-    fn assert_eq_code(code1: String, code2: String) -> () {
+    fn assert_eq_code(code1: Code, code2: Code) -> () {
         assert_eq!(normalize_code(code1), normalize_code(code2));
     }
 
@@ -176,8 +186,8 @@ mod tests {
         "3-8";
         "newline replacement"
     )]
-    fn test_string_replacement(code: &str, expected: &str) {
-        assert_eq!(normalize_code(String::from(code)), String::from(expected))
+    fn test_code_normalization(code: &str, expected: &str) {
+        assert_eq!(normalize_code(Code::from(code)), Code::from(expected))
     }
 
     #[test_case(
@@ -285,7 +295,7 @@ mod tests {
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(&type_);
-        let expected_code = String::from(expected);
+        let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 
@@ -340,7 +350,7 @@ mod tests {
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
         let code = Translator::translate_type_defs(vec![type_def]);
-        let expected_code = String::from(expected);
+        let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 
@@ -383,7 +393,7 @@ mod tests {
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
         let code = Translator::translate_type_defs(type_defs);
-        let expected_code = String::from(expected);
+        let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 
@@ -447,7 +457,7 @@ mod tests {
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
         let code = Translator::translate_builtin(value);
-        let expected_code = String::from(expected);
+        let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 
@@ -463,7 +473,7 @@ mod tests {
     )]
     fn test_store_translation(store: Store, expected: &str) {
         let code = Translator::translate_store(store);
-        let expected_code = String::from(expected);
+        let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 
@@ -499,7 +509,29 @@ mod tests {
     )]
     fn test_value_translation(value: Value, expected: &str) {
         let code = Translator::translate_value(value);
-        let expected_code = String::from(expected);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Value::BuiltIn(BuiltIn::Integer(Integer{value: -1}).into()).into(),
+        "-1LL";
+        "index access"
+    )]
+    #[test_case(
+        ElementAccess{
+            value: Store::Register(
+                Name::from("tuple"),
+                TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()]).into()
+            ).into(),
+            idx: 1
+        }.into(),
+        "std::get<1ULL>(tuple)";
+        "tuple index access"
+    )]
+    fn test_expression_slation(expression: Expression, expected: &str) {
+        let code = Translator::translate_expression(expression);
+        let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 }
