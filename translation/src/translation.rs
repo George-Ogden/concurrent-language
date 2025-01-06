@@ -3,8 +3,9 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    Assignment, AtomicType, AtomicTypeEnum, Boolean, BuiltIn, ElementAccess, Expression, FnType,
-    Integer, MachineType, Store, TupleType, TypeDef, UnionType, Value,
+    Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ElementAccess, Expression,
+    FnType, IfStatement, Integer, MachineType, Statement, Store, TupleType, TypeDef, UnionType,
+    Value,
 };
 
 type Code = String;
@@ -88,13 +89,35 @@ impl Translator {
             _ => todo!(),
         }
     }
+    fn translate_statement(statement: Statement) -> Code {
+        match statement {
+            Statement::Await(await_) => Translator::translate_await(await_),
+            Statement::Assignment(assignment) => Translator::translate_assignment(assignment),
+            Statement::IfStatement(if_statement) => {
+                Translator::translate_if_statement(if_statement)
+            }
+        }
+    }
+    fn translate_await(await_: Await) -> Code {
+        let stores = await_.0;
+        format!(
+            "WorkManager::await({});",
+            stores
+                .into_iter()
+                .map(Translator::translate_store)
+                .join(",")
+        )
+    }
     fn translate_assignment(assignment: Assignment) -> Code {
         let target_code = match assignment.target {
             Store::Register(id, type_) => format!("{} {}", Translator::translate_type(&type_), id),
-            Store::Memory(id, type_) => format!("{}", id),
+            Store::Memory(id, _) => format!("{}", id),
         };
         let value_code = Translator::translate_expression(assignment.value);
         format!("{} = {};", target_code, value_code)
+    }
+    fn translate_if_statement(if_statement: IfStatement) -> Code {
+        Code::new()
     }
 }
 
@@ -671,6 +694,36 @@ mod tests {
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = Translator::translate_assignment(assignment);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Await(vec![Store::Memory(Id::from("z"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())))]).into(),
+        "WorkManager::await(z);";
+        "await for memory"
+    )]
+    #[test_case(
+        Await(vec![
+            Store::Register(
+                Id::from("z"),
+                MachineType::Lazy(Box::new(FnType(
+                    vec![AtomicType(AtomicTypeEnum::INT).into()],
+                    Box::new(AtomicType(AtomicTypeEnum::INT).into())
+                ).into())),
+            ),
+            Store::Register(
+                Id::from("x"),
+                MachineType::Lazy(Box::new(
+                    AtomicType(AtomicTypeEnum::INT).into()
+                )),
+            ),
+        ]).into(),
+        "WorkManager::await(z,x);";
+        "await for registers"
+    )]
+    fn test_statement_translation(statement: Statement, expected: &str) {
+        let code = Translator::translate_statement(statement);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }

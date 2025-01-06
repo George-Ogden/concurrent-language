@@ -87,7 +87,24 @@ pub struct ElementAccess {
     pub idx: usize,
 }
 
+#[derive(Clone, Debug, FromVariants)]
+pub enum Statement {
+    Await(Await),
+    Assignment(Assignment),
+    IfStatement(IfStatement),
+}
+
+#[derive(Clone, Debug)]
+pub struct Await(pub Vec<Store>);
+
+#[derive(Clone, Debug)]
 pub struct Assignment {
     pub target: Store,
     pub value: Expression,
+}
+
+#[derive(Clone, Debug)]
+pub struct IfStatement {
+    pub condition: Store,
+    pub branches: (Vec<Statement>, Vec<Statement>),
 }
