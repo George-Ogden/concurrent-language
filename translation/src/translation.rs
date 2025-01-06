@@ -3,8 +3,8 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    AtomicType, AtomicTypeEnum, Boolean, BuiltIn, ElementAccess, Expression, FnType, Integer,
-    MachineType, Store, TupleType, TypeDef, UnionType, Value,
+    Assignment, AtomicType, AtomicTypeEnum, Boolean, BuiltIn, ElementAccess, Expression, FnType,
+    Integer, MachineType, Store, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -55,12 +55,6 @@ impl Translator {
             itertools::join(struct_definitions, "\n")
         )
     }
-    fn translate_value(value: Value) -> Code {
-        match value {
-            Value::BuiltIn(value) => Translator::translate_builtin(value),
-            Value::Store(store) => Translator::translate_store(store),
-        }
-    }
     fn translate_builtin(value: BuiltIn) -> Code {
         match value {
             BuiltIn::Integer(Integer { value }) => format!("{}LL", value),
@@ -70,6 +64,12 @@ impl Translator {
     }
     fn translate_store(store: Store) -> Code {
         store.id()
+    }
+    fn translate_value(value: Value) -> Code {
+        match value {
+            Value::BuiltIn(value) => Translator::translate_builtin(value),
+            Value::Store(store) => Translator::translate_store(store),
+        }
     }
     fn translate_expression(expression: Expression) -> Code {
         match expression {
@@ -81,6 +81,14 @@ impl Translator {
             Expression::Value(value) => Translator::translate_value(value),
             _ => todo!(),
         }
+    }
+    fn translate_assignment(assignment: Assignment) -> Code {
+        let target_code = match assignment.target {
+            Store::Register(id, type_) => format!("{} {}", Translator::translate_type(&type_), id),
+            Store::Memory(id, type_) => format!("{}", id),
+        };
+        let value_code = Translator::translate_expression(assignment.value);
+        format!("{} = {};", target_code, value_code)
     }
 }
 
@@ -529,8 +537,46 @@ mod tests {
         "std::get<1ULL>(tuple)";
         "tuple index access"
     )]
-    fn test_expression_slation(expression: Expression, expected: &str) {
+    fn test_expression_translation(expression: Expression, expected: &str) {
         let code = Translator::translate_expression(expression);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Assignment {
+            target: Store::Register(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+            value: Value::BuiltIn(Integer{value: 5}.into()).into()
+        },
+        "Int x = 5LL;";
+        "integer assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+            value: ElementAccess{
+                value: Store::Register(
+                    Name::from("tuple"),
+                    TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()]).into()
+                ).into(),
+                idx: 0
+            }.into(),
+
+        },
+        "Int x = std::get<0ULL>(tuple);";
+        "tuple access assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("y"), AtomicType(AtomicTypeEnum::BOOL).into()).into(),
+            value: Value::BuiltIn(Boolean{value: true}.into()).into(),
+
+        },
+        "y =true;";
+        "boolean assignment"
+    )]
+    fn test_assignment_translation(assignment: Assignment, expected: &str) {
+        let code = Translator::translate_assignment(assignment);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }

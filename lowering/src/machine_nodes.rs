@@ -67,3 +67,8 @@ pub struct ElementAccess {
     pub value: Value,
     pub idx: usize,
 }
+
+pub struct Assignment {
+    pub target: Store,
+    pub value: Expression,
+}
