@@ -4,8 +4,8 @@ use std::fmt::Formatter;
 
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ElementAccess, Expression,
-    FnCall, FnType, IfStatement, Integer, MachineType, Statement, Store, TupleType, TypeDef,
-    UnionType, Value,
+    FnCall, FnType, IfStatement, Integer, MachineType, MatchBranch, MatchStatement, Statement,
+    Store, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -86,11 +86,12 @@ impl Translator {
             }
             Expression::Value(value) => self.translate_value(value),
             Expression::Wrap(value) => format!(
-                "new LazyConstant<{}>({})",
+                "new LazyConstant<{}>{{{}}}",
                 self.translate_type(&value.type_()),
                 self.translate_value(value)
             ),
             Expression::Unwrap(store) => format!("{}->value()", self.translate_store(store)),
+            Expression::Extract(store) => format!("{}->value", self.translate_store(store)),
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -109,7 +110,7 @@ impl Translator {
         let args_code = self.translate_value_list(fn_call.args);
         let fn_initialization_code = match fn_call.fn_ {
             Value::BuiltIn(BuiltIn::BuiltInFn(name, _)) => {
-                format!("{} = new {}({});", id, name, args_code)
+                format!("{} = new {}{{{}}};", id, name, args_code)
             }
             Value::Store(store) => {
                 let store_code = self.translate_store(store);
@@ -147,11 +148,45 @@ impl Translator {
             condition_code, if_branch, else_branch
         )
     }
+    fn translate_match_statement(&self, match_statement: MatchStatement) -> Code {
+        let MachineType::UnionType(UnionType(types)) = match_statement.expression.type_() else {
+            panic!("Matching with non-union type")
+        };
+        let branches_code = match_statement
+            .branches
+            .into_iter()
+            .enumerate()
+            .map(|(i, branch)| {
+                let assignment_code = match branch.target {
+                    Some(id) => {
+                        let type_name = &types[i];
+                        let expression_id = &match_statement.expression.id();
+                        format!(
+                            "{} {} = *reinterpret_cast<{}*>(&{}.value);",
+                            type_name, id, type_name, expression_id
+                        )
+                    }
+                    None => Code::new(),
+                };
+                let statements_code = self.translate_statements(branch.statements);
+
+                format!(
+                    "case {}ULL : {{ {} {} break; }}",
+                    i, assignment_code, statements_code
+                )
+            })
+            .join("\n");
+        let expression_code = format!("{}.tag", self.translate_store(match_statement.expression));
+        format!("switch ({}) {{ {} }}", expression_code, branches_code)
+    }
     fn translate_statement(&self, statement: Statement) -> Code {
         match statement {
             Statement::Await(await_) => self.translate_await(await_),
             Statement::Assignment(assignment) => self.translate_assignment(assignment),
             Statement::IfStatement(if_statement) => self.translate_if_statement(if_statement),
+            Statement::MatchStatement(match_statement) => {
+                self.translate_match_statement(match_statement)
+            }
         }
     }
     fn translate_statements(&self, statements: Vec<Statement>) -> Code {
@@ -670,7 +705,7 @@ mod tests {
             value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into())),
 
         },
-        "Lazy<Bool>* y = new LazyConstant<Bool>(true);";
+        "Lazy<Bool>* y = new LazyConstant<Bool>{true};";
         "wrapping constant"
     )]
     #[test_case(
@@ -694,7 +729,7 @@ mod tests {
                 ).into()
             ).into()),
         },
-        "g = new LazyConstant<FnT<Int,Int>>(f);";
+        "g = new LazyConstant<FnT<Int,Int>>{f};";
         "wrapping function from variable"
     )]
     #[test_case(
@@ -756,7 +791,7 @@ mod tests {
                 ]
             }.into()
         },
-        "if (call == nullptr) { call = new Plus__BuiltIn(arg1, arg2); call->call(); }";
+        "if (call == nullptr) { call = new Plus__BuiltIn{arg1, arg2}; call->call(); }";
         "built-in fn-call"
     )]
     #[test_case(
@@ -784,6 +819,123 @@ mod tests {
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        MatchStatement{
+            expression: Store::Register(
+                Id::from("bull"),
+                UnionType(vec![Name::from("Twoo"), Name::from("Faws")]).into()
+            ),
+            branches: vec![
+                MatchBranch {
+                    target: None,
+                    statements: vec![
+                        Assignment {
+                            target: Store::Memory(Id::from("r"), AtomicType(AtomicTypeEnum::BOOL).into()).into(),
+                            value: Value::BuiltIn(Boolean{value: true}.into()).into()
+                        }.into()
+                    ],
+                },
+                MatchBranch {
+                    target: None,
+                    statements: vec![Assignment {
+                        target: Store::Memory(Id::from("r"), AtomicType(AtomicTypeEnum::BOOL).into()).into(),
+                        value: Value::BuiltIn(Boolean{value: false}.into()).into()
+                    }.into()],
+                }
+            ]
+        },
+        "switch (bull.tag) { case 0ULL: { r = true; break; } case 1ULL: { r = false; break; } }";
+        "match statement no values"
+    )]
+    #[test_case(
+        MatchStatement {
+            expression: Store::Register(
+                Id::from("either"),
+                UnionType(vec![Name::from("Left"), Name::from("Right")]).into()
+            ),
+            branches: vec![
+                MatchBranch {
+                    target: Some(Name::from("x")),
+                    statements: vec![
+                        Assignment {
+                            target: Store::Register(Id::from("z"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                            value: Expression::Wrap(Store::Register(Name::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into())
+                        }.into(),
+                        Assignment {
+                            target: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+                            value: FnCall{
+                                fn_: BuiltIn::BuiltInFn(
+                                    Name::from("Comparison_GE__BuiltIn"),
+                                    FnType(
+                                        vec![
+                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                        ],
+                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))),
+                                    ).into()
+                                ).into(),
+                                args: vec![
+                                    Store::Register(Id::from("z"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                                    Store::Register(Id::from("y"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                                ]
+                            }.into()
+                        }.into()
+                    ],
+                },
+                MatchBranch {
+                    target: Some(Name::from("x")),
+                    statements: vec![
+                        Assignment {
+                            target: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+                            value: Expression::Wrap(Store::Register(Name::from("x"), AtomicType(AtomicTypeEnum::BOOL).into()).into())
+                        }.into(),
+                    ],
+                }
+            ]
+        },
+        "switch (either.tag) { case 0ULL: { Left x = *reinterpret_cast<Left*>(&either.value); Lazy<Int>* z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{z, y}; call->call(); } break; } case 1ULL: { Right x = *reinterpret_cast<Right*>(&either.value); call = new LazyConstant<Bool>{x}; break; }}";
+        "match statement read values"
+    )]
+    #[test_case(
+        MatchStatement {
+            expression: Store::Register(
+                Id::from("nat"),
+                UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
+            ),
+            branches: vec![
+                MatchBranch {
+                    target: Some(Name::from("s")),
+                    statements: vec![
+                        Assignment {
+                            target: Store::Register(Id::from("u"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into(),
+                            value: Expression::Extract(Store::Register(Name::from("s"), MachineType::NamedType(Name::from("Suc")).into()).into())
+                        }.into(),
+                        Assignment {
+                            target: Store::Memory(Id::from("r"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into(),
+                            value: Expression::Value(Store::Register(Name::from("u"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into())
+                        }.into(),
+                    ],
+                },
+                MatchBranch {
+                    target: None,
+                    statements: vec![
+                        Assignment {
+                            target: Store::Memory(Id::from("r"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into(),
+                            value: Expression::Value(Store::Register(Name::from("nil"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into())
+                        }.into(),
+                    ],
+                }
+            ]
+        },
+        "switch (nat.tag) { case 0ULL: { Suc s = *reinterpret_cast<Suc*>(&nat.value); VariantT<Suc,Nil> u = s->value; r = u; break; } case 1ULL: { r = nil; break; }}";
+        "match statement recursive type"
+    )]
+    fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
+        let code = TRANSLATOR.translate_match_statement(match_statement);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -912,6 +1064,23 @@ mod tests {
         },
         "WorkManager::await(t); TupleT<Int,Int> tuple = t->value(); Int x = std::get<1ULL>(tuple);";
         "tuple access"
+    )]
+    #[test_case(
+        vec![
+            Assignment {
+                target: Store::Register(Name::from("tail_"), MachineType::NamedType(Name::from("List")).into()).into(),
+                value: ElementAccess{
+                    value: Store::Register(Name::from("cons"), MachineType::NamedType(Name::from("Cons")).into()).into(),
+                    idx: 1
+                }.into()
+            }.into(),
+            Assignment {
+                target: Store::Register(Id::from("tail"), UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into()).into(),
+                value: Expression::Extract(Store::Register(Name::from("tail_"), MachineType::NamedType(Name::from("List")).into()).into())
+            }.into(),
+        ],
+        "List *tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail = tail_->value;";
+        "cons extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
         let code = TRANSLATOR.translate_statements(statements);

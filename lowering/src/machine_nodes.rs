@@ -79,6 +79,7 @@ pub enum Expression {
     ElementAccess(ElementAccess),
     Wrap(Value),
     Unwrap(Store),
+    Extract(Store),
     FnCall(FnCall),
 }
 
@@ -93,6 +94,7 @@ pub enum Statement {
     Await(Await),
     Assignment(Assignment),
     IfStatement(IfStatement),
+    MatchStatement(MatchStatement),
 }
 
 #[derive(Clone, Debug)]
@@ -114,4 +116,16 @@ pub struct FnCall {
 pub struct IfStatement {
     pub condition: Store,
     pub branches: (Vec<Statement>, Vec<Statement>),
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchStatement {
+    pub expression: Store,
+    pub branches: Vec<MatchBranch>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchBranch {
+    pub target: Option<Name>,
+    pub statements: Vec<Statement>,
 }

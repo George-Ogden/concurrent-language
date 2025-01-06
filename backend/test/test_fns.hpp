@@ -443,10 +443,10 @@ struct EitherIntBoolExtractor
         WorkManager::await(either);
         EitherIntBool x = either->value();
         switch (x.tag) {
-        case 0:
+        case 0ULL:
             return new LazyConstant<Bool>(*reinterpret_cast<int *>(&x.value) >
                                           10);
-        case 1:
+        case 1ULL:
             return new LazyConstant<Bool>(*reinterpret_cast<bool *>(&x.value));
         }
         return 0;
@@ -476,33 +476,34 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
     }
 }
 
-struct ListInt_;
-typedef TupleT<Int, ListInt_ *> Cons;
+struct ListInt;
+typedef TupleT<Int, ListInt *> Cons;
 typedef Empty Nil;
-struct ListInt_ {
+struct ListInt {
     using type = VariantT<Cons, Nil>;
     type value;
     // cppcheck-suppress noExplicitConstructor
-    ListInt_(type value) : value(value) {}
+    ListInt(type value) : value(value) {}
 };
-using ListInt = ListInt_::type;
+using ListInt_ = ListInt::type;
 
-struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
-    using EasyCloneFn<ListIntSum, Int, ListInt>::EasyCloneFn;
+struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt_> {
+    using EasyCloneFn<ListIntSum, Int, ListInt_>::EasyCloneFn;
     ListIntSum *call1 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
-    Lazy<Int> *body(Lazy<ListInt> *&lazy_list) override {
+    Lazy<Int> *body(Lazy<ListInt_> *&lazy_list) override {
         WorkManager::await(lazy_list);
-        ListInt list = lazy_list->value();
+        ListInt_ list = lazy_list->value();
         switch (list.tag) {
         case 0: {
             Cons cons = *reinterpret_cast<Cons *>(&list.value);
-            ListInt_ *tail = std::get<1ULL>(cons);
             Int head = std::get<0ULL>(cons);
+            ListInt *tail_ = std::get<1ULL>(cons);
+            ListInt_ tail = tail_->value;
 
             if (call1 == nullptr) {
                 call1 = new ListIntSum{};
-                call1->args = reference_all(tail->value);
+                call1->args = reference_all(tail);
                 call1->call();
             }
 
@@ -522,18 +523,18 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
-    ListInt tail{};
+    ListInt_ tail{};
     tail.tag = 1;
-    ListInt_ wrapped_tail = tail;
-    ListInt third{};
+    ListInt wrapped_tail = tail;
+    ListInt_ third{};
     third.tag = 0;
     *reinterpret_cast<Cons *>(&third.value) = Cons(8, &wrapped_tail);
-    ListInt_ wrapped_third = third;
-    ListInt second{};
+    ListInt wrapped_third = third;
+    ListInt_ second{};
     second.tag = 0;
     *reinterpret_cast<Cons *>(&second.value) = Cons(4, &wrapped_third);
-    ListInt_ wrapped_second = second;
-    ListInt first{};
+    ListInt wrapped_second = second;
+    ListInt_ first{};
     first.tag = 0;
     *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
 
@@ -541,6 +542,62 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
 
     WorkManager::run(adder);
     ASSERT_EQ(adder->ret, 3);
+}
+
+struct Nat;
+typedef Nat *Suc;
+typedef Empty Nil;
+struct Nat {
+    using type = VariantT<Suc, Nil>;
+    type value;
+    // cppcheck-suppress noExplicitConstructor
+    Nat(type value) : value(value) {}
+};
+
+struct SimpleRecursiveTypeExample
+    : EasyCloneFn<SimpleRecursiveTypeExample, VariantT<Suc, Nil>,
+                  VariantT<Suc, Nil>> {
+    using EasyCloneFn<SimpleRecursiveTypeExample, VariantT<Suc, Nil>,
+                      VariantT<Suc, Nil>>::EasyCloneFn;
+    Lazy<VariantT<Suc, Nil>> *body(Lazy<VariantT<Suc, Nil>> *&nat_) override {
+        WorkManager::await(nat_);
+        VariantT<Suc, Nil> nat = nat_->value();
+        switch (nat.tag) {
+        case 0: {
+            Suc s = *reinterpret_cast<Suc *>(&nat.value);
+            VariantT<Suc, Nil> r = s->value;
+            return new LazyConstant<VariantT<Suc, Nil>>{r};
+        }
+        case 1: {
+            VariantT<Suc, Nil> n{};
+            n.tag = 1;
+            return new LazyConstant<VariantT<Suc, Nil>>{n};
+        }
+        }
+        return nullptr;
+    }
+};
+
+TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
+    VariantT<Suc, Nil> n{};
+    n.tag = 1;
+    Nat *wrapped_n = new Nat{n};
+
+    VariantT<Suc, Nil> inner{};
+    inner.tag = 0;
+    *reinterpret_cast<Suc *>(&inner.value) = Suc{wrapped_n};
+    Nat *wrapped_inner = new Nat{inner};
+
+    VariantT<Suc, Nil> outer{};
+    outer.tag = 0;
+    *reinterpret_cast<Suc *>(&outer.value) = Suc{wrapped_inner};
+
+    SimpleRecursiveTypeExample *fn = new SimpleRecursiveTypeExample{outer};
+
+    WorkManager::run(fn);
+    ASSERT_EQ(fn->ret.tag, inner.tag);
+    ASSERT_EQ(*reinterpret_cast<Suc *>(&fn->ret.value),
+              *reinterpret_cast<Suc *>(&inner.value));
 }
 
 const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
