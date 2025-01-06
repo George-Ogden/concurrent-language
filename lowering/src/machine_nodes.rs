@@ -81,6 +81,7 @@ pub enum Expression {
     Unwrap(Store),
     Extract(Store),
     FnCall(FnCall),
+    TupleExpression(TupleExpression),
 }
 
 #[derive(Debug, Clone)]
@@ -129,3 +130,6 @@ pub struct MatchBranch {
     pub target: Option<Name>,
     pub statements: Vec<Statement>,
 }
+
+#[derive(Clone, Debug)]
+pub struct TupleExpression(pub Vec<Value>);

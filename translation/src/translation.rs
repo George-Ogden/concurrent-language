@@ -4,8 +4,8 @@ use std::fmt::Formatter;
 
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ElementAccess, Expression,
-    FnCall, FnType, IfStatement, Integer, MachineType, MatchBranch, MatchStatement, Statement,
-    Store, TupleType, TypeDef, UnionType, Value,
+    FnCall, FnType, IfStatement, Integer, MachineType, MatchStatement, Statement, Store,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -92,6 +92,9 @@ impl Translator {
             ),
             Expression::Unwrap(store) => format!("{}->value()", self.translate_store(store)),
             Expression::Extract(store) => format!("{}->value", self.translate_store(store)),
+            Expression::TupleExpression(TupleExpression(values)) => {
+                format!("std::make_tuple({})", self.translate_value_list(values))
+            }
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -248,7 +251,7 @@ impl fmt::Display for TypesFormatter<'_> {
 mod tests {
     use super::*;
 
-    use lowering::{Id, Name};
+    use lowering::{Id, MatchBranch, Name};
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
@@ -816,6 +819,35 @@ mod tests {
         },
         "if (call2 == nullptr) { call2 = call1->clone();  call2->args = std::make_tuple(arg1, arg2); call2->call(); }";
         "custom fn-call"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(Id::from("e"), TupleType(Vec::new()).into()),
+            value: TupleExpression(Vec::new()).into()
+        },
+        "TupleT<> e = std::make_tuple();";
+        "empty tuple assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("t"), TupleType(vec![AtomicType(AtomicTypeEnum::INT).into()]).into()),
+            value: TupleExpression(vec![
+                Value::BuiltIn(Integer{value: 5}.into())
+            ]).into()
+        },
+        "t = std::make_tuple(5LL);";
+        "singleton tuple assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(Id::from("t"), TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(),AtomicType(AtomicTypeEnum::INT).into()]).into()),
+            value: TupleExpression(vec![
+                Value::BuiltIn(Integer{value: -4}.into()),
+                Store::Register(Id::from("y"), AtomicType(AtomicTypeEnum::INT).into()).into()
+            ]).into()
+        },
+        "TupleT<Int,Int> t = std::make_tuple(-4LL,y);";
+        "double tuple assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);
