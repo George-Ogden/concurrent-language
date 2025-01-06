@@ -79,6 +79,7 @@ pub enum Expression {
     Value(Value),
     Wrap(Value),
     Unwrap(Store),
+    Reference(Store),
     Dereference(Store),
     ElementAccess(ElementAccess),
     TupleExpression(TupleExpression),
@@ -103,8 +104,8 @@ pub struct FnCall {
 
 #[derive(Clone, Debug)]
 pub struct ConstructorCall {
-    pub fn_: Value,
-    pub args: Vec<Value>,
+    pub idx: usize,
+    pub data: Option<(Name, Value)>,
 }
 
 #[derive(Clone, Debug, FromVariants)]

@@ -3,9 +3,9 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ElementAccess, Expression,
-    FnCall, FnType, IfStatement, Integer, MachineType, MatchStatement, Statement, Store,
-    TupleExpression, TupleType, TypeDef, UnionType, Value,
+    Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ConstructorCall,
+    ElementAccess, Expression, FnCall, FnType, IfStatement, Integer, MachineType, MatchStatement,
+    Statement, Store, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -91,6 +91,11 @@ impl Translator {
                 self.translate_value(value)
             ),
             Expression::Unwrap(store) => format!("{}->value()", self.translate_store(store)),
+            Expression::Reference(store) => format!(
+                "new {}{{{}}}",
+                self.translate_type(&store.type_()),
+                self.translate_store(store)
+            ),
             Expression::Dereference(store) => format!("*{}", self.translate_store(store)),
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
@@ -123,9 +128,28 @@ impl Translator {
         };
         format!("if ({id} == nullptr) {{ {fn_initialization_code} {id}->call(); }}",)
     }
+    fn translate_constructor_call(&self, target: Store, constructor_call: ConstructorCall) -> Code {
+        let declaration = match &target {
+            Store::Memory(_, _) => Code::new(),
+            Store::Register(id, type_) => format!("{} {id}{{}};", self.translate_type(&type_)),
+        };
+        let store = self.translate_store(target);
+        let indexing_code = format!("{store}.tag = {}ULL;", constructor_call.idx);
+        let value_code = match constructor_call.data {
+            None => Code::new(),
+            Some((name, value)) => format!(
+                "reinterpret_cast<{name}*>(&{store}.value)->value = {};",
+                self.translate_value(value)
+            ),
+        };
+        format!("{declaration} {indexing_code} {value_code}")
+    }
     fn translate_assignment(&self, assignment: Assignment) -> Code {
         match assignment.value {
             Expression::FnCall(fn_call) => self.translate_fn_call(assignment.target, fn_call),
+            Expression::ConstructorCall(constructor_call) => {
+                self.translate_constructor_call(assignment.target, constructor_call)
+            }
             value => {
                 let value_code = self.translate_expression(value);
                 let target_code = match assignment.target {
@@ -687,7 +711,6 @@ mod tests {
                 ).into(),
                 idx: 0
             }.into(),
-
         },
         "Int x = std::get<0ULL>(tuple);";
         "tuple access assignment"
@@ -696,7 +719,6 @@ mod tests {
         Assignment {
             target: Store::Memory(Id::from("y"), AtomicType(AtomicTypeEnum::BOOL).into()).into(),
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
-
         },
         "y = true;";
         "boolean assignment"
@@ -705,7 +727,6 @@ mod tests {
         Assignment {
             target: Store::Register(Id::from("y"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
             value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into())),
-
         },
         "Lazy<Bool>* y = new LazyConstant<Bool>{true};";
         "wrapping constant"
@@ -847,6 +868,58 @@ mod tests {
         },
         "TupleT<Int,Int> t = std::make_tuple(-4LL,y);";
         "double tuple assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(Id::from("bull"), MachineType::NamedType(Name::from("Bull"))),
+            value: ConstructorCall {
+                idx: 1,
+                data: None
+            }.into()
+        },
+        "Bull bull{}; bull.tag = 1ULL;";
+        "empty constructor assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("bull"), MachineType::NamedType(Name::from("Bull"))),
+            value: ConstructorCall {
+                idx: 0,
+                data: None
+            }.into()
+        },
+        "bull.tag = 0ULL;";
+        "empty constructor memory assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(
+                Id::from("wrapper"),
+                UnionType(vec![Name::from("Wrapper")]).into()
+            ),
+            value: ConstructorCall {
+                idx: 0,
+                data: Some((Name::from("Wrapper"), Value::BuiltIn(Integer{value: 4}.into())))
+            }.into()
+        },
+        "VariantT<Wrapper> wrapper{}; wrapper.tag = 0ULL; reinterpret_cast<Wrapper*>(&wrapper.value)->value = 4LL;";
+        "wrapper constructor assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(
+                Id::from("lr"),
+                MachineType::Reference(Box::new(MachineType::NamedType(Name::from("ListInt"))))
+            ).into(),
+            value: Expression::Reference(
+                Store::Register(
+                    Id::from("l"),
+                    MachineType::NamedType(Name::from("ListInt"))
+                ).into()
+            )
+        },
+        "ListInt* lr = new ListInt{l};";
+        "reference assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);
@@ -1112,6 +1185,42 @@ mod tests {
         ],
         "List *tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail = *tail_;";
         "cons extraction"
+    )]
+    #[test_case(
+        vec![
+            Assignment {
+                target: Store::Register(
+                    Name::from("n"),
+                    UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
+                ).into(),
+                value: ConstructorCall{
+                    idx: 1,
+                    data: None
+                }.into()
+            }.into(),
+            Assignment {
+                target: Store::Register(
+                    Id::from("wrapped_n"),
+                    MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()))
+                ).into(),
+                value: Expression::Reference(Store::Register(Name::from("n"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()))
+            }.into(),
+            Assignment {
+                target: Store::Register(Name::from("s"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into(),
+                value: ConstructorCall{
+                    idx: 0,
+                    data: Some((
+                        Name::from("Suc"),
+                        Store::Register(
+                            Id::from("wrapped_n"),
+                            MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()))
+                        ).into()
+                    ))
+                }.into()
+            }.into(),
+        ],
+        "VariantT<Suc, Nil> n{}; n.tag = 1ULL; VariantT<Suc, Nil> *wrapped_n = new VariantT<Suc, Nil>{n}; VariantT<Suc, Nil> s{}; s.tag = 0ULL; reinterpret_cast<Suc *>(&s.value)->value = wrapped_n;";
+        "simple recursive type extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
         let code = TRANSLATOR.translate_statements(statements);
