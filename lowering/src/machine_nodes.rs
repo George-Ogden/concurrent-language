@@ -11,6 +11,7 @@ pub enum MachineType {
     FnType(FnType),
     UnionType(UnionType),
     NamedType(Name),
+    Lazy(Box<MachineType>),
 }
 
 #[derive(Debug, Clone)]

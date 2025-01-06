@@ -118,6 +118,7 @@ impl fmt::Display for TypeFormatter<'_> {
                 write!(f, "VariantT<{}>", type_names.join(","))
             }
             MachineType::NamedType(name) => write!(f, "{}*", name),
+            MachineType::Lazy(type_) => write!(f, "Lazy<{}>*", TypeFormatter(&**type_)),
         }
     }
 }
@@ -300,6 +301,21 @@ mod tests {
         UnionType(vec![Name::from("Cons_Int"), Name::from("Nil_Int")]).into(),
         "VariantT<Cons_Int,Nil_Int>";
         "list int type"
+    )]
+    #[test_case(
+        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+        "Lazy<Int>*";
+        "lazy int type"
+    )]
+    #[test_case(
+        MachineType::Lazy(Box::new(
+            TupleType(vec![
+                AtomicType(AtomicTypeEnum::INT).into(),
+                AtomicType(AtomicTypeEnum::BOOL).into()
+            ]).into()
+        )),
+        "Lazy<TupleT<Int,Bool>>*";
+        "lazy tuple type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = Translator::translate_type(&type_);
