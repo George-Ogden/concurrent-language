@@ -59,8 +59,8 @@ impl Translator {
     }
     fn translate_builtin(&self, value: BuiltIn) -> Code {
         match value {
-            BuiltIn::Integer(Integer { value }) => format!("{}LL", value),
-            BuiltIn::Boolean(Boolean { value }) => format!("{}", value),
+            BuiltIn::Integer(Integer { value }) => format!("{value}LL"),
+            BuiltIn::Boolean(Boolean { value }) => format!("{value}"),
             BuiltIn::BuiltInFn(name, _) => name,
         }
     }
@@ -82,7 +82,7 @@ impl Translator {
     fn translate_expression(&self, expression: Expression) -> Code {
         match expression {
             Expression::ElementAccess(ElementAccess { value, idx }) => {
-                format!("std::get<{}ULL>({})", idx, self.translate_store(value))
+                format!("std::get<{idx}ULL>({})", self.translate_store(value))
             }
             Expression::Value(value) => self.translate_value(value),
             Expression::Wrap(value) => format!(
@@ -104,7 +104,7 @@ impl Translator {
             .into_iter()
             .map(|store| self.translate_store(store))
             .join(",");
-        format!("WorkManager::await({});", arguments)
+        format!("WorkManager::await({arguments});")
     }
     fn translate_fn_call(&self, target: Store, fn_call: FnCall) -> Code {
         let Store::Memory(id, _) = target else {
@@ -113,21 +113,15 @@ impl Translator {
         let args_code = self.translate_value_list(fn_call.args);
         let fn_initialization_code = match fn_call.fn_ {
             Value::BuiltIn(BuiltIn::BuiltInFn(name, _)) => {
-                format!("{} = new {}{{{}}};", id, name, args_code)
+                format!("{id} = new {name}{{{args_code}}};")
             }
             Value::Store(store) => {
                 let store_code = self.translate_store(store);
-                format!(
-                    "{} = {}->clone(); {}->args = std::make_tuple({});",
-                    id, store_code, id, args_code
-                )
+                format!("{id} = {store_code}->clone(); {id}->args = std::make_tuple({args_code});",)
             }
             _ => panic!("Calling invalid function"),
         };
-        format!(
-            "if ({} == nullptr) {{ {} {}->call(); }}",
-            id, fn_initialization_code, id
-        )
+        format!("if ({id} == nullptr) {{ {fn_initialization_code} {id}->call(); }}",)
     }
     fn translate_assignment(&self, assignment: Assignment) -> Code {
         match assignment.value {
@@ -138,7 +132,7 @@ impl Translator {
                     Store::Register(id, type_) => format!("{} {}", self.translate_type(&type_), id),
                     Store::Memory(id, _) => format!("{}", id),
                 };
-                format!("{} = {};", target_code, value_code)
+                format!("{target_code} = {value_code};")
             }
         }
     }
@@ -146,10 +140,7 @@ impl Translator {
         let condition_code = self.translate_store(if_statement.condition);
         let if_branch = self.translate_statements(if_statement.branches.0);
         let else_branch = self.translate_statements(if_statement.branches.1);
-        format!(
-            "if ({}) {{ {} }} else {{ {} }}",
-            condition_code, if_branch, else_branch
-        )
+        format!("if ({condition_code}) {{ {if_branch} }} else {{ {else_branch} }}",)
     }
     fn translate_match_statement(&self, match_statement: MatchStatement) -> Code {
         let MachineType::UnionType(UnionType(types)) = match_statement.expression.type_() else {
@@ -165,8 +156,7 @@ impl Translator {
                         let type_name = &types[i];
                         let expression_id = &match_statement.expression.id();
                         format!(
-                            "{} {} = *reinterpret_cast<{}*>(&{}.value);",
-                            type_name, id, type_name, expression_id
+                            "{type_name} {id} = *reinterpret_cast<{type_name}*>(&{expression_id}.value);",
                         )
                     }
                     None => Code::new(),
@@ -174,13 +164,12 @@ impl Translator {
                 let statements_code = self.translate_statements(branch.statements);
 
                 format!(
-                    "case {}ULL : {{ {} {} break; }}",
-                    i, assignment_code, statements_code
+                    "case {i}ULL : {{ {assignment_code} {statements_code} break; }}",
                 )
             })
             .join("\n");
         let expression_code = format!("{}.tag", self.translate_store(match_statement.expression));
-        format!("switch ({}) {{ {} }}", expression_code, branches_code)
+        format!("switch ({expression_code}) {{ {branches_code} }}")
     }
     fn translate_statement(&self, statement: Statement) -> Code {
         match statement {
