@@ -84,6 +84,7 @@ impl Translator {
                 Translator::translate_type(&value.type_()),
                 Translator::translate_value(value)
             ),
+            Expression::Unwrap(store) => format!("{}->value()", Translator::translate_store(store)),
             _ => todo!(),
         }
     }
@@ -607,7 +608,17 @@ mod tests {
     )]
     #[test_case(
         Assignment {
-            target: Store::Memory(Id::from("g"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+            target: Store::Memory(
+                Id::from("g"),
+                MachineType::Lazy(
+                    Box::new(
+                        FnType(
+                            vec![AtomicType(AtomicTypeEnum::INT).into()],
+                            Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                        ).into()
+                    )
+                )
+            ),
             value: Expression::Wrap(Store::Register(
                 Id::from("f"),
                 FnType(
@@ -618,6 +629,45 @@ mod tests {
         },
         "g = new LazyConstant<FnT<Int,Int>>(f);";
         "wrapping function from variable"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(
+                Id::from("w"),
+                FnType(
+                    vec![AtomicType(AtomicTypeEnum::INT).into()],
+                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                ).into()
+            ).into(),
+            value: Expression::Unwrap(
+                Store::Memory(
+                    Id::from("g"),
+                    MachineType::Lazy(
+                        Box::new(
+                            FnType(
+                                vec![AtomicType(AtomicTypeEnum::INT).into()],
+                                Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                            ).into()
+                        )
+                    )
+                )
+            ),
+        },
+        "w = g->value();";
+        "unwrapping function from variable"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("y"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+            value: Expression::Unwrap(
+                Store::Memory(
+                    Id::from("t"),
+                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))
+                )
+            ),
+        },
+        "y = t->value();";
+        "unwrapping boolean from variable"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = Translator::translate_assignment(assignment);

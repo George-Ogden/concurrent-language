@@ -78,6 +78,7 @@ pub enum Expression {
     Value(Value),
     ElementAccess(ElementAccess),
     Wrap(Value),
+    Unwrap(Store),
 }
 
 #[derive(Debug, Clone)]
