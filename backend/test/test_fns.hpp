@@ -404,7 +404,11 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     ASSERT_EQ(pair->ret, std::make_tuple(5, true));
 }
 
-using Bull = VariantT<std::monostate, std::monostate>;
+struct Twoo;
+struct Faws;
+typedef VariantT<Twoo, Faws> Bull;
+struct Twoo {};
+struct Faws {};
 
 struct BoolUnion : EasyCloneFn<BoolUnion, Bool, Bull> {
     using EasyCloneFn<BoolUnion, Bool, Bull>::EasyCloneFn;
@@ -434,7 +438,15 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
     }
 }
 
-using EitherIntBool = VariantT<Int, Bool>;
+struct Left;
+struct Right;
+typedef VariantT<Left, Right> EitherIntBool;
+struct Left {
+    Int value;
+};
+struct Right {
+    Bool value;
+};
 
 struct EitherIntBoolExtractor
     : EasyCloneFn<EitherIntBoolExtractor, Bool, EitherIntBool> {
@@ -444,10 +456,11 @@ struct EitherIntBoolExtractor
         EitherIntBool x = either->value();
         switch (x.tag) {
         case 0ULL:
-            return new LazyConstant<Bool>(*reinterpret_cast<int *>(&x.value) >
-                                          10);
+            return new LazyConstant<Bool>(
+                reinterpret_cast<Left *>(&x.value)->value > 10);
         case 1ULL:
-            return new LazyConstant<Bool>(*reinterpret_cast<bool *>(&x.value));
+            return new LazyConstant<Bool>(
+                reinterpret_cast<Right *>(&x.value)->value);
         }
         return 0;
     }
@@ -464,9 +477,9 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         either.tag = tag;
         if (tag == 0) {
 
-            *reinterpret_cast<int *>(&either.value) = value;
+            *reinterpret_cast<Int *>(&either.value) = value;
         } else {
-            *reinterpret_cast<bool *>(&either.value) = value;
+            *reinterpret_cast<Bool *>(&either.value) = value;
         }
 
         EitherIntBoolExtractor *fn = new EitherIntBoolExtractor{either};
@@ -476,30 +489,28 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
     }
 }
 
-struct ListInt;
-typedef TupleT<Int, ListInt *> Cons;
-typedef Empty Nil;
-struct ListInt {
-    using type = VariantT<Cons, Nil>;
+struct Cons;
+struct Nil;
+typedef VariantT<Cons, Nil> ListInt;
+struct Cons {
+    using type = TupleT<Int, ListInt *>;
     type value;
-    // cppcheck-suppress noExplicitConstructor
-    ListInt(type value) : value(value) {}
 };
-using ListInt_ = ListInt::type;
+struct Nil {};
 
-struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt_> {
-    using EasyCloneFn<ListIntSum, Int, ListInt_>::EasyCloneFn;
+struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
+    using EasyCloneFn<ListIntSum, Int, ListInt>::EasyCloneFn;
     ListIntSum *call1 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
-    Lazy<Int> *body(Lazy<ListInt_> *&lazy_list) override {
+    Lazy<Int> *body(Lazy<ListInt> *&lazy_list) override {
         WorkManager::await(lazy_list);
-        ListInt_ list = lazy_list->value();
+        ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            Cons cons = *reinterpret_cast<Cons *>(&list.value);
+            Cons::type cons = reinterpret_cast<Cons *>(&list.value)->value;
             Int head = std::get<0ULL>(cons);
             ListInt *tail_ = std::get<1ULL>(cons);
-            ListInt_ tail = tail_->value;
+            ListInt tail = *tail_;
 
             if (call1 == nullptr) {
                 call1 = new ListIntSum{};
@@ -523,20 +534,23 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt_> {
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
-    ListInt_ tail{};
+    ListInt tail{};
     tail.tag = 1;
     ListInt wrapped_tail = tail;
-    ListInt_ third{};
+    ListInt third{};
     third.tag = 0;
-    *reinterpret_cast<Cons *>(&third.value) = Cons(8, &wrapped_tail);
+    *reinterpret_cast<Cons *>(&third.value) =
+        Cons{std::make_tuple(8, &wrapped_tail)};
     ListInt wrapped_third = third;
-    ListInt_ second{};
+    ListInt second{};
     second.tag = 0;
-    *reinterpret_cast<Cons *>(&second.value) = Cons(4, &wrapped_third);
+    *reinterpret_cast<Cons *>(&second.value) =
+        Cons{std::make_tuple(4, &wrapped_third)};
     ListInt wrapped_second = second;
-    ListInt_ first{};
+    ListInt first{};
     first.tag = 0;
-    *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
+    *reinterpret_cast<Cons *>(&first.value) =
+        Cons{std::make_tuple(-9, &wrapped_second)};
 
     ListIntSum *adder = new ListIntSum{first};
 
@@ -544,14 +558,11 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ASSERT_EQ(adder->ret, 3);
 }
 
-struct Nat;
-typedef Nat *Suc;
-typedef Empty Nil;
-struct Nat {
-    using type = VariantT<Suc, Nil>;
+struct Suc;
+typedef VariantT<Suc, Nil> Nat;
+struct Suc {
+    using type = Nat *;
     type value;
-    // cppcheck-suppress noExplicitConstructor
-    Nat(type value) : value(value) {}
 };
 
 struct SimpleRecursiveTypeExample
@@ -564,8 +575,8 @@ struct SimpleRecursiveTypeExample
         VariantT<Suc, Nil> nat = nat_->value();
         switch (nat.tag) {
         case 0: {
-            Suc s = *reinterpret_cast<Suc *>(&nat.value);
-            VariantT<Suc, Nil> r = s->value;
+            Suc::type s = reinterpret_cast<Suc *>(&nat.value)->value;
+            VariantT<Suc, Nil> r = *s;
             return new LazyConstant<VariantT<Suc, Nil>>{r};
         }
         case 1: {
@@ -596,8 +607,8 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
 
     WorkManager::run(fn);
     ASSERT_EQ(fn->ret.tag, inner.tag);
-    ASSERT_EQ(*reinterpret_cast<Suc *>(&fn->ret.value),
-              *reinterpret_cast<Suc *>(&inner.value));
+    ASSERT_EQ(reinterpret_cast<Suc *>(&fn->ret.value)->value,
+              reinterpret_cast<Suc *>(&inner.value)->value);
 }
 
 const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};

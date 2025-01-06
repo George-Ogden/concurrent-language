@@ -17,44 +17,44 @@ impl Translator {
         format!("{}", TypeFormatter(type_))
     }
     fn translate_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
-        let type_forward_definitions = type_defs
+        let forward_constructor_definitions = type_defs
             .iter()
-            .map(|type_def| format!("struct {};", type_def.name));
+            .map(|type_def| {
+                type_def
+                    .constructors
+                    .iter()
+                    .map(|constructor| format!("struct {};", constructor.0))
+            })
+            .flatten();
+        let type_definitions = type_defs.iter().map(|type_def| {
+            let variant_definition = self.translate_type(&MachineType::UnionType(UnionType(
+                type_def
+                    .constructors
+                    .iter()
+                    .map(|constructor| constructor.0.clone())
+                    .collect_vec(),
+            )));
+            format!("typedef {variant_definition} {};", type_def.name)
+        });
         let constructor_definitions = type_defs
             .iter()
             .map(|type_def| {
                 type_def.constructors.iter().map(|constructor| {
-                    format!(
-                        "typedef {} {} ;",
-                        constructor
-                            .1
-                            .as_ref()
-                            .map_or(Code::from("Empty"), |type_| { self.translate_type(type_) }),
-                        constructor.0
-                    )
+                    let fields = match &constructor.1 {
+                        Some(type_) => {
+                            format!("using type = {}; type value;", self.translate_type(type_))
+                        }
+                        None => String::new(),
+                    };
+                    format!("struct {} {{ {fields} }};", constructor.0)
                 })
             })
             .flatten();
-        let struct_definitions =
-            type_defs.iter().map(|type_def| {
-                format!(
-                "struct {} {{ using type = {}; type value; {}(type value) : value(value) {{}} }};",
-                type_def.name,
-                self.translate_type(&UnionType(
-                    type_def
-                        .constructors
-                        .iter()
-                        .map(|constructor| constructor.0.clone())
-                        .collect_vec()
-                ).into()),
-                type_def.name,
-            )
-            });
         format!(
             "{} {} {}",
-            itertools::join(type_forward_definitions, "\n"),
+            itertools::join(forward_constructor_definitions, "\n"),
+            itertools::join(type_definitions, "\n"),
             itertools::join(constructor_definitions, "\n"),
-            itertools::join(struct_definitions, "\n")
         )
     }
     fn translate_builtin(&self, value: BuiltIn) -> Code {
@@ -91,7 +91,7 @@ impl Translator {
                 self.translate_value(value)
             ),
             Expression::Unwrap(store) => format!("{}->value()", self.translate_store(store)),
-            Expression::Extract(store) => format!("{}->value", self.translate_store(store)),
+            Expression::Dereference(store) => format!("*{}", self.translate_store(store)),
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
@@ -156,7 +156,7 @@ impl Translator {
                         let type_name = &types[i];
                         let expression_id = &match_statement.expression.id();
                         format!(
-                            "{type_name} {id} = *reinterpret_cast<{type_name}*>(&{expression_id}.value);",
+                            "{type_name}::type {id} = reinterpret_cast<{type_name}*>(&{expression_id}.value)->value;",
                         )
                     }
                     None => Code::new(),
@@ -214,7 +214,8 @@ impl fmt::Display for TypeFormatter<'_> {
             MachineType::UnionType(UnionType(type_names)) => {
                 write!(f, "VariantT<{}>", type_names.join(","))
             }
-            MachineType::NamedType(name) => write!(f, "{}*", name),
+            MachineType::NamedType(name) => write!(f, "{}", name),
+            MachineType::Reference(type_) => write!(f, "{}*", TypeFormatter(&**type_)),
             MachineType::Lazy(type_) => write!(f, "Lazy<{}>*", TypeFormatter(&**type_)),
         }
     }
@@ -417,6 +418,15 @@ mod tests {
         "Lazy<TupleT<Int,Bool>>*";
         "lazy tuple type"
     )]
+    #[test_case(
+        MachineType::Reference(Box::new(
+            MachineType::NamedType(
+                Name::from("Cons")
+            )
+        )),
+        "Cons*";
+        "reference type"
+    )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = TRANSLATOR.translate_type(&type_);
         let expected_code = Code::from(expected);
@@ -431,7 +441,7 @@ mod tests {
                 (Name::from("Faws"), None)
             ]
         },
-        "struct Bull; typedef Empty Twoo; typedef Empty Faws; struct Bull { using type = VariantT<Twoo, Faws>; type value; Bull(type value) : value(value) {} };";
+        "struct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{};";
         "bull union"
     )]
     #[test_case(
@@ -452,7 +462,7 @@ mod tests {
                 ),
             ]
         },
-        "struct EitherIntBool; typedef Int Left_IntBool; typedef Bool Right_IntBool; struct EitherIntBool { using type = VariantT<Left_IntBool, Right_IntBool>; type value; EitherIntBool(type value) : value(value) {} };";
+        "struct Left_IntBool; struct Right_IntBool; typedef VariantT<Left_IntBool, Right_IntBool> EitherIntBool; struct Left_IntBool { using type = Int; type value; }; struct Right_IntBool { using type = Bool; type value; };";
         "either int bool"
     )]
     #[test_case(
@@ -463,13 +473,13 @@ mod tests {
                     Name::from("Cons_Int"),
                     Some(TupleType(vec![
                         AtomicType(AtomicTypeEnum::INT).into(),
-                        MachineType::NamedType(Name::from("ListInt"))
+                        MachineType::Reference(Box::new(MachineType::NamedType(Name::from("ListInt"))))
                     ]).into())
                 ),
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct ListInt; typedef TupleT<Int, ListInt *> Cons_Int; typedef Empty Nil_Int; struct ListInt { using type = VariantT<Cons_Int, Nil_Int>; type value; ListInt(type value) : value(value) {} };";
+        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{};";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
@@ -491,8 +501,8 @@ mod tests {
                         Name::from("Complex"),
                         Some(TupleType(
                             vec![
-                                MachineType::NamedType(Name::from("Value")),
-                                MachineType::NamedType(Name::from("Value")),
+                                MachineType::Reference(Box::new(MachineType::NamedType(Name::from("Value")))),
+                                MachineType::Reference(Box::new(MachineType::NamedType(Name::from("Value")))),
                             ]
                         ).into())
                     ),
@@ -507,12 +517,12 @@ mod tests {
                     ),
                     (
                         Name::from("Some"),
-                        Some(MachineType::NamedType(Name::from("Expression")))
+                        Some(MachineType::Reference(Box::new(MachineType::NamedType(Name::from("Expression")))))
                     ),
                 ]
             }
         ],
-        "struct Expression; struct Value; typedef Int Basic; typedef TupleT<Value*, Value*> Complex; typedef Empty None; typedef Expression* Some; struct Expression { using type = VariantT<Basic,Complex>; type value; Expression(type value) : value(value) {} }; struct Value { using type = VariantT<None,Some>; type value; Value(type value) : value(value) {} };";
+        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{}; struct Some { using type = Expression*; type value; };";
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
@@ -918,7 +928,7 @@ mod tests {
                 }
             ]
         },
-        "switch (either.tag) { case 0ULL: { Left x = *reinterpret_cast<Left*>(&either.value); Lazy<Int>* z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{z, y}; call->call(); } break; } case 1ULL: { Right x = *reinterpret_cast<Right*>(&either.value); call = new LazyConstant<Bool>{x}; break; }}";
+        "switch (either.tag) { case 0ULL: { Left::type x = reinterpret_cast<Left*>(&either.value)->value; Lazy<Int>* z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{z, y}; call->call(); } break; } case 1ULL: { Right::type x = reinterpret_cast<Right*>(&either.value)->value; call = new LazyConstant<Bool>{x}; break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -933,7 +943,7 @@ mod tests {
                     statements: vec![
                         Assignment {
                             target: Store::Register(Id::from("u"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into(),
-                            value: Expression::Extract(Store::Register(Name::from("s"), MachineType::NamedType(Name::from("Suc")).into()).into())
+                            value: Expression::Dereference(Store::Register(Name::from("s"), MachineType::NamedType(Name::from("Suc")).into()).into())
                         }.into(),
                         Assignment {
                             target: Store::Memory(Id::from("r"), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()).into(),
@@ -952,7 +962,7 @@ mod tests {
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { Suc s = *reinterpret_cast<Suc*>(&nat.value); VariantT<Suc,Nil> u = s->value; r = u; break; } case 1ULL: { r = nil; break; }}";
+        "switch (nat.tag) { case 0ULL: { Suc::type s = reinterpret_cast<Suc*>(&nat.value)->value; VariantT<Suc,Nil> u = *s; r = u; break; } case 1ULL: { r = nil; break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1089,7 +1099,7 @@ mod tests {
     #[test_case(
         vec![
             Assignment {
-                target: Store::Register(Name::from("tail_"), MachineType::NamedType(Name::from("List")).into()).into(),
+                target: Store::Register(Name::from("tail_"), MachineType::Reference(Box::new(MachineType::NamedType(Name::from("List"))))).into(),
                 value: ElementAccess{
                     value: Store::Register(Name::from("cons"), MachineType::NamedType(Name::from("Cons")).into()).into(),
                     idx: 1
@@ -1097,10 +1107,10 @@ mod tests {
             }.into(),
             Assignment {
                 target: Store::Register(Id::from("tail"), UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into()).into(),
-                value: Expression::Extract(Store::Register(Name::from("tail_"), MachineType::NamedType(Name::from("List")).into()).into())
+                value: Expression::Dereference(Store::Register(Name::from("tail_"), MachineType::NamedType(Name::from("List")).into()).into())
             }.into(),
         ],
-        "List *tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail = tail_->value;";
+        "List *tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail = *tail_;";
         "cons extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {

@@ -11,6 +11,7 @@ pub enum MachineType {
     FnType(FnType),
     UnionType(UnionType),
     NamedType(Name),
+    Reference(Box<MachineType>),
     Lazy(Box<MachineType>),
 }
 
@@ -76,18 +77,34 @@ pub enum BuiltIn {
 #[derive(Debug, Clone, FromVariants)]
 pub enum Expression {
     Value(Value),
-    ElementAccess(ElementAccess),
     Wrap(Value),
     Unwrap(Store),
-    Extract(Store),
-    FnCall(FnCall),
+    Dereference(Store),
+    ElementAccess(ElementAccess),
     TupleExpression(TupleExpression),
+    FnCall(FnCall),
+    ConstructorCall(ConstructorCall),
 }
 
 #[derive(Debug, Clone)]
 pub struct ElementAccess {
     pub value: Store,
     pub idx: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct TupleExpression(pub Vec<Value>);
+
+#[derive(Clone, Debug)]
+pub struct FnCall {
+    pub fn_: Value,
+    pub args: Vec<Value>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConstructorCall {
+    pub fn_: Value,
+    pub args: Vec<Value>,
 }
 
 #[derive(Clone, Debug, FromVariants)]
@@ -108,12 +125,6 @@ pub struct Assignment {
 }
 
 #[derive(Clone, Debug)]
-pub struct FnCall {
-    pub fn_: Value,
-    pub args: Vec<Value>,
-}
-
-#[derive(Clone, Debug)]
 pub struct IfStatement {
     pub condition: Store,
     pub branches: (Vec<Statement>, Vec<Statement>),
@@ -130,6 +141,3 @@ pub struct MatchBranch {
     pub target: Option<Name>,
     pub statements: Vec<Statement>,
 }
-
-#[derive(Clone, Debug)]
-pub struct TupleExpression(pub Vec<Value>);
