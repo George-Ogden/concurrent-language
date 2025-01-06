@@ -4,8 +4,8 @@ use std::fmt::Formatter;
 
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ElementAccess, Expression,
-    FnType, IfStatement, Integer, MachineType, Statement, Store, TupleType, TypeDef, UnionType,
-    Value,
+    FnCall, FnType, IfStatement, Integer, MachineType, Statement, Store, TupleType, TypeDef,
+    UnionType, Value,
 };
 
 type Code = String;
@@ -73,6 +73,12 @@ impl Translator {
             Value::Store(store) => self.translate_store(store),
         }
     }
+    fn translate_value_list(&self, values: Vec<Value>) -> Code {
+        values
+            .into_iter()
+            .map(|value| self.translate_value(value))
+            .join(", ")
+    }
     fn translate_expression(&self, expression: Expression) -> Code {
         match expression {
             Expression::ElementAccess(ElementAccess { value, idx }) => {
@@ -85,7 +91,7 @@ impl Translator {
                 self.translate_value(value)
             ),
             Expression::Unwrap(store) => format!("{}->value()", self.translate_store(store)),
-            _ => todo!(),
+            e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
     fn translate_await(&self, await_: Await) -> Code {
@@ -96,13 +102,41 @@ impl Translator {
             .join(",");
         format!("WorkManager::await({});", arguments)
     }
-    fn translate_assignment(&self, assignment: Assignment) -> Code {
-        let target_code = match assignment.target {
-            Store::Register(id, type_) => format!("{} {}", self.translate_type(&type_), id),
-            Store::Memory(id, _) => format!("{}", id),
+    fn translate_fn_call(&self, target: Store, fn_call: FnCall) -> Code {
+        let Store::Memory(id, _) = target else {
+            panic!("Assigning function call to register is not yet implemented.")
         };
-        let value_code = self.translate_expression(assignment.value);
-        format!("{} = {};", target_code, value_code)
+        let args_code = self.translate_value_list(fn_call.args);
+        let fn_initialization_code = match fn_call.fn_ {
+            Value::BuiltIn(BuiltIn::BuiltInFn(name, _)) => {
+                format!("{} = new {}({});", id, name, args_code)
+            }
+            Value::Store(store) => {
+                let store_code = self.translate_store(store);
+                format!(
+                    "{} = {}->clone(); {}->args = std::make_tuple({});",
+                    id, store_code, id, args_code
+                )
+            }
+            _ => panic!("Calling invalid function"),
+        };
+        format!(
+            "if ({} == nullptr) {{ {} {}->call(); }}",
+            id, fn_initialization_code, id
+        )
+    }
+    fn translate_assignment(&self, assignment: Assignment) -> Code {
+        match assignment.value {
+            Expression::FnCall(fn_call) => self.translate_fn_call(assignment.target, fn_call),
+            value => {
+                let value_code = self.translate_expression(value);
+                let target_code = match assignment.target {
+                    Store::Register(id, type_) => format!("{} {}", self.translate_type(&type_), id),
+                    Store::Memory(id, _) => format!("{}", id),
+                };
+                format!("{} = {};", target_code, value_code)
+            }
+        }
     }
     fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
         let condition_code = self.translate_store(if_statement.condition);
@@ -701,6 +735,52 @@ mod tests {
         },
         "y = t->value();";
         "unwrapping boolean from variable"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            value: FnCall{
+                fn_: BuiltIn::BuiltInFn(
+                    Name::from("Plus__BuiltIn"),
+                    FnType(
+                        vec![
+                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                        ],
+                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    ).into()
+                ).into(),
+                args: vec![
+                    Store::Register(Id::from("arg1"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                    Store::Register(Id::from("arg2"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                ]
+            }.into()
+        },
+        "if (call == nullptr) { call = new Plus__BuiltIn(arg1, arg2); call->call(); }";
+        "built-in fn-call"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("call2"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            value: FnCall{
+                fn_: Store::Memory(
+                    Name::from("call1"),
+                    FnType(
+                        vec![
+                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))
+                        ],
+                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    ).into()
+                ).into(),
+                args: vec![
+                    Store::Register(Id::from("arg1"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                    Store::Register(Id::from("arg2"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+                ]
+            }.into()
+        },
+        "if (call2 == nullptr) { call2 = call1->clone();  call2->args = std::make_tuple(arg1, arg2); call2->call(); }";
+        "custom fn-call"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);

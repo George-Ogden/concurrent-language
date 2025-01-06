@@ -79,6 +79,7 @@ pub enum Expression {
     ElementAccess(ElementAccess),
     Wrap(Value),
     Unwrap(Store),
+    FnCall(FnCall),
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +102,12 @@ pub struct Await(pub Vec<Store>);
 pub struct Assignment {
     pub target: Store,
     pub value: Expression,
+}
+
+#[derive(Clone, Debug)]
+pub struct FnCall {
+    pub fn_: Value,
+    pub args: Vec<Value>,
 }
 
 #[derive(Clone, Debug)]
