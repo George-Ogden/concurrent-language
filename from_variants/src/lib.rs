@@ -16,14 +16,17 @@ pub fn derive_from_variants(input: TokenStream) -> TokenStream {
             if let Fields::Unnamed(fields) = variant.fields {
                 if fields.unnamed.len() == 1 {
                     let field_type = &fields.unnamed[0].ty;
+                    let field_type_name = quote!(#field_type).to_string();
 
-                    impls.push(quote! {
-                        impl From<#field_type> for #name {
-                            fn from(value: #field_type) -> Self {
-                                #name::#variant_name(value)
+                    if field_type_name == variant_name.to_string() {
+                        impls.push(quote! {
+                            impl From<#field_type> for #name {
+                                fn from(value: #field_type) -> Self {
+                                    #name::#variant_name(value)
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
                 }
             }
         }

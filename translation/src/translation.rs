@@ -76,9 +76,14 @@ impl Translator {
             Expression::ElementAccess(ElementAccess { value, idx }) => format!(
                 "std::get<{}ULL>({})",
                 idx,
-                Translator::translate_value(value)
+                Translator::translate_store(value)
             ),
             Expression::Value(value) => Translator::translate_value(value),
+            Expression::Wrap(value) => format!(
+                "new LazyConstant<{}>({})",
+                Translator::translate_type(&value.type_()),
+                Translator::translate_value(value)
+            ),
             _ => todo!(),
         }
     }
@@ -569,7 +574,7 @@ mod tests {
     )]
     #[test_case(
         Assignment {
-            target: Store::Register(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+            target: Store::Register(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()),
             value: ElementAccess{
                 value: Store::Register(
                     Name::from("tuple"),
@@ -588,8 +593,31 @@ mod tests {
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
 
         },
-        "y =true;";
+        "y = true;";
         "boolean assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(Id::from("y"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+            value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into())),
+
+        },
+        "Lazy<Bool>* y = new LazyConstant<Bool>(true);";
+        "wrapping constant"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("g"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))).into(),
+            value: Expression::Wrap(Store::Register(
+                Id::from("f"),
+                FnType(
+                    vec![AtomicType(AtomicTypeEnum::INT).into()],
+                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                ).into()
+            ).into()),
+        },
+        "g = new LazyConstant<FnT<Int,Int>>(f);";
+        "wrapping function from variable"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = Translator::translate_assignment(assignment);

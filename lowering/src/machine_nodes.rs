@@ -36,6 +36,17 @@ pub enum Value {
     Store(Store),
 }
 
+impl Value {
+    pub fn type_(&self) -> MachineType {
+        match self {
+            Self::BuiltIn(BuiltIn::Integer(_)) => AtomicType(AtomicTypeEnum::INT).into(),
+            Self::BuiltIn(BuiltIn::Boolean(_)) => AtomicType(AtomicTypeEnum::BOOL).into(),
+            Self::BuiltIn(BuiltIn::BuiltInFn(_, type_)) => type_.clone(),
+            Self::Store(store) => store.type_(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Store {
     Memory(Id, MachineType),
@@ -46,6 +57,11 @@ impl Store {
     pub fn id(&self) -> Id {
         match &self {
             Self::Memory(id, _) | Self::Register(id, _) => id.clone(),
+        }
+    }
+    pub fn type_(&self) -> MachineType {
+        match &self {
+            Self::Memory(_, type_) | Self::Register(_, type_) => type_.clone(),
         }
     }
 }
@@ -61,11 +77,12 @@ pub enum BuiltIn {
 pub enum Expression {
     Value(Value),
     ElementAccess(ElementAccess),
+    Wrap(Value),
 }
 
 #[derive(Debug, Clone)]
 pub struct ElementAccess {
-    pub value: Value,
+    pub value: Store,
     pub idx: usize,
 }
 
