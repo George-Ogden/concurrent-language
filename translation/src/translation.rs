@@ -13,10 +13,10 @@ type Code = String;
 struct Translator {}
 
 impl Translator {
-    fn translate_type(type_: &MachineType) -> Code {
+    fn translate_type(&self, type_: &MachineType) -> Code {
         format!("{}", TypeFormatter(type_))
     }
-    fn translate_type_defs(type_defs: Vec<TypeDef>) -> Code {
+    fn translate_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
         let type_forward_definitions = type_defs
             .iter()
             .map(|type_def| format!("struct {};", type_def.name));
@@ -26,9 +26,10 @@ impl Translator {
                 type_def.constructors.iter().map(|constructor| {
                     format!(
                         "typedef {} {} ;",
-                        constructor.1.as_ref().map_or(Code::from("Empty"), |type_| {
-                            Translator::translate_type(type_)
-                        }),
+                        constructor
+                            .1
+                            .as_ref()
+                            .map_or(Code::from("Empty"), |type_| { self.translate_type(type_) }),
                         constructor.0
                     )
                 })
@@ -39,7 +40,7 @@ impl Translator {
                 format!(
                 "struct {} {{ using type = {}; type value; {}(type value) : value(value) {{}} }};",
                 type_def.name,
-                Translator::translate_type(&UnionType(
+                self.translate_type(&UnionType(
                     type_def
                         .constructors
                         .iter()
@@ -56,78 +57,74 @@ impl Translator {
             itertools::join(struct_definitions, "\n")
         )
     }
-    fn translate_builtin(value: BuiltIn) -> Code {
+    fn translate_builtin(&self, value: BuiltIn) -> Code {
         match value {
             BuiltIn::Integer(Integer { value }) => format!("{}LL", value),
             BuiltIn::Boolean(Boolean { value }) => format!("{}", value),
             BuiltIn::BuiltInFn(name, _) => name,
         }
     }
-    fn translate_store(store: Store) -> Code {
+    fn translate_store(&self, store: Store) -> Code {
         store.id()
     }
-    fn translate_value(value: Value) -> Code {
+    fn translate_value(&self, value: Value) -> Code {
         match value {
-            Value::BuiltIn(value) => Translator::translate_builtin(value),
-            Value::Store(store) => Translator::translate_store(store),
+            Value::BuiltIn(value) => self.translate_builtin(value),
+            Value::Store(store) => self.translate_store(store),
         }
     }
-    fn translate_expression(expression: Expression) -> Code {
+    fn translate_expression(&self, expression: Expression) -> Code {
         match expression {
-            Expression::ElementAccess(ElementAccess { value, idx }) => format!(
-                "std::get<{}ULL>({})",
-                idx,
-                Translator::translate_store(value)
-            ),
-            Expression::Value(value) => Translator::translate_value(value),
+            Expression::ElementAccess(ElementAccess { value, idx }) => {
+                format!("std::get<{}ULL>({})", idx, self.translate_store(value))
+            }
+            Expression::Value(value) => self.translate_value(value),
             Expression::Wrap(value) => format!(
                 "new LazyConstant<{}>({})",
-                Translator::translate_type(&value.type_()),
-                Translator::translate_value(value)
+                self.translate_type(&value.type_()),
+                self.translate_value(value)
             ),
-            Expression::Unwrap(store) => format!("{}->value()", Translator::translate_store(store)),
+            Expression::Unwrap(store) => format!("{}->value()", self.translate_store(store)),
             _ => todo!(),
         }
     }
-    fn translate_statements(statements: Vec<Statement>) -> Code {
-        statements
-            .into_iter()
-            .map(Translator::translate_statement)
-            .join("\n")
-    }
-    fn translate_statement(statement: Statement) -> Code {
-        match statement {
-            Statement::Await(await_) => Translator::translate_await(await_),
-            Statement::Assignment(assignment) => Translator::translate_assignment(assignment),
-            Statement::IfStatement(if_statement) => {
-                Translator::translate_if_statement(if_statement)
-            }
-        }
-    }
-    fn translate_await(await_: Await) -> Code {
+    fn translate_await(&self, await_: Await) -> Code {
         let arguments = await_
             .0
             .into_iter()
-            .map(Translator::translate_store)
+            .map(|store| self.translate_store(store))
             .join(",");
         format!("WorkManager::await({});", arguments)
     }
-    fn translate_assignment(assignment: Assignment) -> Code {
+    fn translate_assignment(&self, assignment: Assignment) -> Code {
         let target_code = match assignment.target {
-            Store::Register(id, type_) => format!("{} {}", Translator::translate_type(&type_), id),
+            Store::Register(id, type_) => format!("{} {}", self.translate_type(&type_), id),
             Store::Memory(id, _) => format!("{}", id),
         };
-        let value_code = Translator::translate_expression(assignment.value);
+        let value_code = self.translate_expression(assignment.value);
         format!("{} = {};", target_code, value_code)
     }
-    fn translate_if_statement(if_statement: IfStatement) -> Code {
-        let condition_code = Translator::translate_store(if_statement.condition);
-        let if_branch = Translator::translate_statements(if_statement.branches.0);
-        let else_branch = Translator::translate_statements(if_statement.branches.1);
+    fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
+        let condition_code = self.translate_store(if_statement.condition);
+        let if_branch = self.translate_statements(if_statement.branches.0);
+        let else_branch = self.translate_statements(if_statement.branches.1);
         format!(
             "if ({}) {{ {} }} else {{ {} }}",
             condition_code, if_branch, else_branch
         )
+    }
+    fn translate_statement(&self, statement: Statement) -> Code {
+        match statement {
+            Statement::Await(await_) => self.translate_await(await_),
+            Statement::Assignment(assignment) => self.translate_assignment(assignment),
+            Statement::IfStatement(if_statement) => self.translate_if_statement(if_statement),
+        }
+    }
+    fn translate_statements(&self, statements: Vec<Statement>) -> Code {
+        statements
+            .into_iter()
+            .map(|statement| self.translate_statement(statement))
+            .join("\n")
     }
 }
 
@@ -183,8 +180,11 @@ mod tests {
     use super::*;
 
     use lowering::{Id, Name};
+    use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
+
+    const TRANSLATOR: Lazy<Translator> = Lazy::new(|| Translator {});
 
     fn normalize_code(code: Code) -> Code {
         let regex = Regex::new(r"((^|[^[:space:]])[[:space:]]+([^[:space:][:word:]]|$))|((^|[^[:space:][:word:]])[[:space:]]+([^[:space:]]|$))")
@@ -357,7 +357,7 @@ mod tests {
         "lazy tuple type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
-        let code = Translator::translate_type(&type_);
+        let code = TRANSLATOR.translate_type(&type_);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -412,7 +412,7 @@ mod tests {
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
-        let code = Translator::translate_type_defs(vec![type_def]);
+        let code = TRANSLATOR.translate_type_defs(vec![type_def]);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -455,7 +455,7 @@ mod tests {
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
-        let code = Translator::translate_type_defs(type_defs);
+        let code = TRANSLATOR.translate_type_defs(type_defs);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -519,7 +519,7 @@ mod tests {
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
-        let code = Translator::translate_builtin(value);
+        let code = TRANSLATOR.translate_builtin(value);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -535,7 +535,7 @@ mod tests {
         "register translation"
     )]
     fn test_store_translation(store: Store, expected: &str) {
-        let code = Translator::translate_store(store);
+        let code = TRANSLATOR.translate_store(store);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -571,7 +571,7 @@ mod tests {
         "builtin integer translation"
     )]
     fn test_value_translation(value: Value, expected: &str) {
-        let code = Translator::translate_value(value);
+        let code = TRANSLATOR.translate_value(value);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -593,7 +593,7 @@ mod tests {
         "tuple index access"
     )]
     fn test_expression_translation(expression: Expression, expected: &str) {
-        let code = Translator::translate_expression(expression);
+        let code = TRANSLATOR.translate_expression(expression);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -703,7 +703,7 @@ mod tests {
         "unwrapping boolean from variable"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
-        let code = Translator::translate_assignment(assignment);
+        let code = TRANSLATOR.translate_assignment(assignment);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -788,7 +788,7 @@ mod tests {
         "nested if-else statement"
     )]
     fn test_statement_translation(statement: Statement, expected: &str) {
-        let code = Translator::translate_statement(statement);
+        let code = TRANSLATOR.translate_statement(statement);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -834,7 +834,7 @@ mod tests {
         "tuple access"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
-        let code = Translator::translate_statements(statements);
+        let code = TRANSLATOR.translate_statements(statements);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
