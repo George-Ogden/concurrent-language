@@ -105,14 +105,12 @@ impl Translator {
         }
     }
     fn translate_await(await_: Await) -> Code {
-        let stores = await_.0;
-        format!(
-            "WorkManager::await({});",
-            stores
-                .into_iter()
-                .map(Translator::translate_store)
-                .join(",")
-        )
+        let arguments = await_
+            .0
+            .into_iter()
+            .map(Translator::translate_store)
+            .join(",");
+        format!("WorkManager::await({});", arguments)
     }
     fn translate_assignment(assignment: Assignment) -> Code {
         let target_code = match assignment.target {
@@ -123,7 +121,13 @@ impl Translator {
         format!("{} = {};", target_code, value_code)
     }
     fn translate_if_statement(if_statement: IfStatement) -> Code {
-        Code::new()
+        let condition_code = Translator::translate_store(if_statement.condition);
+        let if_branch = Translator::translate_statements(if_statement.branches.0);
+        let else_branch = Translator::translate_statements(if_statement.branches.1);
+        format!(
+            "if ({}) {{ {} }} else {{ {} }}",
+            condition_code, if_branch, else_branch
+        )
     }
 }
 
@@ -727,6 +731,61 @@ mod tests {
         ]).into(),
         "WorkManager::await(z,x);";
         "await for registers"
+    )]
+    #[test_case(
+        IfStatement {
+            condition: Store::Register(Id::from("z"), AtomicType(AtomicTypeEnum::BOOL).into()),
+            branches: (
+                vec![Assignment {
+                    target: Store::Memory(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+                    value: Value::BuiltIn(Integer{value: 1}.into()).into()
+                }.into()],
+                vec![Assignment {
+                    target: Store::Memory(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+                    value: Value::BuiltIn(Integer{value: -1}.into()).into()
+                }.into()],
+            )
+        }.into(),
+        "if (z) { x = 1LL; } else { x = -1LL; }";
+        "if-else statement"
+    )]
+    #[test_case(
+        IfStatement {
+            condition: Store::Register(Id::from("z"), AtomicType(AtomicTypeEnum::BOOL).into()),
+            branches: (
+                vec![
+                    IfStatement {
+                        condition: Store::Register(Id::from("y"), AtomicType(AtomicTypeEnum::BOOL).into()),
+                        branches: (
+                            vec![Assignment {
+                                target: Store::Memory(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+                                value: Value::BuiltIn(Integer{value: 1}.into()).into()
+                            }.into()],
+                            vec![Assignment {
+                                target: Store::Memory(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+                                value: Value::BuiltIn(Integer{value: -1}.into()).into()
+                            }.into()],
+                        )
+                    }.into(),
+                    Assignment {
+                        target: Store::Memory(Id::from("r"), AtomicType(AtomicTypeEnum::BOOL).into()).into(),
+                        value: Value::BuiltIn(Boolean{value: true}.into()).into()
+                    }.into()
+                ],
+                vec![
+                    Assignment {
+                        target: Store::Memory(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+                        value: Value::BuiltIn(Integer{value: 0}.into()).into()
+                    }.into(),
+                    Assignment {
+                        target: Store::Memory(Id::from("r"), AtomicType(AtomicTypeEnum::BOOL).into()).into(),
+                        value: Value::BuiltIn(Boolean{value: false}.into()).into()
+                    }.into()
+                ],
+            )
+        }.into(),
+        "if (z) { if (y) { x = 1LL; } else {x = -1LL; } r = true; } else { x = 0LL; r = false; }";
+        "nested if-else statement"
     )]
     fn test_statement_translation(statement: Statement, expected: &str) {
         let code = Translator::translate_statement(statement);
