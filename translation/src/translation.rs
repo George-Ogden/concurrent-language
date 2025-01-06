@@ -89,6 +89,12 @@ impl Translator {
             _ => todo!(),
         }
     }
+    fn translate_statements(statements: Vec<Statement>) -> Code {
+        statements
+            .into_iter()
+            .map(Translator::translate_statement)
+            .join("\n")
+    }
     fn translate_statement(statement: Statement) -> Code {
         match statement {
             Statement::Await(await_) => Translator::translate_await(await_),
@@ -724,6 +730,52 @@ mod tests {
     )]
     fn test_statement_translation(statement: Statement, expected: &str) {
         let code = Translator::translate_statement(statement);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        {
+            let t = Store::Register(
+                Id::from("t"),
+                MachineType::Lazy(Box::new(TupleType(
+                    vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()],
+                ).into())),
+            );
+            let tuple = Store::Register(
+                Id::from("tuple"),
+                TupleType(
+                    vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()],
+                ).into(),
+            );
+            let x = Store::Register(
+                Id::from("x"),
+                AtomicType(AtomicTypeEnum::INT).into(),
+            );
+            vec![
+                Await(vec![
+                    t.clone(),
+                ]).into(),
+                Assignment {
+                    target: tuple.clone(),
+                    value: Expression::Unwrap(
+                        t
+                    ),
+                }.into(),
+                Assignment {
+                    target: x,
+                    value: ElementAccess{
+                        value: tuple,
+                        idx: 1
+                    }.into(),
+                }.into()
+            ]
+        },
+        "WorkManager::await(t); TupleT<Int,Int> tuple = t->value(); Int x = std::get<1ULL>(tuple);";
+        "tuple access"
+    )]
+    fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
+        let code = Translator::translate_statements(statements);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
