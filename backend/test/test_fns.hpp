@@ -23,42 +23,46 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };
 
-struct IdentityInt : EasyCloneFn<IdentityInt, Int, Int> {
-    using EasyCloneFn<IdentityInt, Int, Int>::EasyCloneFn;
+struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> {
+    using Closure<IdentityInt, Empty, Int, Int>::Closure;
     Lazy<Int> *body(Lazy<Int> *&x) override { return x; }
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
     Int x = 5;
-    IdentityInt *id = new IdentityInt{x};
+    IdentityInt *id = new IdentityInt{};
+    id->args = std::make_tuple(new LazyConstant<Int>{x});
 
     WorkManager::run(id);
     ASSERT_EQ(id->ret, 5);
 }
 
-struct FourWayPlusV1 : EasyCloneFn<FourWayPlusV1, Int, Int, Int, Int, Int> {
-    using EasyCloneFn<FourWayPlusV1, Int, Int, Int, Int, Int>::EasyCloneFn;
+struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
+    using Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int>::Closure;
     FnT<Int, Int, Int> call1 = nullptr, call2 = nullptr, call3 = nullptr;
     Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
                     Lazy<Int> *&d) override {
         if (call1 == nullptr) {
-            call1 = new Plus__BuiltIn{a, b};
+            call1 = new Plus__BuiltIn{};
+            call1->args = std::make_tuple(a, b);
             call1->call();
         }
         if (call2 == nullptr) {
-            call2 = new Plus__BuiltIn{c, d};
+            call2 = new Plus__BuiltIn{};
+            call2->args = std::make_tuple(c, d);
             call2->call();
         }
         if (call3 == nullptr) {
-            call3 = new Plus__BuiltIn{call1, call2};
+            call3 = new Plus__BuiltIn{};
+            call3->args = std::make_tuple(call1, call2);
             call3->call();
         }
         return call3;
     }
 };
 
-struct FourWayPlusV2 : EasyCloneFn<FourWayPlusV2, Int, Int, Int, Int, Int> {
-    using EasyCloneFn<FourWayPlusV2, Int, Int, Int, Int, Int>::EasyCloneFn;
+struct FourWayPlusV2 : Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int> {
+    using Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int>::Closure;
     Plus__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
     Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
                     Lazy<Int> *&d) override {
@@ -80,7 +84,10 @@ struct FourWayPlusV2 : EasyCloneFn<FourWayPlusV2, Int, Int, Int, Int, Int> {
 
 TEST_P(FnCorrectnessTest, FourWayPlusV1Test) {
     Int w = 11, x = 5, y = 10, z = 22;
-    FourWayPlusV1 *plus = new FourWayPlusV1{w, x, y, z};
+    FourWayPlusV1 *plus = new FourWayPlusV1{};
+    plus->args =
+        std::make_tuple(new LazyConstant<Int>{w}, new LazyConstant<Int>{x},
+                        new LazyConstant<Int>{y}, new LazyConstant<Int>{z});
 
     WorkManager::run(plus);
     ASSERT_EQ(plus->ret, 48);
@@ -88,7 +95,10 @@ TEST_P(FnCorrectnessTest, FourWayPlusV1Test) {
 
 TEST_P(FnCorrectnessTest, FourWayPlusV2Test) {
     Int w = 11, x = 5, y = 10, z = 22;
-    FourWayPlusV2 *plus = new FourWayPlusV2{w, x, y, z};
+    FourWayPlusV2 *plus = new FourWayPlusV2{};
+    plus->args =
+        std::make_tuple(new LazyConstant<Int>{w}, new LazyConstant<Int>{x},
+                        new LazyConstant<Int>{y}, new LazyConstant<Int>{z});
 
     WorkManager::run(plus);
     ASSERT_EQ(plus->ret, 48);
@@ -149,13 +159,15 @@ struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
         if (block1 == nullptr) {
             block1 = new BlockFn<Int>([&]() {
                 if (call1 == nullptr) {
-                    call1 = new Increment__BuiltIn{x};
+                    call1 = new Increment__BuiltIn{};
+                    call1->args = std::make_tuple(x);
                     call1->call();
                 }
                 return call1;
             });
             block1->call();
         }
+        block1->args = std::make_tuple();
         return block1;
     }
 };

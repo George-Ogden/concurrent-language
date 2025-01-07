@@ -3,7 +3,7 @@ use itertools::Itertools;
 use std::{collections::HashSet, fmt::Formatter, hash::RandomState};
 
 use lowering::{
-    Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, Closure,
+    Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, Integer,
     MachineType, MatchStatement, Statement, Store, TupleExpression, TupleType, TypeDef, UnionType,
     Value,
@@ -111,11 +111,9 @@ impl Translator {
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
-            Expression::Closure(closure) => format!(
-                "new {}{{{}}}",
-                closure.name,
-                self.translate_value(closure.env)
-            ),
+            Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
+                format!("new {name}{{{}}}", self.translate_value(env))
+            }
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -128,21 +126,24 @@ impl Translator {
         format!("WorkManager::await({arguments});")
     }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
-        let args_code = self.translate_value_list(fn_call.args);
         let fn_initialization_code = match fn_call.fn_ {
             Value::BuiltIn(BuiltIn::BuiltInFn(name, _)) => {
-                format!("new {name}{{{args_code}}};")
+                format!("new {name}{{}};")
             }
             Value::Store(store) => {
                 let store_code = self.translate_store(store);
-                format!("{store_code}->clone(); {target}->args = std::make_tuple({args_code});",)
+                format!("{store_code}->clone();",)
             }
             Value::Block(block) => {
                 format!("{};", self.translate_block(block))
             }
             _ => panic!("Calling invalid function"),
         };
-        format!("{fn_initialization_code} {target}->call()",)
+        let args_assignment = format!(
+            "{target}->args = std::make_tuple({});",
+            self.translate_value_list(fn_call.args)
+        );
+        format!("{fn_initialization_code} {args_assignment} {target}->call()",)
     }
     fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
         let declaration = format!("{{}};");
@@ -360,13 +361,16 @@ impl Translator {
                 *raw_argument_type.clone()
             })
             .collect_vec();
-        let base_name = "EasyCloneFn";
+        let base_name = "Closure";
         let memory_allocations = self.find_memory_allocations_from_statements(&fn_def.statements);
         let memory_allocations_code = self.translate_memory_allocations(memory_allocations);
         let statements_code = self.translate_statements(fn_def.statements);
         let return_code = format!("return {};", self.translate_store(fn_def.ret));
         let base = format!(
-            "{base_name}<{name},{}>",
+            "{base_name}<{name},{},{}>",
+            fn_def
+                .env
+                .map_or_else(|| Code::from("Empty"), |type_| self.translate_type(&type_)),
             TypesFormatter(
                 &std::iter::once(*raw_return_type.clone())
                     .chain(raw_argument_types.into_iter())
@@ -998,7 +1002,7 @@ mod tests {
                 ]
             }.into()
         },
-        "if (call == nullptr) { call = new Plus__BuiltIn{arg1, arg2}; call->call(); }";
+        "if (call == nullptr) { call = new Plus__BuiltIn{}; call->args = std::make_tuple(arg1, arg2); call->call(); }";
         "built-in fn-call"
     )]
     #[test_case(
@@ -1012,7 +1016,7 @@ mod tests {
                 args: Vec::new()
             }.into()
         },
-        "if (call == nullptr) { call = new BlockFn<Int>([&](){ return call; }); call->call(); }";
+        "if (call == nullptr) { call = new BlockFn<Int>([&](){ return call; }); call->args = std::make_tuple(); call->call(); }";
         "empty block fn-call"
     )]
     #[test_case(
@@ -1050,7 +1054,7 @@ mod tests {
                 args: Vec::new()
             }.into()
         },
-        "if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call();}";
+        "if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{}; call->args = std::make_tuple(x); call->call(); } return call; }); block->args = std::make_tuple(); block->call();}";
         "internal fn-call block fn-call"
     )]
     #[test_case(
@@ -1091,7 +1095,7 @@ mod tests {
                 )
             }.into())
         },
-        "FnT<Int> block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{y}; call->call(); } return call; });";
+        "FnT<Int> block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{}; call->args = std::make_tuple(y); call->call(); } return call; });";
         "block assignment"
     )]
     #[test_case(
@@ -1198,7 +1202,7 @@ mod tests {
                     Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                 ).into()
             ).into(),
-            value: Closure{
+            value: ClosureInstantiation{
                 name: Name::from("Adder"),
                 env: Store::Register(
                     Id::from("x"),
@@ -1291,7 +1295,7 @@ mod tests {
                 }
             ]
         },
-        "switch (either.tag) { case 0ULL: { Left::type x = reinterpret_cast<Left*>(&either.value)->value; Lazy<Int>* z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{z, y}; call->call(); } break; } case 1ULL: { Right::type x = reinterpret_cast<Right*>(&either.value)->value; if (call == nullptr) { call = new LazyConstant<Bool>{x};} break; }}";
+        "switch (either.tag) { case 0ULL: { Left::type x = reinterpret_cast<Left*>(&either.value)->value; Lazy<Int>* z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; call->args = std::make_tuple(z, y); call->call(); } break; } case 1ULL: { Right::type x = reinterpret_cast<Right*>(&either.value)->value; if (call == nullptr) { call = new LazyConstant<Bool>{x};} break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1520,17 +1524,19 @@ mod tests {
 
     #[test_case(
         FnDef {
+            env: None,
             name: Name::from("IdentityInt"),
             arguments: vec![(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))],
             statements: Vec::new(),
             ret: Store::Register(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
         }
         ,
-        "struct IdentityInt : EasyCloneFn<IdentityInt, Int, Int> { using EasyCloneFn<IdentityInt, Int, Int>::EasyCloneFn; Lazy<Int> *body(Lazy<Int> *&x) override { return x; } };";
+        "struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> { using Closure<IdentityInt, Empty, Int, Int>::Closure; Lazy<Int> *body(Lazy<Int> *&x) override { return x; } };";
         "identity int"
     )]
     #[test_case(
         FnDef {
+            env: None,
             name: Name::from("FourWayPlus"),
             arguments: vec![
                 (Id::from("a"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
@@ -1626,11 +1632,12 @@ mod tests {
             ],
             ret: Store::Memory(Id::from("call3"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
         },
-        "struct FourWayPlus : EasyCloneFn<FourWayPlus, Int, Int, Int, Int, Int> { using EasyCloneFn<FourWayPlus, Int, Int, Int, Int, Int>::EasyCloneFn; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{a, b}; call1->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{c, d}; call2->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{call1, call2}; call3->call(); } return call3; } };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{}; call1->args = std::make_tuple(a, b); call1->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{}; call2->args = std::make_tuple(c, d); call2->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{}; call3->args = std::make_tuple(call1, call2); call3->call(); } return call3; } };";
         "four way plus int"
     )]
     #[test_case(
         FnDef {
+            env: None,
             name: Name::from("FlatBlockExample"),
             arguments: vec![
                 (Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
@@ -1690,8 +1697,51 @@ mod tests {
                 MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
             ),
         },
-        "struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> { using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn; FnT<Int> block = nullptr; FnT<Int,Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call(); } return block; } }; ";
+        "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int,Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{}; call->args = std::make_tuple(x); call->call(); } return call; }); block->args = std::make_tuple(); block->call(); } return block; } }; ";
         "flat block example"
+    )]
+    #[test_case(
+        FnDef{
+            env: Some(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            name: Name::from("Adder"),
+            arguments: vec![(Name::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))],
+            statements: vec![
+                Assignment {
+                    target: Store::Memory(
+                        Id::from("inner_res"),
+                        FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ).into()
+                    ).into(),
+                    value: FnCall{
+                        fn_: BuiltIn::BuiltInFn(
+                            Name::from("Plus__BuiltIn"),
+                            FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            ).into()
+                        ).into(),
+                        args: vec![
+                            Store::Register(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                            Store::Memory(Id::from("env"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                        ]
+                    }.into()
+                }.into()
+            ],
+            ret: Store::Memory(
+                Id::from("inner_res"),
+                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+            ).into()
+        },
+    "struct Adder : Closure<Adder, Lazy<Int> *, Int, Int> { using Closure<Adder, Lazy<Int> *, Int, Int>::Closure; FnT<Int, Int, Int> inner_res = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (inner_res == nullptr) { inner_res = new Plus__BuiltIn{}; inner_res->args = std::make_tuple(x, env); inner_res->call(); } return inner_res; } };";
+    "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
         let code = TRANSLATOR.translate_fn_def(fn_def);

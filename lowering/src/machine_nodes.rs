@@ -95,7 +95,7 @@ pub enum Expression {
     TupleExpression(TupleExpression),
     FnCall(FnCall),
     ConstructorCall(ConstructorCall),
-    Closure(Closure),
+    ClosureInstantiation(ClosureInstantiation),
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +120,7 @@ pub struct ConstructorCall {
 }
 
 #[derive(Clone, Debug)]
-pub struct Closure {
+pub struct ClosureInstantiation {
     pub name: Name,
     pub env: Value,
 }
@@ -166,4 +166,5 @@ pub struct FnDef {
     pub arguments: Vec<(Id, MachineType)>,
     pub statements: Vec<Statement>,
     pub ret: Store,
+    pub env: Option<MachineType>,
 }

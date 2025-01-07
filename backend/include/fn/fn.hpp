@@ -5,6 +5,7 @@
 #include "fn/continuation.hpp"
 #include "system/work_manager_pre.hpp"
 #include "time/sleep.hpp"
+#include "types/builtin.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -115,6 +116,13 @@ struct Closure : public ParametricFn<R, A...> {
     E env;
     explicit Closure(const E &e) : env(e) {}
     ParametricFn<R, A...> *clone() const override { return new T{env}; }
+};
+
+template <typename T, typename R, typename... A>
+struct Closure<T, Empty, R, A...> : public ParametricFn<R, A...> {
+    explicit Closure() {}
+    explicit Closure(const Empty &e) {}
+    ParametricFn<R, A...> *clone() const override { return new T{}; }
 };
 
 #include "system/work_manager.hpp"
