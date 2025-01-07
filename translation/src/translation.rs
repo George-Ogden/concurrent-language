@@ -173,6 +173,7 @@ impl Translator {
                 format!("{} {assignment_code}", self.translate_type(&type_))
             }
             Store::Memory(id, _) => format!("if ({id} == nullptr) {{ {assignment_code} }}"),
+            Store::Global(_, _) => assignment_code,
         }
     }
     fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
@@ -296,7 +297,7 @@ impl Translator {
             Store::Memory(id, machine_type) => {
                 vec![MemoryAllocation(id.clone(), machine_type.clone())]
             }
-            Store::Register(_, _) => Vec::new(),
+            _ => Vec::new(),
         }
     }
     fn find_memory_allocations_from_expression(
@@ -817,6 +818,11 @@ mod tests {
         "bar";
         "register translation"
     )]
+    #[test_case(
+        Store::Global(Id::from("baz"), AtomicType(AtomicTypeEnum::BOOL).into()),
+        "baz";
+        "global translation"
+    )]
     fn test_store_translation(store: Store, expected: &str) {
         let code = TRANSLATOR.translate_store(store);
         let expected_code = Code::from(expected);
@@ -888,6 +894,14 @@ mod tests {
         },
         "Int x = 5LL;";
         "integer assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Global(Id::from("x"), AtomicType(AtomicTypeEnum::INT).into()).into(),
+            value: Value::BuiltIn(Integer{value: -5}.into()).into()
+        },
+        "x = -5LL;";
+        "global integer assignment"
     )]
     #[test_case(
         Assignment {

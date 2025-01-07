@@ -56,7 +56,11 @@ impl Value {
 pub enum Store {
     Memory(Id, MachineType),
     Register(Id, MachineType),
+    Global(Id, MachineType),
 }
+
+#[derive(Debug, Clone)]
+pub struct Global(pub Id, pub MachineType);
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -67,12 +71,14 @@ pub struct Block {
 impl Store {
     pub fn id(&self) -> Id {
         match &self {
-            Self::Memory(id, _) | Self::Register(id, _) => id.clone(),
+            Self::Memory(id, _) | Self::Register(id, _) | Self::Global(id, _) => id.clone(),
         }
     }
     pub fn type_(&self) -> MachineType {
         match &self {
-            Self::Memory(_, type_) | Self::Register(_, type_) => type_.clone(),
+            Self::Memory(_, type_) | Self::Register(_, type_) | Self::Global(_, type_) => {
+                type_.clone()
+            }
         }
     }
 }
@@ -167,4 +173,10 @@ pub struct FnDef {
     pub statements: Vec<Statement>,
     pub ret: Store,
     pub env: Option<MachineType>,
+}
+
+pub struct Program {
+    pub type_defs: Vec<TypeDef>,
+    pub global_constants: Vec<(Name, MachineType)>,
+    pub fn_defs: Vec<FnDef>,
 }
