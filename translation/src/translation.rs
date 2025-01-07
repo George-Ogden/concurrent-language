@@ -259,7 +259,10 @@ impl Translator {
         if ids.len() != unique_allocations.len() {
             panic!("Memory allocations exist with a different size.")
         }
-        unique_allocations.into_iter().collect_vec()
+        unique_allocations
+            .into_iter()
+            .sorted_by_key(|memory_allocation| memory_allocation.0.clone())
+            .collect_vec()
     }
     fn find_memory_allocations_from_statements(
         &self,
@@ -1710,7 +1713,7 @@ mod tests {
                 MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
             ),
         },
-        "struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> { using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn; FnT<Int,Int> call = nullptr; FnT<Int> block = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call(); } return block; } }; ";
+        "struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> { using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn; FnT<Int> block = nullptr; FnT<Int,Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call(); } return block; } }; ";
         "flat block example"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
