@@ -3,7 +3,7 @@ use itertools::Itertools;
 use std::fmt::Formatter;
 
 use lowering::{
-    Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ConstructorCall,
+    Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ConstructorCall,
     ElementAccess, Expression, FnCall, FnType, IfStatement, Integer, MachineType, MatchStatement,
     Statement, Store, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
@@ -67,10 +67,20 @@ impl Translator {
     fn translate_store(&self, store: Store) -> Code {
         store.id()
     }
+    fn translate_block(&self, block: Block) -> Code {
+        let statements_code = self.translate_statements(block.statements);
+        let MachineType::Lazy(type_) = &block.ret.type_() else {
+            panic!("Block has non-lazy return type.")
+        };
+        let type_code = self.translate_type(&*type_);
+        let return_code = format!("return {};", self.translate_value(*block.ret));
+        format!("new BlockFn<{type_code}>([&]() {{ {statements_code} {return_code} }})")
+    }
     fn translate_value(&self, value: Value) -> Code {
         match value {
             Value::BuiltIn(value) => self.translate_builtin(value),
             Value::Store(store) => self.translate_store(store),
+            Value::Block(block) => self.translate_block(block),
         }
     }
     fn translate_value_list(&self, values: Vec<Value>) -> Code {
@@ -112,7 +122,7 @@ impl Translator {
         format!("WorkManager::await({arguments});")
     }
     fn translate_fn_call(&self, target: Store, fn_call: FnCall) -> Code {
-        let Store::Memory(id, _) = target else {
+        let Store::Memory(id, type_) = target else {
             panic!("Assigning function call to register is not yet implemented.")
         };
         let args_code = self.translate_value_list(fn_call.args);
@@ -123,6 +133,13 @@ impl Translator {
             Value::Store(store) => {
                 let store_code = self.translate_store(store);
                 format!("{id} = {store_code}->clone(); {id}->args = std::make_tuple({args_code});",)
+            }
+            Value::Block(block) => {
+                let assignment = Assignment {
+                    target: Store::Memory(id.clone(), type_).into(),
+                    value: Value::Block(block).into(),
+                };
+                self.translate_assignment(assignment)
             }
             _ => panic!("Calling invalid function"),
         };
@@ -231,6 +248,12 @@ impl fmt::Display for TypeFormatter<'_> {
                     TypesFormatter(
                         &std::iter::once(*ret.clone())
                             .chain(args.clone().into_iter())
+                            .map(|type_| {
+                                let MachineType::Lazy(t) = type_ else {
+                                    panic!("Function type without lazy arguments and return.");
+                                };
+                                *t
+                            })
                             .collect()
                     )
                 )
@@ -265,7 +288,7 @@ impl fmt::Display for TypesFormatter<'_> {
 mod tests {
     use super::*;
 
-    use lowering::{Id, MatchBranch, Name};
+    use lowering::{Block, Id, MatchBranch, Name};
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
@@ -816,6 +839,99 @@ mod tests {
         },
         "if (call == nullptr) { call = new Plus__BuiltIn{arg1, arg2}; call->call(); }";
         "built-in fn-call"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            value: FnCall{
+                fn_: Block{
+                    statements: Vec::new(),
+                    ret: Box::new(Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into())
+                }.into(),
+                args: Vec::new()
+            }.into()
+        },
+        "if (call == nullptr) { call = new BlockFn<Int>([&](){ return call; }); call->call(); }";
+        "empty block fn-call"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(Id::from("block"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            value: FnCall{
+                fn_: Block{
+                    statements: vec![
+                        Assignment {
+                            target: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            value: FnCall{
+                                fn_: BuiltIn::BuiltInFn(
+                                    Name::from("Increment__BuiltIn"),
+                                    FnType(
+                                        vec![
+                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                        ],
+                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                    ).into()
+                                ).into(),
+                                args: vec![
+                                    Store::Memory(
+                                        Id::from("x"),
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                    ).into()
+                                ]
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: Box::new(Store::Memory(
+                        Id::from("call"),
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                    ).into())
+                }.into(),
+                args: Vec::new()
+            }.into()
+        },
+        "if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call();}";
+        "internal fn-call block fn-call"
+    )]
+    #[test_case(
+        Assignment {
+            target: Store::Register(
+                Id::from("block"),
+                FnType(
+                    Vec::new(),
+                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                ).into()
+            ),
+            value: Expression::Value(Block{
+                statements: vec![
+                    Assignment {
+                        target: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        value: FnCall{
+                            fn_: BuiltIn::BuiltInFn(
+                                Name::from("Decrement__BuiltIn"),
+                                FnType(
+                                    vec![
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                    ],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                ).into()
+                            ).into(),
+                            args: vec![
+                                Store::Memory(
+                                    Id::from("y"),
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                ).into()
+                            ]
+                        }.into()
+                    }.into(),
+                ],
+                ret: Box::new(Store::Memory(
+                    Id::from("call"),
+                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                ).into())
+            }.into())
+        },
+        "FnT<Int> block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{y}; call->call(); } return call; });";
+        "block assignment"
     )]
     #[test_case(
         Assignment {

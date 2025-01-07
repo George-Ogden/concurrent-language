@@ -35,6 +35,7 @@ pub struct TypeDef {
 pub enum Value {
     BuiltIn(BuiltIn),
     Store(Store),
+    Block(Block),
 }
 
 impl Value {
@@ -44,6 +45,9 @@ impl Value {
             Self::BuiltIn(BuiltIn::Boolean(_)) => AtomicType(AtomicTypeEnum::BOOL).into(),
             Self::BuiltIn(BuiltIn::BuiltInFn(_, type_)) => type_.clone(),
             Self::Store(store) => store.type_(),
+            Self::Block(Block { statements: _, ret }) => {
+                FnType(Vec::new(), Box::new(ret.type_())).into()
+            }
         }
     }
 }
@@ -52,6 +56,12 @@ impl Value {
 pub enum Store {
     Memory(Id, MachineType),
     Register(Id, MachineType),
+}
+
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub ret: Box<Value>,
 }
 
 impl Store {
