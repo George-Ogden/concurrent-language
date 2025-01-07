@@ -110,4 +110,11 @@ template <typename T> struct BlockFn : public ParametricFn<T> {
     ParametricFn<T> *clone() const override { return new BlockFn<T>{body_fn}; }
 };
 
+template <typename T, typename E, typename R, typename... A>
+struct Closure : public ParametricFn<R, A...> {
+    E env;
+    explicit Closure(const E &e) : env(e) {}
+    ParametricFn<R, A...> *clone() const override { return new T{env}; }
+};
+
 #include "system/work_manager.hpp"

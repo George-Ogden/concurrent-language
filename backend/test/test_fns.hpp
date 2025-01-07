@@ -215,6 +215,43 @@ TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
     ASSERT_EQ(block->ret, 8);
 }
 
+struct Adder : Closure<Adder, Lazy<Int> *, Int, Int> {
+    using Closure<Adder, Lazy<Int> *, Int, Int>::Closure;
+    FnT<Int, Int, Int> inner_res = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        if (inner_res == nullptr) {
+            inner_res = new Plus__BuiltIn{x, env};
+            inner_res->call();
+        }
+        return inner_res;
+    }
+};
+
+struct NestedFnExample : EasyCloneFn<NestedFnExample, Int, Int> {
+    using EasyCloneFn<NestedFnExample, Int, Int>::EasyCloneFn;
+    FnT<Int, Int> closure = nullptr;
+    FnT<Int, Int> res = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        if (closure == nullptr) {
+            closure = new Adder{x};
+        }
+        if (res == nullptr) {
+            res = closure->clone();
+            res->args = std::make_tuple(x);
+            res->call();
+        }
+        return res;
+    }
+};
+
+TEST_P(FnCorrectnessTest, NestedFnExampleTest) {
+    Int x = 5;
+    NestedFnExample *nested = new NestedFnExample{x};
+
+    WorkManager::run(nested);
+    ASSERT_EQ(nested->ret, 10);
+}
+
 struct IfStatementExample
     : EasyCloneFn<IfStatementExample, Int, Int, Int, Int> {
     using EasyCloneFn<IfStatementExample, Int, Int, Int, Int>::EasyCloneFn;
