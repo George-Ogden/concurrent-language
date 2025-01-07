@@ -4,7 +4,7 @@ use type_checker::{AtomicTypeEnum, Boolean, Integer};
 pub type Name = String;
 pub type Id = String;
 
-#[derive(Debug, Clone, FromVariants)]
+#[derive(Debug, Clone, FromVariants, Hash, PartialEq, Eq)]
 pub enum MachineType {
     AtomicType(AtomicType),
     TupleType(TupleType),
@@ -15,14 +15,14 @@ pub enum MachineType {
     Lazy(Box<MachineType>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct AtomicType(pub AtomicTypeEnum);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct TupleType(pub Vec<MachineType>);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct FnType(pub Vec<MachineType>, pub Box<MachineType>);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct UnionType(pub Vec<Name>);
 
 #[derive(Debug, Clone)]
@@ -151,4 +151,12 @@ pub struct MatchStatement {
 pub struct MatchBranch {
     pub target: Option<Name>,
     pub statements: Vec<Statement>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FnDef {
+    pub name: Name,
+    pub arguments: Vec<(Id, MachineType)>,
+    pub statements: Vec<Statement>,
+    pub ret: Store,
 }

@@ -1,11 +1,11 @@
 use core::fmt;
 use itertools::Itertools;
-use std::fmt::Formatter;
+use std::{collections::HashSet, fmt::Formatter, hash::RandomState};
 
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ConstructorCall,
-    ElementAccess, Expression, FnCall, FnType, IfStatement, Integer, MachineType, MatchStatement,
-    Statement, Store, TupleExpression, TupleType, TypeDef, UnionType, Value,
+    ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, Integer, MachineType,
+    MatchStatement, Statement, Store, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -228,7 +228,168 @@ impl Translator {
             .map(|statement| self.translate_statement(statement))
             .join("\n")
     }
+    fn merge_memory_allocations(
+        &self,
+        memory_allocations: Vec<Vec<MemoryAllocation>>,
+    ) -> Vec<MemoryAllocation> {
+        let ids = memory_allocations
+            .iter()
+            .map(|memory_allocations| {
+                memory_allocations
+                    .iter()
+                    .map(|MemoryAllocation(id, _)| id.clone())
+                    .collect::<HashSet<_>>()
+            })
+            .concat();
+        let unique_allocations: HashSet<MemoryAllocation, RandomState> = memory_allocations
+            .into_iter()
+            .map(HashSet::from_iter)
+            .concat();
+        if ids.len() != unique_allocations.len() {
+            panic!("Memory allocations exist with a different size.")
+        }
+        unique_allocations.into_iter().collect_vec()
+    }
+    fn find_memory_allocations_from_statements(
+        &self,
+        statements: &Vec<Statement>,
+    ) -> Vec<MemoryAllocation> {
+        statements
+            .iter()
+            .map(|statement| self.find_memory_allocations_from_statement(statement))
+            .concat()
+    }
+    fn find_memory_allocations_from_statement(
+        &self,
+        statement: &Statement,
+    ) -> Vec<MemoryAllocation> {
+        let allocations = match statement {
+            Statement::Await(_) => Vec::new(),
+            Statement::Assignment(Assignment { target, value }) => {
+                self.merge_memory_allocations(vec![
+                    self.find_memory_allocations_from_store(target),
+                    self.find_memory_allocations_from_expression(value),
+                ])
+            }
+            Statement::IfStatement(IfStatement {
+                condition: _,
+                branches,
+            }) => self.merge_memory_allocations(vec![
+                self.find_memory_allocations_from_statements(&branches.0),
+                self.find_memory_allocations_from_statements(&branches.1),
+            ]),
+            Statement::MatchStatement(MatchStatement {
+                expression: _,
+                branches,
+            }) => self.merge_memory_allocations(
+                branches
+                    .iter()
+                    .map(|branch| self.find_memory_allocations_from_statements(&branch.statements))
+                    .collect_vec(),
+            ),
+        };
+        allocations
+    }
+    fn find_memory_allocations_from_store(&self, store: &Store) -> Vec<MemoryAllocation> {
+        match store {
+            Store::Memory(id, machine_type) => {
+                vec![MemoryAllocation(id.clone(), machine_type.clone())]
+            }
+            Store::Register(_, _) => Vec::new(),
+        }
+    }
+    fn find_memory_allocations_from_expression(
+        &self,
+        expression: &Expression,
+    ) -> Vec<MemoryAllocation> {
+        match expression {
+            Expression::Value(value) => self.find_memory_allocations_from_value(value),
+            Expression::Wrap(value) => self.find_memory_allocations_from_value(value),
+            Expression::TupleExpression(TupleExpression(expressions)) => {
+                self.find_memory_allocations_from_values(expressions)
+            }
+            Expression::FnCall(FnCall { fn_, args }) => self.merge_memory_allocations(vec![
+                self.find_memory_allocations_from_value(fn_),
+                self.find_memory_allocations_from_values(args),
+            ]),
+            Expression::ConstructorCall(ConstructorCall { idx: _, data }) => {
+                data.as_ref().map_or_else(Vec::new, |(_, value)| {
+                    self.find_memory_allocations_from_value(&value)
+                })
+            }
+            _ => Vec::new(),
+        }
+    }
+    fn find_memory_allocations_from_values(&self, values: &Vec<Value>) -> Vec<MemoryAllocation> {
+        values
+            .iter()
+            .map(|value| self.find_memory_allocations_from_value(value))
+            .concat()
+    }
+    fn find_memory_allocations_from_value(&self, value: &Value) -> Vec<MemoryAllocation> {
+        match value {
+            Value::Block(Block { statements, ret: _ }) => {
+                self.find_memory_allocations_from_statements(statements)
+            }
+            _ => Vec::new(),
+        }
+    }
+    fn translate_memory_allocation(&self, memory_allocation: MemoryAllocation) -> Code {
+        let MemoryAllocation(id, type_) = memory_allocation;
+        format!("{} {id} = nullptr;", self.translate_type(&type_))
+    }
+    fn translate_memory_allocations(&self, memory_allocations: Vec<MemoryAllocation>) -> Code {
+        memory_allocations
+            .into_iter()
+            .map(|memory_allocation| self.translate_memory_allocation(memory_allocation))
+            .join("")
+    }
+    fn translate_fn_def(&self, fn_def: FnDef) -> Code {
+        let name = fn_def.name;
+        let return_type = fn_def.ret.type_();
+        let MachineType::Lazy(raw_return_type) = &return_type else {
+            panic!("Function has invalid return type.")
+        };
+        let raw_argument_types = fn_def
+            .arguments
+            .iter()
+            .map(|(_, type_)| {
+                let MachineType::Lazy(raw_argument_type) = &type_ else {
+                    panic!("Function has invalid argument type.")
+                };
+                *raw_argument_type.clone()
+            })
+            .collect_vec();
+        let base_name = "EasyCloneFn";
+        let memory_allocations = self.find_memory_allocations_from_statements(&fn_def.statements);
+        let memory_allocations_code = self.translate_memory_allocations(memory_allocations);
+        let statements_code = self.translate_statements(fn_def.statements);
+        let return_code = format!("return {};", self.translate_store(fn_def.ret));
+        let base = format!(
+            "{base_name}<{name},{}>",
+            TypesFormatter(
+                &std::iter::once(*raw_return_type.clone())
+                    .chain(raw_argument_types.into_iter())
+                    .collect_vec()
+            )
+        );
+        let declaration = format!("struct {name} : {base}");
+        let constructor_code = format!("using {base}::{base_name};");
+        let header_code = format!(
+            "{} body({}) override",
+            self.translate_type(&return_type),
+            fn_def
+                .arguments
+                .into_iter()
+                .map(|(name, type_)| format!("{} &{name}", self.translate_type(&type_)))
+                .join(",")
+        );
+        format!("{declaration} {{ {constructor_code} {memory_allocations_code} {header_code} {{ {statements_code} {return_code} }} }};")
+    }
 }
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct MemoryAllocation(Id, MachineType);
 
 struct TypeFormatter<'a>(&'a MachineType);
 impl fmt::Display for TypeFormatter<'_> {
@@ -1340,6 +1501,189 @@ mod tests {
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
         let code = TRANSLATOR.translate_statements(statements);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        FnDef {
+            name: Name::from("IdentityInt"),
+            arguments: vec![(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))],
+            statements: Vec::new(),
+            ret: Store::Register(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            fn_defs: Vec::new(),
+        },
+        "struct IdentityInt : EasyCloneFn<IdentityInt, Int, Int> { using EasyCloneFn<IdentityInt, Int, Int>::EasyCloneFn; Lazy<Int> *body(Lazy<Int> *&x) override { return x; } };";
+        "identity int"
+    )]
+    #[test_case(
+        FnDef {
+            name: Name::from("FourWayPlus"),
+            arguments: vec![
+                (Id::from("a"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                (Id::from("b"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                (Id::from("c"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                (Id::from("d"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            ],
+            statements: vec![
+                Assignment {
+                    target: Store::Memory(
+                        Id::from("call1"),
+                            FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ).into()
+                    ),
+                    value: FnCall{
+                        fn_: BuiltIn::BuiltInFn(
+                            Name::from("Plus__BuiltIn"),
+                            FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            ).into()
+                        ).into(),
+                        args: vec![
+                            Store::Register(Id::from("a"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                            Store::Register(Id::from("b"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                        ]
+                    }.into()
+                }.into(),
+                Assignment {
+                    target: Store::Memory(
+                        Id::from("call2"),
+                            FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ).into()
+                    ),
+                    value: FnCall{
+                        fn_: BuiltIn::BuiltInFn(
+                            Name::from("Plus__BuiltIn"),
+                            FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            ).into()
+                        ).into(),
+                        args: vec![
+                            Store::Register(Id::from("c"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                            Store::Register(Id::from("d"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                        ]
+                    }.into()
+                }.into(),
+                Assignment {
+                    target: Store::Memory(
+                        Id::from("call3"),
+                            FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ).into()
+                    ),
+                    value: FnCall{
+                        fn_: BuiltIn::BuiltInFn(
+                            Name::from("Plus__BuiltIn"),
+                            FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            ).into()
+                        ).into(),
+                        args: vec![
+                            Store::Register(Id::from("call1"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                            Store::Register(Id::from("call2"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                        ]
+                    }.into()
+                }.into(),
+            ],
+            ret: Store::Memory(Id::from("call3"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            fn_defs: Vec::new(),
+        },
+        "struct FourWayPlus : EasyCloneFn<FourWayPlus, Int, Int, Int, Int, Int> { using EasyCloneFn<FourWayPlus, Int, Int, Int, Int, Int>::EasyCloneFn; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{a, b}; call1->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{c, d}; call2->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{call1, call2}; call3->call(); } return call3; } };";
+        "four way plus int"
+    )]
+    #[test_case(
+        FnDef {
+            name: Name::from("FlatBlockExample"),
+            arguments: vec![
+                (Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            ],
+            statements: vec![
+                Assignment {
+                    target: Store::Memory(
+                        Id::from("block"),
+                        FnType(
+                            Vec::new(),
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ).into()
+                    ),
+                    value: FnCall{
+                        fn_: Block{
+                            statements: vec![
+                                Assignment {
+                                    target: Store::Memory(
+                                        Id::from("call"),
+                                        FnType(
+                                            vec![
+                                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                            ],
+                                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                        ).into()
+                                    ),
+                                    value: FnCall{
+                                        fn_: BuiltIn::BuiltInFn(
+                                            Name::from("Increment__BuiltIn"),
+                                            FnType(
+                                                vec![
+                                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                                ],
+                                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                            ).into()
+                                        ).into(),
+                                        args: vec![
+                                            Store::Memory(
+                                                Id::from("x"),
+                                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                            ).into()
+                                        ]
+                                    }.into()
+                                }.into(),
+                            ],
+                            ret: Store::Memory(
+                                Id::from("call"),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            )
+                        }.into(),
+                        args: Vec::new()
+                    }.into()
+                }.into(),
+            ],
+            ret: Store::Memory(
+                Id::from("block"),
+                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+            ),
+            fn_defs: Vec::new(),
+        },
+        "struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> { using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn; FnT<Int,Int> call = nullptr; FnT<Int> block = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call(); } return block; } }; ";
+        "flat block example"
+    )]
+    fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
+        let code = TRANSLATOR.translate_fn_def(fn_def);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }

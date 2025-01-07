@@ -38,19 +38,19 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
 
 struct FourWayPlusV1 : EasyCloneFn<FourWayPlusV1, Int, Int, Int, Int, Int> {
     using EasyCloneFn<FourWayPlusV1, Int, Int, Int, Int, Int>::EasyCloneFn;
-    Plus__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
+    FnT<Int, Int, Int> call1 = nullptr, call2 = nullptr, call3 = nullptr;
     Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
                     Lazy<Int> *&d) override {
         if (call1 == nullptr) {
-            call1 = new Plus__BuiltIn(a, b);
+            call1 = new Plus__BuiltIn{a, b};
             call1->call();
         }
         if (call2 == nullptr) {
-            call2 = new Plus__BuiltIn(c, d);
+            call2 = new Plus__BuiltIn{c, d};
             call2->call();
         }
         if (call3 == nullptr) {
-            call3 = new Plus__BuiltIn(call1, call2);
+            call3 = new Plus__BuiltIn{call1, call2};
             call3->call();
         }
         return call3;
@@ -63,15 +63,15 @@ struct FourWayPlusV2 : EasyCloneFn<FourWayPlusV2, Int, Int, Int, Int, Int> {
     Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
                     Lazy<Int> *&d) override {
         if (call1 == nullptr) {
-            call1 = new Plus__BuiltIn(a, b);
+            call1 = new Plus__BuiltIn{a, b};
             call1->call();
         }
         if (call2 == nullptr) {
-            call2 = new Plus__BuiltIn(call1, c);
+            call2 = new Plus__BuiltIn{call1, c};
             call2->call();
         }
         if (call3 == nullptr) {
-            call3 = new Plus__BuiltIn(call2, d);
+            call3 = new Plus__BuiltIn{call2, d};
             call3->call();
         }
         return call3;
@@ -143,8 +143,8 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
 
 struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
     using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn;
-    Increment__BuiltIn *call1 = nullptr;
-    ParametricFn<Int> *block1 = nullptr;
+    FnT<Int, Int> call1 = nullptr;
+    FnT<Int> block1 = nullptr;
     Lazy<Int> *body(Lazy<Int> *&x) override {
         if (block1 == nullptr) {
             block1 = new BlockFn<Int>([&]() {
