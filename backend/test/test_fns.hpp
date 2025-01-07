@@ -617,7 +617,7 @@ struct SimpleRecursiveTypeExample
             return new LazyConstant<VariantT<Suc, Nil>>{r};
         }
         case 1: {
-            VariantT<Suc, Nil> n{};
+            VariantT<Suc, Nil> n = {};
             n.tag = 1ULL;
             return new LazyConstant<VariantT<Suc, Nil>>{n};
         }
@@ -627,16 +627,16 @@ struct SimpleRecursiveTypeExample
 };
 
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
-    VariantT<Suc, Nil> n{};
+    VariantT<Suc, Nil> n = {};
     n.tag = 1ULL;
     VariantT<Suc, Nil> *wrapped_n = new VariantT<Suc, Nil>{n};
 
-    VariantT<Suc, Nil> inner{};
+    VariantT<Suc, Nil> inner = {};
     inner.tag = 0ULL;
     reinterpret_cast<Suc *>(&inner.value)->value = wrapped_n;
     Nat *wrapped_inner = new Nat{inner};
 
-    VariantT<Suc, Nil> outer{};
+    VariantT<Suc, Nil> outer = {};
     outer.tag = 0ULL;
     reinterpret_cast<Suc *>(&outer.value)->value = wrapped_inner;
 
