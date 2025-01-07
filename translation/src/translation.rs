@@ -3,9 +3,10 @@ use itertools::Itertools;
 use std::{collections::HashSet, fmt::Formatter, hash::RandomState};
 
 use lowering::{
-    Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ConstructorCall,
-    ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, Integer, MachineType,
-    MatchStatement, Statement, Store, TupleExpression, TupleType, TypeDef, UnionType, Value,
+    Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, Closure,
+    ConstructorCall, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, Integer,
+    MachineType, MatchStatement, Statement, Store, TupleExpression, TupleType, TypeDef, UnionType,
+    Value,
 };
 
 type Code = String;
@@ -145,6 +146,15 @@ impl Translator {
         };
         format!("if ({id} == nullptr) {{ {fn_initialization_code} {id}->call(); }}",)
     }
+    fn translate_closure(&self, target: Store, closure: Closure) -> Code {
+        let Store::Memory(id, type_) = target else {
+            panic!("Assigning function call to register is not yet implemented.")
+        };
+        let env_code = self.translate_value(closure.env);
+        let name = closure.name;
+        let initialization_code = format!("{id} = new {name}{{{env_code}}};");
+        format!("if ({id} == nullptr) {{ {initialization_code} }}",)
+    }
     fn translate_constructor_call(&self, target: Store, constructor_call: ConstructorCall) -> Code {
         let declaration = match &target {
             Store::Memory(_, _) => Code::new(),
@@ -167,6 +177,7 @@ impl Translator {
             Expression::ConstructorCall(constructor_call) => {
                 self.translate_constructor_call(assignment.target, constructor_call)
             }
+            Expression::Closure(closure) => self.translate_closure(assignment.target, closure),
             value => {
                 let value_code = self.translate_expression(value);
                 let target_code = match assignment.target {
@@ -1198,6 +1209,28 @@ mod tests {
         "ListInt* lr = new ListInt{l};";
         "reference assignment"
     )]
+    #[test_case(
+        Assignment {
+            target: Store::Memory(
+                Id::from("closure"),
+                FnType(
+                    vec![
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                    ],
+                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                ).into()
+            ).into(),
+            value: Closure{
+                name: Name::from("Adder"),
+                env: Store::Register(
+                    Id::from("x"),
+                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                ).into()
+            }.into()
+        },
+        "if (closure == nullptr) { closure = new Adder{x}; }";
+        "closure assignment"
+    )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);
         let expected_code = Code::from(expected);
@@ -1511,8 +1544,8 @@ mod tests {
             arguments: vec![(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))],
             statements: Vec::new(),
             ret: Store::Register(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-            fn_defs: Vec::new(),
-        },
+        }
+        ,
         "struct IdentityInt : EasyCloneFn<IdentityInt, Int, Int> { using EasyCloneFn<IdentityInt, Int, Int>::EasyCloneFn; Lazy<Int> *body(Lazy<Int> *&x) override { return x; } };";
         "identity int"
     )]
@@ -1612,7 +1645,6 @@ mod tests {
                 }.into(),
             ],
             ret: Store::Memory(Id::from("call3"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-            fn_defs: Vec::new(),
         },
         "struct FourWayPlus : EasyCloneFn<FourWayPlus, Int, Int, Int, Int, Int> { using EasyCloneFn<FourWayPlus, Int, Int, Int, Int, Int>::EasyCloneFn; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{a, b}; call1->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{c, d}; call2->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{call1, call2}; call3->call(); } return call3; } };";
         "four way plus int"
@@ -1677,7 +1709,6 @@ mod tests {
                 Id::from("block"),
                 MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
             ),
-            fn_defs: Vec::new(),
         },
         "struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> { using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn; FnT<Int,Int> call = nullptr; FnT<Int> block = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{x}; call->call(); } return call; }); block->call(); } return block; } }; ";
         "flat block example"

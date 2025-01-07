@@ -95,6 +95,7 @@ pub enum Expression {
     TupleExpression(TupleExpression),
     FnCall(FnCall),
     ConstructorCall(ConstructorCall),
+    Closure(Closure),
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,12 @@ pub struct FnCall {
 pub struct ConstructorCall {
     pub idx: usize,
     pub data: Option<(Name, Value)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Closure {
+    pub name: Name,
+    pub env: Value,
 }
 
 #[derive(Clone, Debug, FromVariants)]
