@@ -61,7 +61,7 @@ pub enum Store {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<Statement>,
-    pub ret: Box<Value>,
+    pub ret: Store,
 }
 
 impl Store {

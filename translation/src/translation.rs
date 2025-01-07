@@ -73,7 +73,7 @@ impl Translator {
             panic!("Block has non-lazy return type.")
         };
         let type_code = self.translate_type(&*type_);
-        let return_code = format!("return {};", self.translate_value(*block.ret));
+        let return_code = format!("return {};", self.translate_store(block.ret));
         format!("new BlockFn<{type_code}>([&]() {{ {statements_code} {return_code} }})")
     }
     fn translate_value(&self, value: Value) -> Code {
@@ -387,14 +387,14 @@ mod tests {
         "nested tuple type"
     )]
     #[test_case(
-        FnType(Vec::new(), Box::new(TupleType(Vec::new()).into())).into(),
+        FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(TupleType(Vec::new()).into())))).into(),
         "FnT<TupleT<>>";
         "unit fn type"
     )]
     #[test_case(
         FnType(
-            vec![AtomicType(AtomicTypeEnum::INT).into()],
-            Box::new(AtomicType(AtomicTypeEnum::INT).into())
+            vec![MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),],
+            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),)
         ).into(),
         "FnT<Int,Int>";
         "int identity fn"
@@ -402,10 +402,10 @@ mod tests {
     #[test_case(
         FnType(
             vec![
-                AtomicType(AtomicTypeEnum::INT).into(),
-                AtomicType(AtomicTypeEnum::INT).into()
+                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
             ],
-            Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())),)
         ).into(),
         "FnT<Bool,Int,Int>";
         "int comparison fn"
@@ -413,15 +413,15 @@ mod tests {
     #[test_case(
         FnType(
             vec![
-                FnType(
+                MachineType::Lazy(Box::new(FnType(
                     vec![
-                        AtomicType(AtomicTypeEnum::INT).into()
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                     ],
-                    Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
-                ).into(),
-                AtomicType(AtomicTypeEnum::INT).into()
+                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())),)
+                ).into())),
+                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
             ],
-            Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())),)
         ).into(),
         "FnT<Bool,FnT<Bool,Int>,Int>";
         "higher order fn"
@@ -761,8 +761,8 @@ mod tests {
                 MachineType::Lazy(
                     Box::new(
                         FnType(
-                            vec![AtomicType(AtomicTypeEnum::INT).into()],
-                            Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                            vec![MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),),
                         ).into()
                     )
                 )
@@ -770,8 +770,8 @@ mod tests {
             value: Expression::Wrap(Store::Register(
                 Id::from("f"),
                 FnType(
-                    vec![AtomicType(AtomicTypeEnum::INT).into()],
-                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                    vec![MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),],
+                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),),
                 ).into()
             ).into()),
         },
@@ -846,7 +846,7 @@ mod tests {
             value: FnCall{
                 fn_: Block{
                     statements: Vec::new(),
-                    ret: Box::new(Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into())
+                    ret: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))
                 }.into(),
                 args: Vec::new()
             }.into()
@@ -881,10 +881,10 @@ mod tests {
                             }.into()
                         }.into(),
                     ],
-                    ret: Box::new(Store::Memory(
+                    ret: Store::Memory(
                         Id::from("call"),
                         MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                    ).into())
+                    )
                 }.into(),
                 args: Vec::new()
             }.into()
@@ -924,10 +924,10 @@ mod tests {
                         }.into()
                     }.into(),
                 ],
-                ret: Box::new(Store::Memory(
+                ret: Store::Memory(
                     Id::from("call"),
                     MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                ).into())
+                )
             }.into())
         },
         "FnT<Int> block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{y}; call->call(); } return call; });";
