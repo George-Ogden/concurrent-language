@@ -5,8 +5,8 @@ use std::{collections::HashSet, fmt::Formatter, hash::RandomState};
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, Integer,
-    MachineType, MatchStatement, Statement, Store, TupleExpression, TupleType, TypeDef, UnionType,
-    Value,
+    MachineType, MatchStatement, Name, Program, Statement, Store, TupleExpression, TupleType,
+    TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -390,6 +390,48 @@ impl Translator {
                 .join(",")
         );
         format!("{declaration} {{ {constructor_code} {memory_allocations_code} {header_code} {{ {statements_code} {return_code} }} }};")
+    }
+    fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
+        fn_defs
+            .into_iter()
+            .map(|fn_def| self.translate_fn_def(fn_def))
+            .join("\n")
+    }
+    fn find_global_allocations(&self, program: &Program) -> Vec<(Id, MachineType)> {
+        let pre_main = program
+            .fn_defs
+            .iter()
+            .find(|fn_def| fn_def.name == Name::from("PreMain"))
+            .unwrap();
+        pre_main
+            .statements
+            .iter()
+            .map(|statement| {
+                if let Statement::Assignment(Assignment {
+                    target: Store::Global(id, type_),
+                    value: _,
+                }) = statement
+                {
+                    vec![(id.clone(), type_.clone())]
+                } else {
+                    Vec::new()
+                }
+            })
+            .concat()
+    }
+    fn translate_program(&self, program: Program) -> Code {
+        let globals = self.find_global_allocations(&program);
+        let type_def_code = self.translate_type_defs(program.type_defs);
+        let globals_code = globals
+            .into_iter()
+            .map(|(id, type_)| format!("{} {id};", self.translate_type(&type_)))
+            .join("\n");
+        let fn_def_code = self.translate_fn_defs(program.fn_defs);
+        format!("#include \"main/include.hpp\"\n\n{type_def_code} {globals_code} {fn_def_code}")
+    }
+    fn translate(program: Program) -> Code {
+        let translator = Translator {};
+        translator.translate_program(program)
     }
 }
 
@@ -1759,6 +1801,104 @@ mod tests {
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
         let code = TRANSLATOR.translate_fn_def(fn_def);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Program {
+            type_defs: vec![
+                TypeDef{
+                    name: Name::from("Bull"),
+                    constructors: vec![
+                        (Name::from("Twoo"), None),
+                        (Name::from("Faws"), None)
+                    ]
+                }
+            ],
+            fn_defs: vec![
+                FnDef {
+                    env: None,
+                    name: Name::from("Main"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Assignment {
+                            target: Store::Memory(
+                                Id::from("call"),
+                                    FnType(
+                                    vec![
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                    ],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                ).into()
+                            ),
+                            value: FnCall{
+                                fn_: BuiltIn::BuiltInFn(
+                                    Name::from("Plus__BuiltIn"),
+                                    FnType(
+                                        vec![
+                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                        ],
+                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                    ).into()
+                                ).into(),
+                                args: vec![
+                                    Store::Global(Id::from("x"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                                    Store::Global(Id::from("y"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))).into(),
+                                ]
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: Store::Memory(Id::from("call"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                },
+                FnDef {
+                    env: None,
+                    name: Name::from("PreMain"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Assignment {
+                            target: Store::Global(
+                                Id::from("x"),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                            ).into(),
+                            value: Expression::Wrap(Value::BuiltIn(Integer{value: 9}.into())).into()
+                        }.into(),
+                        Assignment {
+                            target: Store::Global(
+                                Id::from("y"),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                            ).into(),
+                            value: Expression::Wrap(Value::BuiltIn(Integer{value: 5}.into())).into()
+                        }.into(),
+                        Assignment {
+                            target: Store::Memory(
+                                    Id::from("main"),
+                                    FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                ).into()
+                            ),
+                            value: FnCall{
+                                fn_: BuiltIn::BuiltInFn(
+                                    Name::from("Main"),
+                                    FnType(
+                                        Vec::new(),
+                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                    ).into()
+                                ).into(),
+                                args: Vec::new()
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: Store::Memory(Id::from("main"), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                }
+            ]
+        },
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; Lazy<Int> *x; Lazy<Int> *y; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; call->args = std::make_tuple(x,y); call->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { x = new LazyConstant<Int>{9LL}; y = new LazyConstant<Int>{5LL}; if (main == nullptr){ main = new Main{}; main->args = std::make_tuple(); main->call(); } return main; } }; ";
+        "main program"
+    )]
+    fn test_program_translation(program: Program, expected: &str) {
+        let code = Translator::translate(program);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }

@@ -177,6 +177,5 @@ pub struct FnDef {
 
 pub struct Program {
     pub type_defs: Vec<TypeDef>,
-    pub global_constants: Vec<(Name, MachineType)>,
     pub fn_defs: Vec<FnDef>,
 }
