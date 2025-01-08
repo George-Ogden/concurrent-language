@@ -4,8 +4,8 @@ PARSER := parser
 GRAMMAR := parser/grammar
 TYPE_CHECKER := type-checker/target/debug/type_checker
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
-TRANSLATOR := type-checker/target/debug/translator
-TRANSLATOR_MANIFEST := type-checker/Cargo.toml
+TRANSLATOR := translation/target/debug/translation
+TRANSLATOR_MANIFEST := translation/Cargo.toml
 BACKEND := backend/bin/main
 
 all: $(TYPE_CHECKER) $(PARSER) $(BACKEND) $(TRANSLATOR)
@@ -13,7 +13,7 @@ all: $(TYPE_CHECKER) $(PARSER) $(BACKEND) $(TRANSLATOR)
 $(TYPE_CHECKER): $(PARSER) $(wildcard type-checker/src/*)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
 
-$(TRANSLATOR): $(PARSER) $(wildcard translation/src/*)
+$(TRANSLATOR): $(wildcard translation/src/*)
 	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
 
 $(BACKEND):
@@ -32,6 +32,9 @@ parse: $(GRAMMAR)
 
 type-check: $(TYPE_CHECKER)
 	cat samples/triangular.txt | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER)
+
+translate: $(TRANSLATOR)
+	echo '{"type_defs":[],"globals":[],"fn_defs":[{"name":"PreMain","arguments":[],"statements":[{"Assignment":{"allocation":{"Lazy":{"AtomicType":"INT"}},"target":"x","value":{"Wrap":[{"BuiltIn":{"Integer":{"value":0}}},{"AtomicType":"INT"}]}}}],"ret":[{"Memory":"x"},{"Lazy":{"AtomicType":"INT"}}],"env":null,"allocations":[["main",{"FnType":[[],{"Lazy":{"AtomicType":"INT"}}]}]]}]}' | ./$(TRANSLATOR) | tee backend/include/main/main.hpp
 
 test: $(PARSER) $(TYPE_CHECKER)
 	pytest . -vv
