@@ -56,6 +56,9 @@ class Visitor(GrammarVisitor):
     def visitId(self, ctx: GrammarParser.IdContext) -> str:
         return ctx.getText()
 
+    def visitOperator_id(self, ctx) -> str:
+        return re.match(r"^__(\S+)__$", ctx.getText()).group(1)
+
     def visitAtomic_type(self, ctx: GrammarParser.Atomic_typeContext) -> AtomicType:
         type_name = ctx.getText().upper()
         type = AtomicTypeEnum[type_name]
@@ -76,6 +79,9 @@ class Visitor(GrammarVisitor):
         return GenericType(generic_instance.id, generic_instance.type_instances)
 
     def visitGeneric_instance(self, ctx: GrammarParser.Generic_instanceContext) -> GenericVariable:
+        if ctx.operator_id() is not None:
+            id = self.visit(ctx.operator_id())
+            return GenericVariable(id, [])
         id = self.visitId(ctx.id_())
         generic_list = [] if ctx.generic_list() is None else self.visit(ctx.generic_list())
         return GenericVariable(id, generic_list)
@@ -230,7 +236,7 @@ class Visitor(GrammarVisitor):
 
     def visitAssignee(self, ctx: GrammarParser.AssigneeContext) -> ParametricAssignee:
         if ctx.operator_id() is not None:
-            id = re.match(r"^__(\S+)__$", ctx.getText()).group(1)
+            id = self.visit(ctx.operator_id())
             return ParametricAssignee(Assignee(id), [])
         elif ctx.getText() == "__":
             return ParametricAssignee(Assignee("__"), [])
@@ -302,7 +308,9 @@ class Visitor(GrammarVisitor):
         return GenericConstructor(generic_instance.id, generic_instance.type_instances)
 
     def visitConstructor_call(self, ctx: GrammarParser.Constructor_callContext) -> ConstructorCall:
-        constructor = self.visit(ctx.generic_constructor())
+        constructor: GenericConstructor = self.visit(ctx.generic_constructor())
+        if OperatorManager.check_operator(constructor.id):
+            raise VisitorError(f"Invalid constructor id {constructor.id}")
         arguments = self.visit(ctx.expr_list())
         return ConstructorCall(constructor, arguments)
 

@@ -28,8 +28,8 @@ TRUE: 'true';
 FALSE: 'false';
 BOOL: 'bool';
 
-INFIX_ID: '_''_'[a-zA-Z_][a-zA-Z0-9_]*'_''_' ;
-ID: [a-zA-Z_][a-zA-Z0-9_]* ;
+INFIX_ID: '_''_'[a-zA-Z_][a-zA-Z0-9_]* '\''* '_''_' ;
+ID: [a-zA-Z_][a-zA-Z0-9_]* '\''* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+;
 
@@ -56,7 +56,7 @@ generic_assignee : non_generic_assignee ('<' WS* id_list WS* '>')? ;
 non_generic_assignee: id | '__';
 
 generic_list : | type_instance WS* (',' WS* type_instance WS*)* ','? WS* ;
-generic_instance : id ('<' generic_list '>')? ;
+generic_instance : id ('<' generic_list '>')? |  operator_id;
 
 atomic_type
     : BOOL

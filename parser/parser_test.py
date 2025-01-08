@@ -163,6 +163,12 @@ from ast_nodes import (
         ("x", Var("x"), "expr"),
         ("foo", Var("foo"), "expr"),
         ("r2d2", Var("r2d2"), "expr"),
+        ("f'", Var("f'"), "expr"),
+        ("g''", Var("g''"), "expr"),
+        ("f'f", None, "expr"),
+        ("__^__", Var("^"), "expr"),
+        ("___^__", None, "expr"),
+        ("__^^^__", Var("^^^"), "expr"),
         ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
         ("map<T>", GenericVariable("map", [Typename("T")]), "expr"),
@@ -227,6 +233,8 @@ from ast_nodes import (
         ("3 ____ 4", None, "expr"),
         ("3 __^__ 4", None, "expr"),
         ("3 _____ 4", FunctionCall(Var("_"), [Integer(3), Integer(4)]), "expr"),
+        ("3 __f'__ 4", FunctionCall(Var("f'"), [Integer(3), Integer(4)]), "expr"),
+        ("3 __f''__ 4", FunctionCall(Var("f''"), [Integer(3), Integer(4)]), "expr"),
         ("3 ______ 4", FunctionCall(Var("__"), [Integer(3), Integer(4)]), "expr"),
         ("3 _______ 4", FunctionCall(Var("___"), [Integer(3), Integer(4)]), "expr"),
         ("3 ________ 4", FunctionCall(Var("____"), [Integer(3), Integer(4)]), "expr"),
@@ -543,6 +551,11 @@ from ast_nodes import (
             "expr",
         ),
         (
+            "__^__(4)",
+            FunctionCall(Var("^"), [Integer(4)]),
+            "expr",
+        ),
+        (
             "foo(4)(-5,0)",
             FunctionCall(FunctionCall(Var("foo"), [Integer(4)]), [Integer(-5), Integer(0)]),
             "expr",
@@ -817,6 +830,7 @@ from ast_nodes import (
         ),
         ("++++x", FunctionCall(Var("++++"), [Var("x")]), "expr"),
         ("Integer{8}", ConstructorCall(Constructor("Integer"), [Integer(8)]), "expr"),
+        ("__^__{8}", None, "expr"),
         (
             "typedef tuple (int, int)",
             OpaqueTypeDefinition(
