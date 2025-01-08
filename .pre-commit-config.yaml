@@ -42,3 +42,26 @@ repos:
         args: ['--manifest-path', 'type-checker/Cargo.toml', '--']
     -   id: cargo-check
         args: ['--manifest-path', 'type-checker/Cargo.toml']
+
+  - repo: https://github.com/pocc/pre-commit-hooks
+    rev: v1.3.5
+    hooks:
+      - id: clang-format
+        args:
+          - -i
+          - "--style={BasedOnStyle: llvm, IndentWidth: 4}"
+      - id: cppcheck
+        args:
+          - --language=c++
+          - --suppress=unusedFunction
+          - --suppress=missingIncludeSystem
+          - --suppress=unmatchedSuppression
+          - --suppress=unusedStructMember
+          - --suppress=unusedVariable
+          - --suppress=useStlAlgorithm
+          - --suppress=memleak
+          - --suppress=uninitvar
+          - --suppress=constVariable
+          - --suppress=unassignedVariable
+          - --suppress=nullPointerRedundantCheck
+          - --inline-suppr

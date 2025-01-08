@@ -277,7 +277,7 @@ impl TypeChecker {
                             item.id.clone(),
                             ConstructorType {
                                 type_: type_reference.clone(),
-                                index: index as u32,
+                                index,
                             },
                         ) {
                             return Err(TypeCheckError::DuplicatedName {
@@ -718,7 +718,7 @@ impl TypeChecker {
                     .map(|constructor| constructor.index)
                     .sorted()
                     .collect_vec();
-                if constructor_indices != (0..variants.len() as u32).collect_vec() {
+                if constructor_indices != (0..variants.len() as usize).collect_vec() {
                     return Err(TypeCheckError::IncorrectVariants { blocks });
                 }
                 let blocks = blocks
@@ -4019,7 +4019,7 @@ mod tests {
                         Id::from(id),
                         ConstructorType {
                             type_: type_checker.type_definitions[&Id::from(type_name)].clone(),
-                            index: i as u32
+                            index: i
                         }
                     ))
                     .collect_vec())
