@@ -40,6 +40,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential libgtest-dev librange-v3-dev
 
+    - name: Temporary Script
+      run: |
+        echo '#include "main/include.hpp"' > backend/include/main/main.hpp
+        echo 'struct PreMain : Closure<PreMain, Empty, Int> {using Closure<PreMain, Empty, Int>::Closure; Lazy<Int> *body() override { return new LazyConstant<Int>{0LL}; }};' >> backend/include/main/main.hpp
+
     - name: Build parser and type checker
       run: |
         make
