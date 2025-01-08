@@ -11,7 +11,7 @@ use lowering::{
 
 type Code = String;
 
-struct Translator {}
+pub struct Translator {}
 
 impl Translator {
     fn translate_type(&self, type_: &MachineType) -> Code {
@@ -288,7 +288,7 @@ impl Translator {
         let fn_def_code = self.translate_fn_defs(program.fn_defs);
         format!("#include \"main/include.hpp\"\n\n{type_def_code} {globals_code} {fn_def_code}")
     }
-    fn translate(program: Program) -> Code {
+    pub fn translate(program: Program) -> Code {
         let translator = Translator {};
         translator.translate_program(program)
     }
