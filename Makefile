@@ -4,12 +4,17 @@ PARSER := parser
 GRAMMAR := parser/grammar
 TYPE_CHECKER := type-checker/target/debug/type_checker
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
+TRANSLATOR := type-checker/target/debug/translator
+TRANSLATOR_MANIFEST := type-checker/Cargo.toml
 BACKEND := backend/bin/main
 
-all: $(TYPE_CHECKER) $(PARSER) $(BACKEND)
+all: $(TYPE_CHECKER) $(PARSER) $(BACKEND) $(TRANSLATOR)
 
 $(TYPE_CHECKER): $(PARSER) $(wildcard type-checker/src/*)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
+
+$(TRANSLATOR): $(PARSER) $(wildcard translation/src/*)
+	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
 
 $(BACKEND):
 	make -C backend
@@ -31,6 +36,7 @@ type-check: $(TYPE_CHECKER)
 test: $(PARSER) $(TYPE_CHECKER)
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv
+	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/triangular.txt samples/list.txt; do \
