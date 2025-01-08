@@ -23,56 +23,71 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };
 
-struct IdentityInt : ParametricFn<Int, Int> {
-    using ParametricFn<Int, Int>::ParametricFn;
-    Int body(Int &x) override { return x; }
+struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> {
+    using Closure<IdentityInt, Empty, Int, Int>::Closure;
+    Lazy<Int> *body(Lazy<Int> *&x) override { return x; }
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
     Int x = 5;
-    IdentityInt *id = new IdentityInt{x};
+    IdentityInt *id = new IdentityInt{};
+    id->args = std::make_tuple(new LazyConstant<Int>{x});
 
     WorkManager::run(id);
     ASSERT_EQ(id->ret, 5);
 }
 
-struct FourWayPlusV1 : ParametricFn<Int, Int, Int, Int, Int> {
-    using ParametricFn<Int, Int, Int, Int, Int>::ParametricFn;
-    Plus__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
-    Int body(Int &a, Int &b, Int &c, Int &d) override {
-        initialize(call1);
-        call1->args = reference_all(a, b);
-        call1->call();
-        initialize(call2);
-        call2->args = reference_all(c, d);
-        call2->call();
-        initialize(call3);
-        call3->args = std::make_tuple(call1, call2);
-        call3->run();
-        return call3->value();
+struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
+    using Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int>::Closure;
+    FnT<Int, Int, Int> call1 = nullptr, call2 = nullptr, call3 = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
+                    Lazy<Int> *&d) override {
+        if (call1 == nullptr) {
+            call1 = new Plus__BuiltIn{};
+            call1->args = std::make_tuple(a, b);
+            call1->call();
+        }
+        if (call2 == nullptr) {
+            call2 = new Plus__BuiltIn{};
+            call2->args = std::make_tuple(c, d);
+            call2->call();
+        }
+        if (call3 == nullptr) {
+            call3 = new Plus__BuiltIn{};
+            call3->args = std::make_tuple(call1, call2);
+            call3->call();
+        }
+        return call3;
     }
 };
 
-struct FourWayPlusV2 : ParametricFn<Int, Int, Int, Int, Int> {
-    using ParametricFn<Int, Int, Int, Int, Int>::ParametricFn;
+struct FourWayPlusV2 : Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int> {
+    using Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int>::Closure;
     Plus__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
-    Int body(Int &a, Int &b, Int &c, Int &d) override {
-        initialize(call1);
-        call1->args = reference_all(a, b);
-        call1->call();
-        initialize(call2);
-        call2->args = std::tuple_cat(std::make_tuple(call1), reference_all(c));
-        call2->call();
-        initialize(call3);
-        call3->args = std::tuple_cat(std::make_tuple(call2), reference_all(d));
-        call3->run();
-        return call3->value();
+    Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c,
+                    Lazy<Int> *&d) override {
+        if (call1 == nullptr) {
+            call1 = new Plus__BuiltIn{a, b};
+            call1->call();
+        }
+        if (call2 == nullptr) {
+            call2 = new Plus__BuiltIn{call1, c};
+            call2->call();
+        }
+        if (call3 == nullptr) {
+            call3 = new Plus__BuiltIn{call2, d};
+            call3->call();
+        }
+        return call3;
     }
 };
 
 TEST_P(FnCorrectnessTest, FourWayPlusV1Test) {
     Int w = 11, x = 5, y = 10, z = 22;
-    FourWayPlusV1 *plus = new FourWayPlusV1{w, x, y, z};
+    FourWayPlusV1 *plus = new FourWayPlusV1{};
+    plus->args =
+        std::make_tuple(new LazyConstant<Int>{w}, new LazyConstant<Int>{x},
+                        new LazyConstant<Int>{y}, new LazyConstant<Int>{z});
 
     WorkManager::run(plus);
     ASSERT_EQ(plus->ret, 48);
@@ -80,35 +95,43 @@ TEST_P(FnCorrectnessTest, FourWayPlusV1Test) {
 
 TEST_P(FnCorrectnessTest, FourWayPlusV2Test) {
     Int w = 11, x = 5, y = 10, z = 22;
-    FourWayPlusV2 *plus = new FourWayPlusV2{w, x, y, z};
+    FourWayPlusV2 *plus = new FourWayPlusV2{};
+    plus->args =
+        std::make_tuple(new LazyConstant<Int>{w}, new LazyConstant<Int>{x},
+                        new LazyConstant<Int>{y}, new LazyConstant<Int>{z});
 
     WorkManager::run(plus);
     ASSERT_EQ(plus->ret, 48);
 }
 
-struct BranchingExample : ParametricFn<Int, Int, Int, Int> {
-    using ParametricFn<Int, Int, Int, Int>::ParametricFn;
+struct BranchingExample : EasyCloneFn<BranchingExample, Int, Int, Int, Int> {
+    using EasyCloneFn<BranchingExample, Int, Int, Int, Int>::EasyCloneFn;
     Comparison_GE__BuiltIn *call1 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
     Minus__BuiltIn *call3 = nullptr;
-    Int body(Int &x, Int &y, Int &z) override {
-        initialize(call1);
-        call1->args = reference_all(x, Int(0));
+    Lazy<Int> *body(Lazy<Int> *&x, Lazy<Int> *&y, Lazy<Int> *&z) override {
+        if (call1 == nullptr) {
+            call1 = new Comparison_GE__BuiltIn{x, new LazyConstant<Int>(0)};
+            call1->call();
+        }
+        WorkManager::await(call1);
         call1->run();
         if (call1->value()) {
-            initialize(call2);
-            call2->args = reference_all(y, Int(1));
-            call2->call();
+            if (call2 == nullptr) {
+                call2 = new Plus__BuiltIn{y, new LazyConstant<Int>(1)};
+                call2->call();
+            }
         } else {
-            initialize(call2);
-            call2->args = reference_all(z, Int(1));
-            call2->call();
+            if (call2 == nullptr) {
+                call2 = new Plus__BuiltIn{z, new LazyConstant<Int>(1)};
+                call2->call();
+            }
         }
-        initialize(call3);
-        call3->args =
-            std::tuple_cat(std::make_tuple(call2), reference_all(Int(2)));
-        call3->run();
-        return call3->value();
+        if (call3 == nullptr) {
+            call3 = new Minus__BuiltIn{call2, new LazyConstant<Int>(2)};
+            call3->call();
+        }
+        return call3;
     }
 };
 
@@ -128,21 +151,24 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
     ASSERT_EQ(branching->ret, 21);
 }
 
-struct FlatBlockExample : ParametricFn<Int, Int> {
-    using ParametricFn<Int, Int>::ParametricFn;
-    Increment__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3;
-    ParametricFn<Int> *block1 = nullptr, *block2 = nullptr, *block3 = nullptr;
-    Int body(Int &x) override {
+struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
+    using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn;
+    FnT<Int, Int> call1 = nullptr;
+    FnT<Int> block1 = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
         if (block1 == nullptr) {
             block1 = new BlockFn<Int>([&]() {
-                initialize(call1);
-                call1->args = reference_all(x);
-                call1->run();
-                return call1->value();
+                if (call1 == nullptr) {
+                    call1 = new Increment__BuiltIn{};
+                    call1->args = std::make_tuple(x);
+                    call1->call();
+                }
+                return call1;
             });
+            block1->call();
         }
-        block1->run();
-        return block1->value();
+        block1->args = std::make_tuple();
+        return block1;
     }
 };
 
@@ -154,39 +180,42 @@ TEST_P(FnCorrectnessTest, FlatBlockExampleTest) {
     ASSERT_EQ(block->ret, 6);
 }
 
-struct NestedBlockExample : ParametricFn<Int, Int> {
-    using ParametricFn<Int, Int>::ParametricFn;
+struct NestedBlockExample : EasyCloneFn<NestedBlockExample, Int, Int> {
+    using EasyCloneFn<NestedBlockExample, Int, Int>::EasyCloneFn;
     Increment__BuiltIn *call1 = nullptr, *call2 = nullptr, *call3 = nullptr;
     ParametricFn<Int> *block1 = nullptr, *block2 = nullptr, *block3 = nullptr;
-    Int body(Int &x) override {
+    Lazy<Int> *body(Lazy<Int> *&x) override {
         if (block1 == nullptr) {
             block1 = new BlockFn<Int>([&]() {
-                initialize(call1);
-                call1->args = reference_all(x);
-                call1->call();
+                if (call1 == nullptr) {
+                    call1 = new Increment__BuiltIn{x};
+                    call1->call();
+                }
                 if (block2 == nullptr) {
                     block2 = new BlockFn<Int>([&]() {
-                        initialize(call2);
-                        call2->args = std::make_tuple(call1);
-                        call2->call();
+                        if (call2 == nullptr) {
+                            call2 = new Increment__BuiltIn{call1};
+                            call2->call();
+                        }
                         if (block3 == nullptr) {
                             block3 = new BlockFn<Int>([&] {
-                                initialize(call3);
-                                call3->args = std::make_tuple(call2);
-                                call3->run();
-                                return call3->value();
+                                if (call3 == nullptr) {
+                                    call3 = new Increment__BuiltIn{call2};
+                                    call3->call();
+                                }
+                                return call3;
                             });
+                            block3->call();
                         }
-                        block3->run();
-                        return block3->value();
+                        return block3;
                     });
+                    block2->call();
                 }
-                block2->run();
-                return block2->value();
+                return block2;
             });
+            block1->call();
         }
-        block1->run();
-        return block1->value();
+        return block1;
     }
 };
 
@@ -198,46 +227,91 @@ TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
     ASSERT_EQ(block->ret, 8);
 }
 
-struct IfStatementExample : ParametricFn<Int, Int, Int, Int> {
-    using ParametricFn<Int, Int, Int, Int>::ParametricFn;
+struct Adder : Closure<Adder, Lazy<Int> *, Int, Int> {
+    using Closure<Adder, Lazy<Int> *, Int, Int>::Closure;
+    FnT<Int, Int, Int> inner_res = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        if (inner_res == nullptr) {
+            inner_res = new Plus__BuiltIn{x, env};
+            inner_res->call();
+        }
+        return inner_res;
+    }
+};
+
+struct NestedFnExample : EasyCloneFn<NestedFnExample, Int, Int> {
+    using EasyCloneFn<NestedFnExample, Int, Int>::EasyCloneFn;
+    FnT<Int, Int> closure = nullptr;
+    FnT<Int, Int> res = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        if (closure == nullptr) {
+            closure = new Adder{x};
+        }
+        if (res == nullptr) {
+            res = closure->clone();
+            res->args = std::make_tuple(x);
+            res->call();
+        }
+        return res;
+    }
+};
+
+TEST_P(FnCorrectnessTest, NestedFnExampleTest) {
+    Int x = 5;
+    NestedFnExample *nested = new NestedFnExample{x};
+
+    WorkManager::run(nested);
+    ASSERT_EQ(nested->ret, 10);
+}
+
+struct IfStatementExample
+    : EasyCloneFn<IfStatementExample, Int, Int, Int, Int> {
+    using EasyCloneFn<IfStatementExample, Int, Int, Int, Int>::EasyCloneFn;
     Comparison_GE__BuiltIn *call1 = nullptr;
-    ParametricFn<Int> *branch = nullptr;
+    ParametricFn<Int> *branch1 = nullptr, *branch2 = nullptr, *branch = nullptr;
     Plus__BuiltIn *call2_1 = nullptr, *call2_2 = nullptr;
     Minus__BuiltIn *call3 = nullptr;
-    Int body(Int &x, Int &y, Int &z) override {
-        Int a = 1;
-        auto branch1 = Block([&]() {
-            initialize(call2_1);
-            call2_1->args = reference_all(y, a);
-            call2_1->run();
-            return call2_1->value();
-        });
-        auto branch2 = Block([&]() {
-            initialize(call2_2);
-            call2_2->args = reference_all(z, a);
-            call2_2->run();
-            return call2_2->value();
-        });
+    Lazy<Int> *body(Lazy<Int> *&x, Lazy<Int> *&y, Lazy<Int> *&z) override {
+        if (branch1 == nullptr) {
+            branch1 = new BlockFn<Int>([&]() {
+                if (call2_1 == nullptr) {
+                    call2_1 = new Plus__BuiltIn{y, new LazyConstant<Int>(1)};
+                    call2_1->call();
+                }
+                return call2_1;
+            });
+        }
+        if (branch2 == nullptr) {
+            branch2 = new BlockFn<Int>([&]() {
+                if (call2_2 == nullptr) {
+                    call2_2 = new Plus__BuiltIn{z, new LazyConstant<Int>(1)};
+                    call2_2->call();
+                }
+                return call2_2;
+            });
+        }
 
-        initialize(call1);
-        call1->args = reference_all(x, Int(0));
-        call1->run();
+        if (call1 == nullptr) {
+            call1 = new Comparison_GE__BuiltIn{x, new LazyConstant<Int>(0)};
+            call1->call();
+        }
+        WorkManager::await(call1);
         if (call1->value()) {
             if (branch == nullptr) {
-                branch = &branch1;
+                branch = branch1;
+                branch->call();
             }
-            branch->call();
         } else {
             if (branch == nullptr) {
-                branch = &branch2;
+                branch = branch2;
+                branch->call();
             };
-            branch->call();
         }
-        initialize(call3);
-        call3->args =
-            std::tuple_cat(std::make_tuple(branch), reference_all(Int(2)));
-        call3->run();
-        return call3->value();
+        if (call3 == nullptr) {
+            call3 = new Minus__BuiltIn{branch, new LazyConstant<Int>(2)};
+            call3->call();
+        }
+        return call3;
     }
 };
 
@@ -249,34 +323,34 @@ TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
     ASSERT_EQ(branching->ret, 9);
 }
 
-struct RecursiveDouble : ParametricFn<Int, Int> {
-    using ParametricFn<Int, Int>::ParametricFn;
+struct RecursiveDouble : EasyCloneFn<RecursiveDouble, Int, Int> {
+    using EasyCloneFn<RecursiveDouble, Int, Int>::EasyCloneFn;
     RecursiveDouble *call1 = nullptr, *call3 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
-    Int body(Int &x) override {
-        if (x > 0) {
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        WorkManager::await(x);
+        if (x->value() > 0) {
             if (call1 == nullptr) {
-                call1 = new RecursiveDouble{};
-                call1->args = reference_all(x - 1);
+                auto arg = new Decrement__BuiltIn{x};
+                arg->call();
+                call1 = new RecursiveDouble{arg};
                 call1->call();
             }
 
             if (call3 == nullptr) {
-                call3 = new RecursiveDouble{};
-                call3->args = reference_all(x - 1);
+                auto arg = new Decrement__BuiltIn{x};
+                arg->call();
+                call3 = new RecursiveDouble{arg};
                 call3->run();
             }
 
             if (call2 == nullptr) {
-                call2 = new Plus__BuiltIn{};
-                call2->args = std::tuple_cat(std::make_tuple(call1),
-                                             reference_all(Int(2)));
+                call2 = new Plus__BuiltIn{call1, new LazyConstant<Int>(2)};
                 call2->call();
             }
-            WorkManager::await(call2);
-            return call2->value();
+            return call2;
         } else {
-            return 0;
+            return new LazyConstant<Int>(0);
         }
     }
 };
@@ -297,16 +371,22 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
     ASSERT_EQ(double_->ret, 0);
 }
 
-struct EvenOrOdd : ParametricFn<Bool, Int> {
-    Bool body(Int &x) override { return static_cast<bool>(x); }
+struct EvenOrOdd : EasyCloneFn<EvenOrOdd, Bool, Int> {
+    using EasyCloneFn<EvenOrOdd, Bool, Int>::EasyCloneFn;
+    Lazy<Bool> *body(Lazy<Int> *&x) override {
+        WorkManager::await(x);
+        return new LazyConstant<Bool>(x->value() & 1);
+    }
 };
 
-struct ApplyIntBool : ParametricFn<Bool, FnT<Bool, Int>, Int> {
-    using ParametricFn<Bool, FnT<Bool, Int>, Int>::ParametricFn;
-    Bool body(FnT<Bool, Int> &f, Int &x) override {
-        f->args = reference_all(x);
-        f->run();
-        return f->value();
+struct ApplyIntBool : EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int> {
+    using EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int>::EasyCloneFn;
+    Lazy<Bool> *body(Lazy<FnT<Bool, Int>> *&f, Lazy<Int> *&x) override {
+        WorkManager::await(f);
+        auto g = f->value();
+        g->args = std::make_tuple(x);
+        g->call();
+        return g;
     }
 };
 
@@ -319,12 +399,50 @@ TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
     ASSERT_TRUE(apply->ret);
 }
 
-struct PairIntBool : ParametricFn<TupleT<Int, Bool>, Int, Bool> {
-    using ParametricFn<TupleT<Int, Bool>, Int, Bool>::ParametricFn;
-    TupleT<Int, Bool> body(Int &x, Bool &y) override {
-        return std::make_tuple(x, y);
+struct PairIntBool : EasyCloneFn<PairIntBool, TupleT<Int, Bool>, Int, Bool> {
+    using EasyCloneFn<PairIntBool, TupleT<Int, Bool>, Int, Bool>::EasyCloneFn;
+    Lazy<TupleT<Int, Bool>> *body(Lazy<Int> *&x, Lazy<Bool> *&y) override {
+        WorkManager::await(x, y);
+        return new LazyConstant<TupleT<Int, Bool>>(
+            std::make_tuple(x->value(), y->value()));
     }
 };
+
+struct HigherOrderReuse
+    : EasyCloneFn<HigherOrderReuse, Int, FnT<Int, Int>, Int, Int> {
+    using EasyCloneFn<HigherOrderReuse, Int, FnT<Int, Int>, Int,
+                      Int>::EasyCloneFn;
+    FnT<Int, Int> call1 = nullptr, call2 = nullptr;
+    Plus__BuiltIn *call3 = nullptr;
+    Lazy<Int> *body(Lazy<FnT<Int, Int>> *&f, Lazy<Int> *&x,
+                    Lazy<Int> *&y) override {
+        WorkManager::await(f);
+        if (call1 == nullptr) {
+            call1 = f->value();
+            call1->args = std::make_tuple(x);
+            call1->call();
+        }
+        if (call2 == nullptr) {
+            call2 = call1->clone();
+            call2->args = std::make_tuple(y);
+            call2->call();
+        }
+        if (call3 == nullptr) {
+            call3 = new Plus__BuiltIn{call1, call2};
+            call3->call();
+        }
+        return call3;
+    }
+};
+
+TEST_P(FnCorrectnessTest, ReusedHigherOrderFunctionTest) {
+    FnT<Int, Int> f = new Increment__BuiltIn{};
+    Int x = 5, y = 4;
+    HigherOrderReuse *F = new HigherOrderReuse{f, x, y};
+
+    WorkManager::run(F);
+    ASSERT_EQ(F->ret, 11);
+}
 
 TEST_P(FnCorrectnessTest, TupleTest) {
     Int x = 5;
@@ -335,11 +453,18 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     ASSERT_EQ(pair->ret, std::make_tuple(5, true));
 }
 
-using Bull = VariantT<std::monostate, std::monostate>;
+struct Twoo;
+struct Faws;
+typedef VariantT<Twoo, Faws> Bull;
+struct Twoo {};
+struct Faws {};
 
-struct BoolUnion : ParametricFn<Bool, Bull> {
-    using ParametricFn<Bool, Bull>::ParametricFn;
-    bool body(Bull &x) override { return x.tag == 0; }
+struct BoolUnion : EasyCloneFn<BoolUnion, Bool, Bull> {
+    using EasyCloneFn<BoolUnion, Bool, Bull>::EasyCloneFn;
+    Lazy<Bool> *body(Lazy<Bull> *&x) override {
+        WorkManager::await(x);
+        return new LazyConstant<Bool>(x->value().tag == 0);
+    }
 };
 
 TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
@@ -354,7 +479,7 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
 
     {
         Bull bull{};
-        bull.tag = 1;
+        bull.tag = 1ULL;
         BoolUnion *fn = new BoolUnion{bull};
 
         WorkManager::run(fn);
@@ -362,16 +487,29 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
     }
 }
 
-using EitherIntBool = VariantT<Int, Bool>;
+struct Left;
+struct Right;
+typedef VariantT<Left, Right> EitherIntBool;
+struct Left {
+    Int value;
+};
+struct Right {
+    Bool value;
+};
 
-struct EitherIntBoolExtractor : ParametricFn<Bool, EitherIntBool> {
-    using ParametricFn<Bool, EitherIntBool>::ParametricFn;
-    Bool body(EitherIntBool &x) override {
+struct EitherIntBoolExtractor
+    : EasyCloneFn<EitherIntBoolExtractor, Bool, EitherIntBool> {
+    using EasyCloneFn<EitherIntBoolExtractor, Bool, EitherIntBool>::EasyCloneFn;
+    Lazy<Bool> *body(Lazy<EitherIntBool> *&either) override {
+        WorkManager::await(either);
+        EitherIntBool x = either->value();
         switch (x.tag) {
-        case 0:
-            return *reinterpret_cast<int *>(&x.value) > 10;
-        case 1:
-            return *reinterpret_cast<bool *>(&x.value);
+        case 0ULL:
+            return new LazyConstant<Bool>(
+                reinterpret_cast<Left *>(&x.value)->value > 10);
+        case 1ULL:
+            return new LazyConstant<Bool>(
+                reinterpret_cast<Right *>(&x.value)->value);
         }
         return 0;
     }
@@ -388,9 +526,9 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         either.tag = tag;
         if (tag == 0) {
 
-            *reinterpret_cast<int *>(&either.value) = value;
+            reinterpret_cast<Left *>(&either.value)->value = value;
         } else {
-            *reinterpret_cast<bool *>(&either.value) = value;
+            reinterpret_cast<Right *>(&either.value)->value = value;
         }
 
         EitherIntBoolExtractor *fn = new EitherIntBoolExtractor{either};
@@ -400,30 +538,32 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
     }
 }
 
-struct ListInt_;
-typedef TupleT<Int, ListInt_ *> Cons;
-struct ListInt_ {
-    using type = VariantT<Cons, TupleT<>>;
+struct Cons;
+struct Nil;
+typedef VariantT<Cons, Nil> ListInt;
+struct Cons {
+    using type = TupleT<Int, ListInt *>;
     type value;
-    // cppcheck-suppress noExplicitConstructor
-    ListInt_(type value) : value(value) {}
 };
-using ListInt = ListInt_::type;
+struct Nil {};
 
-struct ListIntSum : ParametricFn<Int, ListInt> {
-    using ParametricFn<Int, ListInt>::ParametricFn;
+struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
+    using EasyCloneFn<ListIntSum, Int, ListInt>::EasyCloneFn;
     ListIntSum *call1 = nullptr;
     Plus__BuiltIn *call2 = nullptr;
-    Int body(ListInt &list) override {
+    Lazy<Int> *body(Lazy<ListInt> *&lazy_list) override {
+        WorkManager::await(lazy_list);
+        ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            Cons cons = *reinterpret_cast<Cons *>(&list.value);
-            ListInt_ *tail = std::get<1>(cons);
-            Int head = std::get<0>(cons);
+            Cons::type cons = reinterpret_cast<Cons *>(&list.value)->value;
+            Int head = std::get<0ULL>(cons);
+            ListInt *tail_ = std::get<1ULL>(cons);
+            ListInt tail = *tail_;
 
             if (call1 == nullptr) {
                 call1 = new ListIntSum{};
-                call1->args = reference_all(tail->value);
+                call1->args = reference_all(tail);
                 call1->call();
             }
 
@@ -433,36 +573,91 @@ struct ListIntSum : ParametricFn<Int, ListInt> {
                     std::tuple_cat(std::make_tuple(call1), reference_all(head));
                 call2->call();
             }
-            WorkManager::await(call2);
-            return call2->value();
+            return call2;
         }
         case 1:
-            return 0;
+            return new LazyConstant<Int>(0);
         }
-        return 0;
+        return nullptr;
     }
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ListInt tail{};
-    tail.tag = 1;
-    ListInt_ wrapped_tail = tail;
+    tail.tag = 1ULL;
+    ListInt *wrapped_tail = new ListInt{tail};
     ListInt third{};
-    third.tag = 0;
-    *reinterpret_cast<Cons *>(&third.value) = Cons(8, &wrapped_tail);
-    ListInt_ wrapped_third = third;
+    third.tag = 0ULL;
+    *reinterpret_cast<Cons *>(&third.value) =
+        Cons{std::make_tuple(8, wrapped_tail)};
+    ListInt *wrapped_third = new ListInt{third};
     ListInt second{};
-    second.tag = 0;
-    *reinterpret_cast<Cons *>(&second.value) = Cons(4, &wrapped_third);
-    ListInt_ wrapped_second = second;
+    second.tag = 0ULL;
+    *reinterpret_cast<Cons *>(&second.value) =
+        Cons{std::make_tuple(4, wrapped_third)};
+    ListInt wrapped_second = second;
     ListInt first{};
-    first.tag = 0;
-    *reinterpret_cast<Cons *>(&first.value) = Cons(-9, &wrapped_second);
+    first.tag = 0ULL;
+    *reinterpret_cast<Cons *>(&first.value) =
+        Cons{std::make_tuple(-9, &wrapped_second)};
 
     ListIntSum *adder = new ListIntSum{first};
 
     WorkManager::run(adder);
     ASSERT_EQ(adder->ret, 3);
+}
+
+struct Suc;
+typedef VariantT<Suc, Nil> Nat;
+struct Suc {
+    using type = Nat *;
+    type value;
+};
+
+struct SimpleRecursiveTypeExample
+    : EasyCloneFn<SimpleRecursiveTypeExample, VariantT<Suc, Nil>,
+                  VariantT<Suc, Nil>> {
+    using EasyCloneFn<SimpleRecursiveTypeExample, VariantT<Suc, Nil>,
+                      VariantT<Suc, Nil>>::EasyCloneFn;
+    Lazy<VariantT<Suc, Nil>> *body(Lazy<VariantT<Suc, Nil>> *&nat_) override {
+        WorkManager::await(nat_);
+        VariantT<Suc, Nil> nat = nat_->value();
+        switch (nat.tag) {
+        case 0: {
+            Suc::type s = reinterpret_cast<Suc *>(&nat.value)->value;
+            VariantT<Suc, Nil> r = *s;
+            return new LazyConstant<VariantT<Suc, Nil>>{r};
+        }
+        case 1: {
+            VariantT<Suc, Nil> n = {};
+            n.tag = 1ULL;
+            return new LazyConstant<VariantT<Suc, Nil>>{n};
+        }
+        }
+        return nullptr;
+    }
+};
+
+TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
+    VariantT<Suc, Nil> n = {};
+    n.tag = 1ULL;
+    VariantT<Suc, Nil> *wrapped_n = new VariantT<Suc, Nil>{n};
+
+    VariantT<Suc, Nil> inner = {};
+    inner.tag = 0ULL;
+    reinterpret_cast<Suc *>(&inner.value)->value = wrapped_n;
+    Nat *wrapped_inner = new Nat{inner};
+
+    VariantT<Suc, Nil> outer = {};
+    outer.tag = 0ULL;
+    reinterpret_cast<Suc *>(&outer.value)->value = wrapped_inner;
+
+    SimpleRecursiveTypeExample *fn = new SimpleRecursiveTypeExample{outer};
+
+    WorkManager::run(fn);
+    ASSERT_EQ(fn->ret.tag, inner.tag);
+    ASSERT_EQ(reinterpret_cast<Suc *>(&fn->ret.value)->value,
+              reinterpret_cast<Suc *>(&inner.value)->value);
 }
 
 const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};

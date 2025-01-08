@@ -4,12 +4,17 @@ PARSER := parser
 GRAMMAR := parser/grammar
 TYPE_CHECKER := type-checker/target/debug/type_checker
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
+TRANSLATOR := translation/target/debug/translation
+TRANSLATOR_MANIFEST := translation/Cargo.toml
 BACKEND := backend/bin/main
 
-all: $(TYPE_CHECKER) $(PARSER) $(BACKEND)
+all: $(TYPE_CHECKER) $(PARSER) $(BACKEND) $(TRANSLATOR)
 
 $(TYPE_CHECKER): $(PARSER) $(wildcard type-checker/src/*)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
+
+$(TRANSLATOR): $(wildcard translation/src/*)
+	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
 
 $(BACKEND):
 	make -C backend
@@ -28,9 +33,13 @@ parse: $(GRAMMAR)
 type-check: $(TYPE_CHECKER)
 	cat samples/triangular.txt | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER)
 
+translate: $(TRANSLATOR)
+	echo '{"type_defs":[],"globals":[],"fn_defs":[{"name":"PreMain","arguments":[],"statements":[{"Assignment":{"allocation":{"Lazy":{"AtomicType":"INT"}},"target":"x","value":{"Wrap":[{"BuiltIn":{"Integer":{"value":0}}},{"AtomicType":"INT"}]}}}],"ret":[{"Memory":"x"},{"Lazy":{"AtomicType":"INT"}}],"env":null,"allocations":[["main",{"FnType":[[],{"Lazy":{"AtomicType":"INT"}}]}]]}]}' | ./$(TRANSLATOR) | tee backend/include/main/main.hpp
+
 test: $(PARSER) $(TYPE_CHECKER)
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv
+	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/triangular.txt samples/list.txt; do \
