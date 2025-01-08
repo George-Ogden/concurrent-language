@@ -34,53 +34,16 @@ pub struct TypeDef {
 #[derive(Debug, Clone, FromVariants)]
 pub enum Value {
     BuiltIn(BuiltIn),
-    Store(Store),
-    Block(Block),
-}
-
-impl Value {
-    pub fn type_(&self) -> MachineType {
-        match self {
-            Self::BuiltIn(BuiltIn::Integer(_)) => AtomicType(AtomicTypeEnum::INT).into(),
-            Self::BuiltIn(BuiltIn::Boolean(_)) => AtomicType(AtomicTypeEnum::BOOL).into(),
-            Self::BuiltIn(BuiltIn::BuiltInFn(_, type_)) => type_.clone(),
-            Self::Store(store) => store.type_(),
-            Self::Block(Block { statements: _, ret }) => {
-                FnType(Vec::new(), Box::new(ret.type_())).into()
-            }
-        }
-    }
+    Memory(Memory),
 }
 
 #[derive(Debug, Clone)]
-pub enum Store {
-    Memory(Id, MachineType),
-    Register(Id, MachineType),
-    Global(Id, MachineType),
-}
-
-#[derive(Debug, Clone)]
-pub struct Global(pub Id, pub MachineType);
+pub struct Memory(pub Id);
 
 #[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<Statement>,
-    pub ret: Store,
-}
-
-impl Store {
-    pub fn id(&self) -> Id {
-        match &self {
-            Self::Memory(id, _) | Self::Register(id, _) | Self::Global(id, _) => id.clone(),
-        }
-    }
-    pub fn type_(&self) -> MachineType {
-        match &self {
-            Self::Memory(_, type_) | Self::Register(_, type_) | Self::Global(_, type_) => {
-                type_.clone()
-            }
-        }
-    }
+    pub ret: (Value, MachineType),
 }
 
 #[derive(Debug, Clone, FromVariants)]
@@ -92,11 +55,12 @@ pub enum BuiltIn {
 
 #[derive(Debug, Clone, FromVariants)]
 pub enum Expression {
+    Block(Block),
     Value(Value),
-    Wrap(Value),
-    Unwrap(Store),
-    Reference(Store),
-    Dereference(Store),
+    Wrap(Value, MachineType),
+    Unwrap(Value),
+    Reference(Value, MachineType),
+    Dereference(Value),
     ElementAccess(ElementAccess),
     TupleExpression(TupleExpression),
     FnCall(FnCall),
@@ -106,7 +70,7 @@ pub enum Expression {
 
 #[derive(Debug, Clone)]
 pub struct ElementAccess {
-    pub value: Store,
+    pub value: Value,
     pub idx: usize,
 }
 
@@ -140,23 +104,24 @@ pub enum Statement {
 }
 
 #[derive(Clone, Debug)]
-pub struct Await(pub Vec<Store>);
+pub struct Await(pub Vec<Memory>);
 
 #[derive(Clone, Debug)]
 pub struct Assignment {
-    pub target: Store,
+    pub allocation: Option<MachineType>,
+    pub target: Memory,
     pub value: Expression,
 }
 
 #[derive(Clone, Debug)]
 pub struct IfStatement {
-    pub condition: Store,
+    pub condition: Value,
     pub branches: (Vec<Statement>, Vec<Statement>),
 }
 
 #[derive(Clone, Debug)]
 pub struct MatchStatement {
-    pub expression: Store,
+    pub expression: (Value, UnionType),
     pub branches: Vec<MatchBranch>,
 }
 
@@ -167,15 +132,20 @@ pub struct MatchBranch {
 }
 
 #[derive(Clone, Debug)]
+pub struct MemoryAllocation(pub Id, pub MachineType);
+
+#[derive(Clone, Debug)]
 pub struct FnDef {
     pub name: Name,
-    pub arguments: Vec<(Id, MachineType)>,
+    pub arguments: Vec<(Memory, MachineType)>,
     pub statements: Vec<Statement>,
-    pub ret: Store,
+    pub ret: (Value, MachineType),
     pub env: Option<MachineType>,
+    pub allocations: Vec<MemoryAllocation>,
 }
 
 pub struct Program {
     pub type_defs: Vec<TypeDef>,
+    pub globals: Vec<MemoryAllocation>,
     pub fn_defs: Vec<FnDef>,
 }
