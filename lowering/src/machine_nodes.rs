@@ -32,13 +32,13 @@ pub struct TypeDef {
     pub constructors: Vec<(Name, Option<MachineType>)>,
 }
 
-#[derive(Clone, Debug, FromVariants, Serialize, Deserialize)]
+#[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
 pub enum Value {
     BuiltIn(BuiltIn),
     Memory(Memory),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Memory(pub Id);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub struct Block {
     pub ret: (Value, MachineType),
 }
 
-#[derive(Clone, Debug, FromVariants, Serialize, Deserialize)]
+#[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
 pub enum BuiltIn {
     Integer(Integer),
     Boolean(Boolean),

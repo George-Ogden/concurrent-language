@@ -1,32 +1,11 @@
 use std::collections::HashMap;
 
+use crate::{BuiltIn, Memory, Value};
 use from_variants::FromVariants;
 use type_checker::*;
 
-#[derive(FromVariants, Debug, Clone, PartialEq)]
-enum Value {
-    Register(Register),
-    BuiltIn(BuiltIn),
-}
-
-#[derive(FromVariants, Debug, Clone, PartialEq)]
-enum BuiltIn {
-    Integer(Integer),
-    Boolean(Boolean),
-    Function(Function),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct Function {
-    name: String,
-    return_type: Type,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct Register {}
-
 type Scope = HashMap<Variable, Value>;
-type History = HashMap<Value, Register>;
+type History = HashMap<Value, Memory>;
 
 struct Lowerer {}
 impl Lowerer {
