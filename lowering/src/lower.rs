@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::{BuiltIn, Memory, Value};
-use from_variants::FromVariants;
 use type_checker::*;
 
 type Scope = HashMap<Variable, Value>;
