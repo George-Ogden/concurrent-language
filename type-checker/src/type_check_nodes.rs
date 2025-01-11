@@ -492,6 +492,9 @@ pub enum TypeCheckError {
         variant_id: Id,
         assignee: Option<Assignee>,
     },
+    MainFunctionReturnsFunction {
+        type_: Type,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

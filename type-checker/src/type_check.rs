@@ -1080,6 +1080,11 @@ impl TypeChecker {
         };
         let typed_block =
             type_checker.check_block(program_block, context, &GenericVariables::new())?;
+        if let Type::Function(_, _) = typed_block.type_() {
+            return Err(TypeCheckError::MainFunctionReturnsFunction {
+                type_: typed_block.type_(),
+            });
+        }
         let TypedExpression::TypedFunctionCall(TypedFunctionCall {
             function,
             arguments,
@@ -4420,6 +4425,47 @@ mod tests {
         Ok(()),
         TypeContext::new();
         "function type instantiation"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: FunctionType{
+                            argument_types: vec![ATOMIC_TYPE_INT.into()],
+                            return_type: Box::new(ATOMIC_TYPE_INT.into()),
+                        }.into(),
+                        body: ExpressionBlock(GenericVariable{
+                            id: Id::from("identity"),
+                            type_instances: vec![ATOMIC_TYPE_INT.into()]
+                        }.into())
+                    }.into())
+                }.into(),
+                Assignment{
+                    assignee: ParametricAssignee{
+                        assignee: Assignee { id: Id::from("identity") },
+                        generic_variables: vec![Id::from("T")]
+                    },
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Assignee {
+                                    id: Id::from("x")
+                                },
+                                type_: Typename("T").into()
+                            }
+                        ],
+                        return_type: Typename("T").into(),
+                        body: ExpressionBlock(Var("x").into())
+                    }.into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "returning function from main"
     )]
     fn test_program(program: Program, result: Result<(), ()>, context: TypeContext) {
         let type_check_result = TypeChecker::check_program(program, &context);
