@@ -6,4 +6,4 @@ mod utils;
 use ast_nodes::*;
 pub use ast_nodes::{AtomicTypeEnum, Boolean, Integer, Program};
 pub use type_check::TypeChecker;
-pub use type_check_nodes::{ParametricType, Type, TypedExpression, TypedVariable, Variable};
+pub use type_check_nodes::*;
