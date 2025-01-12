@@ -121,9 +121,6 @@ impl Hash for IntermediateCtorCall {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IntermediateAssignment(pub IntermediateMemory);
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateFnDef {
     arguments: Vec<IntermediateArgument>,
     statements: Vec<IntermediateStatement>,
@@ -135,6 +132,12 @@ pub enum IntermediateStatement {
     Assignment(IntermediateMemory),
     IntermediateIfStatement(IntermediateIfStatement),
     IntermediateMatchStatement(IntermediateMatchStatement),
+}
+
+impl From<IntermediateMemory> for IntermediateStatement {
+    fn from(value: IntermediateMemory) -> Self {
+        IntermediateStatement::Assignment(value)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

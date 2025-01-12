@@ -3,11 +3,16 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::intermediate_nodes::*;
 use type_checker::*;
 
+type Scope = HashMap<Variable, IntermediateValue>;
+type History = HashMap<IntermediateExpression, IntermediateValue>;
+type Uninstantiated = HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>;
+type TypeDefs = HashMap<Type, Rc<RefCell<Vec<Option<IntermediateType>>>>>;
+
 struct Lowerer {
-    scope: HashMap<Variable, IntermediateValue>,
-    history: HashMap<IntermediateExpression, IntermediateValue>,
-    uninstantiated: HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>,
-    type_defs: HashMap<Type, Rc<RefCell<Vec<Option<IntermediateType>>>>>,
+    scope: Scope,
+    history: History,
+    uninstantiated: Uninstantiated,
+    type_defs: TypeDefs,
     statements: Vec<IntermediateStatement>,
 }
 impl Lowerer {
@@ -30,7 +35,12 @@ impl Lowerer {
                     IntermediateTupleExpression(intermediate_expressions).into();
                 self.history
                     .entry(intermediate_expression.clone())
-                    .or_insert(intermediate_expression.into())
+                    .or_insert_with(|| {
+                        let value: IntermediateMemory = intermediate_expression.into();
+                        self.statements
+                            .push(IntermediateStatement::Assignment(value.clone()));
+                        value.into()
+                    })
                     .clone()
             }
             _ => todo!(),
@@ -53,19 +63,28 @@ mod tests {
 
     #[test_case(
         TypedExpression::Integer(Integer { value: 4 }),
-        IntermediateBuiltIn::Integer(Integer { value: 4 }).into();
+        (
+            IntermediateBuiltIn::Integer(Integer { value: 4 }).into(),
+            Vec::new()
+        );
         "integer"
     )]
     #[test_case(
         TypedExpression::Boolean(Boolean { value: true }),
-        IntermediateBuiltIn::Boolean(Boolean { value: true }).into();
+        (
+            IntermediateBuiltIn::Boolean(Boolean { value: true }).into(),
+            Vec::new()
+        );
         "boolean"
     )]
     #[test_case(
         TypedTuple{
             expressions: Vec::new()
         }.into(),
-        IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(Vec::new())).into();
+        {
+            let value: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(Vec::new())).into();
+            (value.clone().into(), vec![value.into()])
+        };
         "empty tuple"
     )]
     #[test_case(
@@ -75,12 +94,15 @@ mod tests {
                 Boolean{value: false}.into()
             ]
         }.into(),
-        IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-            vec![
-                IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
-                IntermediateBuiltIn::Boolean(Boolean { value: false }).into(),
-            ]
-        )).into();
+        {
+            let value: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                vec![
+                    IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
+                    IntermediateBuiltIn::Boolean(Boolean { value: false }).into(),
+                ]
+            )).into();
+            (value.clone().into(), vec![value.into()])
+        };
         "non-empty tuple"
     )]
     #[test_case(
@@ -97,22 +119,32 @@ mod tests {
                 }.into(),
             ]
         }.into(),
-        IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-            vec![
-                IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(Vec::new()).into()).into(),
-                IntermediateBuiltIn::Integer(Integer { value: 1 }).into(),
-                IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-                    vec![
-                        IntermediateBuiltIn::Boolean(Boolean { value: true }).into(),
-                    ]
-                )).into()
-            ]
-        )).into();
+        {
+            let inner1: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(Vec::new()).into()).into();
+            let inner3: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                vec![
+                    IntermediateBuiltIn::Boolean(Boolean { value: true }).into(),
+                ]
+            )).into();
+            let outer: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                vec![
+                    inner1.clone().into(),
+                    IntermediateBuiltIn::Integer(Integer { value: 1 }).into(),
+                    inner3.clone().into(),
+                ]
+            )).into();
+            (outer.clone().into(), vec![inner1.into(), inner3.into(), outer.into()])
+        };
         "nested tuple"
     )]
-    fn test_lower_expression(expression: TypedExpression, value: IntermediateValue) {
+    fn test_lower_expression(
+        expression: TypedExpression,
+        value_statements: (IntermediateValue, Vec<IntermediateStatement>),
+    ) {
+        let (value, statements) = value_statements;
         let mut lowerer = Lowerer::new();
         let computation = lowerer.lower_expression(expression);
-        assert_eq!(computation, value)
+        assert_eq!(computation, value);
+        assert_eq!(lowerer.statements, statements)
     }
 }
