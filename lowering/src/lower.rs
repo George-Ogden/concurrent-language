@@ -15,6 +15,7 @@ struct Lowerer {
     type_defs: TypeDefs,
     statements: Vec<IntermediateStatement>,
 }
+
 impl Lowerer {
     pub fn new() -> Self {
         Lowerer {
@@ -51,6 +52,12 @@ impl Lowerer {
             .into_iter()
             .map(|expression| self.lower_expression(expression))
             .collect()
+    }
+    fn lower_type(&mut self, type_: Type) -> IntermediateType {
+        match type_ {
+            Type::Atomic(atomic) => atomic.into(),
+            _ => todo!(),
+        }
     }
 }
 
@@ -146,5 +153,22 @@ mod tests {
         let computation = lowerer.lower_expression(expression);
         assert_eq!(computation, value);
         assert_eq!(lowerer.statements, statements)
+    }
+
+    #[test_case(
+        Type::Atomic(AtomicTypeEnum::INT),
+        |_| AtomicTypeEnum::INT.into();
+        "int type"
+    )]
+    #[test_case(
+        Type::Atomic(AtomicTypeEnum::BOOL),
+        |_| AtomicTypeEnum::BOOL.into();
+        "bool type"
+    )]
+    fn test_lower_type(type_: Type, expected_gen: impl Fn(&TypeDefs) -> IntermediateType) {
+        let mut lowerer = Lowerer::new();
+        let type_ = lowerer.lower_type(type_);
+        let expected = expected_gen(&lowerer.type_defs);
+        assert_eq!(type_, expected);
     }
 }

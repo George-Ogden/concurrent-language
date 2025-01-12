@@ -1,7 +1,7 @@
 use std::{cell::RefCell, hash::Hash, rc::Rc};
 
 use from_variants::FromVariants;
-use type_checker::{Boolean, Integer};
+use type_checker::{AtomicTypeEnum, Boolean, Integer};
 
 use crate::{AtomicType, Name};
 
@@ -12,6 +12,12 @@ pub enum IntermediateType {
     IntermediateFnType(IntermediateFnType),
     IntermediateUnionType(IntermediateUnionType),
     IntermediateReferenceType(Rc<RefCell<IntermediateType>>),
+}
+
+impl From<AtomicTypeEnum> for IntermediateType {
+    fn from(value: AtomicTypeEnum) -> Self {
+        Self::AtomicType(AtomicType(value))
+    }
 }
 
 impl Hash for IntermediateType {
