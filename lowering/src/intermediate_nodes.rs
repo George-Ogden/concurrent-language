@@ -111,3 +111,9 @@ pub struct IntermediateMatchBranch {
     pub target: Option<IntermediateArgument>,
     pub statements: Vec<IntermediateMatchBranch>,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntermediateProgram {
+    pub statements: Vec<IntermediateStatement>,
+    pub main: IntermediateValue,
+}
