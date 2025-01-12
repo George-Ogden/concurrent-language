@@ -44,7 +44,7 @@ pub struct IntermediateMemory(Rc<RefCell<IntermediateExpression>>);
 
 #[derive(Clone, Debug, PartialEq, FromVariants)]
 pub enum IntermediateExpression {
-    IntermediateArgument(IntermediateType),
+    IntermediateArgument(IntermediateArgument),
     IntermediateValue(IntermediateValue),
     IntermediateElementAccess(IntermediateElementAccess),
     IntermediateTupleExpression(IntermediateTupleExpression),
@@ -52,6 +52,9 @@ pub enum IntermediateExpression {
     IntermediateCtorCall(IntermediateCtorCall),
     IntermediateFnDef(IntermediateFnDef),
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntermediateArgument(pub IntermediateType);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IntermediateElementAccess {
@@ -79,10 +82,32 @@ pub struct IntermediateAssignment(pub IntermediateMemory);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IntermediateFnDef {
-    argument_types: Vec<IntermediateType>,
+    arguments: Vec<IntermediateArgument>,
     statements: Vec<IntermediateStatement>,
     return_value: IntermediateValue,
 }
 
+#[derive(Clone, Debug, PartialEq, FromVariants)]
+pub enum IntermediateStatement {
+    Assignment(IntermediateMemory),
+    IntermediateIfStatement(IntermediateIfStatement),
+    IntermediateMatchStatement(IntermediateMatchStatement),
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub enum IntermediateStatement {}
+pub struct IntermediateIfStatement {
+    pub condition: IntermediateValue,
+    pub branches: (Vec<IntermediateStatement>, Vec<IntermediateStatement>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntermediateMatchStatement {
+    pub expression: IntermediateValue,
+    pub branches: Vec<IntermediateMatchBranch>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntermediateMatchBranch {
+    pub target: Option<IntermediateArgument>,
+    pub statements: Vec<IntermediateMatchBranch>,
+}
