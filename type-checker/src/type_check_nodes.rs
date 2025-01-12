@@ -5,10 +5,11 @@ use std::cell::RefCell;
 use std::collections::hash_map::{IntoIter, Keys, Values};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
+use std::hash::Hash;
 use std::ops::Index;
 use std::rc::Rc;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Eq)]
 pub struct ParametricType {
     pub type_: Type,
     pub parameters: Vec<Rc<RefCell<Option<Type>>>>,
@@ -93,7 +94,7 @@ impl From<Type> for TypedVariable {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq)]
 pub enum Type {
     Atomic(AtomicTypeEnum),
     Union(Id, Vec<Option<Type>>),
@@ -234,6 +235,39 @@ impl fmt::Debug for Type {
                 write!(f, "Function({:?},{:?})", argument_type, return_type)
             }
             Type::Variable(idx) => write!(f, "Variable({:?})", idx.as_ptr()),
+        }
+    }
+}
+
+impl Hash for Type {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Type::Atomic(atomic) => {
+                0.hash(state);
+                atomic.hash(state)
+            }
+            Type::Union(_, types) => {
+                1.hash(state);
+                types.hash(state)
+            }
+            Type::Instantiation(type_, params) => {
+                2.hash(state);
+                type_.as_ptr().hash(state);
+                params.hash(state)
+            }
+            Type::Tuple(types) => {
+                3.hash(state);
+                types.hash(state);
+            }
+            Type::Function(args, ret) => {
+                4.hash(state);
+                args.hash(state);
+                ret.hash(state)
+            }
+            Type::Variable(var) => {
+                5.hash(state);
+                var.as_ptr().hash(state)
+            }
         }
     }
 }

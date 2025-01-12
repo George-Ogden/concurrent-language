@@ -33,7 +33,7 @@ pub struct IntermediateTupleType(pub Vec<IntermediateType>);
 pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateType>);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntermediateUnionType(Rc<RefCell<Vec<Option<IntermediateType>>>>);
+pub struct IntermediateUnionType(pub Rc<RefCell<Vec<Option<IntermediateType>>>>);
 
 impl Hash for IntermediateUnionType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

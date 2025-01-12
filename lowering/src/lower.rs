@@ -53,9 +53,19 @@ impl Lowerer {
             .map(|expression| self.lower_expression(expression))
             .collect()
     }
-    fn lower_type(&mut self, type_: Type) -> IntermediateType {
+    fn lower_type(&mut self, type_: &Type) -> IntermediateType {
         match type_ {
-            Type::Atomic(atomic) => atomic.into(),
+            Type::Atomic(atomic) => atomic.clone().into(),
+            Type::Union(_, types) => {
+                let ctors = Rc::new(RefCell::new(
+                    types
+                        .iter()
+                        .map(|type_| type_.as_ref().map(|type_| self.lower_type(type_)))
+                        .collect(),
+                ));
+                let type_ = Type::Union(String::new(), types.clone());
+                IntermediateUnionType(self.type_defs.entry(type_).or_insert(ctors).clone()).into()
+            }
             _ => todo!(),
         }
     }
@@ -63,6 +73,8 @@ impl Lowerer {
 
 #[cfg(test)]
 mod tests {
+
+    use crate::Id;
 
     use super::*;
 
@@ -165,9 +177,40 @@ mod tests {
         |_| AtomicTypeEnum::BOOL.into();
         "bool type"
     )]
+    #[test_case(
+        Type::Union(Id::from("Bull"), vec![None, None]),
+        |type_defs| {
+            assert_eq!(type_defs.len(), 1);
+            IntermediateUnionType(type_defs.values().cloned().collect::<Vec<_>>()[0].clone()).into()
+        };
+        "bull type included"
+    )]
+    #[test_case(
+        Type::Union(Id::from("Bull"), vec![None, None]),
+        |_| {
+            IntermediateUnionType(Rc::new(RefCell::new(vec![None, None]))).into()
+        };
+        "bull type correct"
+    )]
+    #[test_case(
+        Type::Union(
+            Id::from("LR"),
+            vec![
+                Some(TYPE_INT),
+                Some(TYPE_BOOL),
+            ]
+        ),
+        |_| {
+            IntermediateUnionType(Rc::new(RefCell::new(vec![
+                Some(AtomicTypeEnum::INT.into()),
+                Some(AtomicTypeEnum::BOOL.into()),
+            ]))).into()
+        };
+        "left right type correct"
+    )]
     fn test_lower_type(type_: Type, expected_gen: impl Fn(&TypeDefs) -> IntermediateType) {
         let mut lowerer = Lowerer::new();
-        let type_ = lowerer.lower_type(type_);
+        let type_ = lowerer.lower_type(&type_);
         let expected = expected_gen(&lowerer.type_defs);
         assert_eq!(type_, expected);
     }
