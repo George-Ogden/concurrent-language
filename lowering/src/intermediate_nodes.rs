@@ -26,7 +26,7 @@ pub struct IntermediateUnionType(Rc<RefCell<Vec<Option<IntermediateType>>>>);
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeDef(pub Rc<RefCell<Vec<Option<IntermediateType>>>>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, FromVariants)]
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
     IntermediateMemory(IntermediateMemory),
