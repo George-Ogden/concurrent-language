@@ -24,14 +24,41 @@ struct Lowerer {
 
 impl Lowerer {
     pub fn new() -> Self {
-        Lowerer {
+        let mut lowerer = Lowerer {
             scope: Scope::new(),
             history: History::new(),
             uninstantiated: Uninstantiated::new(),
             type_defs: TypeDefs::new(),
             statements: Vec::new(),
             visited_references: VisitedReferences::new(),
-        }
+        };
+        DEFAULT_CONTEXT.with(|context| {
+            lowerer.scope = HashMap::from_iter(context.iter().map(|(id, var)| {
+                let type_ = lowerer.lower_type(&var.type_.borrow().type_);
+                let variable = var.variable.clone();
+                (
+                    variable,
+                    Rc::new(RefCell::new(
+                        IntermediateBuiltIn::BuiltInFn(id.clone(), type_).into(),
+                    )),
+                )
+            }))
+        });
+        lowerer
+    }
+    fn get_cached_value(
+        &mut self,
+        intermediate_expression: IntermediateExpression,
+    ) -> IntermediateValue {
+        self.history
+            .entry(intermediate_expression.clone())
+            .or_insert_with(|| {
+                let value: IntermediateMemory = intermediate_expression.into();
+                self.statements
+                    .push(IntermediateStatement::Assignment(value.clone()));
+                value.into()
+            })
+            .clone()
     }
     fn lower_expression(&mut self, expression: TypedExpression) -> IntermediateValue {
         match expression {
@@ -41,19 +68,23 @@ impl Lowerer {
                 let intermediate_expressions = self.lower_expressions(expressions);
                 let intermediate_expression: IntermediateExpression =
                     IntermediateTupleExpression(intermediate_expressions).into();
-                self.history
-                    .entry(intermediate_expression.clone())
-                    .or_insert_with(|| {
-                        let value: IntermediateMemory = intermediate_expression.into();
-                        self.statements
-                            .push(IntermediateStatement::Assignment(value.clone()));
-                        value.into()
-                    })
-                    .clone()
+                self.get_cached_value(intermediate_expression)
             }
             TypedExpression::TypedAccess(TypedAccess {
                 variable: TypedVariable { variable, type_ },
             }) => self.scope.get(&variable).unwrap().borrow().clone(),
+            TypedExpression::TypedFunctionCall(TypedFunctionCall {
+                function,
+                arguments,
+            }) => {
+                let intermediate_function = self.lower_expression(*function);
+                let intermediate_args = self.lower_expressions(arguments);
+                let intermediate_expression = IntermediateFnCall {
+                    fn_: intermediate_function,
+                    args: intermediate_args,
+                };
+                self.get_cached_value(intermediate_expression.into())
+            }
             _ => todo!(),
         }
     }
@@ -187,7 +218,7 @@ impl Lowerer {
 #[cfg(test)]
 mod tests {
 
-    use crate::Id;
+    use crate::{Id, Name};
 
     use super::*;
 
@@ -268,6 +299,39 @@ mod tests {
             (outer.clone().into(), vec![inner1.into(), inner3.into(), outer.into()])
         };
         "nested tuple"
+    )]
+    #[test_case(
+        TypedFunctionCall{
+            function: Box::new(
+                TypedAccess {
+                    variable: TypedVariable {
+                        variable: DEFAULT_CONTEXT.with(|context| context.get(&Id::from("+")).unwrap().variable.clone()),
+                        type_: Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_INT)),
+                    }
+                }.into()
+            ),
+            arguments: vec![
+                Integer{value: 5}.into(),
+                Integer{value: -4}.into(),
+            ]
+        }.into(),
+        {
+            let memory: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
+                fn_: IntermediateBuiltIn::BuiltInFn(
+                        Name::from("+"),
+                        IntermediateFnType(
+                            vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ).into()
+                    ).into(),
+                args: vec![
+                    IntermediateBuiltIn::Integer(Integer { value: 5 }).into(),
+                    IntermediateBuiltIn::Integer(Integer { value: -4 }).into(),
+                ]
+            }).into();
+            (memory.clone().into(), vec![memory.into()])
+        };
+        "operator call"
     )]
     fn test_lower_expression(
         expression: TypedExpression,
@@ -683,16 +747,16 @@ mod tests {
     fn test_lower_assignments(
         assignments_scope: (Vec<TypedAssignment>, Vec<(Variable, IntermediateValue)>),
     ) {
-        let (assignments, scope) = assignments_scope;
+        let (assignments, expected_scope) = assignments_scope;
         let mut lowerer = Lowerer::new();
         lowerer.lower_assignments(assignments);
-        assert_eq!(
-            lowerer
-                .scope
-                .into_iter()
-                .map(|(k, v)| (k, v.borrow().clone()))
-                .collect::<HashMap<_, _>>(),
-            HashMap::from_iter(scope)
-        )
+        let flat_scope = lowerer
+            .scope
+            .into_iter()
+            .map(|(k, v)| (k, v.borrow().clone()))
+            .collect::<HashMap<_, _>>();
+        for (k, v) in expected_scope {
+            assert_eq!(flat_scope.get(&k), Some(&v))
+        }
     }
 }

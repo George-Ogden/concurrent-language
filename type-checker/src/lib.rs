@@ -5,5 +5,5 @@ mod utils;
 
 use ast_nodes::*;
 pub use ast_nodes::{AtomicTypeEnum, Boolean, Integer, Program};
-pub use type_check::TypeChecker;
+pub use type_check::{TypeChecker, DEFAULT_CONTEXT};
 pub use type_check_nodes::*;

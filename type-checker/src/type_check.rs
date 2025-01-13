@@ -21,7 +21,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use strum::IntoEnumIterator;
 
-const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
+thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
     let integer_binary_operators = [
         "**", "*", "/", "%", "+", "-", ">>", "<<", "<=>", "&", "^", "|",
     ]
@@ -60,6 +60,7 @@ const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             .map(|(id, type_)| (id, type_.into())),
     )
 });
+}
 
 #[derive(Debug)]
 pub struct TypeChecker {
@@ -1105,7 +1106,7 @@ impl TypeChecker {
         })
     }
     pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {
-        Self::check_program(program, &DEFAULT_CONTEXT)
+        DEFAULT_CONTEXT.with(|context| Self::check_program(program, context))
     }
 }
 
