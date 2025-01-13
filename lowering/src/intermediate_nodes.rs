@@ -150,9 +150,9 @@ impl Hash for IntermediateCtorCall {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateFnDef {
-    arguments: Vec<IntermediateArgument>,
-    statements: Vec<IntermediateStatement>,
-    return_value: IntermediateValue,
+    pub arguments: Vec<IntermediateArgument>,
+    pub statements: Vec<IntermediateStatement>,
+    pub return_value: IntermediateValue,
 }
 
 #[derive(Clone, Debug, PartialEq, FromVariants, Eq, Hash)]

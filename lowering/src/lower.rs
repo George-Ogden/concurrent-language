@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    iter::zip,
     rc::Rc,
 };
 
@@ -85,6 +86,34 @@ impl Lowerer {
                 };
                 self.get_cached_value(intermediate_expression.into())
             }
+            TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                parameters,
+                return_type,
+                body,
+            }) => {
+                let variables = parameters
+                    .iter()
+                    .map(|variable| variable.variable.clone())
+                    .collect::<Vec<_>>();
+                let arguments = parameters
+                    .iter()
+                    .map(|variable| IntermediateArgument(self.lower_type(&variable.type_)))
+                    .collect::<Vec<_>>();
+                for (variable, argument) in zip(&variables, &arguments) {
+                    self.scope.insert(
+                        variable.clone(),
+                        Rc::new(RefCell::new(argument.clone().into())),
+                    );
+                }
+                let (statements, return_value) = self.lower_block(body);
+                let intermediate_expression = IntermediateFnDef {
+                    arguments: arguments,
+                    statements: statements,
+                    return_value: return_value,
+                }
+                .into();
+                self.get_cached_value(intermediate_expression)
+            }
             _ => todo!(),
         }
     }
@@ -93,6 +122,18 @@ impl Lowerer {
             .into_iter()
             .map(|expression| self.lower_expression(expression))
             .collect()
+    }
+    fn lower_block(
+        &mut self,
+        block: TypedBlock,
+    ) -> (Vec<IntermediateStatement>, IntermediateValue) {
+        let statements = self.statements.clone();
+        self.statements = Vec::new();
+        self.lower_assignments(block.assignments);
+        let intermediate_value = self.lower_expression(*block.expression);
+        let intermediate_statements = self.statements.clone();
+        self.statements = statements;
+        (intermediate_statements, intermediate_value)
     }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
         self.visited_references.clear();
@@ -332,6 +373,144 @@ mod tests {
             (memory.clone().into(), vec![memory.into()])
         };
         "operator call"
+    )]
+    #[test_case(
+        {
+            let parameters = vec![
+                TypedVariable{
+                    variable: Variable::new(),
+                    type_: TYPE_INT
+                },
+                TypedVariable{
+                    variable: Variable::new(),
+                    type_: TYPE_BOOL
+                },
+            ];
+            TypedFunctionDefinition{
+                parameters: parameters.clone(),
+                return_type: Box::new(TYPE_INT),
+                body: TypedBlock{
+                    assignments: Vec::new(),
+                    expression: Box::new(TypedAccess{
+                        variable: parameters[0].clone()
+                    }.into())
+                }
+            }.into()
+        },
+        {
+            let arguments = vec![
+                IntermediateArgument(AtomicTypeEnum::INT.into()),
+                IntermediateArgument(AtomicTypeEnum::BOOL.into()),
+            ];
+            let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                arguments: arguments.clone(),
+                statements: Vec::new(),
+                return_value: arguments[0].clone().into()
+            }).into();
+            (memory.clone().into(), vec![memory.into()])
+        };
+        "projection fn def"
+    )]
+    #[test_case(
+        {
+            let parameters = vec![
+                TypedVariable{
+                    variable: Variable::new(),
+                    type_: Type::Function(
+                        vec![
+                            TYPE_INT,
+                        ],
+                        Box::new(TYPE_INT)
+                    ),
+                },
+                TypedVariable{
+                    variable: Variable::new(),
+                    type_: TYPE_INT
+                },
+            ];
+            let y = Variable::new();
+            let z = Variable::new();
+            TypedFunctionDefinition{
+                parameters: parameters.clone(),
+                return_type: Box::new(TYPE_INT),
+                body: TypedBlock{
+                    assignments: vec![
+                        TypedAssignment{
+                            variable: y.clone(),
+                            expression: ParametricExpression{
+                                parameters: Vec::new(),
+                                expression: TypedFunctionCall{
+                                    function: Box::new(
+                                        TypedAccess{
+                                            variable: parameters[0].clone()
+                                        }.into()
+                                    ),
+                                    arguments: vec![
+                                        TypedAccess {
+                                            variable: parameters[1].clone()
+                                        }.into()
+                                    ]
+                                }.into()
+                            }
+                        },
+                        TypedAssignment{
+                            variable: z.clone(),
+                            expression: ParametricExpression{
+                                parameters: Vec::new(),
+                                expression: TypedFunctionCall{
+                                    function: Box::new(
+                                        TypedAccess{
+                                            variable: parameters[0].clone()
+                                        }.into()
+                                    ),
+                                    arguments: vec![
+                                        TypedAccess {
+                                            variable: TypedVariable{
+                                                variable: y,
+                                                type_: TYPE_INT
+                                            }
+                                        }.into()
+                                    ]
+                                }.into()
+                            }
+                        }
+                    ],
+                    expression: Box::new(TypedAccess{
+                        variable: TypedVariable{
+                            variable: z,
+                            type_: TYPE_INT
+                        }
+                    }.into())
+                }
+            }.into()
+        },
+        {
+            let arguments = vec![
+                IntermediateArgument(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()),
+                IntermediateArgument(AtomicTypeEnum::INT.into()),
+            ];
+            let call1: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
+                fn_: arguments[0].clone().into(),
+                args: vec![arguments[1].clone().into()]
+            }).into();
+            let call2: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
+                fn_: arguments[0].clone().into(),
+                args: vec![call1.clone().into()]
+            }).into();
+            let fn_def: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                arguments: arguments.clone(),
+                statements: vec![
+                    IntermediateStatement::Assignment(call1),
+                    IntermediateStatement::Assignment(call2.clone()),
+                ],
+                return_value: call2.into()
+            }).into();
+            (fn_def.clone().into(), vec![fn_def.into()])
+        };
+        "double apply fn def"
     )]
     fn test_lower_expression(
         expression: TypedExpression,
