@@ -62,15 +62,42 @@ impl Lowerer {
     }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
         self.visited_references.clear();
-        let lower_type = self.lower_type_internal(type_);
+        let type_ = self.clear_names(type_);
+        let lower_type = self.lower_type_internal(&type_);
         self.visited_references.clear();
         lower_type
+    }
+    fn clear_names(&self, type_: &Type) -> Type {
+        let clear_names = |types: &Vec<Type>| {
+            types
+                .iter()
+                .map(|type_| self.clear_names(type_))
+                .collect::<Vec<_>>()
+        };
+        match type_ {
+            Type::Atomic(atomic_type_enum) => Type::Atomic(atomic_type_enum.clone()),
+            Type::Union(_, types) => Type::Union(
+                String::new(),
+                types
+                    .iter()
+                    .map(|type_| type_.as_ref().map(|type_| self.clear_names(&type_)))
+                    .collect(),
+            ),
+            Type::Instantiation(type_, types) => {
+                Type::Instantiation(type_.clone(), clear_names(types))
+            }
+            Type::Tuple(types) => Type::Tuple(clear_names(types)),
+            Type::Function(args, ret) => {
+                Type::Function(clear_names(args), Box::new(self.clear_names(&*ret)))
+            }
+            Type::Variable(var) => Type::Variable(var.clone()),
+        }
     }
     fn lower_type_internal(&mut self, type_: &Type) -> IntermediateType {
         match type_ {
             Type::Atomic(atomic) => atomic.clone().into(),
             Type::Union(_, types) => {
-                let type_ = Type::Union(String::new(), types.clone());
+                let type_ = self.clear_names(&Type::Union(String::new(), types.clone()));
                 if !self.type_defs.contains_key(&type_) {
                     let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                     self.visited_references.insert(reference.as_ptr());
@@ -85,10 +112,7 @@ impl Lowerer {
                 IntermediateUnionType(ctors).into()
             }
             Type::Instantiation(type_, params) => {
-                let mut instantiation = type_.borrow().instantiate(params);
-                if let Type::Union(_, types) = instantiation {
-                    instantiation = Type::Union(String::new(), types)
-                }
+                let instantiation = self.clear_names(&type_.borrow().instantiate(params));
                 match self.type_defs.entry(instantiation.clone()) {
                     std::collections::hash_map::Entry::Occupied(occupied_entry) => {
                         if self

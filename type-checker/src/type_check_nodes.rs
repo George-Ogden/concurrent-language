@@ -246,8 +246,9 @@ impl Hash for Type {
                 0.hash(state);
                 atomic.hash(state)
             }
-            Type::Union(_, types) => {
+            Type::Union(name, types) => {
                 1.hash(state);
+                name.hash(state);
                 types.hash(state)
             }
             Type::Instantiation(type_, params) => {
