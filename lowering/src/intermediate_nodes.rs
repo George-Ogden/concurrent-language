@@ -6,13 +6,33 @@ use type_checker::{AtomicTypeEnum, Boolean, Integer};
 
 use crate::{AtomicType, Name};
 
-#[derive(Clone, Debug, PartialEq, FromVariants, Eq)]
+#[derive(Clone, PartialEq, FromVariants, Eq)]
 pub enum IntermediateType {
     AtomicType(AtomicType),
     IntermediateTupleType(IntermediateTupleType),
     IntermediateFnType(IntermediateFnType),
     IntermediateUnionType(IntermediateUnionType),
     IntermediateReferenceType(Rc<RefCell<IntermediateType>>),
+}
+
+impl fmt::Debug for IntermediateType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AtomicType(arg0) => f.debug_tuple("AtomicType").field(arg0).finish(),
+            Self::IntermediateTupleType(arg0) => {
+                f.debug_tuple("IntermediateTupleType").field(arg0).finish()
+            }
+            Self::IntermediateFnType(arg0) => {
+                f.debug_tuple("IntermediateFnType").field(arg0).finish()
+            }
+            Self::IntermediateUnionType(arg0) => {
+                f.debug_tuple("IntermediateUnionType").field(arg0).finish()
+            }
+            Self::IntermediateReferenceType(_) => {
+                f.debug_tuple("IntermediateReferenceType").finish()
+            }
+        }
+    }
 }
 
 impl From<AtomicTypeEnum> for IntermediateType {

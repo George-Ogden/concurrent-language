@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use crate::intermediate_nodes::*;
 use type_checker::*;
@@ -7,6 +11,7 @@ type Scope = HashMap<Variable, IntermediateValue>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
+type VisitedReferences = HashSet<*mut IntermediateType>;
 
 struct Lowerer {
     scope: Scope,
@@ -14,16 +19,18 @@ struct Lowerer {
     uninstantiated: Uninstantiated,
     type_defs: TypeDefs,
     statements: Vec<IntermediateStatement>,
+    visited_references: VisitedReferences,
 }
 
 impl Lowerer {
     pub fn new() -> Self {
         Lowerer {
-            scope: HashMap::new(),
-            history: HashMap::new(),
-            uninstantiated: HashMap::new(),
-            type_defs: HashMap::new(),
+            scope: Scope::new(),
+            history: History::new(),
+            uninstantiated: Uninstantiated::new(),
+            type_defs: TypeDefs::new(),
             statements: Vec::new(),
+            visited_references: VisitedReferences::new(),
         }
     }
     fn lower_expression(&mut self, expression: TypedExpression) -> IntermediateValue {
@@ -53,38 +60,70 @@ impl Lowerer {
             .map(|expression| self.lower_expression(expression))
             .collect()
     }
-    fn lower_type(&mut self, type_: &Type) -> IntermediateType {
+    pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
+        self.visited_references.clear();
+        let lower_type = self.lower_type_internal(type_);
+        self.visited_references.clear();
+        lower_type
+    }
+    fn lower_type_internal(&mut self, type_: &Type) -> IntermediateType {
         match type_ {
             Type::Atomic(atomic) => atomic.clone().into(),
             Type::Union(_, types) => {
+                let type_ = Type::Union(String::new(), types.clone());
+                if !self.type_defs.contains_key(&type_) {
+                    let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
+                    self.visited_references.insert(reference.as_ptr());
+                    self.type_defs.insert(type_, reference);
+                }
                 let ctors = types
                     .iter()
-                    .map(|type_: &Option<Type>| type_.as_ref().map(|type_| self.lower_type(type_)))
+                    .map(|type_: &Option<Type>| {
+                        type_.as_ref().map(|type_| self.lower_type_internal(type_))
+                    })
                     .collect();
                 IntermediateUnionType(ctors).into()
             }
             Type::Instantiation(type_, params) => {
-                let instantiation = type_.borrow().instantiate(params);
+                let mut instantiation = type_.borrow().instantiate(params);
+                if let Type::Union(_, types) = instantiation {
+                    instantiation = Type::Union(String::new(), types)
+                }
                 match self.type_defs.entry(instantiation.clone()) {
                     std::collections::hash_map::Entry::Occupied(occupied_entry) => {
-                        IntermediateType::IntermediateReferenceType(occupied_entry.get().clone())
+                        if self
+                            .visited_references
+                            .contains(&occupied_entry.get().as_ptr())
+                        {
+                            IntermediateType::IntermediateReferenceType(
+                                occupied_entry.get().clone(),
+                            )
+                        } else {
+                            self.visited_references
+                                .insert(occupied_entry.get().as_ptr());
+                            occupied_entry.get().borrow().clone()
+                        }
                     }
                     std::collections::hash_map::Entry::Vacant(vacant_entry) => {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
-                        let lower_type = self.lower_type(&instantiation);
+                        self.visited_references.insert(reference.as_ptr());
+                        let lower_type = self.lower_type_internal(&instantiation);
                         *reference.clone().borrow_mut() = lower_type;
-                        IntermediateType::IntermediateReferenceType(reference)
+                        self.type_defs.get(&instantiation).unwrap().borrow().clone()
                     }
                 }
             }
-            Type::Tuple(types) => IntermediateTupleType(self.lower_types(types)).into(),
+            Type::Tuple(types) => IntermediateTupleType(self.lower_types_internal(types)).into(),
             _ => todo!(),
         }
     }
-    fn lower_types(&mut self, types: &Vec<Type>) -> Vec<IntermediateType> {
-        types.iter().map(|type_| self.lower_type(type_)).collect()
+    pub fn lower_types_internal(&mut self, types: &Vec<Type>) -> Vec<IntermediateType> {
+        types
+            .iter()
+            .map(|type_| self.lower_type_internal(type_))
+            .collect()
     }
 }
 
@@ -296,10 +335,74 @@ mod tests {
         };
         "list int"
     )]
+    #[test_case(
+        {
+            let parameters = vec![Rc::new(RefCell::new(None)), Rc::new(RefCell::new(None))];
+            let pair = Rc::new(RefCell::new(ParametricType {
+                parameters: parameters.clone(),
+                type_: Type::Tuple(parameters.iter().map(|parameter| Type::Variable(parameter.clone())).collect()),
+            }));
+            Type::Instantiation(pair, vec![TYPE_INT, TYPE_BOOL])
+        },
+        |_| IntermediateTupleType(vec![
+            AtomicTypeEnum::INT.into(),
+            AtomicTypeEnum::BOOL.into(),
+        ]).into()
+        ;
+        "instantiated pair int bool"
+    )]
+    #[test_case(
+        {
+            let parameter = Rc::new(RefCell::new(None));
+            let type_ = Rc::new(RefCell::new(ParametricType {
+                parameters: vec![parameter.clone()],
+                type_: Type::Variable(parameter),
+            }));
+            Type::Instantiation(type_, vec![TYPE_INT])
+        },
+        |_| AtomicTypeEnum::INT.into();
+        "transparent type alias"
+    )]
+    #[test_case(
+        {
+            let parameter = Rc::new(RefCell::new(None));
+            let list_type = Rc::new(RefCell::new(ParametricType {
+                parameters: vec![parameter.clone()],
+                type_: Type::new(),
+            }));
+            list_type.borrow_mut().type_ = Type::Union(
+                Id::from("List"),
+                vec![
+                    Some(Type::Tuple(vec![
+                        Type::Variable(parameter.clone()),
+                        Type::Instantiation(
+                            list_type.clone(),
+                            vec![Type::Variable(parameter.clone())],
+                        ),
+                    ])),
+                    None,
+                ],
+            );
+            Type::Instantiation(list_type.clone(), vec![TYPE_INT])
+        },
+        |type_defs| {
+            assert_eq!(type_defs.len(), 1);
+            let reference = type_defs.values().cloned().collect::<Vec<_>>()[0].clone();
+            IntermediateUnionType(vec![
+                Some(IntermediateTupleType(vec![
+                    AtomicTypeEnum::INT.into(),
+                    IntermediateType::IntermediateReferenceType(reference.into())
+                ]).into()),
+                None
+            ]).into()
+        };
+        "instantiated list int"
+    )]
     fn test_lower_type(type_: Type, expected_gen: impl Fn(&TypeDefs) -> IntermediateType) {
         let mut lowerer = Lowerer::new();
         let type_ = lowerer.lower_type(&type_);
         let expected = expected_gen(&lowerer.type_defs);
         assert_eq!(type_, expected);
+        assert!(lowerer.visited_references.is_empty())
     }
 }
