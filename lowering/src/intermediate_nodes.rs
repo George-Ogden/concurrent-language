@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{cell::RefCell, hash::Hash, rc::Rc};
 
 use from_variants::FromVariants;
@@ -33,7 +34,7 @@ pub struct IntermediateTupleType(pub Vec<IntermediateType>);
 pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateType>);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntermediateUnionType(pub Rc<RefCell<Vec<Option<IntermediateType>>>>);
+pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
 impl Hash for IntermediateUnionType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

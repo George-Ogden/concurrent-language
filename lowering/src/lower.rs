@@ -6,7 +6,7 @@ use type_checker::*;
 type Scope = HashMap<Variable, IntermediateValue>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>;
-type TypeDefs = HashMap<Type, Rc<RefCell<Vec<Option<IntermediateType>>>>>;
+type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
 
 struct Lowerer {
     scope: Scope,
@@ -57,17 +57,34 @@ impl Lowerer {
         match type_ {
             Type::Atomic(atomic) => atomic.clone().into(),
             Type::Union(_, types) => {
-                let ctors = Rc::new(RefCell::new(
-                    types
-                        .iter()
-                        .map(|type_| type_.as_ref().map(|type_| self.lower_type(type_)))
-                        .collect(),
-                ));
-                let type_ = Type::Union(String::new(), types.clone());
-                IntermediateUnionType(self.type_defs.entry(type_).or_insert(ctors).clone()).into()
+                let ctors = types
+                    .iter()
+                    .map(|type_: &Option<Type>| type_.as_ref().map(|type_| self.lower_type(type_)))
+                    .collect();
+                IntermediateUnionType(ctors).into()
             }
+            Type::Instantiation(type_, params) => {
+                let instantiation = type_.borrow().instantiate(params);
+                match self.type_defs.entry(instantiation.clone()) {
+                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                        IntermediateType::IntermediateReferenceType(occupied_entry.get().clone())
+                    }
+                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                        let reference =
+                            Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
+                        vacant_entry.insert(reference.clone());
+                        let lower_type = self.lower_type(&instantiation);
+                        *reference.clone().borrow_mut() = lower_type;
+                        IntermediateType::IntermediateReferenceType(reference)
+                    }
+                }
+            }
+            Type::Tuple(types) => IntermediateTupleType(self.lower_types(types)).into(),
             _ => todo!(),
         }
+    }
+    fn lower_types(&mut self, types: &Vec<Type>) -> Vec<IntermediateType> {
+        types.iter().map(|type_| self.lower_type(type_)).collect()
     }
 }
 
@@ -170,27 +187,52 @@ mod tests {
     #[test_case(
         Type::Atomic(AtomicTypeEnum::INT),
         |_| AtomicTypeEnum::INT.into();
-        "int type"
+        "int"
     )]
     #[test_case(
         Type::Atomic(AtomicTypeEnum::BOOL),
         |_| AtomicTypeEnum::BOOL.into();
-        "bool type"
+        "bool"
     )]
     #[test_case(
-        Type::Union(Id::from("Bull"), vec![None, None]),
-        |type_defs| {
-            assert_eq!(type_defs.len(), 1);
-            IntermediateUnionType(type_defs.values().cloned().collect::<Vec<_>>()[0].clone()).into()
-        };
-        "bull type included"
+        Type::Tuple(Vec::new()),
+        |_| IntermediateTupleType(Vec::new()).into();
+        "empty tuple"
+    )]
+    #[test_case(
+        Type::Tuple(vec![
+            Type::Atomic(AtomicTypeEnum::INT),
+            Type::Atomic(AtomicTypeEnum::BOOL),
+        ]),
+        |_| IntermediateTupleType(vec![
+            AtomicTypeEnum::INT.into(),
+            AtomicTypeEnum::BOOL.into(),
+        ]).into();
+        "flat tuple"
+    )]
+    #[test_case(
+        Type::Tuple(vec![
+            Type::Tuple(vec![
+                Type::Atomic(AtomicTypeEnum::INT),
+                Type::Atomic(AtomicTypeEnum::BOOL),
+            ]),
+            Type::Tuple(Vec::new()),
+        ]),
+        |_| IntermediateTupleType(vec![
+            IntermediateTupleType(vec![
+                AtomicTypeEnum::INT.into(),
+                AtomicTypeEnum::BOOL.into(),
+            ]).into(),
+            IntermediateTupleType(Vec::new()).into()
+        ]).into();
+        "nested tuple"
     )]
     #[test_case(
         Type::Union(Id::from("Bull"), vec![None, None]),
         |_| {
-            IntermediateUnionType(Rc::new(RefCell::new(vec![None, None]))).into()
+            IntermediateUnionType(vec![None, None]).into()
         };
-        "bull type correct"
+        "bull correct"
     )]
     #[test_case(
         Type::Union(
@@ -201,12 +243,58 @@ mod tests {
             ]
         ),
         |_| {
-            IntermediateUnionType(Rc::new(RefCell::new(vec![
+            IntermediateUnionType(vec![
                 Some(AtomicTypeEnum::INT.into()),
                 Some(AtomicTypeEnum::BOOL.into()),
-            ]))).into()
+            ]).into()
         };
-        "left right type correct"
+        "left right"
+    )]
+    #[test_case(
+        {
+            let reference = Rc::new(RefCell::new(ParametricType::new()));
+            let union_type = Type::Union(Id::from("nat"),vec![
+                Some(Type::Instantiation(Rc::clone(&reference), Vec::new())),
+                None,
+            ]);
+            *reference.borrow_mut() = union_type.clone().into();
+            union_type
+        },
+        |type_defs| {
+            assert_eq!(type_defs.len(), 1);
+            let reference = type_defs.values().cloned().collect::<Vec<_>>()[0].clone();
+            IntermediateUnionType(vec![
+                Some(IntermediateType::IntermediateReferenceType(reference.into())),
+                None
+            ]).into()
+        };
+        "nat"
+    )]
+    #[test_case(
+        {
+            let reference = Rc::new(RefCell::new(ParametricType::new()));
+            let union_type = Type::Union(Id::from("list_int"),vec![
+                Some(Type::Tuple(vec![
+                    TYPE_INT,
+                    Type::Instantiation(Rc::clone(&reference), Vec::new()),
+                ])),
+                None,
+            ]);
+            *reference.borrow_mut() = union_type.clone().into();
+            union_type
+        },
+        |type_defs| {
+            assert_eq!(type_defs.len(), 1);
+            let reference = type_defs.values().cloned().collect::<Vec<_>>()[0].clone();
+            IntermediateUnionType(vec![
+                Some(IntermediateTupleType(vec![
+                    AtomicTypeEnum::INT.into(),
+                    IntermediateType::IntermediateReferenceType(reference.into())
+                ]).into()),
+                None
+            ]).into()
+        };
+        "list int"
     )]
     fn test_lower_type(type_: Type, expected_gen: impl Fn(&TypeDefs) -> IntermediateType) {
         let mut lowerer = Lowerer::new();
