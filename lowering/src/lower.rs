@@ -98,18 +98,33 @@ impl Lowerer {
             Type::Atomic(atomic) => atomic.clone().into(),
             Type::Union(_, types) => {
                 let type_ = self.clear_names(&Type::Union(String::new(), types.clone()));
-                if !self.type_defs.contains_key(&type_) {
-                    let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
-                    self.visited_references.insert(reference.as_ptr());
-                    self.type_defs.insert(type_, reference);
+                let lower_type = |this: &mut Self| {
+                    IntermediateUnionType(
+                        types
+                            .iter()
+                            .map(|type_: &Option<Type>| {
+                                type_.as_ref().map(|type_| this.lower_type_internal(type_))
+                            })
+                            .collect(),
+                    )
+                    .into()
+                };
+                match self.type_defs.entry(type_.clone()) {
+                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                        self.visited_references
+                            .insert(occupied_entry.get().as_ptr());
+                        lower_type(self)
+                    }
+                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                        let reference =
+                            Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
+                        vacant_entry.insert(reference.clone());
+                        self.visited_references.insert(reference.as_ptr());
+                        let lower_type = lower_type(self);
+                        *reference.clone().borrow_mut() = lower_type.clone();
+                        lower_type
+                    }
                 }
-                let ctors = types
-                    .iter()
-                    .map(|type_: &Option<Type>| {
-                        type_.as_ref().map(|type_| self.lower_type_internal(type_))
-                    })
-                    .collect();
-                IntermediateUnionType(ctors).into()
             }
             Type::Instantiation(type_, params) => {
                 let instantiation = self.clear_names(&type_.borrow().instantiate(params));
@@ -513,5 +528,42 @@ mod tests {
         let expected = expected_gen(&lowerer.type_defs);
         assert_eq!(type_, expected);
         assert!(lowerer.visited_references.is_empty())
+    }
+
+    #[test]
+    fn test_lower_types_without_interference() {
+        let parameter = Rc::new(RefCell::new(None));
+        let list_type = Rc::new(RefCell::new(ParametricType {
+            parameters: vec![parameter.clone()],
+            type_: Type::new(),
+        }));
+        list_type.borrow_mut().type_ = Type::Union(
+            Id::from("List"),
+            vec![
+                Some(Type::Tuple(vec![
+                    Type::Variable(parameter.clone()),
+                    Type::Instantiation(list_type.clone(), vec![Type::Variable(parameter.clone())]),
+                ])),
+                None,
+            ],
+        );
+        let list_bool = Type::Instantiation(list_type.clone(), vec![TYPE_BOOL]);
+        let list_int = Type::Instantiation(list_type.clone(), vec![TYPE_INT]);
+        let inst_list_bool = list_type.borrow().instantiate(&vec![TYPE_BOOL]);
+        let inst_list_int = list_type.borrow().instantiate(&vec![TYPE_INT]);
+
+        let mut lowerer = Lowerer::new();
+        let lower_list_int = lowerer.lower_type(&list_int);
+        let lower_inst_list_bool = lowerer.lower_type(&inst_list_bool);
+        let lower_inst_list_int = lowerer.lower_type(&inst_list_int);
+        let lower_list_bool = lowerer.lower_type(&list_bool);
+
+        assert_ne!(lower_list_bool, lower_list_int);
+        assert_ne!(lower_list_bool, lower_inst_list_int);
+        assert_ne!(lower_inst_list_bool, lower_list_int);
+        assert_ne!(lower_inst_list_bool, lower_inst_list_int);
+
+        assert_eq!(lower_inst_list_bool, lower_list_bool);
+        assert_eq!(lower_inst_list_int, lower_list_int);
     }
 }
