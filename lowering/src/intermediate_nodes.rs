@@ -75,6 +75,7 @@ impl Hash for TypeDef {
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
     IntermediateMemory(IntermediateMemory),
+    IntermediateArgument(IntermediateArgument),
 }
 
 impl From<IntermediateExpression> for IntermediateValue {
@@ -91,7 +92,7 @@ pub enum IntermediateBuiltIn {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntermediateMemory(Rc<RefCell<IntermediateExpression>>);
+pub struct IntermediateMemory(pub Rc<RefCell<IntermediateExpression>>);
 
 impl Hash for IntermediateMemory {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

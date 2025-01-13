@@ -7,7 +7,7 @@ use std::{
 use crate::intermediate_nodes::*;
 use type_checker::*;
 
-type Scope = HashMap<Variable, IntermediateValue>;
+type Scope = HashMap<Variable, Rc<RefCell<IntermediateValue>>>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
@@ -51,6 +51,9 @@ impl Lowerer {
                     })
                     .clone()
             }
+            TypedExpression::TypedAccess(TypedAccess {
+                variable: TypedVariable { variable, type_ },
+            }) => self.scope.get(&variable).unwrap().borrow().clone(),
             _ => todo!(),
         }
     }
@@ -168,6 +171,16 @@ impl Lowerer {
             .iter()
             .map(|type_| self.lower_type_internal(type_))
             .collect()
+    }
+    fn lower_assignments(&mut self, assignments: Vec<TypedAssignment>) {
+        for assignment in assignments {
+            let variable = assignment.variable.clone();
+            let type_ = self.lower_type(&assignment.expression.expression.type_());
+            let argument = Rc::new(RefCell::new(IntermediateArgument(type_).into()));
+            self.scope.insert(variable.clone(), argument.clone());
+            let value = self.lower_expression(assignment.expression.expression);
+            *argument.borrow_mut() = value.into();
+        }
     }
 }
 
@@ -565,5 +578,121 @@ mod tests {
 
         assert_eq!(lower_inst_list_bool, lower_list_bool);
         assert_eq!(lower_inst_list_int, lower_list_int);
+    }
+
+    #[test_case(
+        (Vec::new(), Vec::new());
+        "no statements"
+    )]
+    #[test_case(
+        {
+            let x = Variable::new();
+            (
+                vec![
+                    TypedAssignment {
+                        variable: x.clone(),
+                        expression: TypedExpression::Integer(Integer { value: 5 }).into()
+                    }
+                ],
+                vec![
+                    (
+                        x,
+                        IntermediateBuiltIn::Integer(Integer { value: 5 }).into(),
+                    )
+                ]
+            )
+        };
+        "simple statement"
+    )]
+    #[test_case(
+        {
+            let x = Variable::new();
+            let value: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                vec![
+                    IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
+                    IntermediateBuiltIn::Boolean(Boolean { value: false }).into(),
+                ]
+            )).into();
+            (
+                vec![
+                    TypedAssignment {
+                        variable: x.clone(),
+                        expression: TypedExpression::TypedTuple(TypedTuple{
+                            expressions: vec![
+                                Integer{value: 3}.into(),
+                                Boolean{value: false}.into()
+                            ]
+                        }).into(),
+                    }
+                ],
+                vec![
+                    (
+                        x,
+                        value.into()
+                    )
+                ]
+            )
+        };
+        "compound statement"
+    )]
+    #[test_case(
+        {
+            let x = Variable::new();
+            let y = Variable::new();
+            let value: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                vec![
+                    IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
+                    IntermediateBuiltIn::Boolean(Boolean { value: false }).into(),
+                ]
+            )).into();
+            (
+                vec![
+                    TypedAssignment {
+                        variable: x.clone(),
+                        expression: TypedExpression::Integer(Integer { value: 3 }).into()
+                    },
+                    TypedAssignment {
+                        variable: y.clone(),
+                        expression: TypedExpression::TypedTuple(TypedTuple{
+                            expressions: vec![
+                                TypedAccess{
+                                    variable: TypedVariable{
+                                        variable: x.clone(),
+                                        type_: TYPE_INT
+                                    }
+                                }.into(),
+                                Boolean{value: false}.into()
+                            ]
+                        }).into(),
+                    }
+                ],
+                vec![
+                    (
+                        x,
+                        IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
+                    ),
+                    (
+                        y,
+                        value.into()
+                    )
+                ]
+            )
+        };
+        "dual assignment"
+    )]
+    fn test_lower_assignments(
+        assignments_scope: (Vec<TypedAssignment>, Vec<(Variable, IntermediateValue)>),
+    ) {
+        let (assignments, scope) = assignments_scope;
+        let mut lowerer = Lowerer::new();
+        lowerer.lower_assignments(assignments);
+        assert_eq!(
+            lowerer
+                .scope
+                .into_iter()
+                .map(|(k, v)| (k, v.borrow().clone()))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from_iter(scope)
+        )
     }
 }

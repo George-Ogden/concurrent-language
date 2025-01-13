@@ -52,7 +52,7 @@ pub struct TypedParametricVariable {
 impl From<Rc<RefCell<ParametricType>>> for TypedParametricVariable {
     fn from(value: Rc<RefCell<ParametricType>>) -> Self {
         TypedParametricVariable {
-            variable: Rc::new(RefCell::new(())),
+            variable: Variable::new(),
             type_: value,
         }
     }
@@ -88,7 +88,7 @@ pub struct TypedVariable {
 impl From<Type> for TypedVariable {
     fn from(value: Type) -> Self {
         TypedVariable {
-            variable: Rc::new(RefCell::new(())),
+            variable: Variable::new(),
             type_: value,
         }
     }
@@ -273,7 +273,26 @@ impl Hash for Type {
     }
 }
 
-pub type Variable = Rc<RefCell<()>>;
+#[derive(Debug, Eq, Clone)]
+pub struct Variable(pub Rc<RefCell<()>>);
+
+impl Variable {
+    pub fn new() -> Self {
+        Variable(Rc::new(RefCell::new(())))
+    }
+}
+
+impl Hash for Variable {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_ptr().hash(state);
+    }
+}
+
+impl PartialEq for Variable {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ptr() == other.0.as_ptr()
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedTuple {
@@ -437,6 +456,15 @@ impl TypedExpression {
 pub struct ParametricExpression {
     pub expression: TypedExpression,
     pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
+}
+
+impl From<TypedExpression> for ParametricExpression {
+    fn from(value: TypedExpression) -> Self {
+        ParametricExpression {
+            expression: value,
+            parameters: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

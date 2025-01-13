@@ -12,7 +12,7 @@ use crate::{
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     Program, TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance,
-    UnionTypeDefinition,
+    UnionTypeDefinition, Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -538,7 +538,7 @@ impl TypeChecker {
                         (
                             id,
                             TypedVariable {
-                                variable: Rc::new(RefCell::new(())),
+                                variable: Variable::new(),
                                 type_: type_.into(),
                             },
                         )
@@ -830,7 +830,7 @@ impl TypeChecker {
                 self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
             let id = assignment.assignee.assignee.id;
             let assignment = TypedAssignment {
-                variable: Rc::new(RefCell::new(())),
+                variable: Variable::new(),
                 expression: ParametricExpression {
                     expression: typed_expression,
                     parameters: assignment
