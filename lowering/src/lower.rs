@@ -140,7 +140,12 @@ impl Lowerer {
                 }
             }
             Type::Tuple(types) => IntermediateTupleType(self.lower_types_internal(types)).into(),
-            _ => todo!(),
+            Type::Function(args, ret) => IntermediateFnType(
+                self.lower_types_internal(args),
+                Box::new(self.lower_type(&*ret)),
+            )
+            .into(),
+            Type::Variable(_) => panic!("Attempt to lower type variable."),
         }
     }
     pub fn lower_types_internal(&mut self, types: &Vec<Type>) -> Vec<IntermediateType> {
@@ -312,6 +317,86 @@ mod tests {
             ]).into()
         };
         "left right"
+    )]
+    #[test_case(
+        Type::Function(
+            Vec::new(),
+            Box::new(Type::Tuple(Vec::new()))
+        ),
+        |_| {
+            IntermediateFnType(
+                Vec::new(),
+                Box::new(IntermediateTupleType(Vec::new()).into())
+            ).into()
+        };
+        "unit function"
+    )]
+    #[test_case(
+        Type::Function(
+            vec![
+                TYPE_INT,
+                TYPE_INT,
+            ],
+            Box::new(TYPE_INT)
+        ),
+        |_| {
+            IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into())
+            ).into()
+        };
+        "binary int function"
+    )]
+    #[test_case(
+        {
+            let parameter = Rc::new(RefCell::new(None));
+            let type_ = Rc::new(RefCell::new(ParametricType {
+                parameters: vec![parameter.clone()],
+                type_: Type::Function(
+                    vec![
+                        Type::Variable(parameter.clone()),
+                    ],
+                    Box::new(Type::Variable(parameter)),
+                )
+            }));
+            Type::Instantiation(type_, vec![TYPE_INT])
+        },
+        |_| {
+            IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into())
+            ).into()
+        };
+        "instantiated identity function"
+    )]
+    #[test_case(
+        Type::Function(
+            vec![
+                Type::Function(
+                    vec![
+                        TYPE_INT,
+                    ],
+                    Box::new(TYPE_BOOL)
+                ),
+                TYPE_INT,
+            ],
+            Box::new(TYPE_BOOL)
+        ),
+        |_| {
+            IntermediateFnType(
+                vec![
+                    IntermediateFnType(
+                        vec![
+                            AtomicTypeEnum::INT.into(),
+                        ],
+                        Box::new(AtomicTypeEnum::BOOL.into())
+                    ).into(),
+                    AtomicTypeEnum::INT.into()
+                ],
+                Box::new(AtomicTypeEnum::BOOL.into())
+            ).into()
+        };
+        "higher order function"
     )]
     #[test_case(
         {
