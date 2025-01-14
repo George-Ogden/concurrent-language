@@ -136,13 +136,6 @@ impl Lowerer {
         self.history = history;
         (intermediate_statements, intermediate_value)
     }
-    pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
-        self.visited_references.clear();
-        let type_ = self.clear_names(type_);
-        let lower_type = self.lower_type_internal(&type_);
-        self.visited_references.clear();
-        lower_type
-    }
     fn clear_names(&self, type_: &Type) -> Type {
         let clear_names = |types: &Vec<Type>| {
             types
@@ -289,6 +282,13 @@ impl Lowerer {
             .filter_map(|statement| self.remove_wasted_allocations_from_statement(statement))
             .collect()
     }
+    pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
+        self.visited_references.clear();
+        let type_ = self.clear_names(type_);
+        let lower_type = self.lower_type_internal(&type_);
+        self.visited_references.clear();
+        lower_type
+    }
     fn lower_type_internal(&mut self, type_: &Type) -> IntermediateType {
         match type_ {
             Type::Atomic(atomic) => atomic.clone().into(),
@@ -353,7 +353,7 @@ impl Lowerer {
             Type::Tuple(types) => IntermediateTupleType(self.lower_types_internal(types)).into(),
             Type::Function(args, ret) => IntermediateFnType(
                 self.lower_types_internal(args),
-                Box::new(self.lower_type(&*ret)),
+                Box::new(self.lower_type_internal(&*ret)),
             )
             .into(),
             Type::Variable(_) => panic!("Attempt to lower type variable."),
@@ -973,6 +973,30 @@ mod tests {
         let expected = expected_gen(&lowerer.type_defs);
         assert_eq!(type_, expected);
         assert!(lowerer.visited_references.is_empty())
+    }
+
+    #[ignore]
+    #[test]
+    fn test_blowup_type() {
+        let parameter = Rc::new(RefCell::new(None));
+        let blowup_type = Rc::new(RefCell::new(ParametricType {
+            parameters: vec![parameter.clone()],
+            type_: Type::new(),
+        }));
+        blowup_type.borrow_mut().type_ = Type::Union(
+            Id::from("List"),
+            vec![Some(Type::Instantiation(
+                blowup_type.clone(),
+                vec![Type::Tuple(vec![
+                    Type::Variable(parameter.clone()),
+                    Type::Variable(parameter.clone()),
+                ])],
+            ))],
+        );
+        let type_ = Type::Instantiation(blowup_type.clone(), vec![TYPE_INT]);
+
+        let mut lowerer = Lowerer::new();
+        lowerer.lower_type(&type_);
     }
 
     #[test]
