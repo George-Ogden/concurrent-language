@@ -8,7 +8,7 @@ use std::{
 use crate::intermediate_nodes::*;
 use type_checker::*;
 
-type Scope = HashMap<Variable, Rc<RefCell<IntermediateValue>>>;
+type Scope = HashMap<Variable, IntermediateMemory>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
@@ -39,9 +39,10 @@ impl Lowerer {
                 let variable = var.variable.clone();
                 (
                     variable,
-                    Rc::new(RefCell::new(
+                    IntermediateExpression::IntermediateValue(
                         IntermediateBuiltIn::BuiltInFn(id.clone(), type_).into(),
-                    )),
+                    )
+                    .into(),
                 )
             }))
         });
@@ -72,8 +73,8 @@ impl Lowerer {
                 self.get_cached_value(intermediate_expression)
             }
             TypedExpression::TypedAccess(TypedAccess {
-                variable: TypedVariable { variable, type_ },
-            }) => self.scope.get(&variable).unwrap().borrow().clone(),
+                variable: TypedVariable { variable, type_: _ },
+            }) => self.scope.get(&variable).unwrap().clone().into(),
             TypedExpression::TypedFunctionCall(TypedFunctionCall {
                 function,
                 arguments,
@@ -88,7 +89,7 @@ impl Lowerer {
             }
             TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
                 parameters,
-                return_type,
+                return_type: _,
                 body,
             }) => {
                 let variables = parameters
@@ -100,10 +101,7 @@ impl Lowerer {
                     .map(|variable| IntermediateArgument(self.lower_type(&variable.type_)))
                     .collect::<Vec<_>>();
                 for (variable, argument) in zip(&variables, &arguments) {
-                    self.scope.insert(
-                        variable.clone(),
-                        Rc::new(RefCell::new(argument.clone().into())),
-                    );
+                    self.scope.insert(variable.clone(), argument.clone().into());
                 }
                 let (statements, return_value) = self.lower_block(body);
                 let intermediate_expression = IntermediateFnDef {
@@ -167,6 +165,126 @@ impl Lowerer {
             }
             Type::Variable(var) => Type::Variable(var.clone()),
         }
+    }
+    fn remove_wasted_allocations_from_expression(
+        &mut self,
+        expression: IntermediateExpression,
+    ) -> IntermediateExpression {
+        match expression {
+            IntermediateExpression::IntermediateValue(value) => match value.clone() {
+                IntermediateValue::IntermediateArgument(argument) => {
+                    self.remove_wasted_allocations_from_expression(argument.into())
+                }
+                _ => IntermediateExpression::IntermediateValue(
+                    self.remove_wasted_allocations_from_value(value),
+                ),
+            },
+            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
+                value,
+                idx,
+            }) => IntermediateElementAccess {
+                value: self.remove_wasted_allocations_from_value(value),
+                idx,
+            }
+            .into(),
+            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                values,
+            )) => IntermediateTupleExpression(self.remove_wasted_allocations_from_values(values))
+                .into(),
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
+                IntermediateFnCall {
+                    fn_: self.remove_wasted_allocations_from_value(fn_),
+                    args: self.remove_wasted_allocations_from_values(args),
+                }
+                .into()
+            }
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall { idx, data }) => {
+                IntermediateCtorCall { idx, data }.into()
+            }
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                arguments,
+                statements,
+                return_value,
+            }) => IntermediateFnDef {
+                arguments,
+                statements: self.remove_wasted_allocations_from_statements(statements),
+                return_value: self.remove_wasted_allocations_from_value(return_value),
+            }
+            .into(),
+        }
+    }
+    fn remove_wasted_allocations_from_value(
+        &mut self,
+        value: IntermediateValue,
+    ) -> IntermediateValue {
+        match value.clone() {
+            IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
+            IntermediateValue::IntermediateArgument(argument) => argument.into(),
+            IntermediateValue::IntermediateMemory(IntermediateMemory(memory)) => {
+                match memory.clone().borrow().clone() {
+                    IntermediateExpression::IntermediateValue(value) => {
+                        self.remove_wasted_allocations_from_value(value)
+                    }
+                    _ => IntermediateMemory(memory).into(),
+                }
+            }
+        }
+    }
+    fn remove_wasted_allocations_from_values(
+        &mut self,
+        values: Vec<IntermediateValue>,
+    ) -> Vec<IntermediateValue> {
+        values
+            .into_iter()
+            .map(|value| self.remove_wasted_allocations_from_value(value))
+            .collect()
+    }
+    fn remove_wasted_allocations_from_statement(
+        &mut self,
+        statement: IntermediateStatement,
+    ) -> Option<IntermediateStatement> {
+        match statement {
+            IntermediateStatement::Assignment(assignment) => {
+                let IntermediateMemory(memory) = assignment;
+                if matches!(
+                    &*memory.clone().borrow(),
+                    IntermediateExpression::IntermediateValue(_)
+                ) {
+                    return None;
+                }
+                let condensed =
+                    self.remove_wasted_allocations_from_expression(memory.clone().borrow().clone());
+                *memory.borrow_mut() = condensed;
+                Some(IntermediateStatement::Assignment(
+                    IntermediateMemory(memory.clone()).into(),
+                ))
+            }
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition,
+                branches,
+            }) => Some(
+                IntermediateIfStatement {
+                    condition: self.remove_wasted_allocations_from_value(condition),
+                    branches: (
+                        self.remove_wasted_allocations_from_statements(branches.0),
+                        self.remove_wasted_allocations_from_statements(branches.1),
+                    ),
+                }
+                .into(),
+            ),
+            IntermediateStatement::IntermediateMatchStatement(match_statement) => {
+                Some(match_statement.into())
+            }
+        }
+    }
+    fn remove_wasted_allocations_from_statements(
+        &mut self,
+        statements: Vec<IntermediateStatement>,
+    ) -> Vec<IntermediateStatement> {
+        statements
+            .into_iter()
+            .filter_map(|statement| self.remove_wasted_allocations_from_statement(statement))
+            .collect()
     }
     fn lower_type_internal(&mut self, type_: &Type) -> IntermediateType {
         match type_ {
@@ -248,10 +366,10 @@ impl Lowerer {
         for assignment in assignments {
             let variable = assignment.variable.clone();
             let type_ = self.lower_type(&assignment.expression.expression.type_());
-            let argument = Rc::new(RefCell::new(IntermediateArgument(type_).into()));
+            let argument: IntermediateMemory = IntermediateArgument(type_).into();
             self.scope.insert(variable.clone(), argument.clone());
             let value = self.lower_expression(assignment.expression.expression);
-            *argument.borrow_mut() = value.into();
+            *argument.0.borrow_mut() = value.into();
         }
     }
 }
@@ -519,8 +637,11 @@ mod tests {
         let (value, statements) = value_statements;
         let mut lowerer = Lowerer::new();
         let computation = lowerer.lower_expression(expression);
-        assert_eq!(computation, value);
-        assert_eq!(lowerer.statements, statements)
+        let efficient_computation = lowerer.remove_wasted_allocations_from_value(computation);
+        let efficient_statements =
+            lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        assert_eq!(efficient_computation, value);
+        assert_eq!(efficient_statements, statements)
     }
 
     #[test_case(
@@ -923,19 +1044,165 @@ mod tests {
         };
         "dual assignment"
     )]
+    #[test_case(
+        {
+            let f = Variable::new();
+            let y = Variable::new();
+            let argument = IntermediateArgument(AtomicTypeEnum::INT.into());
+            let fn_: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
+                arguments: vec![argument.clone()],
+                statements: Vec::new(),
+                return_value: argument.clone().into()
+            }).into();
+            let value: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
+                fn_: fn_.clone().into(),
+                args: vec![IntermediateBuiltIn::Integer(Integer { value: 11 }).into()]
+            }).into();
+            let parameter = TypedVariable{
+                variable: Variable::new(),
+                type_: TYPE_INT
+            };
+            (
+                vec![
+                    TypedAssignment {
+                        variable: f.clone(),
+                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                            parameters: vec![parameter.clone()],
+                            return_type: Box::new(TYPE_INT),
+                            body: TypedBlock{
+                                assignments: Vec::new(),
+                                expression: Box::new(TypedAccess{
+                                    variable: parameter.clone()
+                                }.into())
+                            }
+                        }).into()
+                    },
+                    TypedAssignment {
+                        variable: y.clone(),
+                        expression: TypedExpression::TypedFunctionCall(TypedFunctionCall{
+                            function: Box::new(
+                                TypedAccess{
+                                    variable: TypedVariable{
+                                        variable: f.clone(),
+                                        type_: Type::Function(vec![TYPE_INT], Box::new(TYPE_INT))
+                                    }
+                                }.into()
+                            ),
+                            arguments: vec![
+                                Integer{value: 11}.into()
+                            ]
+                        }).into(),
+                    }
+                ],
+                vec![
+                    (
+                        f,
+                        fn_.into()
+                    ),
+                    (
+                        y,
+                        value.into()
+                    )
+                ]
+            )
+        };
+        "user-defined fn call"
+    )]
+    #[test_case(
+        {
+            let foo = Variable::new();
+            let y = Variable::new();
+            let fn_ = IntermediateMemory(Rc::new(RefCell::new(IntermediateArgument(
+                IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
+            ).into())));
+            let recursive_call: IntermediateMemory = IntermediateExpression::IntermediateFnCall(
+                IntermediateFnCall{
+                    fn_: fn_.clone().into(),
+                    args: Vec::new()
+                }
+            ).into();
+            *fn_.0.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
+                arguments: Vec::new(),
+                statements: vec![
+                    recursive_call.clone().into()
+                ],
+                return_value: recursive_call.into()
+            }).into();
+            let value: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
+                fn_: fn_.clone().into(),
+                args: vec![IntermediateBuiltIn::Integer(Integer { value: 11 }).into()]
+            }).into();
+            (
+                vec![
+                    TypedAssignment {
+                        variable: foo.clone(),
+                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                            parameters: Vec::new(),
+                            return_type: Box::new(TYPE_INT),
+                            body: TypedBlock{
+                                assignments: Vec::new(),
+                                expression: Box::new(TypedFunctionCall{
+                                    function: Box::new(
+                                        TypedAccess{
+                                            variable: TypedVariable{
+                                                variable: foo.clone(),
+                                                type_: Type::Function(Vec::new(), Box::new(TYPE_INT))
+                                            }
+                                        }.into()
+                                    ),
+                                    arguments: Vec::new()
+                                }.into())
+                            }
+                        }).into()
+                    },
+                    TypedAssignment {
+                        variable: y.clone(),
+                        expression: TypedExpression::TypedFunctionCall(TypedFunctionCall{
+                            function: Box::new(
+                                TypedAccess{
+                                    variable: TypedVariable{
+                                        variable: foo.clone(),
+                                        type_: Type::Function(Vec::new(), Box::new(TYPE_INT))
+                                    }
+                                }.into()
+                            ),
+                            arguments: Vec::new()
+                        }).into(),
+                    }
+                ],
+                vec![
+                    (
+                        foo,
+                        fn_.into()
+                    ),
+                    (
+                        y,
+                        value.into()
+                    )
+                ]
+            )
+        };
+        "recursive fn call"
+    )]
     fn test_lower_assignments(
         assignments_scope: (Vec<TypedAssignment>, Vec<(Variable, IntermediateValue)>),
     ) {
         let (assignments, expected_scope) = assignments_scope;
         let mut lowerer = Lowerer::new();
         lowerer.lower_assignments(assignments);
+        lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
         let flat_scope = lowerer
             .scope
+            .clone()
             .into_iter()
-            .map(|(k, v)| (k, v.borrow().clone()))
+            .map(|(k, v)| (k, v.0.borrow().clone()))
             .collect::<HashMap<_, _>>();
         for (k, v) in expected_scope {
-            assert_eq!(flat_scope.get(&k), Some(&v))
+            let value = flat_scope
+                .get(&k)
+                .as_ref()
+                .map(|&v| lowerer.remove_wasted_allocations_from_expression(v.clone()));
+            assert_eq!(value, Some(v.into()))
         }
     }
 }
