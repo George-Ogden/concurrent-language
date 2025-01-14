@@ -366,13 +366,19 @@ impl Lowerer {
             .collect()
     }
     fn lower_assignments(&mut self, assignments: Vec<TypedAssignment>) {
-        for assignment in assignments {
-            let variable = assignment.variable.clone();
-            let type_ = self.lower_type(&assignment.expression.expression.type_());
-            let argument: IntermediateMemory = IntermediateArgument::from(type_).into();
-            self.scope.insert(variable.clone(), argument.clone());
-            let value = self.lower_expression(assignment.expression.expression);
-            *argument.0.borrow_mut() = value.into();
+        let expressions = assignments
+            .into_iter()
+            .map(|assignment| {
+                let variable = assignment.variable;
+                let type_ = self.lower_type(&assignment.expression.expression.type_());
+                let placeholder: IntermediateMemory = IntermediateArgument::from(type_).into();
+                self.scope.insert(variable.clone(), placeholder.clone());
+                (assignment.expression.expression, placeholder)
+            })
+            .collect::<Vec<_>>();
+        for (expression, placeholder) in expressions {
+            let value = self.lower_expression(expression);
+            *placeholder.0.borrow_mut() = value.into();
         }
     }
 }
@@ -1245,6 +1251,101 @@ mod tests {
             )
         };
         "recursive fn call"
+    )]
+    #[test_case(
+        {
+            let a = Variable::new();
+            let b = Variable::new();
+            let a_fn: IntermediateMemory = IntermediateArgument::from(
+                IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::BOOL.into())))
+            ).into();
+            let b_fn: IntermediateMemory = IntermediateArgument::from(
+                IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::BOOL.into())))
+            ).into();
+            let a_call: IntermediateMemory = IntermediateExpression::IntermediateFnCall(
+                IntermediateFnCall{
+                    fn_: a_fn.clone().into(),
+                    args: Vec::new()
+                }
+            ).into();
+            let b_call: IntermediateMemory = IntermediateExpression::IntermediateFnCall(
+                IntermediateFnCall{
+                    fn_: b_fn.clone().into(),
+                    args: Vec::new()
+                }
+            ).into();
+            *a_fn.0.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
+                arguments: Vec::new(),
+                statements: vec![
+                    b_call.clone().into()
+                ],
+                return_value: b_call.into()
+            }).into();
+            *b_fn.0.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
+                arguments: Vec::new(),
+                statements: vec![
+                    a_call.clone().into()
+                ],
+                return_value: a_call.into()
+            }).into();
+            (
+                vec![
+                    TypedAssignment {
+                        variable: a.clone(),
+                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                            parameters: Vec::new(),
+                            return_type: Box::new(TYPE_BOOL),
+                            body: TypedBlock{
+                                assignments: Vec::new(),
+                                expression: Box::new(TypedFunctionCall{
+                                    function: Box::new(
+                                        TypedAccess{
+                                            variable: TypedVariable{
+                                                variable: b.clone(),
+                                                type_: Type::Function(Vec::new(), Box::new(TYPE_BOOL))
+                                            }
+                                        }.into()
+                                    ),
+                                    arguments: Vec::new()
+                                }.into())
+                            }
+                        }).into()
+                    },
+                    TypedAssignment {
+                        variable: b.clone(),
+                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                            parameters: Vec::new(),
+                            return_type: Box::new(TYPE_BOOL),
+                            body: TypedBlock{
+                                assignments: Vec::new(),
+                                expression: Box::new(TypedFunctionCall{
+                                    function: Box::new(
+                                        TypedAccess{
+                                            variable: TypedVariable{
+                                                variable: a.clone(),
+                                                type_: Type::Function(Vec::new(), Box::new(TYPE_BOOL))
+                                            }
+                                        }.into()
+                                    ),
+                                    arguments: Vec::new()
+                                }.into())
+                            }
+                        }).into()
+                    },
+                ],
+                vec![
+                    (
+                        a,
+                        a_fn.into()
+                    ),
+                    (
+                        b,
+                        b_fn.into()
+                    )
+                ]
+            )
+        };
+        "mutually recursive fn calls"
     )]
     fn test_lower_assignments(
         assignments_scope: (Vec<TypedAssignment>, Vec<(Variable, IntermediateValue)>),
