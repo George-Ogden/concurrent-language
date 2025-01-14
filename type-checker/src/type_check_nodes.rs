@@ -82,15 +82,42 @@ impl From<TypedVariable> for TypedParametricVariable {
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedVariable {
     pub variable: Variable,
-    pub type_: Type,
+    pub type_: ParametricType,
 }
 
-impl From<Type> for TypedVariable {
-    fn from(value: Type) -> Self {
+impl TypedVariable {
+    fn instantiate(&self) -> Self {
+        TypedVariable {
+            variable: self.variable.clone(),
+            type_: ParametricType {
+                type_: self.type_.type_.instantiate(),
+                parameters: self.type_.parameters.clone(),
+            },
+        }
+    }
+}
+
+impl From<Rc<RefCell<ParametricType>>> for TypedVariable {
+    fn from(value: Rc<RefCell<ParametricType>>) -> Self {
+        TypedVariable {
+            variable: Variable::new(),
+            type_: value.borrow().clone(),
+        }
+    }
+}
+
+impl From<ParametricType> for TypedVariable {
+    fn from(value: ParametricType) -> Self {
         TypedVariable {
             variable: Variable::new(),
             type_: value,
         }
+    }
+}
+
+impl From<Type> for TypedVariable {
+    fn from(value: Type) -> Self {
+        ParametricType::from(value).into()
     }
 }
 
@@ -302,6 +329,7 @@ pub struct TypedTuple {
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedAccess {
     pub variable: TypedVariable,
+    pub parameters: Vec<Type>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -323,10 +351,35 @@ pub struct TypedMatchItem {
     pub assignee: Option<TypedVariable>,
 }
 
+impl TypedMatchItem {
+    fn instantiate(&self) -> Self {
+        TypedMatchItem {
+            type_name: self.type_name.clone(),
+            assignee: self
+                .assignee
+                .as_ref()
+                .map(|assignee| assignee.instantiate()),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedMatchBlock {
     pub matches: Vec<TypedMatchItem>,
     pub block: TypedBlock,
+}
+
+impl TypedMatchBlock {
+    fn instantiate(&self) -> Self {
+        TypedMatchBlock {
+            matches: self
+                .matches
+                .iter()
+                .map(|match_| match_.instantiate())
+                .collect(),
+            block: self.block.instantiate(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -383,11 +436,12 @@ impl TypedExpression {
             Self::Integer(_) => TYPE_INT,
             Self::Boolean(_) => TYPE_BOOL,
             Self::TypedTuple(TypedTuple { expressions }) => {
-                Type::Tuple(expressions.iter().map(TypedExpression::type_).collect_vec())
+                Type::Tuple(expressions.iter().map(Self::type_).collect_vec())
             }
             Self::TypedAccess(TypedAccess {
                 variable: TypedVariable { variable: _, type_ },
-            }) => type_.clone(),
+                parameters,
+            }) => type_.instantiate(parameters),
             Self::TypedElementAccess(TypedElementAccess { expression, index }) => {
                 if let Type::Tuple(types) = expression.type_() {
                     types[*index as usize].clone()
@@ -407,7 +461,7 @@ impl TypedExpression {
             }) => Type::Function(
                 parameters
                     .iter()
-                    .map(|(_, parameter)| parameter.type_.clone())
+                    .map(|(_, parameter)| parameter.type_.type_.clone())
                     .collect_vec(),
                 return_type.clone(),
             ),
@@ -418,7 +472,7 @@ impl TypedExpression {
             }) => Type::Function(
                 parameters
                     .iter()
-                    .map(|parameter| parameter.type_.clone())
+                    .map(|parameter| parameter.type_.type_.clone())
                     .collect_vec(),
                 return_type.clone(),
             ),
@@ -450,12 +504,103 @@ impl TypedExpression {
         };
         type_
     }
+    fn instantiate(&self) -> TypedExpression {
+        match &self {
+            Self::Boolean(_) | Self::Integer(_) => self.clone(),
+            Self::TypedTuple(TypedTuple { expressions }) => TypedTuple {
+                expressions: (Self::instantiate_expressions(expressions)),
+            }
+            .into(),
+            Self::TypedAccess(TypedAccess {
+                variable,
+                parameters,
+            }) => TypedAccess {
+                variable: variable.instantiate(),
+                parameters: (Type::instantiate_types(parameters)),
+            }
+            .into(),
+            Self::TypedElementAccess(TypedElementAccess { expression, index }) => {
+                TypedElementAccess {
+                    expression: Box::new(expression.instantiate()),
+                    index: *index,
+                }
+                .into()
+            }
+            Self::TypedIf(TypedIf {
+                condition,
+                true_block,
+                false_block,
+            }) => TypedIf {
+                condition: Box::new(condition.instantiate()),
+                true_block: true_block.instantiate(),
+                false_block: false_block.instantiate(),
+            }
+            .into(),
+            Self::TypedMatch(TypedMatch { subject, blocks }) => TypedMatch {
+                subject: Box::new(subject.instantiate()),
+                blocks: blocks.iter().map(|block| block.instantiate()).collect(),
+            }
+            .into(),
+            Self::TypedFunctionDefinition(TypedFunctionDefinition {
+                parameters,
+                return_type,
+                body,
+            }) => TypedFunctionDefinition {
+                parameters: parameters
+                    .iter()
+                    .map(|parameter| parameter.instantiate())
+                    .collect(),
+                return_type: Box::new(return_type.instantiate()),
+                body: body.instantiate(),
+            }
+            .into(),
+            Self::TypedFunctionCall(TypedFunctionCall {
+                function,
+                arguments,
+            }) => TypedFunctionCall {
+                function: Box::new(function.instantiate()),
+                arguments: (Self::instantiate_expressions(arguments)),
+            }
+            .into(),
+            Self::TypedConstructorCall(TypedConstructorCall {
+                id,
+                output_type,
+                arguments,
+            }) => TypedConstructorCall {
+                id: id.clone(),
+                output_type: output_type.instantiate(),
+                arguments: Self::instantiate_expressions(arguments),
+            }
+            .into(),
+            Self::PartiallyTypedFunctionDefinition(_) => panic!(),
+        }
+    }
+
+    fn instantiate_expressions(expressions: &Vec<TypedExpression>) -> Vec<TypedExpression> {
+        expressions
+            .iter()
+            .map(|expression| expression.instantiate())
+            .collect_vec()
+    }
 }
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct ParametricExpression {
     pub expression: TypedExpression,
     pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
+}
+
+impl ParametricExpression {
+    pub fn instantiate(&self, type_variables: &Vec<Type>) -> TypedExpression {
+        for ((_, parameter), variable) in self.parameters.iter().zip_eq(type_variables) {
+            *parameter.borrow_mut() = Some(variable.clone());
+        }
+        let expression = self.expression.instantiate();
+        for (_, parameter) in &self.parameters {
+            *parameter.borrow_mut() = None;
+        }
+        expression
+    }
 }
 
 impl From<TypedExpression> for ParametricExpression {
@@ -469,8 +614,32 @@ impl From<TypedExpression> for ParametricExpression {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedAssignment {
-    pub variable: Variable,
+    pub variable: TypedVariable,
     pub expression: ParametricExpression,
+}
+
+impl TypedAssignment {
+    pub fn instantiate(&self) -> Self {
+        TypedAssignment {
+            expression: ParametricExpression {
+                expression: self.expression.expression.instantiate(),
+                parameters: self.expression.parameters.clone(),
+            },
+            variable: TypedVariable {
+                variable: self.variable.variable.clone(),
+                type_: ParametricType {
+                    type_: self.variable.type_.type_.instantiate(),
+                    parameters: self.variable.type_.parameters.clone(),
+                },
+            },
+        }
+    }
+    pub fn instantiate_assignments(assignments: &Vec<Self>) -> Vec<Self> {
+        assignments
+            .iter()
+            .map(|assignment| assignment.instantiate())
+            .collect()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -482,6 +651,12 @@ pub struct TypedBlock {
 impl TypedBlock {
     pub fn type_(&self) -> Type {
         return self.expression.type_();
+    }
+    pub fn instantiate(&self) -> TypedBlock {
+        TypedBlock {
+            assignments: TypedAssignment::instantiate_assignments(&self.assignments),
+            expression: Box::new((*self.expression).instantiate()),
+        }
     }
 }
 
@@ -917,4 +1092,408 @@ impl PartialEq for TypeDefinitions {
     }
 }
 
-pub type TypeContext = HashMap<Id, TypedParametricVariable>;
+pub type TypeContext = HashMap<Id, TypedVariable>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Boolean, Integer};
+
+    use test_case::test_case;
+
+    #[test_case(
+        ParametricExpression{
+            parameters: vec![(Id::from("T"), Rc::new(RefCell::new(None)))],
+            expression: Boolean { value: true }.into()
+        },
+        vec![TYPE_INT],
+        Boolean { value: true }.into();
+        "boolean expression"
+    )]
+    #[test_case(
+        ParametricExpression{
+            parameters: Vec::new(),
+            expression: Integer { value: 8 }.into()
+        },
+        Vec::new(),
+        Integer { value: 8 }.into();
+        "integer expression"
+    )]
+    #[test_case(
+        {
+            let left = Rc::new(RefCell::new(None));
+            let right = Rc::new(RefCell::new(None));
+            let arg0 = TypedVariable::from(Type::Variable(left.clone()));
+            let arg1 = TypedVariable::from(Type::Variable(right.clone()));
+            ParametricExpression{
+                parameters: vec![(Id::from("T"), left.clone()), (Id::from("U"), right.clone())],
+                expression: TypedFunctionDefinition{
+                    parameters: vec![arg0.clone(), arg1.clone()],
+                    body: TypedBlock{
+                        assignments: Vec::new(),
+                        expression: Box::new(TypedTuple{
+                            expressions: vec![
+                                TypedAccess{
+                                    variable: arg0.into(),
+                                    parameters: Vec::new()
+                                }.into(),
+                                TypedAccess{
+                                    variable: arg1.into(),
+                                    parameters: Vec::new()
+                                }.into(),
+                            ]
+                        }.into())
+                    },
+                    return_type: Box::new(Type::Tuple(vec![Type::Variable(left.clone()), Type::Variable(right.clone())]))
+                }.into()
+            }
+        },
+        vec![TYPE_INT, TYPE_BOOL],
+        {
+            let arg0 = TypedVariable::from(TYPE_INT);
+            let arg1 = TypedVariable::from(TYPE_BOOL);
+            TypedFunctionDefinition{
+                parameters: vec![arg0.clone(), arg1.clone()],
+                body: TypedBlock{
+                    assignments: Vec::new(),
+                    expression: Box::new(TypedTuple{
+                        expressions: vec![
+                            TypedAccess{
+                                variable: arg0.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                            TypedAccess{
+                                variable: arg1.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                        ]
+                    }.into())
+                },
+                return_type: Box::new(Type::Tuple(vec![TYPE_INT, TYPE_BOOL]))
+            }.into()
+        };
+        "tuple function expression"
+    )]
+    #[test_case(
+        {
+            let a = Rc::new(RefCell::new(None));
+            let b = Rc::new(RefCell::new(None));
+            let arg0 = TypedVariable::from(Type::Function(vec![Type::Variable(a.clone())],Box::new(Type::Variable(b.clone()))));
+            let arg1 = TypedVariable::from(Type::Variable(a.clone()));
+            let variable = TypedVariable::from(Type::Variable(b.clone()));
+            ParametricExpression{
+                parameters: vec![(Id::from("F"), a.clone()), (Id::from("T"), b.clone())],
+                expression: TypedFunctionDefinition{
+                    parameters: vec![arg0.clone(), arg1.clone()],
+                    body: TypedBlock{
+                        assignments: vec![
+                            TypedAssignment{
+                                variable: variable.clone(),
+                                expression: TypedExpression::from(TypedFunctionCall{
+                                    function: Box::new(
+                                        TypedAccess{
+                                            variable: arg0.into(),
+                                            parameters: Vec::new()
+                                        }.into(),
+                                    ),
+                                    arguments: vec![
+                                        TypedAccess{
+                                            variable: arg1.into(),
+                                            parameters: Vec::new()
+                                        }.into(),
+                                    ]
+                                }).into()
+                            }.into()
+                        ],
+                        expression: Box::new(TypedAccess{
+                            variable: variable.into(),
+                            parameters: Vec::new()
+                        }.into())
+                    },
+                    return_type: Box::new(Type::Variable(b.clone()))
+                }.into()
+            }
+        },
+        vec![TYPE_INT, TYPE_BOOL],
+        {
+            let arg0 = TypedVariable::from(Type::Function(vec![TYPE_INT],Box::new(TYPE_BOOL)));
+            let arg1 = TypedVariable::from(TYPE_INT);
+            let variable = TypedVariable::from(TYPE_BOOL);
+            TypedFunctionDefinition{
+                parameters: vec![arg0.clone(), arg1.clone()],
+                body: TypedBlock{
+                    assignments: vec![
+                        TypedAssignment{
+                            variable: variable.clone(),
+                            expression: TypedExpression::from(TypedFunctionCall{
+                                function: Box::new(
+                                    TypedAccess{
+                                        variable: arg0.into(),
+                                        parameters: Vec::new()
+                                    }.into(),
+                                ),
+                                arguments: vec![
+                                    TypedAccess{
+                                        variable: arg1.into(),
+                                        parameters: Vec::new()
+                                    }.into(),
+                                ]
+                            }).into()
+                        }.into()
+                    ],
+                    expression: Box::new(TypedAccess{
+                        variable: variable.into(),
+                        parameters: Vec::new()
+                    }.into())
+                },
+                return_type: Box::new(TYPE_BOOL)
+            }.into()
+        };
+        "function application expression"
+    )]
+    #[test_case(
+        {
+            let parameter = Rc::new(RefCell::new(None));
+            let arg0 = TypedVariable::from(TYPE_BOOL);
+            let arg1 = TypedVariable::from(Type::Variable(parameter.clone()));
+            let arg2 = TypedVariable::from(Type::Variable(parameter.clone()));
+            ParametricExpression{
+                parameters: vec![(Id::from("T"), parameter.clone())],
+                expression: TypedFunctionDefinition{
+                    parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
+                    body: TypedBlock{
+                        assignments: Vec::new(),
+                        expression: Box::new(TypedIf{
+                            condition: Box::new(
+                                TypedAccess{
+                                    variable: arg0.into(),
+                                    parameters: Vec::new()
+                                }.into(),
+                            ),
+                            true_block: TypedBlock {
+                                assignments: Vec::new(),
+                                expression: Box::new(
+                                    TypedAccess{
+                                        variable: arg1.into(),
+                                        parameters: Vec::new()
+                                    }.into(),
+                                )
+                            },
+                            false_block: TypedBlock {
+                                assignments: Vec::new(),
+                                expression: Box::new(
+                                    TypedAccess{
+                                        variable: arg2.into(),
+                                        parameters: Vec::new()
+                                    }.into(),
+                                )
+                            },
+                        }.into())
+                    },
+                    return_type: Box::new(Type::Variable(parameter.clone()))
+                }.into()
+            }
+        },
+        vec![TYPE_BOOL],
+        {
+            let arg0 = TypedVariable::from(TYPE_BOOL);
+            let arg1 = TypedVariable::from(TYPE_BOOL);
+            let arg2 = TypedVariable::from(TYPE_BOOL);
+            TypedFunctionDefinition{
+                parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
+                body: TypedBlock{
+                    assignments: Vec::new(),
+                    expression: Box::new(TypedIf{
+                        condition: Box::new(
+                            TypedAccess{
+                                variable: arg0.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                        ),
+                        true_block: TypedBlock {
+                            assignments: Vec::new(),
+                            expression: Box::new(
+                                TypedAccess{
+                                    variable: arg1.into(),
+                                    parameters: Vec::new()
+                                }.into(),
+                            )
+                        },
+                        false_block: TypedBlock {
+                            assignments: Vec::new(),
+                            expression: Box::new(
+                                TypedAccess{
+                                    variable: arg2.into(),
+                                    parameters: Vec::new()
+                                }.into(),
+                            )
+                        },
+                    }.into())
+                },
+                return_type: Box::new(TYPE_BOOL)
+            }.into()
+
+        };
+        "if statement expression"
+    )]
+    #[test_case(
+        {
+            let left = Rc::new(RefCell::new(None));
+            let right = Rc::new(RefCell::new(None));
+            let arg = TypedVariable::from(Type::Variable(left.clone()));
+            let variable = TypedVariable::from(Type::Union(Id::from("Either"), vec![Some(Type::Variable(left.clone())), Some(Type::Variable(right.clone()))]));
+            let subvariable = TypedVariable::from(Type::Variable(left.clone()));
+            ParametricExpression{
+                parameters: vec![(Id::from("T"), left.clone()),(Id::from("U"), right.clone())],
+                expression: TypedFunctionDefinition{
+                    parameters: vec![arg.clone()],
+                    body: TypedBlock{
+                        assignments: vec![
+                            TypedAssignment{
+                                variable: variable.clone(),
+                                expression: TypedExpression::from(TypedConstructorCall{
+                                    id: Id::from("Left"),
+                                    output_type: variable.type_.type_.clone(),
+                                    arguments: vec![
+                                        TypedAccess{
+                                            variable: arg.clone().into(),
+                                            parameters: Vec::new()
+                                        }.into(),
+                                    ],
+                                }).into()
+                            }.into()
+                        ],
+                        expression: Box::new(TypedMatch{
+                            subject: Box::new(
+                                TypedAccess{
+                                    variable: variable.into(),
+                                    parameters: Vec::new()
+                                }.into(),
+                            ),
+                            blocks: vec![
+                                TypedMatchBlock {
+                                    matches: vec![
+                                        TypedMatchItem {
+                                            type_name: Id::from("Left"),
+                                            assignee: Some(subvariable.clone()),
+                                        }
+                                    ],
+                                    block: TypedBlock {
+                                        assignments: Vec::new(),
+                                        expression: Box::new(
+                                            TypedAccess{
+                                                variable: subvariable.into(),
+                                                parameters: Vec::new()
+                                            }.into(),
+                                        )
+                                    }
+                                },
+                                TypedMatchBlock {
+                                    matches: vec![
+                                        TypedMatchItem {
+                                            type_name: Id::from("Right"),
+                                            assignee: None,
+                                        }
+                                    ],
+                                    block: TypedBlock {
+                                        assignments: Vec::new(),
+                                        expression: Box::new(
+                                            TypedAccess{
+                                                variable: arg.into(),
+                                                parameters: Vec::new()
+                                            }.into(),
+                                        )
+                                    }
+                                },
+                            ]
+                        }.into())
+                    },
+                    return_type: Box::new(Type::Variable(left.clone()))
+                }.into()
+            }
+        },
+        vec![TYPE_BOOL, TYPE_UNIT],
+        {
+
+            let arg = TypedVariable::from(TYPE_BOOL);
+            let variable = TypedVariable::from(Type::Union(Id::from("Either"), vec![Some(TYPE_BOOL), Some(TYPE_UNIT)]));
+            let subvariable = TypedVariable::from(TYPE_BOOL);
+            TypedFunctionDefinition{
+                parameters: vec![arg.clone()],
+                body: TypedBlock{
+                    assignments: vec![
+                        TypedAssignment{
+                            variable: variable.clone(),
+                            expression: TypedExpression::from(TypedConstructorCall{
+                                id: Id::from("Left"),
+                                output_type: variable.type_.type_.clone(),
+                                arguments: vec![
+                                    TypedAccess{
+                                        variable: arg.clone().into(),
+                                        parameters: Vec::new()
+                                    }.into(),
+                                ],
+                            }).into()
+                        }.into()
+                    ],
+                    expression: Box::new(TypedMatch{
+                        subject: Box::new(
+                            TypedAccess{
+                                variable: variable.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                        ),
+                        blocks: vec![
+                            TypedMatchBlock {
+                                matches: vec![
+                                    TypedMatchItem {
+                                        type_name: Id::from("Left"),
+                                        assignee: Some(subvariable.clone()),
+                                    }
+                                ],
+                                block: TypedBlock {
+                                    assignments: Vec::new(),
+                                    expression: Box::new(
+                                        TypedAccess{
+                                            variable: subvariable.into(),
+                                            parameters: Vec::new()
+                                        }.into(),
+                                    )
+                                }
+                            },
+                            TypedMatchBlock {
+                                matches: vec![
+                                    TypedMatchItem {
+                                        type_name: Id::from("Right"),
+                                        assignee: None,
+                                    }
+                                ],
+                                block: TypedBlock {
+                                    assignments: Vec::new(),
+                                    expression: Box::new(
+                                        TypedAccess{
+                                            variable: arg.into(),
+                                            parameters: Vec::new()
+                                        }.into(),
+                                    )
+                                }
+                            },
+                        ]
+                    }.into())
+                },
+                return_type: Box::new(TYPE_BOOL)
+            }.into()
+        };
+        "union type expression"
+    )]
+    fn test_instantiate(
+        expression: ParametricExpression,
+        types: Vec<Type>,
+        expected: TypedExpression,
+    ) {
+        assert_eq!(
+            format!("{:?}", expression.instantiate(&types)),
+            format!("{:?}", expected)
+        );
+    }
+}

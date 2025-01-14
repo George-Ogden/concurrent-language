@@ -1,18 +1,17 @@
 use crate::type_check_nodes::{
-    ConstructorType, GenericVariables, ParametricExpression, ParametricType,
-    PartiallyTypedFunctionDefinition, Type, TypeCheckError, TypeContext, TypeDefinitions,
-    TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
-    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedMatch,
-    TypedMatchBlock, TypedMatchItem, TypedParametricVariable, TypedProgram, TypedTuple,
-    TypedVariable, TYPE_BOOL, TYPE_INT,
+    ConstructorType, GenericVariables, ParametricType, PartiallyTypedFunctionDefinition, Type,
+    TypeCheckError, TypeContext, TypeDefinitions, TypedAccess, TypedAssignment, TypedBlock,
+    TypedConstructorCall, TypedElementAccess, TypedExpression, TypedFunctionCall,
+    TypedFunctionDefinition, TypedIf, TypedMatch, TypedMatchBlock, TypedMatchItem, TypedProgram,
+    TypedTuple, TypedVariable, TYPE_BOOL, TYPE_INT,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
-    Program, TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance,
-    UnionTypeDefinition, Variable,
+    ParametricExpression, Program, TransparentTypeDefinition, TupleExpression, TupleType,
+    TypeInstance, UnionTypeDefinition, Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -418,35 +417,26 @@ impl TypeChecker {
                 let variable = context.get(&id);
                 match variable {
                     Some(typed_variable) => {
-                        let TypedParametricVariable { variable, type_ } = typed_variable;
-                        if type_instances.len() != type_.borrow().parameters.len() {
+                        let type_ = &typed_variable.type_;
+                        if type_instances.len() != type_.parameters.len() {
                             return Err(TypeCheckError::WrongNumberOfTypeParameters {
-                                type_: type_.borrow().clone(),
+                                type_: type_.clone(),
                                 type_instances,
                             });
                         }
-                        let type_ = if type_instances.is_empty() {
-                            type_.borrow().type_.clone()
-                        } else {
-                            Type::Instantiation(
-                                type_.clone(),
-                                type_instances
-                                    .into_iter()
-                                    .map(|type_instance| {
-                                        TypeChecker::convert_ast_type(
-                                            type_instance,
-                                            &self.type_definitions,
-                                            generic_variables,
-                                        )
-                                    })
-                                    .collect::<Result<_, _>>()?,
-                            )
-                        };
+                        let types = type_instances
+                            .into_iter()
+                            .map(|type_instance| {
+                                TypeChecker::convert_ast_type(
+                                    type_instance,
+                                    &self.type_definitions,
+                                    generic_variables,
+                                )
+                            })
+                            .collect::<Result<_, _>>()?;
                         TypedAccess {
-                            variable: TypedVariable {
-                                variable: variable.clone(),
-                                type_,
-                            },
+                            variable: typed_variable.clone(),
+                            parameters: types,
                         }
                         .into()
                     }
@@ -831,7 +821,18 @@ impl TypeChecker {
                 self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
             let id = assignment.assignee.assignee.id;
             let assignment = TypedAssignment {
-                variable: Variable::new(),
+                variable: TypedVariable {
+                    variable: Variable::new(),
+                    type_: ParametricType {
+                        parameters: assignment
+                            .assignee
+                            .generic_variables
+                            .iter()
+                            .map(|id| generic_variables[&id].clone())
+                            .collect(),
+                        type_: typed_expression.type_(),
+                    },
+                },
                 expression: ParametricExpression {
                     expression: typed_expression,
                     parameters: assignment
@@ -842,21 +843,7 @@ impl TypeChecker {
                         .collect(),
                 },
             };
-            new_context.insert(
-                id,
-                TypedParametricVariable {
-                    variable: assignment.variable.clone(),
-                    type_: Rc::new(RefCell::new(ParametricType {
-                        type_: (assignment.expression.expression.type_()),
-                        parameters: assignment
-                            .expression
-                            .parameters
-                            .iter()
-                            .map(|(_, rc)| rc.clone())
-                            .collect_vec(),
-                    })),
-                },
-            );
+            new_context.insert(id, assignment.variable.clone());
             assignments.push(assignment);
         }
         let typed_expression =
@@ -1096,7 +1083,11 @@ impl TypeChecker {
         if arguments.len() != 0 {
             panic!("Main function call changed form.")
         }
-        let TypedExpression::TypedAccess(TypedAccess { variable }) = *function else {
+        let TypedExpression::TypedAccess(TypedAccess {
+            variable,
+            parameters: _,
+        }) = *function
+        else {
             panic!("Main function call changed form.")
         };
         Ok(TypedProgram {

@@ -8,9 +8,9 @@ use std::{
 use crate::intermediate_nodes::*;
 use type_checker::*;
 
-type Scope = HashMap<Variable, IntermediateMemory>;
+type Scope = HashMap<(Variable, Vec<Type>), IntermediateMemory>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
-type Uninstantiated = HashMap<(Variable, Rc<RefCell<Option<Type>>>), IntermediateExpression>;
+type Uninstantiated = HashMap<Variable, ParametricExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
 type VisitedReferences = HashSet<*mut IntermediateType>;
 
@@ -35,10 +35,10 @@ impl Lowerer {
         };
         DEFAULT_CONTEXT.with(|context| {
             lowerer.scope = HashMap::from_iter(context.iter().map(|(id, var)| {
-                let type_ = lowerer.lower_type(&var.type_.borrow().type_);
+                let type_ = lowerer.lower_type(&var.type_.type_);
                 let variable = var.variable.clone();
                 (
-                    variable,
+                    (variable, Vec::new()),
                     IntermediateExpression::IntermediateValue(
                         IntermediateBuiltIn::BuiltInFn(id.clone(), type_).into(),
                     )
@@ -73,8 +73,34 @@ impl Lowerer {
                 self.get_cached_value(intermediate_expression)
             }
             TypedExpression::TypedAccess(TypedAccess {
-                variable: TypedVariable { variable, type_: _ },
-            }) => self.scope.get(&variable).unwrap().clone().into(),
+                variable: TypedVariable { variable, type_ },
+                parameters,
+            }) => {
+                if !self
+                    .scope
+                    .contains_key(&(variable.clone(), parameters.clone()))
+                {
+                    let uninstantiated = self.uninstantiated.get(&variable).unwrap();
+                    let (expression, placeholder) = self
+                        .add_placeholder_assignment(
+                            TypedAssignment {
+                                variable: TypedVariable {
+                                    variable: variable.clone(),
+                                    type_,
+                                },
+                                expression: uninstantiated.clone(),
+                            },
+                            Some(parameters.clone()),
+                        )
+                        .unwrap();
+                    self.perform_assignment(expression, placeholder);
+                };
+                self.scope
+                    .get(&(variable, parameters))
+                    .unwrap()
+                    .clone()
+                    .into()
+            }
             TypedExpression::TypedFunctionCall(TypedFunctionCall {
                 function,
                 arguments,
@@ -98,10 +124,13 @@ impl Lowerer {
                     .collect::<Vec<_>>();
                 let arguments = parameters
                     .iter()
-                    .map(|variable| IntermediateArgument::from(self.lower_type(&variable.type_)))
+                    .map(|variable| {
+                        IntermediateArgument::from(self.lower_type(&variable.type_.type_))
+                    })
                     .collect::<Vec<_>>();
                 for (variable, argument) in zip(&variables, &arguments) {
-                    self.scope.insert(variable.clone(), argument.clone().into());
+                    self.scope
+                        .insert((variable.clone(), Vec::new()), argument.clone().into());
                 }
                 let (statements, return_value) = self.lower_block(body);
                 let intermediate_expression = IntermediateFnDef {
@@ -365,20 +394,37 @@ impl Lowerer {
             .map(|type_| self.lower_type_internal(type_))
             .collect()
     }
+    fn add_placeholder_assignment(
+        &mut self,
+        assignment: TypedAssignment,
+        parameters: Option<Vec<Type>>,
+    ) -> Option<(TypedExpression, IntermediateMemory)> {
+        let variable = assignment.variable;
+        if parameters.is_none() && variable.type_.parameters.len() > 0 {
+            self.uninstantiated
+                .insert(variable.variable, assignment.expression);
+            return None;
+        }
+        let parameters = parameters.unwrap_or(Vec::new());
+        let expression = assignment.expression.instantiate(&parameters);
+        let type_ = expression.type_();
+        let lower_type = self.lower_type(&type_);
+        let placeholder: IntermediateMemory = IntermediateArgument::from(lower_type).into();
+        self.scope
+            .insert((variable.variable.clone(), parameters), placeholder.clone());
+        Some((expression, placeholder))
+    }
+    fn perform_assignment(&mut self, expression: TypedExpression, placeholder: IntermediateMemory) {
+        let value = self.lower_expression(expression);
+        *placeholder.0.borrow_mut() = value.into();
+    }
     fn lower_assignments(&mut self, assignments: Vec<TypedAssignment>) {
         let expressions = assignments
             .into_iter()
-            .map(|assignment| {
-                let variable = assignment.variable;
-                let type_ = self.lower_type(&assignment.expression.expression.type_());
-                let placeholder: IntermediateMemory = IntermediateArgument::from(type_).into();
-                self.scope.insert(variable.clone(), placeholder.clone());
-                (assignment.expression.expression, placeholder)
-            })
+            .filter_map(|assignment| self.add_placeholder_assignment(assignment, None))
             .collect::<Vec<_>>();
         for (expression, placeholder) in expressions {
-            let value = self.lower_expression(expression);
-            *placeholder.0.borrow_mut() = value.into();
+            self.perform_assignment(expression, placeholder);
         }
     }
 }
@@ -474,8 +520,9 @@ mod tests {
                 TypedAccess {
                     variable: TypedVariable {
                         variable: DEFAULT_CONTEXT.with(|context| context.get(&Id::from("+")).unwrap().variable.clone()),
-                        type_: Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_INT)),
-                    }
+                        type_: Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_INT)).into(),
+                    },
+                    parameters :Vec::new()
                 }.into()
             ),
             arguments: vec![
@@ -504,14 +551,8 @@ mod tests {
     #[test_case(
         {
             let parameters = vec![
-                TypedVariable{
-                    variable: Variable::new(),
-                    type_: TYPE_INT
-                },
-                TypedVariable{
-                    variable: Variable::new(),
-                    type_: TYPE_BOOL
-                },
+                TYPE_INT.into(),
+                TYPE_BOOL.into()
             ];
             TypedFunctionDefinition{
                 parameters: parameters.clone(),
@@ -519,7 +560,8 @@ mod tests {
                 body: TypedBlock{
                     assignments: Vec::new(),
                     expression: Box::new(TypedAccess{
-                        variable: parameters[0].clone()
+                        variable: parameters[0].clone().into(),
+                        parameters: Vec::new()
                     }.into())
                 }
             }.into()
@@ -541,22 +583,16 @@ mod tests {
     #[test_case(
         {
             let parameters = vec![
-                TypedVariable{
-                    variable: Variable::new(),
-                    type_: Type::Function(
-                        vec![
-                            TYPE_INT,
-                        ],
-                        Box::new(TYPE_INT)
-                    ),
-                },
-                TypedVariable{
-                    variable: Variable::new(),
-                    type_: TYPE_INT
-                },
+                Type::Function(
+                    vec![
+                        TYPE_INT,
+                    ],
+                    Box::new(TYPE_INT)
+                ).into(),
+                TYPE_INT.into(),
             ];
-            let y = Variable::new();
-            let z = Variable::new();
+            let y: TypedVariable = TYPE_INT.into();
+            let z: TypedVariable = TYPE_INT.into();
             TypedFunctionDefinition{
                 parameters: parameters.clone(),
                 return_type: Box::new(TYPE_INT),
@@ -569,12 +605,14 @@ mod tests {
                                 expression: TypedFunctionCall{
                                     function: Box::new(
                                         TypedAccess{
-                                            variable: parameters[0].clone()
+                                            variable: parameters[0].clone().into(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ),
                                     arguments: vec![
                                         TypedAccess {
-                                            variable: parameters[1].clone()
+                                            variable: parameters[1].clone().into(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ]
                                 }.into()
@@ -587,15 +625,14 @@ mod tests {
                                 expression: TypedFunctionCall{
                                     function: Box::new(
                                         TypedAccess{
-                                            variable: parameters[0].clone()
+                                            variable: parameters[0].clone().into(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ),
                                     arguments: vec![
                                         TypedAccess {
-                                            variable: TypedVariable{
-                                                variable: y,
-                                                type_: TYPE_INT
-                                            }
+                                            variable: y.clone(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ]
                                 }.into()
@@ -603,10 +640,8 @@ mod tests {
                         }
                     ],
                     expression: Box::new(TypedAccess{
-                        variable: TypedVariable{
-                            variable: z,
-                            type_: TYPE_INT
-                        }
+                        variable: z.clone(),
+                        parameters: Vec::new()
                     }.into())
                 }
             }.into()
@@ -1042,7 +1077,7 @@ mod tests {
     )]
     #[test_case(
         {
-            let x = Variable::new();
+            let x: TypedVariable = TYPE_INT.into();
             (
                 vec![
                     TypedAssignment {
@@ -1052,7 +1087,7 @@ mod tests {
                 ],
                 vec![
                     (
-                        x,
+                        x.variable,
                         IntermediateBuiltIn::Integer(Integer { value: 5 }).into(),
                     )
                 ]
@@ -1062,7 +1097,7 @@ mod tests {
     )]
     #[test_case(
         {
-            let x = Variable::new();
+            let x: TypedVariable = Type::Tuple(vec![TYPE_INT, TYPE_BOOL]).into();
             let value: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 vec![
                     IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
@@ -1083,7 +1118,7 @@ mod tests {
                 ],
                 vec![
                     (
-                        x,
+                        x.variable,
                         value.into()
                     )
                 ]
@@ -1093,8 +1128,8 @@ mod tests {
     )]
     #[test_case(
         {
-            let x = Variable::new();
-            let y = Variable::new();
+            let x: TypedVariable = TYPE_INT.into();
+            let y: TypedVariable = TYPE_BOOL.into();
             let value: IntermediateMemory = IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 vec![
                     IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
@@ -1112,10 +1147,8 @@ mod tests {
                         expression: TypedExpression::TypedTuple(TypedTuple{
                             expressions: vec![
                                 TypedAccess{
-                                    variable: TypedVariable{
-                                        variable: x.clone(),
-                                        type_: TYPE_INT
-                                    }
+                                    variable: x.clone(),
+                                    parameters: Vec::new()
                                 }.into(),
                                 Boolean{value: false}.into()
                             ]
@@ -1124,11 +1157,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        x,
+                        x.variable,
                         IntermediateBuiltIn::Integer(Integer { value: 3 }).into(),
                     ),
                     (
-                        y,
+                        y.variable,
                         value.into()
                     )
                 ]
@@ -1138,8 +1171,8 @@ mod tests {
     )]
     #[test_case(
         {
-            let f = Variable::new();
-            let y = Variable::new();
+            let f: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_INT)).into();
+            let y: TypedVariable = TYPE_INT.into();
             let argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
             let fn_: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
                 arguments: vec![argument.clone()],
@@ -1150,10 +1183,7 @@ mod tests {
                 fn_: fn_.clone().into(),
                 args: vec![IntermediateBuiltIn::Integer(Integer { value: 11 }).into()]
             }).into();
-            let parameter = TypedVariable{
-                variable: Variable::new(),
-                type_: TYPE_INT
-            };
+            let parameter: TypedVariable = TYPE_INT.into();
             (
                 vec![
                     TypedAssignment {
@@ -1164,7 +1194,8 @@ mod tests {
                             body: TypedBlock{
                                 assignments: Vec::new(),
                                 expression: Box::new(TypedAccess{
-                                    variable: parameter.clone()
+                                    variable: parameter.clone().into(),
+                                    parameters: Vec::new()
                                 }.into())
                             }
                         }).into()
@@ -1174,10 +1205,8 @@ mod tests {
                         expression: TypedExpression::TypedFunctionCall(TypedFunctionCall{
                             function: Box::new(
                                 TypedAccess{
-                                    variable: TypedVariable{
-                                        variable: f.clone(),
-                                        type_: Type::Function(vec![TYPE_INT], Box::new(TYPE_INT))
-                                    }
+                                    variable: f.clone(),
+                                    parameters: Vec::new()
                                 }.into()
                             ),
                             arguments: vec![
@@ -1188,11 +1217,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        f,
+                        f.variable,
                         fn_.into()
                     ),
                     (
-                        y,
+                        y.variable,
                         value.into()
                     )
                 ]
@@ -1202,8 +1231,8 @@ mod tests {
     )]
     #[test_case(
         {
-            let foo = Variable::new();
-            let y = Variable::new();
+            let foo: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_INT)).into();
+            let y: TypedVariable = TYPE_INT.into();
             let fn_: IntermediateMemory = IntermediateArgument::from(
                 IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())))
             ).into();
@@ -1236,10 +1265,8 @@ mod tests {
                                 expression: Box::new(TypedFunctionCall{
                                     function: Box::new(
                                         TypedAccess{
-                                            variable: TypedVariable{
-                                                variable: foo.clone(),
-                                                type_: Type::Function(Vec::new(), Box::new(TYPE_INT))
-                                            }
+                                            variable: foo.clone().into(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ),
                                     arguments: Vec::new()
@@ -1252,10 +1279,8 @@ mod tests {
                         expression: TypedExpression::TypedFunctionCall(TypedFunctionCall{
                             function: Box::new(
                                 TypedAccess{
-                                    variable: TypedVariable{
-                                        variable: foo.clone(),
-                                        type_: Type::Function(Vec::new(), Box::new(TYPE_INT))
-                                    }
+                                    variable: foo.clone().into(),
+                                    parameters: Vec::new()
                                 }.into()
                             ),
                             arguments: Vec::new()
@@ -1264,11 +1289,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        foo,
+                        foo.variable,
                         fn_.into()
                     ),
                     (
-                        y,
+                        y.variable,
                         value.into()
                     )
                 ]
@@ -1278,8 +1303,8 @@ mod tests {
     )]
     #[test_case(
         {
-            let a = Variable::new();
-            let b = Variable::new();
+            let a: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_BOOL)).into();
+            let b: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_BOOL)).into();
             let a_fn: IntermediateMemory = IntermediateArgument::from(
                 IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::BOOL.into())))
             ).into();
@@ -1324,10 +1349,8 @@ mod tests {
                                 expression: Box::new(TypedFunctionCall{
                                     function: Box::new(
                                         TypedAccess{
-                                            variable: TypedVariable{
-                                                variable: b.clone(),
-                                                type_: Type::Function(Vec::new(), Box::new(TYPE_BOOL))
-                                            }
+                                            variable: b.clone(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ),
                                     arguments: Vec::new()
@@ -1345,10 +1368,8 @@ mod tests {
                                 expression: Box::new(TypedFunctionCall{
                                     function: Box::new(
                                         TypedAccess{
-                                            variable: TypedVariable{
-                                                variable: a.clone(),
-                                                type_: Type::Function(Vec::new(), Box::new(TYPE_BOOL))
-                                            }
+                                            variable: a.clone(),
+                                            parameters: Vec::new()
                                         }.into()
                                     ),
                                     arguments: Vec::new()
@@ -1359,17 +1380,117 @@ mod tests {
                 ],
                 vec![
                     (
-                        a,
+                        a.variable,
                         a_fn.into()
                     ),
                     (
-                        b,
+                        b.variable,
                         b_fn.into()
                     )
                 ]
             )
         };
         "mutually recursive fn calls"
+    )]
+    #[test_case(
+        {
+        let parameter = Rc::new(RefCell::new(None));
+        let id_type = ParametricType {
+            parameters: vec![parameter.clone()],
+            type_: Type::Function(
+                vec![
+                    Type::Variable(parameter.clone()),
+                ],
+                Box::new(Type::Variable(parameter.clone())),
+            )
+        };
+        let id: TypedVariable = id_type.clone().into();
+        let id_int: TypedVariable = id_type.instantiate(&vec![TYPE_INT]).into();
+        let id_bool: TypedVariable = id_type.instantiate(&vec![TYPE_BOOL]).into();
+        let id_bool2: TypedVariable = id_type.instantiate(&vec![TYPE_BOOL]).into();
+        let x = TypedVariable {
+            variable: Variable::new(),
+            type_: Type::Variable(parameter.clone()).into(),
+        };
+        let int_argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
+        let bool_argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::BOOL).into();
+        let id_int_fn: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+            arguments: vec![int_argument.clone()],
+            statements: Vec::new(),
+            return_value: int_argument.into()
+        }).into();
+        let id_bool_fn: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+            arguments: vec![bool_argument.clone()],
+            statements: Vec::new(),
+            return_value: bool_argument.into()
+        }).into();
+        (
+            vec![
+                TypedAssignment{
+                    variable: id.clone(),
+                    expression: ParametricExpression {
+                        expression: TypedFunctionDefinition{
+                            parameters: vec![x.clone()],
+                            return_type: Box::new(TYPE_INT),
+                            body: TypedBlock{
+                                assignments: Vec::new(),
+                                expression: Box::new(TypedAccess{
+                                    variable: x.clone(),
+                                    parameters: Vec::new()
+                                }.into())
+                            }
+                        }.into(),
+                        parameters: vec![(String::from("T"),parameter.clone())]
+                    },
+                },
+                TypedAssignment{
+                    variable: id_int.clone(),
+                    expression: ParametricExpression{
+                        expression: TypedAccess{
+                            variable: id.clone(),
+                            parameters: vec![TYPE_INT]
+                        }.into(),
+                        parameters: Vec::new()
+                    }
+                },
+                TypedAssignment{
+                    variable: id_bool.clone(),
+                    expression: ParametricExpression{
+                        expression: TypedAccess{
+                            variable: id.clone(),
+                            parameters: vec![TYPE_BOOL]
+                        }.into(),
+                        parameters: Vec::new()
+                    }
+                },
+                TypedAssignment{
+                    variable: id_bool2.clone(),
+                    expression: ParametricExpression{
+                        expression: TypedAccess{
+                            variable: id.clone(),
+                            parameters: vec![TYPE_BOOL]
+                        }.into(),
+                        parameters: Vec::new()
+                    }
+                }
+            ],
+            vec![
+                (
+                    id_int.variable,
+                    id_int_fn.into()
+                ),
+                (
+                    id_bool.variable,
+                    id_bool_fn.clone().into()
+                ),
+                (
+                    id_bool2.variable,
+                    id_bool_fn.into()
+                ),
+            ]
+        )
+        };
+        "parametric identity function"
     )]
     fn test_lower_assignments(
         assignments_scope: (Vec<TypedAssignment>, Vec<(Variable, IntermediateValue)>),
@@ -1386,7 +1507,7 @@ mod tests {
             .collect::<HashMap<_, _>>();
         for (k, v) in expected_scope {
             let value = flat_scope
-                .get(&k)
+                .get(&(k, Vec::new()))
                 .as_ref()
                 .map(|&v| lowerer.remove_wasted_allocations_from_expression(v.clone()));
             assert_eq!(value, Some(v.into()))
