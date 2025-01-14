@@ -150,11 +150,55 @@ impl PartialEq for IntermediateExpression {
 
 struct ExpressionEqualityChecker {
     history: HashMap<*mut IntermediateExpression, *mut IntermediateExpression>,
+    arguments: HashMap<*mut IntermediateType, *mut IntermediateType>,
 }
 impl ExpressionEqualityChecker {
     fn new() -> Self {
         ExpressionEqualityChecker {
             history: HashMap::new(),
+            arguments: HashMap::new(),
+        }
+    }
+    fn equal_argument(&mut self, a1: &IntermediateArgument, a2: &IntermediateArgument) -> bool {
+        let IntermediateArgument(t1) = a1;
+        let IntermediateArgument(t2) = a2;
+        if self.arguments.get(&t1.as_ptr()) == Some(&t2.as_ptr()) {
+            true
+        } else if matches!(self.arguments.get(&t1.as_ptr()), Some(_))
+            || matches!(self.arguments.get(&t2.as_ptr()), Some(_))
+            || t1 != t2
+        {
+            false
+        } else {
+            self.arguments.insert(t1.as_ptr(), t2.as_ptr());
+            self.arguments.insert(t2.as_ptr(), t1.as_ptr());
+            true
+        }
+    }
+    fn equal_arguments(
+        &mut self,
+        a1: &Vec<IntermediateArgument>,
+        a2: &Vec<IntermediateArgument>,
+    ) -> bool {
+        a1.len() == a2.len()
+            && a1
+                .iter()
+                .zip(a2.iter())
+                .all(|(a1, a2)| self.equal_argument(a1, a2))
+    }
+    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
+        let IntermediateMemory(e1) = m1;
+        let IntermediateMemory(e2) = m2;
+        if self.history.get(&e1.as_ptr()) == Some(&e2.as_ptr()) {
+            true
+        } else if matches!(self.history.get(&e1.as_ptr()), Some(_))
+            || matches!(self.history.get(&e2.as_ptr()), Some(_))
+        {
+            false
+        } else {
+            self.history.insert(e1.as_ptr(), e2.as_ptr());
+            self.history.insert(e2.as_ptr(), e1.as_ptr());
+            self.equal_expression(&e1.borrow().clone(), &e2.borrow().clone())
         }
     }
     fn equal_expression(
@@ -216,7 +260,11 @@ impl ExpressionEqualityChecker {
                     statements: s2,
                     return_value: r2,
                 }),
-            ) => a1 == a2 && self.eq_statements(&s1, &s2) && self.equal_value(&r1, &r2),
+            ) => {
+                self.equal_arguments(a1, a2)
+                    && self.equal_statements(&s1, &s2)
+                    && self.equal_value(&r1, &r2)
+            }
             _ => false,
         }
     }
@@ -229,27 +277,12 @@ impl ExpressionEqualityChecker {
             (
                 IntermediateValue::IntermediateArgument(a1),
                 IntermediateValue::IntermediateArgument(a2),
-            ) => a1 == a2,
+            ) => self.equal_argument(a1, a2),
             (
                 IntermediateValue::IntermediateMemory(m1),
                 IntermediateValue::IntermediateMemory(m2),
             ) => self.equal_memory(m1, m2),
             _ => false,
-        }
-    }
-    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
-        let IntermediateMemory(m1) = m1;
-        let IntermediateMemory(m2) = m2;
-        if self.history.get(&m1.as_ptr()) == self.history.get(&m2.as_ptr()) {
-            true
-        } else if matches!(self.history.get(&m1.as_ptr()), Some(_))
-            || matches!(self.history.get(&m2.as_ptr()), Some(_))
-        {
-            false
-        } else {
-            self.history.insert(m1.as_ptr(), m2.as_ptr());
-            self.history.insert(m2.as_ptr(), m1.as_ptr());
-            self.equal_expression(&m1.borrow().clone(), &m2.borrow().clone())
         }
     }
     fn equal_values(
@@ -263,7 +296,7 @@ impl ExpressionEqualityChecker {
                 .zip(values2.iter())
                 .all(|(v1, v2)| self.equal_value(v1, v2))
     }
-    fn eq_statements(
+    fn equal_statements(
         &mut self,
         statements1: &Vec<IntermediateStatement>,
         statements2: &Vec<IntermediateStatement>,
@@ -290,8 +323,8 @@ impl ExpressionEqualityChecker {
                 }),
             ) => {
                 self.equal_value(c1, c2)
-                    && self.eq_statements(&b1.0, &b2.0)
-                    && self.eq_statements(&b1.1, &b2.1)
+                    && self.equal_statements(&b1.0, &b2.0)
+                    && self.equal_statements(&b1.1, &b2.1)
             }
             (
                 IntermediateStatement::IntermediateMatchStatement(_),
@@ -350,7 +383,7 @@ impl ExpressionFormatter {
                 return_value,
             }) => {
                 format!(
-                    "FnDef({},{})",
+                    "FnDef({};{})",
                     self.format_statements(statements),
                     self.format_value(return_value)
                 )
@@ -364,10 +397,14 @@ impl ExpressionFormatter {
             }
             IntermediateValue::IntermediateMemory(IntermediateMemory(expression)) => {
                 if self.history.contains(&expression.as_ptr()) {
-                    format!("{:#?}", expression.as_ptr())
+                    format!("Mem({:#?})", expression.as_ptr())
                 } else {
                     self.history.insert(expression.as_ptr());
-                    self.format_expression(&expression.borrow().clone())
+                    format!(
+                        "Mem({:#?} = {})",
+                        expression.as_ptr(),
+                        self.format_expression(&expression.borrow().clone())
+                    )
                 }
             }
             IntermediateValue::IntermediateArgument(IntermediateArgument(type_)) => {
@@ -414,8 +451,20 @@ impl ExpressionFormatter {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IntermediateArgument(pub IntermediateType);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IntermediateArgument(pub Rc<RefCell<IntermediateType>>);
+
+impl From<IntermediateType> for IntermediateArgument {
+    fn from(value: IntermediateType) -> Self {
+        IntermediateArgument(Rc::new(RefCell::new(value)))
+    }
+}
+
+impl Hash for IntermediateArgument {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.borrow().hash(state);
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateElementAccess {
