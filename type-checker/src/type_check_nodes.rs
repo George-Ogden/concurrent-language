@@ -347,14 +347,14 @@ pub struct TypedIf {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedMatchItem {
-    pub type_name: Id,
+    pub type_idx: usize,
     pub assignee: Option<TypedVariable>,
 }
 
 impl TypedMatchItem {
     fn instantiate(&self) -> Self {
         TypedMatchItem {
-            type_name: self.type_name.clone(),
+            type_idx: self.type_idx,
             assignee: self
                 .assignee
                 .as_ref()
@@ -410,7 +410,7 @@ pub struct TypedFunctionCall {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedConstructorCall {
-    pub id: Id,
+    pub idx: usize,
     pub output_type: Type,
     pub arguments: Vec<TypedExpression>,
 }
@@ -487,7 +487,7 @@ impl TypedExpression {
             }
             Self::TypedConstructorCall(TypedConstructorCall {
                 output_type,
-                id: _,
+                idx: _,
                 arguments: _,
             }) => output_type.clone(),
             Self::TypedMatch(TypedMatch { subject: _, blocks }) => {
@@ -563,11 +563,11 @@ impl TypedExpression {
             }
             .into(),
             Self::TypedConstructorCall(TypedConstructorCall {
-                id,
+                idx,
                 output_type,
                 arguments,
             }) => TypedConstructorCall {
-                id: id.clone(),
+                idx: *idx,
                 output_type: output_type.instantiate(),
                 arguments: Self::instantiate_expressions(arguments),
             }
@@ -1352,7 +1352,7 @@ mod tests {
                             TypedAssignment{
                                 variable: variable.clone(),
                                 expression: TypedExpression::from(TypedConstructorCall{
-                                    id: Id::from("Left"),
+                                    idx: 0,
                                     output_type: variable.type_.type_.clone(),
                                     arguments: vec![
                                         TypedAccess{
@@ -1374,7 +1374,7 @@ mod tests {
                                 TypedMatchBlock {
                                     matches: vec![
                                         TypedMatchItem {
-                                            type_name: Id::from("Left"),
+                                            type_idx: 0,
                                             assignee: Some(subvariable.clone()),
                                         }
                                     ],
@@ -1391,7 +1391,7 @@ mod tests {
                                 TypedMatchBlock {
                                     matches: vec![
                                         TypedMatchItem {
-                                            type_name: Id::from("Right"),
+                                            type_idx: 1,
                                             assignee: None,
                                         }
                                     ],
@@ -1425,7 +1425,7 @@ mod tests {
                         TypedAssignment{
                             variable: variable.clone(),
                             expression: TypedExpression::from(TypedConstructorCall{
-                                id: Id::from("Left"),
+                                idx: 0,
                                 output_type: variable.type_.type_.clone(),
                                 arguments: vec![
                                     TypedAccess{
@@ -1447,7 +1447,7 @@ mod tests {
                             TypedMatchBlock {
                                 matches: vec![
                                     TypedMatchItem {
-                                        type_name: Id::from("Left"),
+                                        type_idx: 0,
                                         assignee: Some(subvariable.clone()),
                                     }
                                 ],
@@ -1464,7 +1464,7 @@ mod tests {
                             TypedMatchBlock {
                                 matches: vec![
                                     TypedMatchItem {
-                                        type_name: Id::from("Right"),
+                                        type_idx: 1,
                                         assignee: None,
                                     }
                                 ],

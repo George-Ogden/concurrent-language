@@ -141,6 +141,29 @@ impl Lowerer {
                 .into();
                 self.get_cached_value(intermediate_expression)
             }
+            TypedExpression::TypedConstructorCall(TypedConstructorCall {
+                idx,
+                output_type,
+                arguments,
+            }) => {
+                let IntermediateType::IntermediateUnionType(lower_type) =
+                    self.lower_type(&output_type)
+                else {
+                    panic!("Expected constructor call to have union type.")
+                };
+                let lower_data = match &arguments[..] {
+                    [] => None,
+                    [argument] => Some(self.lower_expression(argument.clone())),
+                    _ => panic!("Multiple arguments in constructor call."),
+                };
+                let intermediate_expression = IntermediateCtorCall {
+                    idx,
+                    data: lower_data,
+                    type_: lower_type,
+                }
+                .into();
+                self.get_cached_value(intermediate_expression)
+            }
             _ => todo!(),
         }
     }
@@ -223,9 +246,16 @@ impl Lowerer {
                 }
                 .into()
             }
-            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall { idx, data }) => {
-                IntermediateCtorCall { idx, data }.into()
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx,
+                data,
+                type_,
+            }) => IntermediateCtorCall {
+                idx,
+                data: data.map(|data| self.remove_wasted_allocations_from_value(data)),
+                type_,
             }
+            .into(),
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 arguments,
                 statements,
@@ -673,6 +703,135 @@ mod tests {
             (fn_def.clone().into(), vec![fn_def.into()])
         };
         "double apply fn def"
+    )]
+    #[test_case(
+        TypedConstructorCall{
+            idx: 0,
+            output_type: Type::Union(
+                Id::from("Bull"),
+                vec![
+                    None,
+                    None
+                ],
+            ),
+            arguments: Vec::new()
+        }.into(),
+        {
+            let memory: IntermediateMemory = IntermediateExpression::from(
+                IntermediateCtorCall{
+                    idx: 0,
+                    data: None,
+                    type_: IntermediateUnionType(vec![None, None]).into()
+                }
+            ).into();
+            (
+                memory.clone().into(),
+                vec![memory.into()]
+            )
+        }
+        ;
+        "data-free constructor"
+    )]
+    #[test_case(
+        TypedConstructorCall{
+            idx: 1,
+            output_type: Type::Union(
+                Id::from("Option_Int"),
+                vec![
+                    None,
+                    Some(TYPE_INT),
+                ],
+            ),
+            arguments: vec![
+                Integer{value: 8}.into()
+            ]
+        }.into(),
+        {
+            let memory: IntermediateMemory = IntermediateExpression::from(
+                IntermediateCtorCall{
+                    idx: 1,
+                    data: Some(IntermediateBuiltIn::from(Integer{value: 8}).into()),
+                    type_: IntermediateUnionType(vec![None, Some(AtomicTypeEnum::INT.into())]).into()
+                }
+            ).into();
+            (
+                memory.clone().into(),
+                vec![memory.into()]
+            )
+        };
+        "data-value constructor"
+    )]
+    #[test_case(
+        {
+            let reference = Rc::new(RefCell::new(ParametricType::new()));
+            let list_int_type = Type::Union(Id::from("list_int"),vec![
+                Some(Type::Tuple(vec![
+                    TYPE_INT,
+                    Type::Instantiation(Rc::clone(&reference), Vec::new()),
+                ])),
+                None,
+            ]);
+            *reference.borrow_mut() = list_int_type.clone().into();
+            TypedConstructorCall{
+                idx: 1,
+                output_type: list_int_type.clone(),
+                arguments: vec![
+                    TypedTuple{
+                        expressions: vec![
+                            Integer{value: -8}.into(),
+                            TypedConstructorCall{
+                                idx: 0,
+                                output_type: list_int_type.clone(),
+                                arguments: Vec::new()
+                            }.into()
+                        ]
+                    }.into()
+                ]
+            }.into()
+        },
+        {
+            let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
+            let union_type = IntermediateUnionType(vec![
+                Some(IntermediateTupleType(vec![
+                    AtomicTypeEnum::INT.into(),
+                    IntermediateType::IntermediateReferenceType(reference.clone().into())
+                ]).into()),
+                None
+            ]);
+            let list_int_type = IntermediateType::from(union_type.clone());
+            *reference.borrow_mut() = list_int_type.clone();
+            let nil: IntermediateMemory = IntermediateExpression::from(
+                IntermediateCtorCall{
+                    idx: 0,
+                    data: None,
+                    type_: union_type.clone()
+                }
+            ).into();
+            let tuple: IntermediateMemory = IntermediateExpression::from(
+                IntermediateTupleExpression(
+                    vec![
+                        IntermediateBuiltIn::from(Integer{value: -8}).into(),
+                        nil.clone().into()
+                    ]
+                )
+            ).into();
+            let head: IntermediateMemory = IntermediateExpression::from(
+                IntermediateCtorCall{
+                    idx: 1,
+                    data: Some(tuple.clone().into()),
+                    type_: union_type
+                }
+            ).into();
+            (
+                head.clone().into(),
+                vec![
+                    nil.into(),
+                    tuple.into(),
+                    head.into()
+                ]
+            )
+        };
+        "recursive constructor"
     )]
     fn test_lower_expression(
         expression: TypedExpression,

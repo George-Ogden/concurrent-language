@@ -12,7 +12,7 @@ use type_checker::{AtomicTypeEnum, Boolean, Integer};
 
 use crate::{AtomicType, Name};
 
-#[derive(Clone, PartialEq, FromVariants, Eq)]
+#[derive(Clone, FromVariants, Eq)]
 pub enum IntermediateType {
     AtomicType(AtomicType),
     IntermediateTupleType(IntermediateTupleType),
@@ -50,6 +50,75 @@ impl From<AtomicTypeEnum> for IntermediateType {
 impl Hash for IntermediateType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
+    }
+}
+
+impl PartialEq for IntermediateType {
+    fn eq(&self, other: &Self) -> bool {
+        let mut equality_checker = TypeEqualityChecker::new();
+        equality_checker.equal_type(self, other)
+    }
+}
+
+struct TypeEqualityChecker {
+    equal_references: HashMap<*mut IntermediateType, *mut IntermediateType>,
+}
+
+impl TypeEqualityChecker {
+    fn new() -> Self {
+        TypeEqualityChecker {
+            equal_references: HashMap::new(),
+        }
+    }
+    fn equal_type(&mut self, t1: &IntermediateType, t2: &IntermediateType) -> bool {
+        match (t1, t2) {
+            (IntermediateType::AtomicType(a1), IntermediateType::AtomicType(a2)) => a1 == a2,
+            (
+                IntermediateType::IntermediateTupleType(IntermediateTupleType(t1)),
+                IntermediateType::IntermediateTupleType(IntermediateTupleType(t2)),
+            ) => self.equal_types(t1, t2),
+            (
+                IntermediateType::IntermediateFnType(IntermediateFnType(a1, r1)),
+                IntermediateType::IntermediateFnType(IntermediateFnType(a2, r2)),
+            ) => self.equal_types(a1, a2) && self.equal_type(r1, r2),
+            (
+                IntermediateType::IntermediateUnionType(IntermediateUnionType(t1)),
+                IntermediateType::IntermediateUnionType(IntermediateUnionType(t2)),
+            ) => {
+                t1.len() == t2.len()
+                    && t1.iter().zip_eq(t2.iter()).all(|(t1, t2)| match (t1, t2) {
+                        (None, None) => true,
+                        (Some(t1), Some(t2)) => self.equal_type(t1, t2),
+                        _ => false,
+                    })
+            }
+            (
+                IntermediateType::IntermediateReferenceType(r1),
+                IntermediateType::IntermediateReferenceType(r2),
+            ) => {
+                let p1 = r1.as_ptr();
+                let p2 = r2.as_ptr();
+                if self.equal_references.get(&p1) == Some(&p2) {
+                    true
+                } else if matches!(self.equal_references.get(&p1), Some(x))
+                    || matches!(self.equal_references.get(&p2), Some(x))
+                {
+                    false
+                } else {
+                    self.equal_references.insert(p1, p2);
+                    self.equal_references.insert(p2, p1);
+                    self.equal_type(&r1.borrow().clone(), &r2.borrow().clone())
+                }
+            }
+            _ => false,
+        }
+    }
+    fn equal_types(&mut self, t1: &Vec<IntermediateType>, t2: &Vec<IntermediateType>) -> bool {
+        t1.len() == t2.len()
+            && t1
+                .iter()
+                .zip_eq(t2.iter())
+                .all(|(t1, t2)| self.equal_type(t1, t2))
     }
 }
 
@@ -243,12 +312,22 @@ impl ExpressionEqualityChecker {
                 IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
                     idx: i1,
                     data: d1,
+                    type_: t1,
                 }),
                 IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
                     idx: i2,
                     data: d2,
+                    type_: t2,
                 }),
-            ) => i1 == i2 && d1 == d2,
+            ) => {
+                i1 == i2
+                    && match (d1, d2) {
+                        (None, None) => true,
+                        (Some(d1), Some(d2)) => self.equal_value(d1, d2),
+                        _ => false,
+                    }
+                    && t1 == t2
+            }
             (
                 IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                     arguments: a1,
@@ -374,8 +453,17 @@ impl ExpressionFormatter {
                     self.format_values(args)
                 )
             }
-            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall { idx, data }) => {
-                format!("CtorCall({},{:?})", idx, data)
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx,
+                data,
+                type_,
+            }) => {
+                format!(
+                    "CtorCall({},{:?},{:?})",
+                    idx,
+                    data.as_ref().map(|data| self.format_value(data)),
+                    type_
+                )
             }
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 arguments: _,
@@ -481,17 +569,11 @@ pub struct IntermediateFnCall {
     pub args: Vec<IntermediateValue>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateCtorCall {
     pub idx: usize,
-    pub data: Rc<RefCell<Vec<Option<IntermediateType>>>>,
-}
-
-impl Hash for IntermediateCtorCall {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.idx.hash(state);
-        self.data.as_ptr().hash(state);
-    }
+    pub data: Option<IntermediateValue>,
+    pub type_: IntermediateUnionType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

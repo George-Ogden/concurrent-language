@@ -636,7 +636,7 @@ impl TypeChecker {
                 let Type::Union(_, variant_types) = &output_type else {
                     panic!("Constructor call for non-union type.")
                 };
-                let input_type = variant_types[constructor_type.index as usize].clone();
+                let input_type = variant_types[constructor_type.index].clone();
                 match input_type {
                     Some(type_) => {
                         if vec![type_.clone()] != types {
@@ -658,7 +658,7 @@ impl TypeChecker {
                     }
                 }
                 TypedConstructorCall {
-                    id: constructor.id.clone(),
+                    idx: constructor_type.index,
                     arguments,
                     output_type,
                 }
@@ -721,7 +721,7 @@ impl TypeChecker {
                             .map(|item| {
                                 match (
                                     &item.assignee,
-                                    &variants[variant_lookup[&item.type_name].index as usize],
+                                    &variants[variant_lookup[&item.type_name].index],
                                 ) {
                                     (Some(assignee), Some(type_)) => {
                                         Ok(Some((assignee.id.clone(), type_)))
@@ -749,7 +749,7 @@ impl TypeChecker {
                             .matches
                             .into_iter()
                             .map(|item| TypedMatchItem {
-                                type_name: item.type_name.clone(),
+                                type_idx: variant_lookup[&item.type_name].index,
                                 assignee: variable.clone(),
                             })
                             .collect_vec();
@@ -944,12 +944,12 @@ impl TypeChecker {
             }
             .into(),
             TypedExpression::TypedConstructorCall(TypedConstructorCall {
-                id,
+                idx,
                 output_type,
                 arguments,
             }) => TypedConstructorCall {
-                id: id,
-                output_type: output_type,
+                idx,
+                output_type,
                 arguments: self.check_functions_in_expressions(
                     arguments,
                     context,
