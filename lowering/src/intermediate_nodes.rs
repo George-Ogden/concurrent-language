@@ -476,11 +476,47 @@ impl ExpressionEqualityChecker {
                     && self.equal_statements(&b1.1, &b2.1)
             }
             (
-                IntermediateStatement::IntermediateMatchStatement(_),
-                IntermediateStatement::IntermediateMatchStatement(_),
-            ) => todo!(),
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject: s1,
+                    branches: b1,
+                }),
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject: s2,
+                    branches: b2,
+                }),
+            ) => self.equal_value(s1, s2) && self.equal_branches(b1, b2),
             _ => false,
         }
+    }
+    fn equal_branch(
+        &mut self,
+        branch1: &IntermediateMatchBranch,
+        branch2: &IntermediateMatchBranch,
+    ) -> bool {
+        let IntermediateMatchBranch {
+            target: t1,
+            statements: s1,
+        } = branch1;
+        let IntermediateMatchBranch {
+            target: t2,
+            statements: s2,
+        } = branch2;
+        (match (t1, t2) {
+            (None, None) => true,
+            (Some(a1), Some(a2)) => self.equal_argument(a1, a2),
+            _ => false,
+        }) && self.equal_statements(s1, s2)
+    }
+    fn equal_branches(
+        &mut self,
+        branches1: &Vec<IntermediateMatchBranch>,
+        branches2: &Vec<IntermediateMatchBranch>,
+    ) -> bool {
+        branches1.len() == branches2.len()
+            && branches1
+                .iter()
+                .zip(branches2.iter())
+                .all(|(b1, e2)| self.equal_branch(b1, e2))
     }
 }
 
@@ -581,14 +617,14 @@ pub struct IntermediateIfStatement {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateMatchStatement {
-    pub expression: IntermediateValue,
+    pub subject: IntermediateValue,
     pub branches: Vec<IntermediateMatchBranch>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateMatchBranch {
     pub target: Option<IntermediateArgument>,
-    pub statements: Vec<IntermediateMatchBranch>,
+    pub statements: Vec<IntermediateStatement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
