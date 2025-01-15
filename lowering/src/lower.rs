@@ -83,19 +83,35 @@ impl Lowerer {
             TypedExpression::Integer(integer) => IntermediateBuiltIn::Integer(integer).into(),
             TypedExpression::Boolean(boolean) => IntermediateBuiltIn::Boolean(boolean).into(),
             TypedExpression::TypedTuple(tuple) => self.lower_tuple(tuple),
+            TypedExpression::TypedElementAccess(element_access) => {
+                self.lower_element_access(element_access)
+            }
             TypedExpression::TypedAccess(access) => self.lower_access(access),
             TypedExpression::TypedFunctionCall(fn_call) => self.lower_fn_call(fn_call),
             TypedExpression::TypedFunctionDefinition(fn_def) => self.lower_fn_def(fn_def),
             TypedExpression::TypedConstructorCall(ctor_call) => self.lower_ctor_call(ctor_call),
             TypedExpression::TypedIf(if_) => self.lower_if(if_),
             TypedExpression::TypedMatch(match_) => self.lower_match(match_),
-            _ => todo!(),
+            TypedExpression::PartiallyTypedFunctionDefinition(_) => {
+                panic!("All function definitions should be fully typed.")
+            }
         }
     }
     fn lower_tuple(&mut self, TypedTuple { expressions }: TypedTuple) -> IntermediateValue {
         let intermediate_expressions = self.lower_expressions(expressions);
-        let intermediate_expression: IntermediateExpression =
-            IntermediateTupleExpression(intermediate_expressions).into();
+        let intermediate_expression = IntermediateTupleExpression(intermediate_expressions).into();
+        self.get_cached_value(intermediate_expression)
+    }
+    fn lower_element_access(
+        &mut self,
+        TypedElementAccess { expression, index }: TypedElementAccess,
+    ) -> IntermediateValue {
+        let intermediate_value = self.lower_expression(*expression);
+        let intermediate_expression = IntermediateElementAccess {
+            value: intermediate_value,
+            idx: index,
+        }
+        .into();
         self.get_cached_value(intermediate_expression)
     }
     fn lower_access(
@@ -774,6 +790,44 @@ mod tests {
             (memory.location.clone().into(), vec![memory.into()])
         };
         "projection fn def"
+    )]
+    #[test_case(
+        {
+            let argument: TypedVariable = Type::Tuple(vec![TYPE_INT, TYPE_BOOL]).into();
+            TypedFunctionDefinition{
+                parameters: vec![argument.clone()],
+                return_type: Box::new(TYPE_BOOL),
+                body: TypedBlock{
+                    assignments: Vec::new(),
+                    expression: Box::new(TypedElementAccess{
+                        expression: Box::new(TypedAccess{
+                            variable: argument.into(),
+                            parameters: Vec::new()
+                        }.into()),
+                        index: 1
+                    }.into())
+                }
+            }.into()
+        },
+        {
+            let argument: IntermediateArgument = IntermediateType::from(IntermediateTupleType(vec![
+                IntermediateType::from(AtomicTypeEnum::INT).into(),
+                IntermediateType::from(AtomicTypeEnum::BOOL).into()
+            ])).into();
+            let result: IntermediateMemory = IntermediateExpression::from(IntermediateElementAccess{
+                value: argument.clone().into(),
+                idx: 1
+            }).into();
+            let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                arguments: vec![argument.clone()],
+                statements: vec![
+                    result.clone().into()
+                ],
+                return_value: result.location.into()
+            }).into();
+            (memory.location.clone().into(), vec![memory.into()])
+        };
+        "element access"
     )]
     #[test_case(
         {
