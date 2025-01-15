@@ -1,11 +1,6 @@
 use core::fmt;
 use itertools::Itertools;
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
 
 use from_variants::FromVariants;
 use type_checker::{AtomicTypeEnum, Boolean, Integer};
@@ -100,8 +95,8 @@ impl TypeEqualityChecker {
                 let p2 = r2.as_ptr();
                 if self.equal_references.get(&p1) == Some(&p2) {
                     true
-                } else if matches!(self.equal_references.get(&p1), Some(x))
-                    || matches!(self.equal_references.get(&p2), Some(x))
+                } else if matches!(self.equal_references.get(&p1), Some(_))
+                    || matches!(self.equal_references.get(&p2), Some(_))
                 {
                     false
                 } else {
@@ -146,16 +141,54 @@ impl Hash for TypeDef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, FromVariants, Eq, Hash)]
+type Location = Rc<RefCell<()>>;
+
+#[derive(Clone, PartialEq, FromVariants, Eq)]
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
-    IntermediateMemory(IntermediateMemory),
+    IntermediateMemory(Location),
     IntermediateArgument(IntermediateArgument),
 }
 
-impl From<IntermediateExpression> for IntermediateValue {
-    fn from(value: IntermediateExpression) -> Self {
-        IntermediateValue::IntermediateMemory(value.into())
+impl fmt::Debug for IntermediateValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IntermediateBuiltIn(arg0) => {
+                f.debug_tuple("IntermediateBuiltIn").field(arg0).finish()
+            }
+            Self::IntermediateMemory(arg0) => f
+                .debug_tuple("IntermediateMemory")
+                .field(&arg0.as_ptr())
+                .finish(),
+            Self::IntermediateArgument(arg0) => {
+                f.debug_tuple("IntermediateArgument").field(arg0).finish()
+            }
+        }
+    }
+}
+
+impl Hash for IntermediateValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            IntermediateValue::IntermediateBuiltIn(built_in) => {
+                0.hash(state);
+                built_in.hash(state);
+            }
+            IntermediateValue::IntermediateMemory(location) => {
+                1.hash(state);
+                location.as_ptr().hash(state);
+            }
+            IntermediateValue::IntermediateArgument(argument) => {
+                2.hash(state);
+                argument.hash(state);
+            }
+        }
+    }
+}
+
+impl From<Location> for IntermediateValue {
+    fn from(value: Location) -> Self {
+        Self::IntermediateMemory(value)
     }
 }
 
@@ -167,27 +200,36 @@ pub enum IntermediateBuiltIn {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntermediateMemory(pub Rc<RefCell<IntermediateExpression>>);
+pub struct IntermediateMemory {
+    pub expression: Rc<RefCell<IntermediateExpression>>,
+    pub location: Location,
+}
 
 impl Hash for IntermediateMemory {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.as_ptr().hash(state);
+        self.expression.as_ptr().hash(state);
     }
 }
 
 impl From<IntermediateExpression> for IntermediateMemory {
     fn from(value: IntermediateExpression) -> Self {
-        IntermediateMemory(Rc::new(RefCell::new(value)))
+        IntermediateMemory {
+            expression: Rc::new(RefCell::new(value)),
+            location: Rc::new(RefCell::new(())),
+        }
     }
 }
 
 impl From<IntermediateArgument> for IntermediateMemory {
     fn from(value: IntermediateArgument) -> Self {
-        IntermediateMemory(Rc::new(RefCell::new(value.into())))
+        IntermediateMemory {
+            expression: Rc::new(RefCell::new(value.into())),
+            location: Rc::new(RefCell::new(())),
+        }
     }
 }
 
-#[derive(Clone, Eq, FromVariants, Hash)]
+#[derive(Clone, Eq, FromVariants, Hash, Debug)]
 pub enum IntermediateExpression {
     IntermediateValue(IntermediateValue),
     IntermediateElementAccess(IntermediateElementAccess),
@@ -197,15 +239,14 @@ pub enum IntermediateExpression {
     IntermediateFnDef(IntermediateFnDef),
 }
 
-impl fmt::Debug for IntermediateExpression {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut expression_formatter = ExpressionFormatter::new();
-        expression_formatter.format(f, self)
+impl From<IntermediateArgument> for IntermediateExpression {
+    fn from(value: IntermediateArgument) -> Self {
+        IntermediateExpression::IntermediateValue(value.into())
     }
 }
 
-impl From<IntermediateArgument> for IntermediateExpression {
-    fn from(value: IntermediateArgument) -> Self {
+impl From<IntermediateBuiltIn> for IntermediateExpression {
+    fn from(value: IntermediateBuiltIn) -> Self {
         IntermediateExpression::IntermediateValue(value.into())
     }
 }
@@ -218,12 +259,14 @@ impl PartialEq for IntermediateExpression {
 }
 
 struct ExpressionEqualityChecker {
-    history: HashMap<*mut IntermediateExpression, *mut IntermediateExpression>,
+    true_history: HashMap<*mut (), *mut ()>,
+    history: HashMap<*mut (), *mut ()>,
     arguments: HashMap<*mut IntermediateType, *mut IntermediateType>,
 }
 impl ExpressionEqualityChecker {
     fn new() -> Self {
         ExpressionEqualityChecker {
+            true_history: HashMap::new(),
             history: HashMap::new(),
             arguments: HashMap::new(),
         }
@@ -255,18 +298,45 @@ impl ExpressionEqualityChecker {
                 .zip(a2.iter())
                 .all(|(a1, a2)| self.equal_argument(a1, a2))
     }
-    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
-        let IntermediateMemory(e1) = m1;
-        let IntermediateMemory(e2) = m2;
-        if self.history.get(&e1.as_ptr()) == Some(&e2.as_ptr()) {
+    fn equal_locations(&mut self, l1: &Location, l2: &Location) -> bool {
+        if self.history.get(&l1.as_ptr()) == Some(&l2.as_ptr()) {
             true
-        } else if matches!(self.history.get(&e1.as_ptr()), Some(_))
-            || matches!(self.history.get(&e2.as_ptr()), Some(_))
+        } else if matches!(self.history.get(&l1.as_ptr()), Some(_))
+            || matches!(self.history.get(&l2.as_ptr()), Some(_))
         {
             false
         } else {
-            self.history.insert(e1.as_ptr(), e2.as_ptr());
-            self.history.insert(e2.as_ptr(), e1.as_ptr());
+            self.history.insert(l1.as_ptr(), l2.as_ptr());
+            self.history.insert(l2.as_ptr(), l1.as_ptr());
+            true
+        }
+    }
+    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
+        let IntermediateMemory {
+            expression: e1,
+            location: l1,
+        } = m1;
+        let IntermediateMemory {
+            expression: e2,
+            location: l2,
+        } = m2;
+        if self.true_history.get(&l1.as_ptr()) == Some(&l2.as_ptr()) {
+            true
+        } else if self.history.get(&l1.as_ptr()) == Some(&l2.as_ptr()) {
+            self.true_history.insert(l1.as_ptr(), l2.as_ptr());
+            self.true_history.insert(l2.as_ptr(), l1.as_ptr());
+            self.equal_expression(&e1.borrow().clone(), &e2.borrow().clone())
+        } else if matches!(self.true_history.get(&l1.as_ptr()), Some(_))
+            || matches!(self.true_history.get(&l2.as_ptr()), Some(_))
+            || matches!(self.history.get(&l1.as_ptr()), Some(_))
+            || matches!(self.history.get(&l2.as_ptr()), Some(_))
+        {
+            false
+        } else {
+            self.history.insert(l1.as_ptr(), l2.as_ptr());
+            self.history.insert(l2.as_ptr(), l1.as_ptr());
+            self.true_history.insert(l1.as_ptr(), l2.as_ptr());
+            self.true_history.insert(l2.as_ptr(), l1.as_ptr());
             self.equal_expression(&e1.borrow().clone(), &e2.borrow().clone())
         }
     }
@@ -360,7 +430,7 @@ impl ExpressionEqualityChecker {
             (
                 IntermediateValue::IntermediateMemory(m1),
                 IntermediateValue::IntermediateMemory(m2),
-            ) => self.equal_memory(m1, m2),
+            ) => self.equal_locations(m1, m2),
             _ => false,
         }
     }
@@ -414,133 +484,16 @@ impl ExpressionEqualityChecker {
     }
 }
 
-struct ExpressionFormatter {
-    history: HashSet<*mut IntermediateExpression>,
-}
-impl ExpressionFormatter {
-    fn new() -> Self {
-        Self {
-            history: HashSet::new(),
-        }
-    }
-    fn format(
-        &mut self,
-        f: &mut std::fmt::Formatter<'_>,
-        expression: &IntermediateExpression,
-    ) -> std::fmt::Result {
-        write!(f, "{}", self.format_expression(expression))
-    }
-    fn format_expression(&mut self, expression: &IntermediateExpression) -> String {
-        match &expression {
-            IntermediateExpression::IntermediateValue(value) => {
-                format!("Value({})", self.format_value(value))
-            }
-            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
-                value,
-                idx,
-            }) => {
-                format!("ElementAccess({},{})", self.format_value(value), idx)
-            }
-            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-                values,
-            )) => {
-                format!("TupleExpression({})", self.format_values(values))
-            }
-            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
-                format!(
-                    "FnCall({},{})",
-                    self.format_value(fn_),
-                    self.format_values(args)
-                )
-            }
-            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
-                idx,
-                data,
-                type_,
-            }) => {
-                format!(
-                    "CtorCall({},{:?},{:?})",
-                    idx,
-                    data.as_ref().map(|data| self.format_value(data)),
-                    type_
-                )
-            }
-            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: _,
-                statements,
-                return_value,
-            }) => {
-                format!(
-                    "FnDef({};{})",
-                    self.format_statements(statements),
-                    self.format_value(return_value)
-                )
-            }
-        }
-    }
-    fn format_value(&mut self, value: &IntermediateValue) -> String {
-        match value {
-            IntermediateValue::IntermediateBuiltIn(intermediate_built_in) => {
-                format!("{:?}", intermediate_built_in)
-            }
-            IntermediateValue::IntermediateMemory(IntermediateMemory(expression)) => {
-                if self.history.contains(&expression.as_ptr()) {
-                    format!("Mem({:#?})", expression.as_ptr())
-                } else {
-                    self.history.insert(expression.as_ptr());
-                    format!(
-                        "Mem({:#?} = {})",
-                        expression.as_ptr(),
-                        self.format_expression(&expression.borrow().clone())
-                    )
-                }
-            }
-            IntermediateValue::IntermediateArgument(IntermediateArgument(type_)) => {
-                format!("Arg({:?})", type_)
-            }
-        }
-    }
-    fn format_values(&mut self, values: &Vec<IntermediateValue>) -> String {
-        values
-            .iter()
-            .map(|value| self.format_value(value))
-            .join(",")
-    }
-    fn format_statement(&mut self, statement: &IntermediateStatement) -> String {
-        match statement {
-            IntermediateStatement::Assignment(IntermediateMemory(memory)) => {
-                format!(
-                    "{:#?} = {}",
-                    memory.as_ptr(),
-                    self.format_expression(&memory.borrow().clone())
-                )
-            }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => {
-                format!(
-                    "If({},{},{})",
-                    self.format_value(condition),
-                    self.format_statements(&branches.0),
-                    self.format_statements(&branches.1)
-                )
-            }
-            IntermediateStatement::IntermediateMatchStatement(_) => {
-                todo!()
-            }
-        }
-    }
-    fn format_statements(&mut self, statements: &Vec<IntermediateStatement>) -> String {
-        statements
-            .iter()
-            .map(|statement| self.format_statement(statement))
-            .join(";")
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct IntermediateArgument(pub Rc<RefCell<IntermediateType>>);
+
+impl fmt::Debug for IntermediateArgument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("IntermediateArgument")
+            .field(&self.0.as_ptr())
+            .finish()
+    }
+}
 
 impl From<IntermediateType> for IntermediateArgument {
     fn from(value: IntermediateType) -> Self {
@@ -583,11 +536,35 @@ pub struct IntermediateFnDef {
     pub return_value: IntermediateValue,
 }
 
-#[derive(Clone, Debug, PartialEq, FromVariants, Eq, Hash)]
+#[derive(Clone, PartialEq, FromVariants, Eq, Hash)]
 pub enum IntermediateStatement {
     Assignment(IntermediateMemory),
     IntermediateIfStatement(IntermediateIfStatement),
     IntermediateMatchStatement(IntermediateMatchStatement),
+}
+
+impl fmt::Debug for IntermediateStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Assignment(IntermediateMemory {
+                expression,
+                location,
+            }) => write!(
+                f,
+                "{:#?} = {:?}",
+                location.as_ptr(),
+                expression.borrow().clone()
+            ),
+            Self::IntermediateIfStatement(arg0) => f
+                .debug_tuple("IntermediateIfStatement")
+                .field(arg0)
+                .finish(),
+            Self::IntermediateMatchStatement(arg0) => f
+                .debug_tuple("IntermediateMatchStatement")
+                .field(arg0)
+                .finish(),
+        }
+    }
 }
 
 impl From<IntermediateMemory> for IntermediateStatement {
