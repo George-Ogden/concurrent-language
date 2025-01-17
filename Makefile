@@ -6,6 +6,8 @@ TYPE_CHECKER := type-checker/target/debug/type_checker
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
 TRANSLATOR := translation/target/debug/translation
 TRANSLATOR_MANIFEST := translation/Cargo.toml
+LOWERER := lowering/target/debug/lowering
+LOWERER_MANIFEST := lowering/Cargo.toml
 BACKEND := backend/bin/main
 
 all: $(TYPE_CHECKER) $(PARSER) $(BACKEND) $(TRANSLATOR)
@@ -40,6 +42,7 @@ test: $(PARSER) $(TYPE_CHECKER)
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv
 	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv
+	cargo test --manifest-path $(LOWERER_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/triangular.txt samples/list.txt; do \
