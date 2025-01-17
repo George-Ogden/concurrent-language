@@ -174,18 +174,18 @@ impl Lowerer {
             .iter()
             .map(|variable| variable.variable.clone())
             .collect::<Vec<_>>();
-        let arguments = parameters
+        let args = parameters
             .iter()
-            .map(|variable| IntermediateArgument::from(self.lower_type(&variable.type_.type_)))
+            .map(|variable| IntermediateArg::from(self.lower_type(&variable.type_.type_)))
             .collect::<Vec<_>>();
-        for (variable, argument) in zip_eq(&variables, &arguments) {
-            let memory = argument.clone().into();
+        for (variable, arg) in zip_eq(&variables, &args) {
+            let memory = arg.clone().into();
             self.update_memory(&memory);
             self.scope.insert((variable.clone(), Vec::new()), memory);
         }
         let (statements, return_value) = self.lower_block(body, false);
         let intermediate_expression = IntermediateFnDef {
-            arguments: arguments,
+            args: args,
             statements: statements,
             return_value: return_value,
         }
@@ -259,29 +259,29 @@ impl Lowerer {
                 .filter_map(|(assignee, _)| assignee.clone())
                 .map(|assignee| (assignee.variable, assignee.type_)),
         );
-        let arguments: HashMap<Variable, IntermediateArgument> =
+        let args: HashMap<Variable, IntermediateArg> =
             HashMap::from_iter(all_assignees.into_iter().map(|(variable, type_)| {
-                let argument = IntermediateArgument::from(self.lower_type(&type_.type_));
-                let memory = argument.clone().into();
+                let arg = IntermediateArg::from(self.lower_type(&type_.type_));
+                let memory = arg.clone().into();
                 self.update_memory(&memory);
                 self.scope.insert((variable.clone(), Vec::new()), memory);
-                (variable, argument)
+                (variable, arg)
             }));
-        let (arguments, blocks): (Vec<_>, Vec<_>) = matches
+        let (args, blocks): (Vec<_>, Vec<_>) = matches
             .into_values()
             .map(|(assignee, block)| {
                 (
-                    assignee.map(|assignee| arguments.get(&assignee.variable).unwrap().clone()),
+                    assignee.map(|assignee| args.get(&assignee.variable).unwrap().clone()),
                     self.lower_block(block, true),
                 )
             })
             .unzip();
         let (value, statements) = self.merge_blocks(blocks);
-        let branches = arguments
+        let branches = args
             .into_iter()
             .zip(statements.into_iter())
-            .map(|(argument, statements)| IntermediateMatchBranch {
-                target: argument,
+            .map(|(arg, statements)| IntermediateMatchBranch {
+                target: arg,
                 statements: statements,
             })
             .collect();
@@ -369,8 +369,8 @@ impl Lowerer {
     ) -> IntermediateExpression {
         match expression {
             IntermediateExpression::IntermediateValue(value) => match value.clone() {
-                IntermediateValue::IntermediateArgument(argument) => {
-                    self.remove_wasted_allocations_from_expression(argument.into())
+                IntermediateValue::IntermediateArg(arg) => {
+                    self.remove_wasted_allocations_from_expression(arg.into())
                 }
                 _ => IntermediateExpression::IntermediateValue(
                     self.remove_wasted_allocations_from_value(value),
@@ -406,11 +406,11 @@ impl Lowerer {
             }
             .into(),
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments,
+                args,
                 statements,
                 return_value,
             }) => IntermediateFnDef {
-                arguments,
+                args,
                 statements: self.remove_wasted_allocations_from_statements(statements),
                 return_value: self.remove_wasted_allocations_from_value(return_value),
             }
@@ -423,7 +423,7 @@ impl Lowerer {
     ) -> IntermediateValue {
         match value.clone() {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
-            IntermediateValue::IntermediateArgument(argument) => argument.into(),
+            IntermediateValue::IntermediateArg(arg) => arg.into(),
             IntermediateValue::IntermediateMemory(location) => {
                 let expressions = self.memory.get(&location.as_ptr());
                 if expressions.map(Vec::len) == Some(1) {
@@ -619,7 +619,7 @@ impl Lowerer {
         let expression = assignment.expression.instantiate(&parameters);
         let type_ = expression.type_();
         let lower_type = self.lower_type(&type_);
-        let placeholder: IntermediateMemory = IntermediateArgument::from(lower_type).into();
+        let placeholder: IntermediateMemory = IntermediateArg::from(lower_type).into();
         self.scope
             .insert((variable.variable.clone(), parameters), placeholder.clone());
         Some((expression, placeholder))
@@ -636,6 +636,20 @@ impl Lowerer {
             .collect::<Vec<_>>();
         for (expression, placeholder) in expressions {
             self.perform_assignment(expression, placeholder);
+        }
+    }
+    fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
+        self.lower_assignments(program.assignments);
+        let main = self
+            .scope
+            .get(&(program.main.variable, Vec::new()))
+            .unwrap()
+            .clone()
+            .location
+            .into();
+        IntermediateProgram {
+            statements: self.remove_wasted_allocations_from_statements(self.statements.clone()),
+            main: self.remove_wasted_allocations_from_value(main),
         }
     }
 }
@@ -778,14 +792,14 @@ mod tests {
             }.into()
         },
         {
-            let arguments = vec![
+            let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::BOOL).into(),
             ];
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: arguments.clone(),
+                args: args.clone(),
                 statements: Vec::new(),
-                return_value: arguments[0].clone().into()
+                return_value: args[0].clone().into()
             }).into();
             (memory.location.clone().into(), vec![memory.into()])
         };
@@ -793,15 +807,15 @@ mod tests {
     )]
     #[test_case(
         {
-            let argument: TypedVariable = Type::Tuple(vec![TYPE_INT, TYPE_BOOL]).into();
+            let arg: TypedVariable = Type::Tuple(vec![TYPE_INT, TYPE_BOOL]).into();
             TypedFunctionDefinition{
-                parameters: vec![argument.clone()],
+                parameters: vec![arg.clone()],
                 return_type: Box::new(TYPE_BOOL),
                 body: TypedBlock{
                     assignments: Vec::new(),
                     expression: Box::new(TypedElementAccess{
                         expression: Box::new(TypedAccess{
-                            variable: argument.into(),
+                            variable: arg.into(),
                             parameters: Vec::new()
                         }.into()),
                         index: 1
@@ -810,16 +824,16 @@ mod tests {
             }.into()
         },
         {
-            let argument: IntermediateArgument = IntermediateType::from(IntermediateTupleType(vec![
+            let arg: IntermediateArg = IntermediateType::from(IntermediateTupleType(vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::BOOL).into()
             ])).into();
             let result: IntermediateMemory = IntermediateExpression::from(IntermediateElementAccess{
-                value: argument.clone().into(),
+                value: arg.clone().into(),
                 idx: 1
             }).into();
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: vec![
                     result.clone().into()
                 ],
@@ -896,7 +910,7 @@ mod tests {
             }.into()
         },
         {
-            let arguments: Vec<IntermediateArgument> = vec![
+            let args: Vec<IntermediateArg> = vec![
                 IntermediateType::from(IntermediateFnType(
                     vec![AtomicTypeEnum::INT.into()],
                     Box::new(AtomicTypeEnum::INT.into())
@@ -904,15 +918,15 @@ mod tests {
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
             ];
             let call1: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
-                fn_: arguments[0].clone().into(),
-                args: vec![arguments[1].clone().into()]
+                fn_: args[0].clone().into(),
+                args: vec![args[1].clone().into()]
             }).into();
             let call2: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
-                fn_: arguments[0].clone().into(),
+                fn_: args[0].clone().into(),
                 args: vec![call1.location.clone().into()]
             }).into();
             let fn_def: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: arguments.clone(),
+                args: args.clone(),
                 statements: vec![
                     IntermediateStatement::Assignment(call1),
                     IntermediateStatement::Assignment(call2.clone()),
@@ -1088,13 +1102,13 @@ mod tests {
             }.into()
         },
         {
-            let argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::BOOL).into();
-            let return_address: IntermediateMemory = IntermediateArgument::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
+            let return_address: IntermediateMemory = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: vec![
                     IntermediateIfStatement{
-                        condition: argument.into(),
+                        condition: arg.into(),
                         branches: (
                             vec![
                                 IntermediateMemory{
@@ -1222,8 +1236,8 @@ mod tests {
             }.into()
         },
         {
-            let argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
-            let return_address: IntermediateMemory = IntermediateArgument::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let return_address: IntermediateMemory = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
             let y: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
                 fn_: IntermediateBuiltIn::BuiltInFn(
                         Name::from("++"),
@@ -1233,7 +1247,7 @@ mod tests {
                         ).into()
                     ).into(),
                 args: vec![
-                    argument.clone().into()
+                    arg.clone().into()
                 ]
             }).into();
             let c: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
@@ -1262,7 +1276,7 @@ mod tests {
                 ]
             }).into();
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: vec![
                     y.clone().into(),
                     c.clone().into(),
@@ -1348,13 +1362,13 @@ mod tests {
             }.into()
         },
         {
-            let argument: IntermediateArgument = IntermediateType::from(IntermediateUnionType(vec![None,None])).into();
-            let return_address: IntermediateMemory = IntermediateArgument::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
+            let arg: IntermediateArg = IntermediateType::from(IntermediateUnionType(vec![None,None])).into();
+            let return_address: IntermediateMemory = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: vec![
                     IntermediateMatchStatement{
-                        subject: argument.into(),
+                        subject: arg.into(),
                         branches: vec![
                             IntermediateMatchBranch{
                                 target: None,
@@ -1430,14 +1444,14 @@ mod tests {
             }.into()
         },
         {
-            let argument: IntermediateArgument = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into())])).into();
-            let return_address: IntermediateMemory = IntermediateArgument::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
-            let var: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let arg: IntermediateArg = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into())])).into();
+            let return_address: IntermediateMemory = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
+            let var: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: vec![
                     IntermediateMatchStatement{
-                        subject: argument.into(),
+                        subject: arg.into(),
                         branches: vec![
                             IntermediateMatchBranch{
                                 target: Some(var.clone()),
@@ -1523,14 +1537,14 @@ mod tests {
             }.into()
         },
         {
-            let argument: IntermediateArgument = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),None])).into();
-            let return_address: IntermediateMemory = IntermediateArgument::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
-            let var: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let arg: IntermediateArg = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),None])).into();
+            let return_address: IntermediateMemory = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
+            let var: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: vec![
                     IntermediateMatchStatement{
-                        subject: argument.into(),
+                        subject: arg.into(),
                         branches: vec![
                             IntermediateMatchBranch{
                                 target: Some(var.clone()),
@@ -1568,7 +1582,7 @@ mod tests {
     ) {
         let (value, statements) = value_statements;
         let expected_fn: IntermediateExpression = IntermediateFnDef {
-            arguments: Vec::new(),
+            args: Vec::new(),
             statements,
             return_value: value,
         }
@@ -1579,7 +1593,7 @@ mod tests {
         let efficient_statements =
             lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
         let efficient_fn = IntermediateFnDef {
-            arguments: Vec::new(),
+            args: Vec::new(),
             statements: efficient_statements,
             return_value: efficient_value,
         };
@@ -1589,50 +1603,50 @@ mod tests {
     #[test]
     fn test_projection_equalities() {
         let p0: IntermediateMemory = {
-            let arguments = vec![
+            let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
             ];
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: arguments.clone(),
+                args: args.clone(),
                 statements: Vec::new(),
-                return_value: arguments[0].clone().into(),
+                return_value: args[0].clone().into(),
             })
             .into()
         };
         let p1: IntermediateMemory = {
-            let arguments = vec![
+            let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
             ];
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: arguments.clone(),
+                args: args.clone(),
                 statements: Vec::new(),
-                return_value: arguments[1].clone().into(),
+                return_value: args[1].clone().into(),
             })
             .into()
         };
         let q0: IntermediateMemory = {
-            let arguments = vec![
+            let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
             ];
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: arguments.clone(),
+                args: args.clone(),
                 statements: Vec::new(),
-                return_value: arguments[0].clone().into(),
+                return_value: args[0].clone().into(),
             })
             .into()
         };
         let q1: IntermediateMemory = {
-            let arguments = vec![
+            let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
             ];
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-                arguments: arguments.clone(),
+                args: args.clone(),
                 statements: Vec::new(),
-                return_value: arguments[1].clone().into(),
+                return_value: args[1].clone().into(),
             })
             .into()
         };
@@ -2071,11 +2085,11 @@ mod tests {
         {
             let f: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_INT)).into();
             let y: TypedVariable = TYPE_INT.into();
-            let argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let fn_: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
-                arguments: vec![argument.clone()],
+                args: vec![arg.clone()],
                 statements: Vec::new(),
-                return_value: argument.clone().into()
+                return_value: arg.clone().into()
             }).into();
             let value: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
@@ -2131,7 +2145,7 @@ mod tests {
         {
             let foo: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_INT)).into();
             let y: TypedVariable = TYPE_INT.into();
-            let fn_: IntermediateMemory = IntermediateArgument::from(
+            let fn_: IntermediateMemory = IntermediateArg::from(
                 IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())))
             ).into();
             let recursive_call: IntermediateMemory = IntermediateExpression::IntermediateFnCall(
@@ -2141,7 +2155,7 @@ mod tests {
                 }
             ).into();
             *fn_.expression.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
-                arguments: Vec::new(),
+                args: Vec::new(),
                 statements: vec![
                     recursive_call.clone().into()
                 ],
@@ -2203,10 +2217,10 @@ mod tests {
         {
             let a: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_BOOL)).into();
             let b: TypedVariable = Type::Function(Vec::new(), Box::new(TYPE_BOOL)).into();
-            let a_fn: IntermediateMemory = IntermediateArgument::from(
+            let a_fn: IntermediateMemory = IntermediateArg::from(
                 IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::BOOL.into())))
             ).into();
-            let b_fn: IntermediateMemory = IntermediateArgument::from(
+            let b_fn: IntermediateMemory = IntermediateArg::from(
                 IntermediateType::from(IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::BOOL.into())))
             ).into();
             let a_call: IntermediateMemory = IntermediateExpression::IntermediateFnCall(
@@ -2222,14 +2236,14 @@ mod tests {
                 }
             ).into();
             *a_fn.expression.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
-                arguments: Vec::new(),
+                args: Vec::new(),
                 statements: vec![
                     b_call.clone().into()
                 ],
                 return_value: b_call.location.into()
             }).into();
             *b_fn.expression.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
-                arguments: Vec::new(),
+                args: Vec::new(),
                 statements: vec![
                     a_call.clone().into()
                 ],
@@ -2310,17 +2324,17 @@ mod tests {
             variable: Variable::new(),
             type_: Type::Variable(parameter.clone()).into(),
         };
-        let int_argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::INT).into();
-        let bool_argument: IntermediateArgument = IntermediateType::from(AtomicTypeEnum::BOOL).into();
+        let int_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+        let bool_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
         let id_int_fn: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-            arguments: vec![int_argument.clone()],
+            args: vec![int_arg.clone()],
             statements: Vec::new(),
-            return_value: int_argument.into()
+            return_value: int_arg.into()
         }).into();
         let id_bool_fn: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
-            arguments: vec![bool_argument.clone()],
+            args: vec![bool_arg.clone()],
             statements: Vec::new(),
-            return_value: bool_argument.into()
+            return_value: bool_arg.into()
         }).into();
         (
             vec![
@@ -2410,5 +2424,296 @@ mod tests {
                 .map(|&v| lowerer.remove_wasted_allocations_from_expression(v.clone()));
             assert_eq!(value, Some(v.into()))
         }
+    }
+
+    #[test_case(
+        {
+            let main: TypedVariable = ParametricType {
+                type_: Type::Function(Vec::new(), Box::new(TYPE_INT)),
+                parameters: Vec::new()
+            }.into();
+            TypedProgram {
+                type_definitions: TypeDefinitions::new(),
+                assignments: vec![
+                    TypedAssignment{
+                        variable: main.clone(),
+                        expression: TypedExpression::from(TypedFunctionDefinition{
+                            parameters: Vec::new(),
+                            return_type: Box::new(TYPE_INT),
+                            body: TypedBlock {
+                                assignments: Vec::new(),
+                                expression: Box::new(Integer{value:0}.into())
+                            }
+                        }).into()
+                    }
+                ],
+                main
+            }
+        },
+        {
+            let main: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                args: Vec::new(),
+                statements: Vec::new(),
+                return_value: IntermediateBuiltIn::from(Integer{value: 0}).into()
+            }).into();
+            IntermediateProgram{
+                statements: vec![
+                    main.clone().into()
+                ],
+                main: main.location.into()
+            }
+        };
+        "return 0"
+    )]
+    #[test_case(
+        {
+            let main: TypedVariable = ParametricType {
+                type_: Type::Function(Vec::new(), Box::new(TYPE_INT)),
+                parameters: Vec::new()
+            }.into();
+            let parameter = Rc::new(RefCell::new(None));
+            let type_definitions:TypeDefinitions = [(
+                Id::from("Option"),
+                ParametricType {
+                    parameters: vec![parameter.clone()],
+                    type_: Type::Union(
+                        Id::from("Option"),
+                        vec![
+                            Some(Type::Variable(parameter)),
+                            None
+                        ]
+                    )
+                }
+            )].into();
+            let var: TypedVariable = ParametricType {
+                type_: TYPE_INT,
+                parameters: Vec::new()
+            }.into();
+            let x: TypedVariable = ParametricType {
+                type_: TYPE_INT,
+                parameters: Vec::new()
+            }.into();
+            TypedProgram {
+                type_definitions: type_definitions.clone(),
+                assignments: vec![
+                    TypedAssignment {
+                        expression: ParametricExpression{
+                            parameters: Vec::new(),
+                            expression: TypedMatch{
+                                subject: Box::new(
+                                    TypedConstructorCall{
+                                        idx: 1,
+                                        output_type: Type::Instantiation(type_definitions.get(&Id::from("Option")).unwrap().clone(), vec![TYPE_INT]),
+                                        arguments: vec![Integer{value:1}.into()]
+                                    }.into(),
+                                ),
+                                blocks: vec![
+                                    TypedMatchBlock{
+                                        matches: vec![
+                                            TypedMatchItem {
+                                                type_idx: 1,
+                                                assignee: None
+                                            },
+                                        ],
+                                        block: TypedBlock {
+                                            assignments: Vec::new(),
+                                            expression: Box::new(
+                                                Integer{value: 0}.into()
+                                            )
+                                        }
+                                    },
+                                    TypedMatchBlock{
+                                        matches: vec![
+                                            TypedMatchItem {
+                                                type_idx: 0,
+                                                assignee: Some(var.clone())
+                                            },
+                                        ],
+                                        block: TypedBlock {
+                                            assignments: Vec::new(),
+                                            expression: Box::new(
+                                                TypedAccess {
+                                                    variable: var.into(),
+                                                    parameters: Vec::new()
+                                                }.into()
+                                            )
+                                        }
+                                    },
+                                ],
+                            }.into()
+                        },
+                        variable: x.clone()
+                    },
+                    TypedAssignment{
+                        variable: main.clone(),
+                        expression: TypedExpression::from(TypedFunctionDefinition{
+                            parameters: Vec::new(),
+                            return_type: Box::new(TYPE_INT),
+                            body: TypedBlock {
+                                assignments: Vec::new(),
+                                expression: Box::new(TypedAccess{
+                                    variable: x,
+                                    parameters: Vec::new(),
+                                }.into())
+                            }
+                        }).into()
+                    }
+                ],
+                main
+            }
+        },
+        {
+            let ctor: IntermediateMemory = IntermediateExpression::from(IntermediateCtorCall{
+                idx: 1,
+                data: Some(IntermediateBuiltIn::from(Integer{value: 1}).into()),
+                type_: IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),None])
+            }).into();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let location = Rc::new(RefCell::new(()));
+            let main: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                args: Vec::new(),
+                statements: Vec::new(),
+                return_value: location.clone().into()
+            }).into();
+            IntermediateProgram{
+                statements: vec![
+                    ctor.clone().into(),
+                    IntermediateMatchStatement{
+                        subject: ctor.location.into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(arg.clone()),
+                                statements: vec![
+                                    IntermediateMemory{
+                                        location: location.clone(),
+                                        expression: Rc::new(RefCell::new(arg.clone().into()))
+                                    }.into(),
+                                ]
+                            },
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: vec![
+                                    IntermediateMemory{
+                                        location: location.clone(),
+                                        expression: Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: 0}).into()))
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into(),
+                    main.clone().into()
+                ],
+                main: main.location.into()
+            }
+        };
+        "union type usage"
+    )]
+    #[test_case(
+        {
+            let main: TypedVariable = ParametricType {
+                type_: Type::Function(Vec::new(), Box::new(TYPE_INT)),
+                parameters: Vec::new()
+            }.into();
+            let parameter = Rc::new(RefCell::new(None));
+            let type_variable = Type::Variable(parameter.clone());
+            let arg: TypedVariable = ParametricType{
+                parameters: Vec::new(),
+                type_: type_variable.clone()
+            }.into();
+            let id: TypedVariable = ParametricType{
+                parameters: vec![parameter.clone()],
+                type_: Type::Function(vec![type_variable.clone()],Box::new(type_variable.clone()))
+            }.into();
+            TypedProgram {
+                type_definitions: TypeDefinitions::new(),
+                assignments: vec![
+                    TypedAssignment {
+                        expression: ParametricExpression{
+                            parameters: vec![(Id::from("T"), parameter.clone())],
+                            expression: TypedFunctionDefinition{
+                                parameters: vec![
+                                    arg.clone()
+                                ],
+                                return_type: Box::new(type_variable.clone()),
+                                body: TypedBlock {
+                                    assignments: Vec::new(),
+                                    expression: Box::new(TypedAccess{
+                                        variable: arg,
+                                        parameters: Vec::new()
+                                    }.into())
+                                }
+                            }.into()
+                        },
+                        variable: id.clone()
+                    },
+                    TypedAssignment{
+                        variable: main.clone(),
+                        expression: TypedExpression::from(TypedFunctionDefinition{
+                            parameters: Vec::new(),
+                            return_type: Box::new(TYPE_INT),
+                            body: TypedBlock {
+                                assignments: Vec::new(),
+                                expression: Box::new(
+                                    TypedFunctionCall{
+                                        function: Box::new(TypedAccess{
+                                            variable: id,
+                                            parameters: vec![TYPE_INT],
+                                        }.into()),
+                                        arguments: vec![
+                                            Integer{value: 0}.into()
+                                        ]
+                                    }.into()
+                                )
+                            }
+                        }).into()
+                    }
+                ],
+                main
+            }
+        },
+        {
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let id_int: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                args: vec![arg.clone()],
+                statements: Vec::new(),
+                return_value: arg.into()
+            }).into();
+            let fn_call: IntermediateMemory = IntermediateExpression::from(IntermediateFnCall{
+                args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()],
+                fn_: id_int.location.clone().into()
+            }).into();
+            let main: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                args: Vec::new(),
+                statements: vec![
+                    id_int.into(),
+                    fn_call.clone().into()
+                ],
+                return_value: fn_call.location.into()
+            }).into();
+            IntermediateProgram{
+                statements: vec![
+                    main.clone().into()
+                ],
+                main: main.location.into()
+            }
+        };
+        "parametric variable"
+    )]
+    fn test_lower_program(program: TypedProgram, expected: IntermediateProgram) {
+        let mut lowerer = Lowerer::new();
+        let lower_program = lowerer.lower_program(program);
+        let lower_fn: IntermediateExpression = IntermediateFnDef {
+            args: Vec::new(),
+            statements: lower_program.statements,
+            return_value: lower_program.main,
+        }
+        .into();
+        let expected_fn: IntermediateExpression = IntermediateFnDef {
+            args: Vec::new(),
+            statements: expected.statements,
+            return_value: expected.main,
+        }
+        .into();
+        assert_eq!(lower_fn, expected_fn);
     }
 }

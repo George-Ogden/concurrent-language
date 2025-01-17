@@ -1019,7 +1019,7 @@ impl fmt::Debug for DebugTypeWrapper {
             Type::Instantiation(rc, instances) => {
                 write!(
                     f,
-                    "Instantation({}, {:?})",
+                    "Instantiation({}, {:?})",
                     references_index
                         .get(&rc.as_ptr())
                         .unwrap_or(&Id::from("unknown")),
