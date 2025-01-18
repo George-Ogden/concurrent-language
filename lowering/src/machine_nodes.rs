@@ -16,6 +16,12 @@ pub enum MachineType {
     Lazy(Box<MachineType>),
 }
 
+impl From<AtomicTypeEnum> for MachineType {
+    fn from(value: AtomicTypeEnum) -> Self {
+        AtomicType(value).into()
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AtomicType(pub AtomicTypeEnum);
 
@@ -26,7 +32,7 @@ pub struct FnType(pub Vec<MachineType>, pub Box<MachineType>);
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnionType(pub Vec<Name>);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TypeDef {
     pub name: Name,
     pub constructors: Vec<(Name, Option<MachineType>)>,

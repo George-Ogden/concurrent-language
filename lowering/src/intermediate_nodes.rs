@@ -13,7 +13,7 @@ pub enum IntermediateType {
     IntermediateTupleType(IntermediateTupleType),
     IntermediateFnType(IntermediateFnType),
     IntermediateUnionType(IntermediateUnionType),
-    IntermediateReferenceType(Rc<RefCell<IntermediateType>>),
+    Reference(Rc<RefCell<IntermediateType>>),
 }
 
 impl fmt::Debug for IntermediateType {
@@ -29,9 +29,7 @@ impl fmt::Debug for IntermediateType {
             Self::IntermediateUnionType(arg0) => {
                 f.debug_tuple("IntermediateUnionType").field(arg0).finish()
             }
-            Self::IntermediateReferenceType(_) => {
-                f.debug_tuple("IntermediateReferenceType").finish()
-            }
+            Self::Reference(_) => f.debug_tuple("Reference").finish(),
         }
     }
 }
@@ -87,10 +85,7 @@ impl TypeEqualityChecker {
                         _ => false,
                     })
             }
-            (
-                IntermediateType::IntermediateReferenceType(r1),
-                IntermediateType::IntermediateReferenceType(r2),
-            ) => {
+            (IntermediateType::Reference(r1), IntermediateType::Reference(r2)) => {
                 let p1 = r1.as_ptr();
                 let p2 = r2.as_ptr();
                 if self.equal_references.get(&p1) == Some(&p2) {
@@ -197,6 +192,7 @@ pub struct IntermediateMemory {
 impl Hash for IntermediateMemory {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.expression.as_ptr().hash(state);
+        self.location.as_ptr().hash(state);
     }
 }
 

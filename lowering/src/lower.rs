@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::intermediate_nodes::*;
+use crate::{intermediate_nodes::*, AtomicType, FnType, MachineType, TupleType, TypeDef};
 use itertools::{zip_eq, Itertools};
 use type_checker::*;
 
@@ -14,6 +14,7 @@ type Uninstantiated = HashMap<Variable, ParametricExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
 type VisitedReferences = HashSet<*mut IntermediateType>;
 type MemoryMap = HashMap<*mut (), Vec<Rc<RefCell<IntermediateExpression>>>>;
+type ReferenceNames = HashMap<*mut IntermediateType, MachineType>;
 
 struct Lowerer {
     scope: Scope,
@@ -23,6 +24,7 @@ struct Lowerer {
     statements: Vec<IntermediateStatement>,
     visited_references: VisitedReferences,
     memory: MemoryMap,
+    reference_names: ReferenceNames,
 }
 
 impl Lowerer {
@@ -35,6 +37,7 @@ impl Lowerer {
             statements: Vec::new(),
             visited_references: VisitedReferences::new(),
             memory: MemoryMap::new(),
+            reference_names: ReferenceNames::new(),
         };
         let scope = DEFAULT_CONTEXT.with(|context| {
             Scope::from_iter(context.iter().map(|(id, var)| {
@@ -569,9 +572,7 @@ impl Lowerer {
                             .visited_references
                             .contains(&occupied_entry.get().as_ptr())
                         {
-                            IntermediateType::IntermediateReferenceType(
-                                occupied_entry.get().clone(),
-                            )
+                            IntermediateType::Reference(occupied_entry.get().clone())
                         } else {
                             self.visited_references
                                 .insert(occupied_entry.get().as_ptr());
@@ -723,12 +724,73 @@ impl Lowerer {
             IntermediateValue::IntermediateArg(IntermediateArg(rc)) => rc.borrow().clone(),
         }
     }
+
+    fn compile_type(&self, type_: &IntermediateType) -> MachineType {
+        match type_ {
+            IntermediateType::AtomicType(AtomicType(atomic_type_enum)) => {
+                atomic_type_enum.clone().into()
+            }
+            IntermediateType::IntermediateTupleType(IntermediateTupleType(types)) => {
+                TupleType(self.compile_types(types)).into()
+            }
+            IntermediateType::IntermediateFnType(IntermediateFnType(arg_types, ret_type)) => {
+                FnType(
+                    self.compile_types(arg_types),
+                    Box::new(self.compile_type(&*ret_type)),
+                )
+                .into()
+            }
+            IntermediateType::IntermediateUnionType(intermediate_union_type) => todo!(),
+            IntermediateType::Reference(reference) => {
+                match self.reference_names.get(&reference.as_ptr()) {
+                    Some(type_) => MachineType::Reference(Box::new(type_.clone())),
+                    None => self.compile_type(&reference.borrow().clone()),
+                }
+            }
+        }
+    }
+    fn compile_types(&self, types: &Vec<IntermediateType>) -> Vec<MachineType> {
+        types.iter().map(|type_| self.compile_type(type_)).collect()
+    }
+    fn compile_type_defs(&mut self, types: Vec<Rc<RefCell<IntermediateType>>>) -> Vec<TypeDef> {
+        let types = types
+            .into_iter()
+            .filter_map(|type_| {
+                let IntermediateType::IntermediateUnionType(union_type) = type_.borrow().clone()
+                else {
+                    return None;
+                };
+                Some((type_.as_ptr(), union_type))
+            })
+            .collect_vec();
+        for (i, (ptr, _)) in types.iter().enumerate() {
+            self.reference_names
+                .insert(*ptr, MachineType::NamedType(format!("T{i}")));
+        }
+        types
+            .into_iter()
+            .enumerate()
+            .map(|(i, (_, IntermediateUnionType(types)))| TypeDef {
+                name: format!("T{i}"),
+                constructors: types
+                    .into_iter()
+                    .enumerate()
+                    .map(|(j, type_)| {
+                        (
+                            format!("T{i}C{j}"),
+                            type_.as_ref().map(|type_| self.compile_type(type_)),
+                        )
+                    })
+                    .collect_vec(),
+            })
+            .collect_vec()
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::{Id, Name};
+    use crate::{Id, Name, TupleType};
 
     use super::*;
 
@@ -1098,7 +1160,7 @@ mod tests {
             let union_type = IntermediateUnionType(vec![
                 Some(IntermediateTupleType(vec![
                     AtomicTypeEnum::INT.into(),
-                    IntermediateType::IntermediateReferenceType(reference.clone().into())
+                    IntermediateType::Reference(reference.clone().into())
                 ]).into()),
                 None
             ]);
@@ -1660,6 +1722,8 @@ mod tests {
         .into();
         let mut lowerer = Lowerer::new();
         let value = lowerer.lower_expression(expression);
+        dbg!(&value);
+        dbg!(&lowerer.statements);
         let efficient_value = lowerer.remove_wasted_allocations_from_value(value);
         let efficient_statements =
             lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
@@ -1890,7 +1954,7 @@ mod tests {
             assert_eq!(type_defs.len(), 1);
             let reference = type_defs.values().cloned().collect::<Vec<_>>()[0].clone();
             IntermediateUnionType(vec![
-                Some(IntermediateType::IntermediateReferenceType(reference.into())),
+                Some(IntermediateType::Reference(reference.into())),
                 None
             ]).into()
         };
@@ -1915,7 +1979,7 @@ mod tests {
             IntermediateUnionType(vec![
                 Some(IntermediateTupleType(vec![
                     AtomicTypeEnum::INT.into(),
-                    IntermediateType::IntermediateReferenceType(reference.into())
+                    IntermediateType::Reference(reference.into())
                 ]).into()),
                 None
             ]).into()
@@ -1978,7 +2042,7 @@ mod tests {
             IntermediateUnionType(vec![
                 Some(IntermediateTupleType(vec![
                     AtomicTypeEnum::INT.into(),
-                    IntermediateType::IntermediateReferenceType(reference.into())
+                    IntermediateType::Reference(reference.into())
                 ]).into()),
                 None
             ]).into()
@@ -2889,7 +2953,7 @@ mod tests {
         (
             {
                 let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
-                let type_ = IntermediateUnionType(vec![Some(IntermediateType::IntermediateReferenceType(reference.clone())), None]);
+                let type_ = IntermediateUnionType(vec![Some(IntermediateType::Reference(reference.clone())), None]);
                 *reference.borrow_mut() = type_.clone().into();
                 IntermediateCtorCall{
                     idx: 1,
@@ -2901,7 +2965,7 @@ mod tests {
         ),
         {
             let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
-            let type_ = IntermediateUnionType(vec![Some(IntermediateType::IntermediateReferenceType(reference.clone())), None]);
+            let type_ = IntermediateUnionType(vec![Some(IntermediateType::Reference(reference.clone())), None]);
             *reference.borrow_mut() = type_.clone().into();
             type_.into()
         };
@@ -3013,5 +3077,115 @@ mod tests {
         let mut lowerer = Lowerer::new();
         lowerer.memory = memory_map;
         assert_eq!(lowerer.expression_type(&expression), type_);
+    }
+
+    #[test_case(
+        Vec::new(),
+        Vec::new();
+        "empty type defs"
+    )]
+    #[test_case(
+        vec![
+            Rc::new(RefCell::new(IntermediateUnionType(
+                vec![None,None,]
+            ).into())),
+            Rc::new(RefCell::new(IntermediateUnionType(
+                vec![Some(AtomicTypeEnum::INT.into()),None,]
+            ).into()))
+        ],
+        vec![
+            TypeDef {
+                name: Name::from("T0"),
+                constructors: vec![
+                    (Name::from("T0C0"), None),
+                    (Name::from("T0C1"), None),
+                ]
+            },
+            TypeDef {
+                name: Name::from("T1"),
+                constructors: vec![
+                    (Name::from("T1C0"), Some(AtomicTypeEnum::INT.into())),
+                    (Name::from("T1C1"), None),
+                ]
+            },
+        ];
+        "non-recursive union types"
+    )]
+    #[test_case(
+        vec![
+            {
+                let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
+                let recursive_type = IntermediateUnionType(
+                    vec![
+                        Some(IntermediateType::Reference(reference.clone())),
+                        None
+                    ]
+                ).into();
+                *reference.borrow_mut() = recursive_type;
+                reference
+            },
+            {
+                let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
+                let recursive_type = IntermediateUnionType(
+                    vec![
+                        Some(IntermediateTupleType(vec![IntermediateType::Reference(reference.clone()), AtomicTypeEnum::INT.into()]).into()),
+                        None
+                    ]
+                ).into();
+                *reference.borrow_mut() = recursive_type;
+                reference
+            },
+        ],
+        vec![
+            TypeDef {
+                name: Name::from("T0"),
+                constructors: vec![
+                    (Name::from("T0C0"), Some(MachineType::Reference(Box::new(MachineType::NamedType(Name::from("T0")))))),
+                    (Name::from("T0C1"), None),
+                ]
+            },
+            TypeDef {
+                name: Name::from("T1"),
+                constructors: vec![
+                    (Name::from("T1C0"), Some(TupleType(vec![
+                        MachineType::Reference(Box::new(MachineType::NamedType(Name::from("T1")))),
+                        AtomicTypeEnum::INT.into()
+                    ]).into())),
+                    (Name::from("T1C1"), None),
+                ]
+            },
+        ];
+        "recursive union types"
+    )]
+    #[test_case(
+        vec![
+            Rc::new(RefCell::new(IntermediateType::Reference(
+                Rc::new(RefCell::new(
+                    IntermediateTupleType(
+                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()]
+                    ).into()
+                ))
+            ))),
+            Rc::new(RefCell::new(IntermediateUnionType(
+                vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::BOOL.into()),]
+            ).into()))
+        ],
+        vec![
+            TypeDef {
+                name: Name::from("T0"),
+                constructors: vec![
+                    (Name::from("T0C0"), Some(AtomicTypeEnum::INT.into())),
+                    (Name::from("T0C1"), Some(AtomicTypeEnum::BOOL.into())),
+                ]
+            },
+        ];
+        "mixed types"
+    )]
+    fn test_compile_type_defs(
+        type_defs: Vec<Rc<RefCell<IntermediateType>>>,
+        expected_type_defs: Vec<TypeDef>,
+    ) {
+        let mut lowerer = Lowerer::new();
+        assert_eq!(lowerer.compile_type_defs(type_defs), expected_type_defs)
     }
 }
