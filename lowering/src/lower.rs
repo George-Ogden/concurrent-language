@@ -5,10 +5,11 @@ use std::{
 };
 
 use crate::{
-    intermediate_nodes::*, AtomicType, BuiltIn, FnType, MachineType, Memory, TupleType, TypeDef,
-    Value,
+    intermediate_nodes::*, AtomicType, BuiltIn, FnType, MachineType, Memory, Name, TupleType,
+    TypeDef, Value,
 };
 use itertools::{zip_eq, Itertools};
+use once_cell::sync::Lazy;
 use type_checker::*;
 
 type Scope = HashMap<(Variable, Vec<Type>), IntermediateMemory>;
@@ -20,6 +21,35 @@ type MemoryMap = HashMap<*mut (), Vec<Rc<RefCell<IntermediateExpression>>>>;
 type ReferenceNames = HashMap<*mut IntermediateType, MachineType>;
 type MemoryIds = HashMap<*mut (), Memory>;
 type ArgIds = HashMap<*mut IntermediateType, Memory>;
+
+const OPERATOR_NAMES: Lazy<HashMap<Name, Name>> = Lazy::new(|| {
+    HashMap::from_iter(
+        [
+            ("+", "Plus__BuiltIn"),
+            ("-", "Minus__BuiltIn"),
+            ("*", "Multiply__BuiltIn"),
+            ("/", "Divide__BuiltIn"),
+            ("**", "Exponentiate__BuiltIn"),
+            ("%", "Modulo__BuiltIn"),
+            ("<<", "Left_Shift__BuiltIn"),
+            (">>", "Right_Shift__BuiltIn"),
+            ("<=>", "Spaceship__BuiltIn"),
+            ("&", "Bitwise_And__BuiltIn"),
+            ("|", "Bitwise_Or__BuiltIn"),
+            ("^", "Bitwise_Xor__BuiltIn"),
+            ("++", "Increment__BuiltIn"),
+            ("--", "Decrement__BuiltIn"),
+            ("<", "Comparison_LT__BuiltIn"),
+            ("<=", "Comparison_LE__BuiltIn"),
+            (">", "Comparison_GT__BuiltIn"),
+            (">=", "Comparison_GE__BuiltIn"),
+            ("==", "Comparison_EQ__BuiltIn"),
+            ("!=", "Comparison_NE__BuiltIn"),
+        ]
+        .into_iter()
+        .map(|(op, name)| (Name::from(op), Name::from(name))),
+    )
+});
 
 struct Lowerer {
     scope: Scope,
@@ -804,7 +834,11 @@ impl Lowerer {
                 BuiltIn::from(integer).into()
             }
             IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(name, type_)) => {
-                BuiltIn::BuiltInFn(name, self.compile_type(&type_)).into()
+                BuiltIn::BuiltInFn(
+                    OPERATOR_NAMES.get(&name).unwrap().clone(),
+                    self.compile_type(&type_),
+                )
+                .into()
             }
             IntermediateValue::IntermediateMemory(location) => {
                 let p = location.as_ptr();
@@ -827,7 +861,7 @@ impl Lowerer {
 #[cfg(test)]
 mod tests {
 
-    use crate::{BuiltIn, Id, Memory, Name, TupleType, Value};
+    use crate::{BuiltIn, Expression, Id, Memory, Name, TupleType, Value};
 
     use super::*;
 
@@ -3245,7 +3279,7 @@ mod tests {
             ).into()
         ).into(),
         BuiltIn::BuiltInFn(
-            Name::from("=="),
+            Name::from("Comparison_EQ__BuiltIn"),
             FnType(
                 vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
                 Box::new(AtomicTypeEnum::BOOL.into())

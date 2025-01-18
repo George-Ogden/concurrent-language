@@ -649,6 +649,7 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
     Nat *wrapped_inner = new Nat{inner};
 
     VariantT<Suc, Nil> outer = {};
+
     outer.tag = 0ULL;
     reinterpret_cast<Suc *>(&outer.value)->value = wrapped_inner;
 
