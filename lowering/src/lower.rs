@@ -4,7 +4,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::{intermediate_nodes::*, AtomicType, FnType, MachineType, TupleType, TypeDef};
+use crate::{
+    intermediate_nodes::*, AtomicType, BuiltIn, FnType, MachineType, Memory, TupleType, TypeDef,
+    Value,
+};
 use itertools::{zip_eq, Itertools};
 use type_checker::*;
 
@@ -15,6 +18,8 @@ type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
 type VisitedReferences = HashSet<*mut IntermediateType>;
 type MemoryMap = HashMap<*mut (), Vec<Rc<RefCell<IntermediateExpression>>>>;
 type ReferenceNames = HashMap<*mut IntermediateType, MachineType>;
+type MemoryIds = HashMap<*mut (), Memory>;
+type ArgIds = HashMap<*mut IntermediateType, Memory>;
 
 struct Lowerer {
     scope: Scope,
@@ -25,6 +30,8 @@ struct Lowerer {
     visited_references: VisitedReferences,
     memory: MemoryMap,
     reference_names: ReferenceNames,
+    memory_ids: MemoryIds,
+    arg_ids: ArgIds,
 }
 
 impl Lowerer {
@@ -38,6 +45,8 @@ impl Lowerer {
             visited_references: VisitedReferences::new(),
             memory: MemoryMap::new(),
             reference_names: ReferenceNames::new(),
+            memory_ids: MemoryIds::new(),
+            arg_ids: ArgIds::new(),
         };
         let scope = DEFAULT_CONTEXT.with(|context| {
             Scope::from_iter(context.iter().map(|(id, var)| {
@@ -785,12 +794,40 @@ impl Lowerer {
             })
             .collect_vec()
     }
+
+    fn compile_value(&mut self, value: IntermediateValue) -> Value {
+        match value {
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Boolean(boolean)) => {
+                BuiltIn::from(boolean).into()
+            }
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Integer(integer)) => {
+                BuiltIn::from(integer).into()
+            }
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(name, type_)) => {
+                BuiltIn::BuiltInFn(name, self.compile_type(&type_)).into()
+            }
+            IntermediateValue::IntermediateMemory(location) => {
+                let p = location.as_ptr();
+                if !self.memory_ids.contains_key(&p) {
+                    self.memory_ids
+                        .insert(p, Memory(format!("m{}", self.memory_ids.len())));
+                }
+                self.memory_ids.get(&p).unwrap().clone().into()
+            }
+            IntermediateValue::IntermediateArg(IntermediateArg(reference)) => self
+                .arg_ids
+                .get(&reference.as_ptr())
+                .unwrap()
+                .clone()
+                .into(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::{Id, Name, TupleType};
+    use crate::{BuiltIn, Id, Memory, Name, TupleType, Value};
 
     use super::*;
 
@@ -3187,5 +3224,99 @@ mod tests {
     ) {
         let mut lowerer = Lowerer::new();
         assert_eq!(lowerer.compile_type_defs(type_defs), expected_type_defs)
+    }
+
+    #[test_case(
+        IntermediateBuiltIn::from(Integer{value: 4}).into(),
+        BuiltIn::from(Integer{value: 4}).into();
+        "integer"
+    )]
+    #[test_case(
+        IntermediateBuiltIn::from(Boolean{value: true}).into(),
+        BuiltIn::from(Boolean{value: true}).into();
+        "boolean"
+    )]
+    #[test_case(
+        IntermediateBuiltIn::BuiltInFn(
+            Name::from("=="),
+            IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::BOOL.into())
+            ).into()
+        ).into(),
+        BuiltIn::BuiltInFn(
+            Name::from("=="),
+            FnType(
+                vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::BOOL.into())
+            ).into()
+        ).into();
+        "built-in fn"
+    )]
+    #[test_case(
+        IntermediateValue::IntermediateMemory(
+            Rc::new(RefCell::new(()))
+        ),
+        Memory(
+            Id::from("m0")
+        ).into();
+        "memory"
+    )]
+    fn test_compile_values(value: IntermediateValue, expected_value: Value) {
+        let mut lowerer = Lowerer::new();
+        let compiled_value = lowerer.compile_value(value);
+        assert_eq!(compiled_value, expected_value);
+    }
+    #[test]
+    fn test_compile_multiple_memory_locations() {
+        let locations = vec![
+            Rc::new(RefCell::new(())),
+            Rc::new(RefCell::new(())),
+            Rc::new(RefCell::new(())),
+        ];
+        let mut lowerer = Lowerer::new();
+        let value_0 = lowerer.compile_value(locations[0].clone().into());
+        let value_1 = lowerer.compile_value(locations[1].clone().into());
+        let value_2 = lowerer.compile_value(locations[2].clone().into());
+        assert_ne!(value_0, value_1);
+        assert_ne!(value_2, value_1);
+        assert_ne!(value_2, value_0);
+
+        assert_eq!(value_0, lowerer.compile_value(locations[0].clone().into()));
+        assert_eq!(value_1, lowerer.compile_value(locations[1].clone().into()));
+        assert_eq!(value_2, lowerer.compile_value(locations[2].clone().into()));
+    }
+    #[test]
+    fn test_compile_arguments() {
+        let types = vec![
+            Rc::new(RefCell::new(AtomicTypeEnum::INT.into())),
+            Rc::new(RefCell::new(AtomicTypeEnum::BOOL.into())),
+            Rc::new(RefCell::new(AtomicTypeEnum::INT.into())),
+        ];
+        let mut lowerer = Lowerer::new();
+        lowerer
+            .arg_ids
+            .insert(types[0].as_ptr(), Memory(Id::from("a0")));
+        lowerer
+            .arg_ids
+            .insert(types[1].as_ptr(), Memory(Id::from("a1")));
+        lowerer
+            .arg_ids
+            .insert(types[2].as_ptr(), Memory(Id::from("a2")));
+
+        let args = types
+            .into_iter()
+            .map(|type_| IntermediateArg(type_))
+            .collect_vec();
+        let value_0 = lowerer.compile_value(args[0].clone().into());
+        let value_1 = lowerer.compile_value(args[1].clone().into());
+        let value_2 = lowerer.compile_value(args[2].clone().into());
+        assert_ne!(value_0, value_1);
+        assert_ne!(value_2, value_1);
+        assert_ne!(value_2, value_0);
+
+        assert_eq!(value_0, lowerer.compile_value(args[0].clone().into()));
+        assert_eq!(value_1, lowerer.compile_value(args[1].clone().into()));
+        assert_eq!(value_2, lowerer.compile_value(args[2].clone().into()));
     }
 }
