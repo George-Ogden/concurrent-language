@@ -656,10 +656,49 @@ impl Lowerer {
     fn expression_type(&self, expression: &IntermediateExpression) -> IntermediateType {
         match expression {
             IntermediateExpression::IntermediateValue(value) => self.value_type(value),
-            _ => todo!(),
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx: _,
+                data: _,
+                type_,
+            }) => type_.clone().into(),
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                args,
+                statements: _,
+                return_value,
+            }) => IntermediateFnType(
+                args.iter()
+                    .map(|arg| self.value_type(&arg.clone().into()))
+                    .collect(),
+                Box::new(self.value_type(return_value)),
+            )
+            .into(),
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args: _ }) => {
+                let IntermediateType::IntermediateFnType(IntermediateFnType(_, return_type)) =
+                    self.value_type(fn_)
+                else {
+                    panic!("Calling function with non-function type.")
+                };
+                *return_type
+            }
+            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                values,
+            )) => {
+                IntermediateTupleType(values.iter().map(|value| self.value_type(value)).collect())
+                    .into()
+            }
+            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
+                value,
+                idx,
+            }) => {
+                let IntermediateType::IntermediateTupleType(IntermediateTupleType(types)) =
+                    self.value_type(value)
+                else {
+                    panic!("Accessing tuple with non-tuple type.")
+                };
+                types[*idx].clone()
+            }
         }
     }
-
     fn value_type(&self, value: &IntermediateValue) -> IntermediateType {
         match value {
             IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Integer(_)) => {
@@ -2832,5 +2871,147 @@ mod tests {
         let mut lowerer = Lowerer::new();
         lowerer.memory = memory_map;
         assert_eq!(lowerer.value_type(&value), type_);
+    }
+
+    #[test_case(
+        (
+            IntermediateCtorCall{
+                idx: 0,
+                data: None,
+                type_: IntermediateUnionType(vec![None,None])
+            }.into(),
+            MemoryMap::new()
+        ),
+        IntermediateUnionType(vec![None,None]).into();
+        "ctor call no data"
+    )]
+    #[test_case(
+        (
+            {
+                let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
+                let type_ = IntermediateUnionType(vec![Some(IntermediateType::IntermediateReferenceType(reference.clone())), None]);
+                *reference.borrow_mut() = type_.clone().into();
+                IntermediateCtorCall{
+                    idx: 1,
+                    data: None,
+                    type_: type_
+                }.into()
+            },
+            MemoryMap::new()
+        ),
+        {
+            let reference = Rc::new(RefCell::new(IntermediateTupleType(Vec::new()).into()));
+            let type_ = IntermediateUnionType(vec![Some(IntermediateType::IntermediateReferenceType(reference.clone())), None]);
+            *reference.borrow_mut() = type_.clone().into();
+            type_.into()
+        };
+        "recursive ctor"
+    )]
+    #[test_case(
+        (
+            IntermediateFnDef{
+                args: Vec::new(),
+                statements: Vec::new(),
+                return_value: IntermediateBuiltIn::from(Integer{value: 5}).into()
+            }.into(),
+            MemoryMap::new()
+        ),
+        IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into();
+        "fn def no args"
+    )]
+    #[test_case(
+        (
+            {
+                let args = vec![
+                    IntermediateType::from(AtomicTypeEnum::INT).into(),
+                    IntermediateType::from(AtomicTypeEnum::BOOL).into(),
+                ];
+                IntermediateFnDef{
+                    args: args.clone(),
+                    statements: Vec::new(),
+                    return_value: args[1].clone().into()
+                }.into()
+            },
+            MemoryMap::new()
+        ),
+        IntermediateFnType(vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::BOOL.into()], Box::new(AtomicTypeEnum::BOOL.into())).into();
+        "fn def with args"
+    )]
+    #[test_case(
+        (
+            IntermediateFnCall{
+                fn_: IntermediateBuiltIn::BuiltInFn(
+                    Name::from("<"),
+                    IntermediateFnType(
+                        vec![
+                            AtomicTypeEnum::INT.into(),
+                            AtomicTypeEnum::INT.into()
+                        ],
+                        Box::new(AtomicTypeEnum::BOOL.into())
+                    ).into()
+                ).into(),
+                args: vec![
+                    IntermediateBuiltIn::from(Integer{value: 3}).into(),
+                    IntermediateBuiltIn::from(Integer{value: 4}).into(),
+                ]
+            }.into(),
+            MemoryMap::new()
+        ),
+        AtomicTypeEnum::BOOL.into();
+        "fn call"
+    )]
+    #[test_case(
+        (
+            IntermediateTupleExpression(Vec::new()).into(),
+            MemoryMap::new()
+        ),
+        IntermediateTupleType(Vec::new()).into();
+        "empty tuple"
+    )]
+    #[test_case(
+        (
+            IntermediateTupleExpression(
+                vec![
+                    IntermediateBuiltIn::from(Integer{value: 4}).into(),
+                    IntermediateBuiltIn::from(Boolean{value: false}).into(),
+                ]
+            ).into(),
+            MemoryMap::new()
+        ),
+        IntermediateTupleType(vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::BOOL.into()]).into();
+        "non-empty tuple"
+    )]
+    #[test_case(
+        {
+            let location = Rc::new(RefCell::new(()));
+            (
+                IntermediateElementAccess{
+                    value: location.clone().into(),
+                    idx: 1
+                }.into(),
+                MemoryMap::from([(
+                    location.as_ptr(),
+                    vec![Rc::new(RefCell::new(
+                        IntermediateTupleExpression(
+                            vec![
+                                IntermediateBuiltIn::from(Integer{value: 4}).into(),
+                                IntermediateBuiltIn::from(Boolean{value: false}).into(),
+                            ]
+                        ).into(),
+                    ))]
+                )])
+            )
+        },
+        AtomicTypeEnum::BOOL.into();
+        "tuple access"
+    )]
+    fn test_expression_type(
+        expression_memory_map: (IntermediateExpression, MemoryMap),
+        type_: IntermediateType,
+    ) {
+        let (expression, memory_map) = expression_memory_map;
+        let mut lowerer = Lowerer::new();
+        lowerer.memory = memory_map;
+        assert_eq!(lowerer.expression_type(&expression), type_);
     }
 }
