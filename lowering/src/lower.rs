@@ -652,6 +652,38 @@ impl Lowerer {
             main: self.remove_wasted_allocations_from_value(main),
         }
     }
+
+    fn expression_type(&self, expression: &IntermediateExpression) -> IntermediateType {
+        match expression {
+            IntermediateExpression::IntermediateValue(value) => self.value_type(value),
+            _ => todo!(),
+        }
+    }
+
+    fn value_type(&self, value: &IntermediateValue) -> IntermediateType {
+        match value {
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Integer(_)) => {
+                AtomicTypeEnum::INT.into()
+            }
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Boolean(_)) => {
+                AtomicTypeEnum::BOOL.into()
+            }
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(_, type_)) => {
+                type_.clone()
+            }
+            IntermediateValue::IntermediateMemory(reference) => {
+                let expressions = self.memory.get(&reference.as_ptr()).unwrap();
+                let types = expressions
+                    .iter()
+                    .map(|expression| self.expression_type(&expression.borrow().clone()));
+                if !types.clone().all_equal() {
+                    panic!("Expressions have different types.");
+                }
+                types.collect_vec().first().unwrap().clone()
+            }
+            IntermediateValue::IntermediateArg(IntermediateArg(rc)) => rc.borrow().clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2715,5 +2747,90 @@ mod tests {
         }
         .into();
         assert_eq!(lower_fn, expected_fn);
+    }
+
+    #[test_case(
+        (
+            IntermediateBuiltIn::from(Integer{value: 11}).into(),
+            MemoryMap::new()
+        ),
+        AtomicTypeEnum::INT.into();
+        "integer"
+    )]
+    #[test_case(
+        (
+            IntermediateBuiltIn::from(Boolean{value: true}).into(),
+            MemoryMap::new()
+        ),
+        AtomicTypeEnum::BOOL.into();
+        "boolean"
+    )]
+    #[test_case(
+        (
+            IntermediateBuiltIn::BuiltInFn(
+                Name::from("+"),
+                IntermediateFnType(
+                    vec![
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::INT.into(),
+                    ],
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()
+            ).into(),
+            MemoryMap::new()
+        ),
+        IntermediateFnType(
+            vec![
+                AtomicTypeEnum::INT.into(),
+                AtomicTypeEnum::INT.into(),
+            ],
+            Box::new(AtomicTypeEnum::INT.into())
+        ).into();
+        "builtin-function"
+    )]
+    #[test_case(
+        {
+            let location = Rc::new(RefCell::new(()));
+            (
+                IntermediateValue::IntermediateMemory(location.clone()),
+                MemoryMap::from([(
+                    location.as_ptr(),
+                    vec![Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: 8}).into()))]
+                )])
+            )
+        },
+        AtomicTypeEnum::INT.into();
+        "single value memory location"
+    )]
+    #[test_case(
+        {
+            let location = Rc::new(RefCell::new(()));
+            (
+                IntermediateValue::IntermediateMemory(location.clone()),
+                MemoryMap::from([(
+                    location.as_ptr(),
+                    vec![
+                        Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: 8}).into())),
+                        Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: -8}).into())),
+                    ]
+                )])
+            )
+        },
+        AtomicTypeEnum::INT.into();
+        "multiple value memory location"
+    )]
+    #[test_case(
+        (
+            IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into(),
+            MemoryMap::new()
+        ),
+        AtomicTypeEnum::INT.into();
+        "argument"
+    )]
+    fn test_value_type(value_memory_map: (IntermediateValue, MemoryMap), type_: IntermediateType) {
+        let (value, memory_map) = value_memory_map;
+        let mut lowerer = Lowerer::new();
+        lowerer.memory = memory_map;
+        assert_eq!(lowerer.value_type(&value), type_);
     }
 }
