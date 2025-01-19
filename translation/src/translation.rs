@@ -4,9 +4,9 @@ use std::fmt::Formatter;
 
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
-    ConstructorCall, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, Integer,
-    MachineType, MatchStatement, Memory, MemoryAllocation, Program, Statement, TupleExpression,
-    TupleType, TypeDef, UnionType, Value,
+    ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
+    IfStatement, Integer, MachineType, MatchStatement, Memory, MemoryAllocation, Program,
+    Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -154,8 +154,16 @@ impl Translator {
         };
         format!("{declaration} {value_code} {indexing_code}")
     }
+    fn translate_declaration(&self, declaration: Declaration) -> Code {
+        let Declaration { type_, memory } = declaration;
+        format!(
+            "{} {};",
+            self.translate_type(&type_),
+            self.translate_memory(memory)
+        )
+    }
     fn translate_assignment(&self, assignment: Assignment) -> Code {
-        let id = assignment.target.0;
+        let Memory(id) = assignment.target;
         let value_code = match assignment.value {
             Expression::FnCall(fn_call) => self.translate_fn_call(id.clone(), fn_call),
             Expression::ConstructorCall(constructor_call) => {
@@ -164,9 +172,10 @@ impl Translator {
             value => self.translate_expression(value),
         };
         let assignment_code = format!("{id} = {value_code};");
-        match assignment.allocation {
-            None => format!("if ({id} == nullptr) {{ {assignment_code} }}"),
-            Some(type_) => format!("{} {assignment_code}", self.translate_type(&type_)),
+        if assignment.check_null {
+            format!("if ({id} == nullptr) {{ {assignment_code} }}")
+        } else {
+            assignment_code
         }
     }
     fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
@@ -206,6 +215,7 @@ impl Translator {
             Statement::Await(await_) => self.translate_await(await_),
             Statement::Assignment(assignment) => self.translate_assignment(assignment),
             Statement::IfStatement(if_statement) => self.translate_if_statement(if_statement),
+            Statement::Declaration(declaration) => self.translate_declaration(declaration),
             Statement::MatchStatement(match_statement) => {
                 self.translate_match_statement(match_statement)
             }
@@ -770,9 +780,9 @@ mod tests {
         Assignment {
             target: Memory(Id::from("x")).into(),
             value: Value::BuiltIn(Integer{value: 5}.into()).into(),
-            allocation: Some(AtomicType(AtomicTypeEnum::INT).into())
+            check_null: false
         },
-        "Int x = 5LL;";
+        "x = 5LL;";
         "integer assignment"
     )]
     #[test_case(
@@ -784,25 +794,25 @@ mod tests {
                 ).into()),
                 idx: 0
             }.into(),
-            allocation: Some(AtomicType(AtomicTypeEnum::INT).into())
+            check_null: false
         },
-        "Int x = std::get<0ULL>(tuple);";
+        "x = std::get<0ULL>(tuple);";
         "tuple access assignment"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("y")).into(),
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
-            allocation: Some(AtomicType(AtomicTypeEnum::BOOL).into())
+            check_null: false
         },
-        "Bool y = true;";
+        "y = true;";
         "boolean assignment"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("x")).into(),
             value: Expression::Wrap(Value::BuiltIn(Integer{value: -5}.into()), AtomicType(AtomicTypeEnum::INT).into()),
-            allocation: None,
+            check_null: true
         },
         "if (x == nullptr) { x = new LazyConstant<Int>{-5LL}; }";
         "wrapping constant"
@@ -821,7 +831,7 @@ mod tests {
                     Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),),
                 ).into()
             ),
-            allocation: None
+            check_null: true
         },
         "if (g == nullptr) { g = new LazyConstant<FnT<Int,Int>>{f}; }";
         "wrapping function from variable"
@@ -830,18 +840,18 @@ mod tests {
         Assignment {
             target: Memory(Id::from("w")).into(),
             value: Expression::Unwrap(Memory(Id::from("g")).into()),
-            allocation: None
+            check_null: false
         },
-        "if (w == nullptr) { w = g->value(); }";
+        "w = g->value();";
         "unwrapping function from variable"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("y")).into(),
             value: Expression::Unwrap(Memory(Id::from("t")).into()),
-            allocation: Some(AtomicType(AtomicTypeEnum::BOOL).into())
+            check_null: false
         },
-        "Bool y = t->value();";
+        "y = t->value();";
         "unwrapping boolean from variable"
     )]
     #[test_case(
@@ -863,7 +873,7 @@ mod tests {
                     Memory(Id::from("arg2")).into(),
                 ]
             }.into(),
-            allocation: None
+            check_null: true
         },
         "if (call == nullptr) { call = new Plus__BuiltIn{}; call->args = std::make_tuple(arg1, arg2); call->call(); }";
         "built-in fn-call"
@@ -875,14 +885,9 @@ mod tests {
                 statements: Vec::new(),
                 ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))
             }.into(),
-            allocation: Some(
-                FnType(
-                    Vec::new(),
-                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                ).into()
-            )
+            check_null: false
         },
-        "FnT<Int> call = new BlockFn<Int>([&](){ return call; });";
+        "call = new BlockFn<Int>([&](){ return call; });";
         "empty block"
     )]
     #[test_case(
@@ -908,7 +913,7 @@ mod tests {
                                 ).into()
                             ]
                         }.into(),
-                        allocation: None
+                        check_null: true
                     }.into(),
                 ],
                 ret: (
@@ -918,7 +923,7 @@ mod tests {
                     MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
                 )
             }.into(),
-            allocation: None
+            check_null: true
         },
         "if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{}; call->args = std::make_tuple(x); call->call(); } return call; });}";
         "internal fn-call block fn-call"
@@ -942,7 +947,7 @@ mod tests {
                             ).into(),
                             args: vec![Memory(Id::from("y")).into()]
                         }.into(),
-                        allocation: None
+                        check_null: true
                     }.into(),
                 ],
                 ret: (
@@ -950,14 +955,9 @@ mod tests {
                     MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
                 )
             }.into(),
-            allocation: Some(
-                FnType(
-                    Vec::new(),
-                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                ).into()
-            )
+            check_null: false
         },
-        "FnT<Int> block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{}; call->args = std::make_tuple(y); call->call(); } return call; });";
+        "block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{}; call->args = std::make_tuple(y); call->call(); } return call; });";
         "block assignment"
     )]
     #[test_case(
@@ -970,7 +970,7 @@ mod tests {
                     Memory(Id::from("arg2")).into(),
                 ]
             }.into(),
-            allocation: None
+            check_null: true
         },
         "if (call2 == nullptr) { call2 = call1->clone();  call2->args = std::make_tuple(arg1, arg2); call2->call(); }";
         "custom fn-call"
@@ -979,9 +979,9 @@ mod tests {
         Assignment {
             target: Memory(Id::from("e")),
             value: TupleExpression(Vec::new()).into(),
-            allocation: Some(TupleType(Vec::new()).into())
+            check_null: false
         },
-        "TupleT<> e = std::make_tuple();";
+        "e = std::make_tuple();";
         "empty tuple assignment"
     )]
     #[test_case(
@@ -990,9 +990,9 @@ mod tests {
             value: TupleExpression(vec![
                 Value::BuiltIn(Integer{value: 5}.into())
             ]).into(),
-            allocation: Some(TupleType(vec![AtomicType(AtomicTypeEnum::INT).into()]).into())
+            check_null: false
         },
-        "TupleT<Int> t = std::make_tuple(5LL);";
+        "t = std::make_tuple(5LL);";
         "singleton tuple assignment"
     )]
     #[test_case(
@@ -1002,9 +1002,9 @@ mod tests {
                 Value::BuiltIn(Integer{value: -4}.into()),
                 Memory(Id::from("y")).into()
             ]).into(),
-            allocation: Some(TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(),AtomicType(AtomicTypeEnum::INT).into()]).into())
+            check_null: false
         },
-        "TupleT<Int,Int> t = std::make_tuple(-4LL,y);";
+        "t = std::make_tuple(-4LL,y);";
         "double tuple assignment"
     )]
     #[test_case(
@@ -1014,9 +1014,9 @@ mod tests {
                 idx: 1,
                 data: None
             }.into(),
-            allocation: Some(MachineType::NamedType(Name::from("Bull")))
+            check_null: false
         },
-        "Bull bull = {}; bull.tag = 1ULL;";
+        "bull = {}; bull.tag = 1ULL;";
         "empty constructor assignment"
     )]
     #[test_case(
@@ -1026,9 +1026,9 @@ mod tests {
                 idx: 0,
                 data: Some((Name::from("Wrapper"), Value::BuiltIn(Integer{value: 4}.into())))
             }.into(),
-            allocation: Some(UnionType(vec![Name::from("Wrapper")]).into())
+            check_null: false
         },
-        "VariantT<Wrapper> wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = 4LL; wrapper.tag = 0ULL;";
+        "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = 4LL; wrapper.tag = 0ULL;";
         "wrapper constructor assignment"
     )]
     #[test_case(
@@ -1040,9 +1040,9 @@ mod tests {
                 ).into(),
                 MachineType::NamedType(Name::from("ListInt"))
             ),
-            allocation: Some(MachineType::Reference(Box::new(MachineType::NamedType(Name::from("ListInt")))))
+            check_null: false
         },
-        "ListInt* lr = new ListInt{l};";
+        "lr = new ListInt{l};";
         "reference assignment"
     )]
     #[test_case(
@@ -1052,7 +1052,7 @@ mod tests {
                 name: Name::from("Adder"),
                 env: Memory(Id::from("x")).into()
             }.into(),
-            allocation: None
+            check_null: true
         },
         "if (closure == nullptr) { closure = new Adder{x}; }";
         "closure assignment"
@@ -1073,7 +1073,7 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                            allocation: None,
+                            check_null: true
                         }.into(),
                     ],
                 },
@@ -1083,7 +1083,7 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Wrap(Value::BuiltIn(Boolean{value: false}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                            allocation: None,
+                            check_null: true
                         }.into(),
                     ],
                 }
@@ -1102,10 +1102,14 @@ mod tests {
                 MatchBranch {
                     target: Some(Name::from("x")),
                     statements: vec![
+                        Declaration {
+                            memory: Memory(Id::from("z")).into(),
+                            type_: MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("z")).into(),
                             value: Expression::Wrap(Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                            allocation: Some(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))
+                            check_null: false
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("call")).into(),
@@ -1125,7 +1129,7 @@ mod tests {
                                     Memory(Id::from("y")).into(),
                                 ]
                             }.into(),
-                            allocation: None
+                            check_null: true
                         }.into()
                     ],
                 },
@@ -1135,13 +1139,13 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("call")).into(),
                             value: Expression::Wrap(Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                            allocation: None,
+                            check_null: true
                         }.into(),
                     ],
                 }
             ]
         },
-        "switch (either.tag) { case 0ULL: { Left::type x = reinterpret_cast<Left*>(&either.value)->value; Lazy<Int>* z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; call->args = std::make_tuple(z, y); call->call(); } break; } case 1ULL: { Right::type x = reinterpret_cast<Right*>(&either.value)->value; if (call == nullptr) { call = new LazyConstant<Bool>{x};} break; }}";
+        "switch (either.tag) { case 0ULL: { Left::type x = reinterpret_cast<Left*>(&either.value)->value; Lazy<Int>* z; z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; call->args = std::make_tuple(z, y); call->call(); } break; } case 1ULL: { Right::type x = reinterpret_cast<Right*>(&either.value)->value; if (call == nullptr) { call = new LazyConstant<Bool>{x};} break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1151,15 +1155,19 @@ mod tests {
                 MatchBranch {
                     target: Some(Name::from("s")),
                     statements: vec![
+                        Declaration {
+                            memory: Memory(Id::from("u")),
+                            type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("u")),
                             value: Expression::Dereference(Memory(Name::from("s")).into()),
-                            allocation: Some(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())
+                            check_null: false
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Wrap(Memory(Name::from("u")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                            allocation: None
+                            check_null: true
                         }.into(),
                     ],
                 },
@@ -1169,13 +1177,13 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Wrap(Memory(Name::from("nil")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                            allocation: None
+                            check_null: true
                         }.into(),
                     ],
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { Suc::type s = reinterpret_cast<Suc*>(&nat.value)->value; VariantT<Suc,Nil> u = *s; if (r == nullptr) { r = new LazyConstant<VariantT<Suc,Nil>>{u};} break; } case 1ULL: { if (r == nullptr) {r = new LazyConstant<VariantT<Suc,Nil>>{nil};} break; }}";
+        "switch (nat.tag) { case 0ULL: { Suc::type s = reinterpret_cast<Suc*>(&nat.value)->value; VariantT<Suc,Nil> u; u = *s; if (r == nullptr) { r = new LazyConstant<VariantT<Suc,Nil>>{u};} break; } case 1ULL: { if (r == nullptr) {r = new LazyConstant<VariantT<Suc,Nil>>{nil};} break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1204,12 +1212,12 @@ mod tests {
                 vec![Assignment {
                     target: Memory(Id::from("x")),
                     value: Expression::Wrap(Value::BuiltIn(Integer{value: 1}.into()).into(),  AtomicType(AtomicTypeEnum::INT).into()),
-                    allocation: None
+                    check_null: true
                 }.into()],
                 vec![Assignment {
                     target: Memory(Id::from("x")).into(),
                     value: Expression::Wrap(Value::BuiltIn(Integer{value: -1}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                    allocation: None
+                    check_null: true
                 }.into()],
             )
         }.into(),
@@ -1228,14 +1236,14 @@ mod tests {
                                 Assignment {
                                     target: Memory(Id::from("x")).into(),
                                     value: Expression::Wrap(Value::BuiltIn(Integer{value: 1}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                                    allocation: None
+                                    check_null: true
                                 }.into()
                             ],
                             vec![
                                 Assignment {
                                     target: Memory(Id::from("x")).into(),
                                     value: Expression::Wrap(Value::BuiltIn(Integer{value: -1}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                                    allocation: None
+                                    check_null: true
                                 }.into()
                             ],
                         )
@@ -1243,19 +1251,19 @@ mod tests {
                     Assignment {
                         target: Memory(Id::from("r")).into(),
                         value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                        allocation: None
+                        check_null: true
                     }.into(),
                 ],
                 vec![
                     Assignment {
                         target: Memory(Id::from("x")).into(),
                         value: Expression::Wrap(Value::BuiltIn(Integer{value: 0}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                        allocation: None
+                        check_null: true
                     }.into(),
                     Assignment {
                         target: Memory(Id::from("r")).into(),
                         value: Expression::Wrap(Value::BuiltIn(Boolean{value: false}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                        allocation: None
+                        check_null: true
                     }.into(),
                 ],
             )
@@ -1274,12 +1282,20 @@ mod tests {
             Await(vec![
                 Memory(Id::from("t"))
             ]).into(),
+            Declaration {
+                type_: TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()]).into(),
+                memory: Memory(Id::from("tuple"))
+            }.into(),
             Assignment {
                 target: Memory(Id::from("tuple")),
                 value: Expression::Unwrap(
                     Memory(Id::from("t")).into()
                 ),
-                allocation: Some(TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()]).into())
+                check_null: false
+            }.into(),
+            Declaration {
+                type_: AtomicType(AtomicTypeEnum::INT).into(),
+                memory: Memory(Id::from("x"))
             }.into(),
             Assignment {
                 target: Memory(Id::from("x")),
@@ -1287,45 +1303,65 @@ mod tests {
                     value: Memory(Id::from("tuple")).into(),
                     idx: 1
                 }.into(),
-                allocation: Some(AtomicType(AtomicTypeEnum::INT).into())
+                check_null: false
             }.into()
         ],
-        "WorkManager::await(t); TupleT<Int,Int> tuple = t->value(); Int x = std::get<1ULL>(tuple);";
+        "WorkManager::await(t); TupleT<Int,Int> tuple; tuple = t->value(); Int x; x = std::get<1ULL>(tuple);";
         "tuple access"
     )]
     #[test_case(
         vec![
+            Declaration{
+                type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from("List")))).into(),
+                memory:  Memory(Id::from("tail_")),
+            }.into(),
             Assignment {
                 target: Memory(Id::from("tail_")),
                 value: ElementAccess{
                     value: Memory(Id::from("cons")).into(),
                     idx: 1
                 }.into(),
-                allocation: Some(MachineType::Reference(Box::new(MachineType::NamedType(Name::from("List")))).into())
+                check_null: false
+            }.into(),
+            Declaration{
+                type_: UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into(),
+                memory: Memory(Id::from("tail"))
             }.into(),
             Assignment {
                 target: Memory(Id::from("tail")),
                 value: Expression::Dereference(Memory(Id::from("tail_")).into()),
-                allocation: Some(UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into())
+                check_null: false
             }.into(),
         ],
-        "List *tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail = *tail_;";
+        "List *tail_; tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail; tail = *tail_;";
         "cons extraction"
     )]
     #[test_case(
         vec![
+            Declaration{
+                type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
+                memory: Memory(Id::from("n"))
+            }.into(),
             Assignment {
                 target: Memory(Id::from("n")).into(),
                 value: ConstructorCall{
                     idx: 1,
                     data: None
                 }.into(),
-                allocation: Some(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())
+                check_null: false
+            }.into(),
+            Declaration{
+                type_:MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())),
+                memory: Memory(Id::from("wrapped_n")).into()
             }.into(),
             Assignment {
                 target: Memory(Id::from("wrapped_n")).into(),
                 value: Expression::Reference(Memory(Id::from("n")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                allocation: Some(MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())))
+                check_null: false
+            }.into(),
+            Declaration{
+                type_:UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
+                memory: Memory(Id::from("s"))
             }.into(),
             Assignment {
                 target: Memory(Id::from("s")).into(),
@@ -1336,10 +1372,10 @@ mod tests {
                         Memory(Id::from("wrapped_n")).into()
                     ))
                 }.into(),
-                allocation: Some(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())
+                check_null: false
             }.into(),
         ],
-        "VariantT<Suc, Nil> n = {}; n.tag = 1ULL; VariantT<Suc, Nil> *wrapped_n = new VariantT<Suc, Nil>{n}; VariantT<Suc, Nil> s = {}; reinterpret_cast<Suc *>(&s.value)->value = wrapped_n; s.tag = 0ULL;";
+        "VariantT<Suc, Nil> n; n = {}; n.tag = 1ULL; VariantT<Suc, Nil> *wrapped_n; wrapped_n = new VariantT<Suc, Nil>{n}; VariantT<Suc, Nil> s; s= {}; reinterpret_cast<Suc *>(&s.value)->value = wrapped_n; s.tag = 0ULL;";
         "simple recursive type extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
@@ -1373,7 +1409,7 @@ mod tests {
             statements: vec![
                 Assignment {
                     target: Memory(Id::from("call1")),
-                    allocation: None,
+                    check_null: true,
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
@@ -1393,7 +1429,7 @@ mod tests {
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("call2")),
-                    allocation: None,
+                    check_null: true,
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
@@ -1413,7 +1449,7 @@ mod tests {
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("call3")),
-                    allocation: None,
+                    check_null: true,
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
@@ -1477,12 +1513,19 @@ mod tests {
                 (Memory(Id::from("x")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
             ],
             statements: vec![
+                Declaration {
+                    memory: Memory(Id::from("block_tmp")),
+                    type_: FnType(
+                        Vec::new(),
+                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    ).into()
+                }.into(),
                 Assignment {
                     target: Memory(Id::from("block_tmp")),
                     value: Block{
                         statements: vec![
                             Assignment {
-                                allocation: None,
+                                check_null: true,
                                 target: Memory(Id::from("call")),
                                 value: FnCall{
                                     fn_: BuiltIn::BuiltInFn(
@@ -1502,16 +1545,11 @@ mod tests {
                         ],
                         ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))
                     }.into(),
-                    allocation: Some(
-                        FnType(
-                            Vec::new(),
-                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                        ).into()
-                    )
+                    check_null: false,
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("block")),
-                    allocation: None,
+                    check_null: true,
                     value: FnCall{
                         fn_: Memory(Id::from("block_tmp")).into(),
                         args: Vec::new()
@@ -1538,7 +1576,7 @@ mod tests {
                 )
             ]
         },
-        "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int, Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { FnT<Int> block_tmp = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn {}; call -> args = std::make_tuple(x); call -> call(); } return call; }); if (block == nullptr) { block = block_tmp->clone(); block->args = std::make_tuple(); block->call(); } return block; } };";
+        "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int, Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { FnT<Int> block_tmp; block_tmp = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn {}; call -> args = std::make_tuple(x); call -> call(); } return call; }); if (block == nullptr) { block = block_tmp->clone(); block->args = std::make_tuple(); block->call(); } return block; } };";
         "flat block example"
     )]
     #[test_case(
@@ -1565,7 +1603,7 @@ mod tests {
                             Memory(Id::from("env")).into(),
                         ]
                     }.into(),
-                    allocation: None
+                    check_null: true
                 }.into()
             ],
             ret: (Memory(Id::from("inner_res")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
@@ -1626,7 +1664,7 @@ mod tests {
                                     Memory(Id::from("y")).into(),
                                 ]
                             }.into(),
-                            allocation: None
+                            check_null: true
                         }.into(),
                     ],
                     ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
@@ -1651,16 +1689,16 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("x")).into(),
                             value: Expression::Wrap(Value::BuiltIn(Integer{value: 9}.into()),AtomicType(AtomicTypeEnum::INT).into()),
-                            allocation: None
+                            check_null: true
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("y")).into(),
                             value: Expression::Wrap(Value::BuiltIn(Integer{value: 5}.into()),AtomicType(AtomicTypeEnum::INT).into()),
-                            allocation: None
+                            check_null: true
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("main")),
-                            allocation: None,
+                            check_null: true,
                             value: FnCall{
                                 fn_: BuiltIn::BuiltInFn(
                                     Name::from("Main"),

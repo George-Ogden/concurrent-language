@@ -5,9 +5,9 @@ use std::{
 };
 
 use crate::{
-    intermediate_nodes::*, Assignment, AtomicType, Await, BuiltIn, ConstructorCall, ElementAccess,
-    Expression, FnCall, FnType, MachineType, Memory, Name, Statement, TupleExpression, TupleType,
-    TypeDef, UnionType, Value,
+    intermediate_nodes::*, Assignment, AtomicType, Await, BuiltIn, ConstructorCall, Declaration,
+    ElementAccess, Expression, FnCall, FnType, MachineType, Memory, Name, Statement,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::{zip_eq, Either, Itertools};
 use once_cell::sync::Lazy;
@@ -880,8 +880,15 @@ impl Lowerer {
                             statements.push(Await(vec![lazy_mem]).into());
                             let memory = self.new_memory_location();
                             statements.push(
+                                Declaration {
+                                    type_,
+                                    memory: memory.clone(),
+                                }
+                                .into(),
+                            );
+                            statements.push(
                                 Assignment {
-                                    allocation: Some(type_),
+                                    check_null: false,
                                     target: memory.clone(),
                                     value: Expression::Unwrap(lazy_val),
                                 }
@@ -903,8 +910,15 @@ impl Lowerer {
                                 self.compile_value(value.clone(), false);
                             let memory = self.new_memory_location();
                             statements.push(
+                                Declaration {
+                                    type_: MachineType::Lazy(Box::new(type_.clone())),
+                                    memory: memory.clone(),
+                                }
+                                .into(),
+                            );
+                            statements.push(
                                 Assignment {
-                                    allocation: Some(MachineType::Lazy(Box::new(type_.clone()))),
+                                    check_null: false,
                                     target: memory.clone(),
                                     value: Expression::Wrap(non_lazy_val, type_),
                                 }
@@ -989,11 +1003,18 @@ impl Lowerer {
                 for (i, type_) in referenced_value_indices {
                     let memory = self.new_memory_location();
                     statements.push(
+                        Declaration {
+                            memory: memory.clone(),
+                            type_: MachineType::Reference(Box::new(
+                                self.compile_type(&type_.borrow().clone()),
+                            )),
+                        }
+                        .into(),
+                    );
+                    statements.push(
                         Assignment {
                             target: memory.clone(),
-                            allocation: Some(MachineType::Reference(Box::new(
-                                self.compile_type(&type_.borrow().clone()),
-                            ))),
+                            check_null: false,
                             value: values[i].clone().into(),
                         }
                         .into(),
@@ -3593,8 +3614,12 @@ mod tests {
         (
             vec![
                 Await(vec![Memory(Id::from("a0"))]).into(),
+                Declaration{
+                    memory: Memory(Id::from("m0")),
+                    type_: AtomicTypeEnum::INT.into()
+                }.into(),
                 Assignment{
-                    allocation: Some(AtomicTypeEnum::INT.into()),
+                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Unwrap(Memory(Id::from("a0")).into())
                 }.into()
@@ -3615,8 +3640,12 @@ mod tests {
         (
             vec![
                 Await(vec![Memory(Id::from("a1"))]).into(),
+                Declaration{
+                    type_: AtomicTypeEnum::INT.into(),
+                    memory: Memory(Id::from("m0"))
+                }.into(),
                 Assignment{
-                    allocation: Some(AtomicTypeEnum::INT.into()),
+                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Unwrap(Memory(Id::from("a1")).into())
                 }.into(),
@@ -3655,11 +3684,15 @@ mod tests {
         (
             vec![
                 Await(vec![Memory(Id::from("a0"))]).into(),
-                Assignment{
-                    allocation: Some(TupleType(vec![
+                Declaration {
+                    type_: TupleType(vec![
                         AtomicTypeEnum::INT.into(),
                         AtomicTypeEnum::BOOL.into(),
-                    ]).into()),
+                    ]).into(),
+                    memory: Memory(Id::from("m0"))
+                }.into(),
+                Assignment{
+                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Unwrap(Memory(Id::from("a0")).into())
                 }.into()
@@ -3684,10 +3717,14 @@ mod tests {
         }.into(),
         (
             vec![
-                Assignment{
-                    allocation: Some(MachineType::Lazy(
+                Declaration{
+                    type_: MachineType::Lazy(
                         Box::new(AtomicTypeEnum::INT.into())
-                    )),
+                    ),
+                    memory: Memory(Id::from("m0"))
+                }.into(),
+                Assignment{
+                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Wrap(
                         BuiltIn::from(Integer{value: 7}).into(),
@@ -3724,10 +3761,14 @@ mod tests {
         }.into(),
         (
             vec![
-                Assignment{
-                    allocation: Some(MachineType::Lazy(
+                Declaration {
+                    type_: MachineType::Lazy(
                         Box::new(AtomicTypeEnum::INT.into())
-                    )),
+                    ),
+                    memory: Memory(Id::from("m0"))
+                }.into(),
+                Assignment{
+                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Wrap(
                         BuiltIn::from(Integer{value: 9}).into(),
@@ -3773,13 +3814,17 @@ mod tests {
         (
             vec![
                 Await(vec![Memory(Id::from("a1"))]).into(),
-                Assignment{
-                    allocation: Some(FnType(
+                Declaration {
+                    type_: FnType(
                         vec![
                             MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
                         ],
                         Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
-                    ).into()),
+                    ).into(),
+                    memory: Memory(Id::from("m0"))
+                }.into(),
+                Assignment{
+                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Unwrap(
                         Memory(Id::from("a1")).into()
@@ -3853,17 +3898,26 @@ mod tests {
         let (statements, expression) = lowerer.compile_expression(intermediate_expression);
         assert_eq!(
             statements,
-            vec![Assignment {
-                target: Memory(Id::from("m1")),
-                allocation: Some(MachineType::Reference(Box::new(MachineType::UnionType(
-                    UnionType(vec![Id::from("T0C0"), Id::from("T0C1"),])
-                )))),
-                value: Expression::Reference(
-                    Memory(Id::from("m0")).into(),
-                    MachineType::UnionType(UnionType(vec![Id::from("T0C0"), Id::from("T0C1"),]))
-                )
-            }
-            .into()]
+            vec![
+                Declaration {
+                    memory: Memory(Id::from("m1")),
+                    type_: MachineType::Reference(Box::new(MachineType::UnionType(UnionType(
+                        vec![Id::from("T0C0"), Id::from("T0C1"),]
+                    ))))
+                }
+                .into(),
+                Assignment {
+                    target: Memory(Id::from("m1")),
+                    check_null: false,
+                    value: Expression::Reference(
+                        Memory(Id::from("m0")).into(),
+                        MachineType::UnionType(UnionType(
+                            vec![Id::from("T0C0"), Id::from("T0C1"),]
+                        ))
+                    )
+                }
+                .into()
+            ]
         );
         assert_eq!(
             expression,

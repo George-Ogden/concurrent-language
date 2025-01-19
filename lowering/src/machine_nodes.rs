@@ -105,6 +105,7 @@ pub struct ClosureInstantiation {
 #[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
 pub enum Statement {
     Await(Await),
+    Declaration(Declaration),
     Assignment(Assignment),
     IfStatement(IfStatement),
     MatchStatement(MatchStatement),
@@ -114,10 +115,16 @@ pub enum Statement {
 pub struct Await(pub Vec<Memory>);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Declaration {
+    pub type_: MachineType,
+    pub memory: Memory,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Assignment {
-    pub allocation: Option<MachineType>,
     pub target: Memory,
     pub value: Expression,
+    pub check_null: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
