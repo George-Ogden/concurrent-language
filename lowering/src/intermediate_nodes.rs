@@ -214,7 +214,7 @@ impl From<IntermediateArg> for IntermediateMemory {
     }
 }
 
-#[derive(Clone, Eq, FromVariants, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, FromVariants, Hash, Debug)]
 pub enum IntermediateExpression {
     IntermediateValue(IntermediateValue),
     IntermediateElementAccess(IntermediateElementAccess),
@@ -236,19 +236,17 @@ impl From<IntermediateBuiltIn> for IntermediateExpression {
     }
 }
 
-impl PartialEq for IntermediateExpression {
-    fn eq(&self, other: &Self) -> bool {
-        let mut expression_equality_checker = ExpressionEqualityChecker::new();
-        expression_equality_checker.equal_expression(self, other)
-    }
-}
-
-struct ExpressionEqualityChecker {
+pub struct ExpressionEqualityChecker {
     true_history: HashMap<*mut (), *mut ()>,
     history: HashMap<*mut (), *mut ()>,
     args: HashMap<*mut IntermediateType, *mut IntermediateType>,
 }
+
 impl ExpressionEqualityChecker {
+    pub fn equal(e1: &IntermediateExpression, e2: &IntermediateExpression) -> bool {
+        let mut expression_equality_checker = Self::new();
+        expression_equality_checker.equal_expression(e1, e2)
+    }
     fn new() -> Self {
         ExpressionEqualityChecker {
             true_history: HashMap::new(),

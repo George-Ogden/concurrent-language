@@ -861,7 +861,7 @@ impl Lowerer {
 #[cfg(test)]
 mod tests {
 
-    use crate::{BuiltIn, Expression, Id, Memory, Name, TupleType, Value};
+    use crate::{BuiltIn, Id, Memory, Name, TupleType, Value};
 
     use super::*;
 
@@ -1803,12 +1803,15 @@ mod tests {
             statements: efficient_statements,
             return_value: efficient_value,
         };
-        assert_eq!(expected_fn, efficient_fn.into())
+        assert!(ExpressionEqualityChecker::equal(
+            &expected_fn,
+            &efficient_fn.into()
+        ))
     }
 
     #[test]
     fn test_projection_equalities() {
-        let p0: IntermediateMemory = {
+        let p0 = {
             let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
@@ -1818,9 +1821,8 @@ mod tests {
                 statements: Vec::new(),
                 return_value: args[0].clone().into(),
             })
-            .into()
         };
-        let p1: IntermediateMemory = {
+        let p1 = {
             let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
@@ -1830,9 +1832,8 @@ mod tests {
                 statements: Vec::new(),
                 return_value: args[1].clone().into(),
             })
-            .into()
         };
-        let q0: IntermediateMemory = {
+        let q0 = {
             let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
@@ -1842,9 +1843,8 @@ mod tests {
                 statements: Vec::new(),
                 return_value: args[0].clone().into(),
             })
-            .into()
         };
-        let q1: IntermediateMemory = {
+        let q1 = {
             let args = vec![
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
                 IntermediateType::from(AtomicTypeEnum::INT).into(),
@@ -1854,15 +1854,14 @@ mod tests {
                 statements: Vec::new(),
                 return_value: args[1].clone().into(),
             })
-            .into()
         };
 
-        assert_eq!(p0, q0);
-        assert_eq!(p1, q1);
-        assert_ne!(p0, p1);
-        assert_ne!(q0, q1);
-        assert_ne!(p0, q1);
-        assert_ne!(p1, q0);
+        assert!(ExpressionEqualityChecker::equal(&p0, &q0));
+        assert!(ExpressionEqualityChecker::equal(&p1, &q1));
+        assert!(!ExpressionEqualityChecker::equal(&p0, &p1));
+        assert!(!ExpressionEqualityChecker::equal(&q0, &q1));
+        assert!(!ExpressionEqualityChecker::equal(&p0, &q1));
+        assert!(!ExpressionEqualityChecker::equal(&p1, &q0));
     }
 
     #[test_case(
@@ -2920,7 +2919,7 @@ mod tests {
             return_value: expected.main,
         }
         .into();
-        assert_eq!(lower_fn, expected_fn);
+        assert!(ExpressionEqualityChecker::equal(&lower_fn, &expected_fn));
     }
 
     #[test_case(
