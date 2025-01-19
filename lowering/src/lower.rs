@@ -5,10 +5,11 @@ use std::{
 };
 
 use crate::{
-    intermediate_nodes::*, AtomicType, BuiltIn, FnType, MachineType, Memory, Name, TupleType,
-    TypeDef, Value,
+    intermediate_nodes::*, Assignment, AtomicType, Await, BuiltIn, ConstructorCall, ElementAccess,
+    Expression, FnCall, FnType, MachineType, Memory, Name, Statement, TupleExpression, TupleType,
+    TypeDef, UnionType, Value,
 };
-use itertools::{zip_eq, Itertools};
+use itertools::{zip_eq, Either, Itertools};
 use once_cell::sync::Lazy;
 use type_checker::*;
 
@@ -21,6 +22,8 @@ type MemoryMap = HashMap<*mut (), Vec<Rc<RefCell<IntermediateExpression>>>>;
 type ReferenceNames = HashMap<*mut IntermediateType, MachineType>;
 type MemoryIds = HashMap<*mut (), Memory>;
 type ArgIds = HashMap<*mut IntermediateType, Memory>;
+type ValueScope = HashMap<IntermediateValue, Value>;
+type TypeLookup = HashMap<IntermediateUnionType, UnionType>;
 
 const OPERATOR_NAMES: Lazy<HashMap<Name, Name>> = Lazy::new(|| {
     HashMap::from_iter(
@@ -62,6 +65,9 @@ struct Lowerer {
     reference_names: ReferenceNames,
     memory_ids: MemoryIds,
     arg_ids: ArgIds,
+    lazy_vals: ValueScope,
+    non_lazy_vals: ValueScope,
+    type_lookup: TypeLookup,
 }
 
 impl Lowerer {
@@ -77,6 +83,9 @@ impl Lowerer {
             reference_names: ReferenceNames::new(),
             memory_ids: MemoryIds::new(),
             arg_ids: ArgIds::new(),
+            lazy_vals: ValueScope::new(),
+            non_lazy_vals: ValueScope::new(),
+            type_lookup: TypeLookup::new(),
         };
         let scope = DEFAULT_CONTEXT.with(|context| {
             Scope::from_iter(context.iter().map(|(id, var)| {
@@ -167,7 +176,7 @@ impl Lowerer {
             .scope
             .contains_key(&(variable.variable.clone(), parameters.clone()))
         {
-            let uninstantiated = self.uninstantiated.get(&variable.variable).unwrap();
+            let uninstantiated = &self.uninstantiated[&variable.variable];
             let (expression, placeholder) = self
                 .add_placeholder_assignment(
                     TypedAssignment {
@@ -182,9 +191,7 @@ impl Lowerer {
                 .unwrap();
             self.perform_assignment(expression, placeholder);
         };
-        self.scope
-            .get(&(variable.variable, parameters))
-            .unwrap()
+        self.scope[&(variable.variable, parameters)]
             .clone()
             .location
             .into()
@@ -313,7 +320,7 @@ impl Lowerer {
             .into_values()
             .map(|(assignee, block)| {
                 (
-                    assignee.map(|assignee| args.get(&assignee.variable).unwrap().clone()),
+                    assignee.map(|assignee| args[&assignee.variable].clone()),
                     self.lower_block(block, true),
                 )
             })
@@ -625,7 +632,7 @@ impl Lowerer {
                         self.visited_references.insert(reference.as_ptr());
                         let lower_type = self.lower_type_internal(&instantiation);
                         *reference.clone().borrow_mut() = lower_type;
-                        self.type_defs.get(&instantiation).unwrap().borrow().clone()
+                        self.type_defs[&instantiation].borrow().clone()
                     }
                 }
             }
@@ -680,10 +687,7 @@ impl Lowerer {
     }
     fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
         self.lower_assignments(program.assignments);
-        let main = self
-            .scope
-            .get(&(program.main.variable, Vec::new()))
-            .unwrap()
+        let main = self.scope[&(program.main.variable, Vec::new())]
             .clone()
             .location
             .into();
@@ -751,7 +755,7 @@ impl Lowerer {
                 type_.clone()
             }
             IntermediateValue::IntermediateMemory(reference) => {
-                let expressions = self.memory.get(&reference.as_ptr()).unwrap();
+                let expressions = &self.memory[&reference.as_ptr()];
                 let types = expressions
                     .iter()
                     .map(|expression| self.expression_type(&expression.borrow().clone()));
@@ -774,12 +778,17 @@ impl Lowerer {
             }
             IntermediateType::IntermediateFnType(IntermediateFnType(arg_types, ret_type)) => {
                 FnType(
-                    self.compile_types(arg_types),
-                    Box::new(self.compile_type(&*ret_type)),
+                    self.compile_types(arg_types)
+                        .into_iter()
+                        .map(|type_| MachineType::Lazy(Box::new(type_)))
+                        .collect(),
+                    Box::new(MachineType::Lazy(Box::new(self.compile_type(&*ret_type)))),
                 )
                 .into()
             }
-            IntermediateType::IntermediateUnionType(intermediate_union_type) => todo!(),
+            IntermediateType::IntermediateUnionType(union_type) => {
+                self.type_lookup[union_type].clone().into()
+            }
             IntermediateType::Reference(reference) => {
                 match self.reference_names.get(&reference.as_ptr()) {
                     Some(type_) => MachineType::Reference(Box::new(type_.clone())),
@@ -809,9 +818,9 @@ impl Lowerer {
         types
             .into_iter()
             .enumerate()
-            .map(|(i, (_, IntermediateUnionType(types)))| TypeDef {
-                name: format!("T{i}"),
-                constructors: types
+            .map(|(i, (_, IntermediateUnionType(types)))| {
+                let union_type = IntermediateUnionType(types.clone());
+                let constructors = types
                     .into_iter()
                     .enumerate()
                     .map(|(j, type_)| {
@@ -820,40 +829,231 @@ impl Lowerer {
                             type_.as_ref().map(|type_| self.compile_type(type_)),
                         )
                     })
-                    .collect_vec(),
+                    .collect_vec();
+                self.type_lookup.insert(
+                    union_type,
+                    UnionType(constructors.iter().map(|(name, _)| name.clone()).collect()),
+                );
+                TypeDef {
+                    name: format!("T{i}"),
+                    constructors,
+                }
             })
             .collect_vec()
     }
 
-    fn compile_value(&mut self, value: IntermediateValue) -> Value {
-        match value {
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Boolean(boolean)) => {
-                BuiltIn::from(boolean).into()
-            }
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Integer(integer)) => {
-                BuiltIn::from(integer).into()
-            }
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(name, type_)) => {
-                BuiltIn::BuiltInFn(
-                    OPERATOR_NAMES.get(&name).unwrap().clone(),
-                    self.compile_type(&type_),
-                )
-                .into()
-            }
-            IntermediateValue::IntermediateMemory(location) => {
-                let p = location.as_ptr();
-                if !self.memory_ids.contains_key(&p) {
-                    self.memory_ids
-                        .insert(p, Memory(format!("m{}", self.memory_ids.len())));
+    fn next_memory_address(&self) -> Memory {
+        Memory(format!("m{}", self.memory_ids.len()))
+    }
+    fn next_arg_id(&self) -> Memory {
+        Memory(format!("a{}", self.arg_ids.len()))
+    }
+    fn new_memory_location(&mut self) -> Memory {
+        let mut boxes: Vec<Rc<RefCell<()>>> = Vec::new();
+        while match boxes.first() {
+            None => true,
+            Some(x) => self.memory_ids.contains_key(&x.as_ptr()),
+        } {
+            boxes.push(Rc::new(RefCell::new(())));
+        }
+        let first = boxes.first().unwrap();
+        let memory = self.next_memory_address();
+        self.memory_ids.insert(first.as_ptr(), memory.clone());
+        memory
+    }
+    fn compile_value(&mut self, value: IntermediateValue, lazy: bool) -> (Vec<Statement>, Value) {
+        match &value {
+            IntermediateValue::IntermediateArg(IntermediateArg(reference)) => {
+                if lazy {
+                    (Vec::new(), self.arg_ids[&reference.as_ptr()].clone().into())
+                } else {
+                    match self.non_lazy_vals.get(&value) {
+                        Some(value) => (Vec::new(), value.clone()),
+                        None => {
+                            let type_ = self.compile_type(&self.value_type(&value));
+                            let (mut statements, lazy_val) =
+                                self.compile_value(value.clone(), true);
+                            let lazy_mem = match &lazy_val {
+                                Value::BuiltIn(_) => panic!("Built-in values cannot be lazy."),
+                                Value::Memory(memory) => memory.clone(),
+                            };
+                            statements.push(Await(vec![lazy_mem]).into());
+                            let memory = self.new_memory_location();
+                            statements.push(
+                                Assignment {
+                                    allocation: Some(type_),
+                                    target: memory.clone(),
+                                    value: Expression::Unwrap(lazy_val),
+                                }
+                                .into(),
+                            );
+                            self.non_lazy_vals.insert(value, memory.clone().into());
+                            (statements, memory.into())
+                        }
+                    }
                 }
-                self.memory_ids.get(&p).unwrap().clone().into()
             }
-            IntermediateValue::IntermediateArg(IntermediateArg(reference)) => self
-                .arg_ids
-                .get(&reference.as_ptr())
-                .unwrap()
-                .clone()
-                .into(),
+            _ => {
+                if lazy {
+                    match self.lazy_vals.get(&value) {
+                        Some(value) => (Vec::new(), value.clone()),
+                        None => {
+                            let type_ = self.compile_type(&self.value_type(&value));
+                            let (mut statements, non_lazy_val) =
+                                self.compile_value(value.clone(), false);
+                            let memory = self.new_memory_location();
+                            statements.push(
+                                Assignment {
+                                    allocation: Some(MachineType::Lazy(Box::new(type_.clone()))),
+                                    target: memory.clone(),
+                                    value: Expression::Wrap(non_lazy_val, type_),
+                                }
+                                .into(),
+                            );
+                            self.lazy_vals.insert(value, memory.clone().into());
+                            (statements, memory.into())
+                        }
+                    }
+                } else {
+                    (
+                        Vec::new(),
+                        match value {
+                            IntermediateValue::IntermediateBuiltIn(
+                                IntermediateBuiltIn::Boolean(boolean),
+                            ) => BuiltIn::from(boolean).into(),
+                            IntermediateValue::IntermediateBuiltIn(
+                                IntermediateBuiltIn::Integer(integer),
+                            ) => BuiltIn::from(integer).into(),
+                            IntermediateValue::IntermediateBuiltIn(
+                                IntermediateBuiltIn::BuiltInFn(name, type_),
+                            ) => BuiltIn::BuiltInFn(
+                                OPERATOR_NAMES[&name].clone(),
+                                self.compile_type(&type_),
+                            )
+                            .into(),
+                            IntermediateValue::IntermediateMemory(location) => {
+                                let p = location.as_ptr();
+                                if !self.memory_ids.contains_key(&p) {
+                                    self.memory_ids.insert(p, self.next_memory_address());
+                                }
+                                self.memory_ids[&p].clone().into()
+                            }
+                            IntermediateValue::IntermediateArg(_) => panic!(),
+                        },
+                    )
+                }
+            }
+        }
+    }
+    fn compile_values(
+        &mut self,
+        values: Vec<IntermediateValue>,
+        lazy: bool,
+    ) -> (Vec<Statement>, Vec<Value>) {
+        let (statements, values) = values
+            .into_iter()
+            .map(|value| self.compile_value(value, lazy))
+            .collect::<(Vec<Vec<Statement>>, Vec<Value>)>();
+        let statements = statements.concat();
+        let (awaits, other_statements): (Vec<_>, Vec<_>) =
+            statements
+                .into_iter()
+                .partition_map(|statement| match statement {
+                    Statement::Await(Await(vs)) => Either::Left(vs),
+                    other => Either::Right(other),
+                });
+        let mut statements = Vec::new();
+        if awaits.len() > 0 {
+            statements.push(Await(awaits.concat()).into());
+        }
+        statements.extend(other_statements);
+        (statements, values)
+    }
+    fn compile_expression(
+        &mut self,
+        expression: IntermediateExpression,
+    ) -> (Vec<Statement>, Expression) {
+        match expression {
+            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                values,
+            )) => {
+                let referenced_value_indices = values
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, value)| match self.value_type(value) {
+                        IntermediateType::Reference(type_) => Some((i, type_)),
+                        _ => None,
+                    })
+                    .collect_vec();
+                let (mut statements, mut values) = self.compile_values(values, false);
+                for (i, type_) in referenced_value_indices {
+                    let memory = self.new_memory_location();
+                    statements.push(
+                        Assignment {
+                            target: memory.clone(),
+                            allocation: Some(MachineType::Reference(Box::new(
+                                self.compile_type(&type_.borrow().clone()),
+                            ))),
+                            value: values[i].clone().into(),
+                        }
+                        .into(),
+                    );
+                    values[i] = memory.into();
+                }
+                (statements, TupleExpression(values).into())
+            }
+            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
+                value,
+                idx,
+            }) => {
+                let (statements, value) = self.compile_value(value, false);
+                (statements, ElementAccess { value, idx }.into())
+            }
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
+                let (fn_statements, fn_value) = self.compile_value(fn_, false);
+                let (args_statements, args_values) = self.compile_values(args, true);
+                (
+                    vec![fn_statements, args_statements].concat(),
+                    FnCall {
+                        fn_: fn_value,
+                        args: args_values,
+                    }
+                    .into(),
+                )
+            }
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx,
+                data,
+                type_,
+            }) => {
+                let (statements, value) = match data {
+                    None => (Vec::new(), None),
+                    Some(value) => {
+                        let (statements, value) = self.compile_value(value, false);
+                        (statements, Some(value))
+                    }
+                };
+                (
+                    statements,
+                    ConstructorCall {
+                        idx,
+                        data: value.map(|value| {
+                            let MachineType::UnionType(UnionType(variants)) =
+                                self.compile_type(&type_.into())
+                            else {
+                                panic!("Did not compile union type into union type.")
+                            };
+                            (variants[idx].clone(), value)
+                        }),
+                    }
+                    .into(),
+                )
+            }
+            IntermediateExpression::IntermediateValue(value) => {
+                let (statements, value) = self.compile_value(value, false);
+                (statements, value.into())
+            }
+            _ => todo!(),
         }
     }
 }
@@ -861,7 +1061,7 @@ impl Lowerer {
 #[cfg(test)]
 mod tests {
 
-    use crate::{BuiltIn, Id, Memory, Name, TupleType, Value};
+    use crate::{Await, BuiltIn, Id, Memory, Name, Statement, TupleType, Value};
 
     use super::*;
 
@@ -1793,8 +1993,6 @@ mod tests {
         .into();
         let mut lowerer = Lowerer::new();
         let value = lowerer.lower_expression(expression);
-        dbg!(&value);
-        dbg!(&lowerer.statements);
         let efficient_value = lowerer.remove_wasted_allocations_from_value(value);
         let efficient_statements =
             lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
@@ -2627,7 +2825,7 @@ mod tests {
                 .get(&(k, Vec::new()))
                 .as_ref()
                 .map(|&v| lowerer.remove_wasted_allocations_from_expression(v.clone()));
-            assert_eq!(value, Some(v.into()))
+            assert!(ExpressionEqualityChecker::equal(&value.unwrap(), &v.into()))
         }
     }
 
@@ -3280,8 +3478,8 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_EQ__BuiltIn"),
             FnType(
-                vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
-                Box::new(AtomicTypeEnum::BOOL.into())
+                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
             ).into()
         ).into();
         "built-in fn"
@@ -3297,7 +3495,7 @@ mod tests {
     )]
     fn test_compile_values(value: IntermediateValue, expected_value: Value) {
         let mut lowerer = Lowerer::new();
-        let compiled_value = lowerer.compile_value(value);
+        let (_, compiled_value) = lowerer.compile_value(value, false);
         assert_eq!(compiled_value, expected_value);
     }
     #[test]
@@ -3308,16 +3506,25 @@ mod tests {
             Rc::new(RefCell::new(())),
         ];
         let mut lowerer = Lowerer::new();
-        let value_0 = lowerer.compile_value(locations[0].clone().into());
-        let value_1 = lowerer.compile_value(locations[1].clone().into());
-        let value_2 = lowerer.compile_value(locations[2].clone().into());
+        let value_0 = lowerer.compile_value(locations[0].clone().into(), false);
+        let value_1 = lowerer.compile_value(locations[1].clone().into(), false);
+        let value_2 = lowerer.compile_value(locations[2].clone().into(), false);
         assert_ne!(value_0, value_1);
         assert_ne!(value_2, value_1);
         assert_ne!(value_2, value_0);
 
-        assert_eq!(value_0, lowerer.compile_value(locations[0].clone().into()));
-        assert_eq!(value_1, lowerer.compile_value(locations[1].clone().into()));
-        assert_eq!(value_2, lowerer.compile_value(locations[2].clone().into()));
+        assert_eq!(
+            value_0,
+            lowerer.compile_value(locations[0].clone().into(), false)
+        );
+        assert_eq!(
+            value_1,
+            lowerer.compile_value(locations[1].clone().into(), false)
+        );
+        assert_eq!(
+            value_2,
+            lowerer.compile_value(locations[2].clone().into(), false)
+        );
     }
     #[test]
     fn test_compile_arguments() {
@@ -3341,15 +3548,380 @@ mod tests {
             .into_iter()
             .map(|type_| IntermediateArg(type_))
             .collect_vec();
-        let value_0 = lowerer.compile_value(args[0].clone().into());
-        let value_1 = lowerer.compile_value(args[1].clone().into());
-        let value_2 = lowerer.compile_value(args[2].clone().into());
+        let value_0 = lowerer.compile_value(args[0].clone().into(), true);
+        let value_1 = lowerer.compile_value(args[1].clone().into(), true);
+        let value_2 = lowerer.compile_value(args[2].clone().into(), true);
         assert_ne!(value_0, value_1);
         assert_ne!(value_2, value_1);
         assert_ne!(value_2, value_0);
 
-        assert_eq!(value_0, lowerer.compile_value(args[0].clone().into()));
-        assert_eq!(value_1, lowerer.compile_value(args[1].clone().into()));
-        assert_eq!(value_2, lowerer.compile_value(args[2].clone().into()));
+        assert_eq!(value_0, lowerer.compile_value(args[0].clone().into(), true));
+        assert_eq!(value_1, lowerer.compile_value(args[1].clone().into(), true));
+        assert_eq!(value_2, lowerer.compile_value(args[2].clone().into(), true));
+    }
+
+    #[test_case(
+        IntermediateTupleExpression(Vec::new()).into(),
+        (
+            Vec::new(),
+            TupleExpression(Vec::new()).into()
+        );
+        "empty expression"
+    )]
+    #[test_case(
+        IntermediateTupleExpression(
+            vec![
+                IntermediateBuiltIn::from(Integer{value: 5}).into(),
+                IntermediateBuiltIn::from(Boolean{value: true}).into(),
+            ]
+        ).into(),
+        (
+            Vec::new(),
+            TupleExpression(vec![
+                BuiltIn::from(Integer{value: 5}).into(),
+                BuiltIn::from(Boolean{value: true}).into(),
+            ]).into()
+        );
+        "tuple expression"
+    )]
+    #[test_case(
+        IntermediateTupleExpression(
+            vec![
+                IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into()
+            ]
+        ).into(),
+        (
+            vec![
+                Await(vec![Memory(Id::from("a0"))]).into(),
+                Assignment{
+                    allocation: Some(AtomicTypeEnum::INT.into()),
+                    target: Memory(Id::from("m0")),
+                    value: Expression::Unwrap(Memory(Id::from("a0")).into())
+                }.into()
+            ],
+            TupleExpression(vec![
+                Memory(Id::from("m0")).into()
+            ]).into()
+        );
+        "tuple expression with argument"
+    )]
+    #[test_case(
+        IntermediateTupleExpression(
+            {
+                let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+                vec![arg.clone().into(),arg.into()]
+            }
+        ).into(),
+        (
+            vec![
+                Await(vec![Memory(Id::from("a1"))]).into(),
+                Assignment{
+                    allocation: Some(AtomicTypeEnum::INT.into()),
+                    target: Memory(Id::from("m0")),
+                    value: Expression::Unwrap(Memory(Id::from("a1")).into())
+                }.into(),
+            ],
+            TupleExpression(vec![
+                Memory(Id::from("m0")).into(),
+                Memory(Id::from("m0")).into(),
+            ]).into()
+        );
+        "tuple expression duplicate arguments"
+    )]
+    #[test_case(
+        IntermediateElementAccess{
+            value: Rc::new(RefCell::new(())).into(),
+            idx: 4
+        }.into(),
+        (
+            Vec::new(),
+            ElementAccess{
+                value: Memory(Id::from("m0")).into(),
+                idx: 4
+            }.into()
+        );
+        "memory element access"
+    )]
+    #[test_case(
+        IntermediateElementAccess{
+            value: IntermediateArg::from(IntermediateType::from(
+                IntermediateTupleType(vec![
+                    AtomicTypeEnum::INT.into(),
+                    AtomicTypeEnum::BOOL.into(),
+                ]))
+            ).into(),
+            idx: 1
+        }.into(),
+        (
+            vec![
+                Await(vec![Memory(Id::from("a0"))]).into(),
+                Assignment{
+                    allocation: Some(TupleType(vec![
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::BOOL.into(),
+                    ]).into()),
+                    target: Memory(Id::from("m0")),
+                    value: Expression::Unwrap(Memory(Id::from("a0")).into())
+                }.into()
+            ],
+            ElementAccess{
+                value: Memory(Id::from("m0")).into(),
+                idx: 1
+            }.into()
+        );
+        "argument element access"
+    )]
+    #[test_case(
+        IntermediateFnCall{
+            fn_: IntermediateBuiltIn::BuiltInFn(
+                Name::from("++"),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()
+            ).into(),
+            args: vec![IntermediateBuiltIn::from(Integer{value: 7}).into()]
+        }.into(),
+        (
+            vec![
+                Assignment{
+                    allocation: Some(MachineType::Lazy(
+                        Box::new(AtomicTypeEnum::INT.into())
+                    )),
+                    target: Memory(Id::from("m0")),
+                    value: Expression::Wrap(
+                        BuiltIn::from(Integer{value: 7}).into(),
+                        AtomicTypeEnum::INT.into()
+                    )
+                }.into()
+            ],
+            FnCall{
+                args: vec![Memory(Id::from("m0")).into()],
+                fn_: BuiltIn::BuiltInFn(
+                    Name::from("Increment__BuiltIn"),
+                    FnType(
+                        vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                    ).into()
+                ).into()
+            }.into()
+        );
+        "built-in fn call"
+    )]
+    #[test_case(
+        IntermediateFnCall{
+            fn_: IntermediateBuiltIn::BuiltInFn(
+                Name::from("*"),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()
+            ).into(),
+            args: vec![
+                IntermediateBuiltIn::from(Integer{value: 9}).into(),
+                IntermediateBuiltIn::from(Integer{value: 9}).into(),
+            ]
+        }.into(),
+        (
+            vec![
+                Assignment{
+                    allocation: Some(MachineType::Lazy(
+                        Box::new(AtomicTypeEnum::INT.into())
+                    )),
+                    target: Memory(Id::from("m0")),
+                    value: Expression::Wrap(
+                        BuiltIn::from(Integer{value: 9}).into(),
+                        AtomicTypeEnum::INT.into()
+                    )
+                }.into()
+            ],
+            FnCall{
+                args: vec![
+                    Memory(Id::from("m0")).into(),
+                    Memory(Id::from("m0")).into(),
+                ],
+                fn_: BuiltIn::BuiltInFn(
+                    Name::from("Multiply__BuiltIn"),
+                    FnType(
+                        vec![
+                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                        ],
+                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                    ).into()
+                ).into()
+            }.into()
+        );
+        "fn call reused arg"
+    )]
+    #[test_case(
+        IntermediateFnCall{
+            fn_: IntermediateArg::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::BOOL.into())
+                ))
+            ).into(),
+            args: vec![
+                IntermediateArg::from(
+                    IntermediateType::from(
+                        AtomicTypeEnum::INT
+                    )
+                ).into(),
+            ]
+        }.into(),
+        (
+            vec![
+                Await(vec![Memory(Id::from("a1"))]).into(),
+                Assignment{
+                    allocation: Some(FnType(
+                        vec![
+                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                        ],
+                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
+                    ).into()),
+                    target: Memory(Id::from("m0")),
+                    value: Expression::Unwrap(
+                        Memory(Id::from("a1")).into()
+                    )
+                }.into()
+            ],
+            FnCall{
+                args: vec![
+                    Memory(Id::from("a0")).into(),
+                ],
+                fn_: Memory(Id::from("m0")).into()
+            }.into()
+        );
+        "fn call higher-order call from args"
+    )]
+    #[test_case(
+        IntermediateCtorCall{
+            idx: 0,
+            data: None,
+            type_: IntermediateUnionType(vec![None,None])
+        }.into(),
+        (
+            Vec::new(),
+            ConstructorCall{
+                idx: 0,
+                data: None
+            }.into()
+        );
+        "no data constructor call"
+    )]
+    fn test_compile_expressions(
+        expression: IntermediateExpression,
+        expected: (Vec<Statement>, Expression),
+    ) {
+        let mut lowerer = Lowerer::new();
+        for value in expression.values() {
+            match value {
+                IntermediateValue::IntermediateArg(IntermediateArg(reference)) => {
+                    lowerer
+                        .arg_ids
+                        .insert(reference.as_ptr(), lowerer.next_arg_id());
+                }
+                _ => (),
+            }
+        }
+        let result = lowerer.compile_expression(expression);
+        assert_eq!(result, expected);
+    }
+    fn test_compile_tuple_expression_with_reference() {
+        let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
+        let nat_type: IntermediateType = IntermediateUnionType(vec![
+            Some(IntermediateType::Reference(reference.clone())),
+            None,
+        ])
+        .into();
+        *reference.borrow_mut() = nat_type.clone();
+
+        let argument = IntermediateArg::from(nat_type);
+
+        let location = Rc::new(RefCell::new(()));
+        let intermediate_expression =
+            IntermediateTupleExpression(vec![location.clone().into()]).into();
+
+        let mut lowerer = Lowerer::new();
+        lowerer.compile_type_defs(vec![reference]);
+        lowerer.memory.insert(
+            location.as_ptr(),
+            vec![Rc::new(RefCell::new(argument.into()))],
+        );
+
+        let (statements, expression) = lowerer.compile_expression(intermediate_expression);
+        assert_eq!(
+            statements,
+            vec![Assignment {
+                target: Memory(Id::from("m1")),
+                allocation: Some(MachineType::Reference(Box::new(MachineType::UnionType(
+                    UnionType(vec![Id::from("T0C0"), Id::from("T0C1"),])
+                )))),
+                value: Expression::Reference(
+                    Memory(Id::from("m0")).into(),
+                    MachineType::UnionType(UnionType(vec![Id::from("T0C0"), Id::from("T0C1"),]))
+                )
+            }
+            .into()]
+        );
+        assert_eq!(
+            expression,
+            TupleExpression(vec![Memory(Id::from("m1")).into()]).into()
+        );
+    }
+    #[test_case(
+        {
+            let type_ = IntermediateUnionType(vec![Some(AtomicTypeEnum::BOOL.into()),Some(AtomicTypeEnum::INT.into())]);
+            (
+                IntermediateCtorCall{
+                    idx: 1,
+                    data: Some(IntermediateBuiltIn::from(Integer{value: 9}).into()),
+                    type_: type_.clone()
+                }.into(),
+                Rc::new(RefCell::new(type_.into()))
+            )
+        },
+        (
+            Vec::new(),
+            ConstructorCall{
+                idx: 1,
+                data: Some((Name::from("T0C1"), BuiltIn::from(Integer{value: 9}).into()))
+            }.into()
+        );
+        "data constructor call"
+    )]
+    #[test_case(
+        {
+            let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
+            let union_type = IntermediateUnionType(vec![Some(IntermediateType::Reference(reference.clone())),None]);
+            *reference.borrow_mut() = union_type.clone().into();
+            (
+                IntermediateCtorCall{
+                    idx: 0,
+                    data: Some(Rc::new(RefCell::new(())).into()),
+                    type_: union_type
+                }.into(),
+                reference
+            )
+        },
+        (
+            Vec::new(),
+            ConstructorCall{
+                idx: 0,
+                data: Some((Name::from("T0C0"), Memory(Id::from("m0")).into()))
+            }.into()
+        );
+        "recursive constructor call"
+    )]
+    fn test_compile_constructors(
+        constructor_type: (IntermediateCtorCall, Rc<RefCell<IntermediateType>>),
+        expected: (Vec<Statement>, Expression),
+    ) {
+        let (constructor, type_) = constructor_type;
+        let mut lowerer = Lowerer::new();
+        lowerer.compile_type_defs(vec![type_]);
+        let result = lowerer.compile_expression(constructor.into());
+        assert_eq!(result, expected);
     }
 }

@@ -118,14 +118,8 @@ pub struct IntermediateTupleType(pub Vec<IntermediateType>);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateType>);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
-
-impl Hash for IntermediateUnionType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.as_ptr().hash(state);
-    }
-}
 
 type Location = Rc<RefCell<()>>;
 
@@ -235,6 +229,35 @@ pub enum IntermediateExpression {
     IntermediateFnCall(IntermediateFnCall),
     IntermediateCtorCall(IntermediateCtorCall),
     IntermediateFnDef(IntermediateFnDef),
+}
+
+impl IntermediateExpression {
+    pub fn values(&self) -> Vec<IntermediateValue> {
+        match self {
+            IntermediateExpression::IntermediateValue(value) => vec![value.clone()],
+            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
+                value,
+                idx: _,
+            }) => vec![value.clone()],
+            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                values,
+            )) => values.clone(),
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
+                let mut values = args.clone();
+                values.push(fn_.clone());
+                values
+            }
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx: _,
+                data,
+                type_: _,
+            }) => match data {
+                None => Vec::new(),
+                Some(v) => vec![v.clone()],
+            },
+            IntermediateExpression::IntermediateFnDef(_) => Vec::new(),
+        }
+    }
 }
 
 impl From<IntermediateArg> for IntermediateExpression {
