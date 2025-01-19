@@ -129,7 +129,7 @@ impl Hash for IntermediateUnionType {
 
 type Location = Rc<RefCell<()>>;
 
-#[derive(Clone, PartialEq, FromVariants, Eq)]
+#[derive(Clone, FromVariants, Eq)]
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
     IntermediateMemory(Location),
@@ -147,6 +147,19 @@ impl fmt::Debug for IntermediateValue {
                 .field(&arg0.as_ptr())
                 .finish(),
             Self::IntermediateArg(arg0) => f.debug_tuple("IntermediateArg").field(arg0).finish(),
+        }
+    }
+}
+
+impl PartialEq for IntermediateValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::IntermediateBuiltIn(l0), Self::IntermediateBuiltIn(r0)) => l0 == r0,
+            (Self::IntermediateMemory(l0), Self::IntermediateMemory(r0)) => {
+                l0.as_ptr() == r0.as_ptr()
+            }
+            (Self::IntermediateArg(l0), Self::IntermediateArg(r0)) => l0 == r0,
+            _ => false,
         }
     }
 }
