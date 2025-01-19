@@ -1002,12 +1002,11 @@ impl Lowerer {
                 let (mut statements, mut values) = self.compile_values(values, false);
                 for (i, type_) in referenced_value_indices {
                     let memory = self.new_memory_location();
+                    let type_ = self.compile_type(&type_.borrow().clone());
                     statements.push(
                         Declaration {
                             memory: memory.clone(),
-                            type_: MachineType::Reference(Box::new(
-                                self.compile_type(&type_.borrow().clone()),
-                            )),
+                            type_: MachineType::Reference(Box::new(type_.clone())),
                         }
                         .into(),
                     );
@@ -1015,7 +1014,7 @@ impl Lowerer {
                         Assignment {
                             target: memory.clone(),
                             check_null: false,
-                            value: values[i].clone().into(),
+                            value: Expression::Reference(values[i].clone(), type_),
                         }
                         .into(),
                     );
@@ -1027,8 +1026,36 @@ impl Lowerer {
                 value,
                 idx,
             }) => {
-                let (statements, value) = self.compile_value(value, false);
-                (statements, ElementAccess { value, idx }.into())
+                let IntermediateType::IntermediateTupleType(IntermediateTupleType(mut types)) =
+                    self.value_type(&value)
+                else {
+                    panic!("Accessing non-tuple type.")
+                };
+                let type_ = types.remove(idx);
+                let (mut statements, value) = self.compile_value(value, false);
+                let value = ElementAccess { value, idx }.into();
+                let value = if matches!(&type_, IntermediateType::Reference(_)) {
+                    let memory = self.new_memory_location();
+                    statements.push(
+                        Declaration {
+                            memory: memory.clone(),
+                            type_: self.compile_type(&type_),
+                        }
+                        .into(),
+                    );
+                    statements.push(
+                        Assignment {
+                            target: memory.clone(),
+                            value,
+                            check_null: false,
+                        }
+                        .into(),
+                    );
+                    Expression::Dereference(memory.into())
+                } else {
+                    value
+                };
+                (statements, value)
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
                 let (fn_statements, fn_value) = self.compile_value(fn_, false);
@@ -3659,20 +3686,6 @@ mod tests {
     )]
     #[test_case(
         IntermediateElementAccess{
-            value: Rc::new(RefCell::new(())).into(),
-            idx: 4
-        }.into(),
-        (
-            Vec::new(),
-            ElementAccess{
-                value: Memory(Id::from("m0")).into(),
-                idx: 4
-            }.into()
-        );
-        "memory element access"
-    )]
-    #[test_case(
-        IntermediateElementAccess{
             value: IntermediateArg::from(IntermediateType::from(
                 IntermediateTupleType(vec![
                     AtomicTypeEnum::INT.into(),
@@ -3873,16 +3886,19 @@ mod tests {
         let result = lowerer.compile_expression(expression);
         assert_eq!(result, expected);
     }
+    #[test]
     fn test_compile_tuple_expression_with_reference() {
         let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
         let nat_type: IntermediateType = IntermediateUnionType(vec![
-            Some(IntermediateType::Reference(reference.clone())),
+            Some(
+                IntermediateTupleType(vec![IntermediateType::Reference(reference.clone())]).into(),
+            ),
             None,
         ])
         .into();
         *reference.borrow_mut() = nat_type.clone();
 
-        let argument = IntermediateArg::from(nat_type);
+        let argument = IntermediateArg::from(IntermediateType::Reference(reference.clone()));
 
         let location = Rc::new(RefCell::new(()));
         let intermediate_expression =
@@ -3922,6 +3938,62 @@ mod tests {
         assert_eq!(
             expression,
             TupleExpression(vec![Memory(Id::from("m1")).into()]).into()
+        );
+    }
+    #[test]
+    fn test_compile_tuple_access_expression_with_dereference() {
+        let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
+        let nat_type: IntermediateType = IntermediateUnionType(vec![
+            Some(IntermediateType::Reference(reference.clone())),
+            None,
+        ])
+        .into();
+        *reference.borrow_mut() = nat_type.clone();
+
+        let argument = IntermediateArg::from(IntermediateType::from(IntermediateTupleType(vec![
+            IntermediateType::Reference(reference.clone()),
+        ])));
+
+        let location = Rc::new(RefCell::new(()));
+        let intermediate_expression = IntermediateElementAccess {
+            value: location.clone().into(),
+            idx: 0,
+        }
+        .into();
+
+        let mut lowerer = Lowerer::new();
+        lowerer.compile_type_defs(vec![reference]);
+        lowerer.memory.insert(
+            location.as_ptr(),
+            vec![Rc::new(RefCell::new(argument.into()))],
+        );
+
+        let (statements, expression) = lowerer.compile_expression(intermediate_expression);
+        assert_eq!(
+            statements,
+            vec![
+                Declaration {
+                    memory: Memory(Id::from("m1")),
+                    type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from(
+                        "T0"
+                    ))))
+                }
+                .into(),
+                Assignment {
+                    target: Memory(Id::from("m1")),
+                    check_null: false,
+                    value: ElementAccess {
+                        value: Memory(Id::from("m0")).into(),
+                        idx: 0
+                    }
+                    .into()
+                }
+                .into()
+            ]
+        );
+        assert_eq!(
+            expression,
+            Expression::Dereference(Memory(Id::from("m1")).into())
         );
     }
     #[test_case(
