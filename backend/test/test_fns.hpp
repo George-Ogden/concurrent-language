@@ -323,6 +323,31 @@ TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
     ASSERT_EQ(branching->ret, 9);
 }
 
+struct SharedRegisterExample : EasyCloneFn<SharedRegisterExample, Int, Bool> {
+    using EasyCloneFn<SharedRegisterExample, Int, Bool>::EasyCloneFn;
+    Lazy<Int> *body(Lazy<Bool> *&b) override {
+        WorkManager::await(b);
+        Bool m0;
+        Int m1;
+        m0 = b->value();
+        if (m0) {
+            m1 = 1;
+        } else {
+            m1 = 0;
+        }
+        Lazy<Int> *m2 = new LazyConstant<Int>{m1};
+        return m2;
+    }
+};
+
+TEST_P(FnCorrectnessTest, SharedRegisterExampleTest) {
+    Bool b = true;
+    SharedRegisterExample *example = new SharedRegisterExample{b};
+
+    WorkManager::run(example);
+    ASSERT_EQ(example->ret, 1);
+}
+
 struct RecursiveDouble : EasyCloneFn<RecursiveDouble, Int, Int> {
     using EasyCloneFn<RecursiveDouble, Int, Int>::EasyCloneFn;
     RecursiveDouble *call1 = nullptr, *call3 = nullptr;
