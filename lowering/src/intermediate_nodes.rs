@@ -121,7 +121,7 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
-type Location = Rc<RefCell<()>>;
+pub type Location = Rc<RefCell<()>>;
 
 #[derive(Clone, FromVariants, Eq)]
 pub enum IntermediateValue {
@@ -534,7 +534,7 @@ impl ExpressionEqualityChecker {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Eq)]
 pub struct IntermediateArg(pub Rc<RefCell<IntermediateType>>);
 
 impl fmt::Debug for IntermediateArg {
@@ -542,6 +542,12 @@ impl fmt::Debug for IntermediateArg {
         f.debug_tuple("IntermediateArg")
             .field(&self.0.as_ptr())
             .finish()
+    }
+}
+
+impl PartialEq for IntermediateArg {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ptr() == other.0.as_ptr()
     }
 }
 
