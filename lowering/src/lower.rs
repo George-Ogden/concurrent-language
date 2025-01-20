@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     intermediate_nodes::*, Assignment, AtomicType, Await, BuiltIn, ConstructorCall, Declaration,
-    ElementAccess, Expression, FnCall, FnType, MachineType, Memory, Name, Statement,
+    ElementAccess, Expression, FnCall, FnType, IfStatement, MachineType, Memory, Name, Statement,
     TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::{zip_eq, Either, Itertools};
@@ -1114,10 +1114,45 @@ impl Lowerer {
             _ => todo!(),
         }
     }
+    fn compile_if_statement(&mut self, if_statement: IntermediateIfStatement) -> Vec<Statement> {
+        let IntermediateIfStatement {
+            condition,
+            branches: (true_branch, false_branch),
+        } = if_statement;
+        let (mut statements, condition) = self.compile_value(condition, false);
+        let true_branch = self.compile_statements(true_branch);
+        let false_branch = self.compile_statements(false_branch);
+        let true_declarations = Statement::declarations(&true_branch);
+        let false_declarations = Statement::declarations(&false_branch);
+        let shared_declarations = true_declarations
+            .intersection(&false_declarations)
+            .collect_vec();
+        let shared_memory = shared_declarations
+            .iter()
+            .map(|declaration| declaration.memory.clone())
+            .collect::<HashSet<_>>();
+        let true_branch = Statement::remove_declarations(true_branch, &shared_memory);
+        let false_branch = Statement::remove_declarations(false_branch, &shared_memory);
+        statements.extend(
+            shared_declarations
+                .into_iter()
+                .map(|declaration| declaration.clone().into()),
+        );
+        statements.push(
+            IfStatement {
+                condition,
+                branches: (true_branch, false_branch),
+            }
+            .into(),
+        );
+        statements
+    }
     fn compile_statement(&mut self, statement: IntermediateStatement) -> Vec<Statement> {
         match statement {
             IntermediateStatement::Assignment(memory) => self.compile_assignment(memory),
-            IntermediateStatement::IntermediateIfStatement(_) => todo!(),
+            IntermediateStatement::IntermediateIfStatement(if_statement) => {
+                self.compile_if_statement(if_statement)
+            }
             IntermediateStatement::IntermediateMatchStatement(_) => todo!(),
         }
     }
@@ -1168,7 +1203,7 @@ impl Lowerer {
 #[cfg(test)]
 mod tests {
 
-    use crate::{Await, BuiltIn, Id, Memory, Name, Statement, TupleType, Value};
+    use crate::{Await, BuiltIn, Id, IfStatement, Memory, Name, Statement, TupleType, Value};
 
     use super::*;
 
@@ -4390,6 +4425,149 @@ mod tests {
             }.into(),
         ];
         "tuple expression then fn call"
+    )]
+    #[test_case(
+        {
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
+            let location = Rc::new(RefCell::new(()));
+            (
+                vec![arg.clone()],
+                vec![
+                    IntermediateIfStatement{
+                        condition: arg.into(),
+                        branches: (
+                            vec![
+                                IntermediateStatement::Assignment(
+                                    IntermediateMemory {
+                                        location: location.clone(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
+                                        ))
+                                    }
+                                )
+                            ],
+                            vec![
+                                IntermediateStatement::Assignment(
+                                    IntermediateMemory {
+                                        location: location.clone(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                        ))
+                                    }
+                                )
+                            ]
+                        )
+                    }.into()
+                ]
+            )
+        },
+        vec![
+            Await(vec![Memory(Id::from("a0"))]).into(),
+            Declaration {
+                memory: Memory(Id::from("m0")),
+                type_: AtomicTypeEnum::BOOL.into()
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("m0")),
+                value: Expression::Unwrap(
+                    Memory(Id::from("a0")).into()
+                ),
+                check_null: false
+            }.into(),
+            Declaration {
+                memory: Memory(Id::from("m1")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
+            IfStatement {
+                condition: Memory(Id::from("m0")).into(),
+                branches: (
+                    vec![
+                        Assignment {
+                            target: Memory(Id::from("m1")),
+                            value: Expression::Value(
+                                BuiltIn::from(Integer{value: 1}).into()
+                            ),
+                            check_null: false
+                        }.into(),
+                    ],
+                    vec![
+                        Assignment {
+                            target: Memory(Id::from("m1")),
+                            value: Expression::Value(
+                                BuiltIn::from(Integer{value: 0}).into()
+                            ),
+                            check_null: false
+                        }.into(),
+                    ],
+                )
+            }.into()
+        ];
+        "if statement awaited argument"
+    )]
+    #[test_case(
+        {
+            let location = Rc::new(RefCell::new(()));
+            (
+                Vec::new(),
+                vec![
+                    IntermediateIfStatement{
+                        condition: IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
+                        branches: (
+                            vec![
+                                IntermediateStatement::Assignment(
+                                    IntermediateMemory {
+                                        location: location.clone(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
+                                        ))
+                                    }
+                                )
+                            ],
+                            vec![
+                                IntermediateStatement::Assignment(
+                                    IntermediateMemory {
+                                        location: location.clone(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: false})).into()
+                                        ))
+                                    }
+                                )
+                            ]
+                        )
+                    }.into()
+                ]
+            )
+        },
+        vec![
+            Declaration {
+                memory: Memory(Id::from("m0")),
+                type_: AtomicTypeEnum::BOOL.into()
+            }.into(),
+            IfStatement {
+                condition: BuiltIn::from(Boolean{value: true}).into(),
+                branches: (
+                    vec![
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: Expression::Value(
+                                BuiltIn::from(Boolean{value: true}).into()
+                            ),
+                            check_null: false
+                        }.into(),
+                    ],
+                    vec![
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: Expression::Value(
+                                BuiltIn::from(Boolean{value: false}).into()
+                            ),
+                            check_null: false
+                        }.into(),
+                    ],
+                )
+            }.into()
+        ];
+        "if statement value only"
     )]
     fn test_compile_statements(
         args_statements: (Vec<IntermediateArg>, Vec<IntermediateStatement>),

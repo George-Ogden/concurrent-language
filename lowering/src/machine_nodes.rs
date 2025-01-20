@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use from_variants::FromVariants;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use type_checker::{AtomicTypeEnum, Boolean, Integer};
 
@@ -44,7 +47,7 @@ pub enum Value {
     Memory(Memory),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Memory(pub Id);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -111,10 +114,98 @@ pub enum Statement {
     MatchStatement(MatchStatement),
 }
 
+impl Statement {
+    fn get_declarations(&self) -> HashSet<Declaration> {
+        match self {
+            Statement::Await(_) | Statement::Assignment(_) => HashSet::new(),
+            Statement::Declaration(declaration) => HashSet::from([declaration.clone()]),
+            Statement::IfStatement(IfStatement {
+                condition: _,
+                branches: (true_branch, false_branch),
+            }) => true_branch
+                .iter()
+                .chain(false_branch.iter())
+                .flat_map(|stmt| stmt.get_declarations())
+                .collect(),
+            Statement::MatchStatement(MatchStatement {
+                expression: _,
+                branches,
+            }) => branches
+                .iter()
+                .flat_map(|branch| {
+                    branch
+                        .statements
+                        .iter()
+                        .flat_map(|statement| statement.get_declarations())
+                })
+                .collect(),
+        }
+    }
+    fn maybe_remove_declaration(self, declarations: &HashSet<Memory>) -> Option<Self> {
+        match self {
+            Statement::Await(await_) => Some(await_.into()),
+            Statement::Assignment(assignment) => Some(assignment.into()),
+            Statement::Declaration(Declaration { type_: _, memory })
+                if declarations.contains(&memory) =>
+            {
+                None
+            }
+            Statement::Declaration(Declaration { type_, memory }) => {
+                Some(Declaration { type_, memory }.into())
+            }
+            Statement::IfStatement(IfStatement {
+                condition,
+                branches,
+            }) => Some(
+                IfStatement {
+                    condition,
+                    branches: (
+                        Self::remove_declarations(branches.0, declarations),
+                        Self::remove_declarations(branches.1, declarations),
+                    ),
+                }
+                .into(),
+            ),
+            Statement::MatchStatement(MatchStatement {
+                expression,
+                branches,
+            }) => Some(
+                MatchStatement {
+                    expression,
+                    branches: branches
+                        .into_iter()
+                        .map(|MatchBranch { target, statements }| MatchBranch {
+                            target,
+                            statements: Self::remove_declarations(statements, declarations),
+                        })
+                        .collect_vec(),
+                }
+                .into(),
+            ),
+        }
+    }
+    pub fn declarations(statements: &Vec<Statement>) -> HashSet<Declaration> {
+        statements
+            .iter()
+            .map(|statement| statement.get_declarations())
+            .flatten()
+            .collect()
+    }
+    pub fn remove_declarations(
+        statements: Vec<Statement>,
+        declarations: &HashSet<Memory>,
+    ) -> Vec<Statement> {
+        statements
+            .into_iter()
+            .filter_map(|statement| statement.maybe_remove_declaration(declarations))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Await(pub Vec<Memory>);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Declaration {
     pub type_: MachineType,
     pub memory: Memory,
