@@ -516,10 +516,12 @@ struct Left;
 struct Right;
 typedef VariantT<Left, Right> EitherIntBool;
 struct Left {
-    Int value;
+    using type = Int;
+    type value;
 };
 struct Right {
-    Bool value;
+    using type = Bool;
+    type value;
 };
 
 struct EitherIntBoolExtractor
@@ -563,6 +565,60 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
     }
 }
 
+struct EitherIntBoolEdgeCase
+    : EasyCloneFn<EitherIntBoolEdgeCase, Bool, EitherIntBool> {
+    using EasyCloneFn<EitherIntBoolEdgeCase, Bool, EitherIntBool>::EasyCloneFn;
+    Lazy<Bool> *y = nullptr;
+    Lazy<Bool> *body(Lazy<EitherIntBool> *&either) override {
+        WorkManager::await(either);
+        EitherIntBool x = either->value();
+        switch (x.tag) {
+        case 0ULL: {
+            Lazy<Left::type> *i = new LazyConstant<Left::type>{
+                reinterpret_cast<Left *>(&x.value)->value};
+            Lazy<Int> *z = new LazyConstant<Int>{0};
+            if (y == nullptr) {
+                y = new Comparison_GT__BuiltIn{};
+                dynamic_cast<FnT<Bool, Int, Int>>(y)->args =
+                    std::make_tuple(i, z);
+                dynamic_cast<Fn *>(y)->call();
+            }
+            break;
+        }
+        case 1ULL: {
+            Lazy<Right::type> *b = new LazyConstant<Right::type>{
+                reinterpret_cast<Right *>(&x.value)->value};
+            y = b;
+            break;
+        }
+        }
+        return y;
+    }
+};
+
+TEST_P(FnCorrectnessTest, EdgeCaseTest) {
+    for (const auto &[tag, value, result] :
+         std::vector<std::tuple<int, int, bool>>{{1, 0, false},
+                                                 {1, 1, true},
+                                                 {0, 0, false},
+                                                 {0, -5, false},
+                                                 {0, 15, true}}) {
+        EitherIntBool either{};
+        either.tag = tag;
+        if (tag == 0) {
+
+            reinterpret_cast<Left *>(&either.value)->value = value;
+        } else {
+            reinterpret_cast<Right *>(&either.value)->value = value;
+        }
+
+        EitherIntBoolEdgeCase *fn = new EitherIntBoolEdgeCase{either};
+
+        WorkManager::run(fn);
+        ASSERT_EQ(fn->ret, result);
+    }
+}
+
 struct Cons;
 struct Nil;
 typedef VariantT<Cons, Nil> ListInt;
@@ -581,7 +637,10 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
         ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            Cons::type cons = reinterpret_cast<Cons *>(&list.value)->value;
+            Lazy<Cons::type> *cons_lazy = new LazyConstant<Cons::type>{
+                reinterpret_cast<Cons *>(&list.value)->value};
+            WorkManager::await(cons_lazy);
+            Cons::type cons = cons_lazy->value();
             Int head = std::get<0ULL>(cons);
             ListInt *tail_ = std::get<1ULL>(cons);
             ListInt tail = *tail_;

@@ -62,7 +62,7 @@ impl Translator {
         match value {
             BuiltIn::Integer(Integer { value }) => format!("{value}LL"),
             BuiltIn::Boolean(Boolean { value }) => format!("{value}"),
-            BuiltIn::BuiltInFn(name, _) => name,
+            BuiltIn::BuiltInFn(name) => name,
         }
     }
     fn translate_memory(&self, memory: Memory) -> Code {
@@ -127,7 +127,7 @@ impl Translator {
     }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
         let fn_initialization_code = match fn_call.fn_ {
-            Value::BuiltIn(BuiltIn::BuiltInFn(name, _)) => {
+            Value::BuiltIn(BuiltIn::BuiltInFn(name)) => {
                 format!("new {name}{{}};")
             }
             Value::Memory(memory) => {
@@ -136,11 +136,12 @@ impl Translator {
             }
             _ => panic!("Calling invalid function"),
         };
+        let type_code = self.translate_type(&fn_call.fn_type.into());
         let args_assignment = format!(
-            "{target}->args = std::make_tuple({});",
+            "dynamic_cast<{type_code}>({target})->args = std::make_tuple({});",
             self.translate_value_list(fn_call.args)
         );
-        format!("{fn_initialization_code} {args_assignment} {target}->call()",)
+        format!("{fn_initialization_code} {args_assignment} dynamic_cast<{type_code}>({target})->call()",)
     }
     fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
         let declaration = format!("{{}};");
@@ -193,10 +194,10 @@ impl Translator {
             .enumerate()
             .map(|(i, branch)| {
                 let assignment_code = match branch.target {
-                    Some(id) => {
+                    Some(Memory(id)) => {
                         let type_name = &types[i];
                         format!(
-                            "{type_name}::type {id} = reinterpret_cast<{type_name}*>(&{expression_code}.value)->value;",
+                            "Lazy<{type_name}::type> *{id} = new LazyConstant<{type_name}::type>{{reinterpret_cast<{type_name}*>(&{expression_code}.value)->value}};",
                         )
                     }
                     None => Code::new(),
@@ -685,13 +686,6 @@ mod tests {
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
-            FnType(
-                vec![
-                    AtomicType(AtomicTypeEnum::INT).into(),
-                    AtomicType(AtomicTypeEnum::INT).into()
-                ],
-                Box::new(AtomicType(AtomicTypeEnum::INT).into())
-            ).into()
         ),
         "Plus__BuiltIn";
         "builtin plus translation"
@@ -699,13 +693,6 @@ mod tests {
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
-            FnType(
-                vec![
-                    AtomicType(AtomicTypeEnum::INT).into(),
-                    AtomicType(AtomicTypeEnum::INT).into()
-                ],
-                Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
-            ).into()
         ),
         "Comparison_GE__BuiltIn";
         "builtin greater than or equal to translation"
@@ -733,13 +720,6 @@ mod tests {
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
-            FnType(
-                vec![
-                    AtomicType(AtomicTypeEnum::INT).into(),
-                    AtomicType(AtomicTypeEnum::INT).into()
-                ],
-                Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
-            ).into()
         ).into(),
         "Comparison_LT__BuiltIn";
         "builtin function translation"
@@ -860,14 +840,14 @@ mod tests {
             value: FnCall{
                 fn_: BuiltIn::BuiltInFn(
                     Name::from("Plus__BuiltIn"),
-                    FnType(
-                        vec![
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                        ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
                 ).into(),
+                fn_type: FnType(
+                    vec![
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                    ],
+                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                ),
                 args: vec![
                     Memory(Id::from("arg1")).into(),
                     Memory(Id::from("arg2")).into(),
@@ -875,8 +855,8 @@ mod tests {
             }.into(),
             check_null: true
         },
-        "if (call == nullptr) { call = new Plus__BuiltIn{}; call->args = std::make_tuple(arg1, arg2); call->call(); }";
-        "built-in fn-call"
+        "if (call == nullptr) { call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(arg1, arg2); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); }";
+        "built-in fn call"
     )]
     #[test_case(
         Assignment {
@@ -900,13 +880,13 @@ mod tests {
                         value: FnCall{
                             fn_: BuiltIn::BuiltInFn(
                                 Name::from("Increment__BuiltIn"),
-                                FnType(
-                                    vec![
-                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    ],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                                ).into()
                             ).into(),
+                            fn_type: FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            ),
                             args: vec![
                                 Memory(
                                     Id::from("x")
@@ -925,8 +905,8 @@ mod tests {
             }.into(),
             check_null: true
         },
-        "if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{}; call->args = std::make_tuple(x); call->call(); } return call; });}";
-        "internal fn-call block fn-call"
+        "if (block == nullptr) { block = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn{}; dynamic_cast<FnT<Int,Int>>(call)->args = std::make_tuple(x); dynamic_cast<FnT<Int,Int>>(call)->call(); } return call; });}";
+        "internal fn call block fn call"
     )]
     #[test_case(
         Assignment {
@@ -938,13 +918,13 @@ mod tests {
                         value: FnCall{
                             fn_: BuiltIn::BuiltInFn(
                                 Name::from("Decrement__BuiltIn"),
-                                FnType(
-                                    vec![
-                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    ],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                                ).into()
                             ).into(),
+                            fn_type: FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            ),
                             args: vec![Memory(Id::from("y")).into()]
                         }.into(),
                         check_null: true
@@ -957,7 +937,7 @@ mod tests {
             }.into(),
             check_null: false
         },
-        "block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{}; call->args = std::make_tuple(y); call->call(); } return call; });";
+        "block = new BlockFn<Int>([&](){ if (call == nullptr) { call = new Decrement__BuiltIn{}; dynamic_cast<FnT<Int,Int>>(call)->args = std::make_tuple(y); dynamic_cast<FnT<Int,Int>>(call)->call(); } return call; });";
         "block assignment"
     )]
     #[test_case(
@@ -968,12 +948,19 @@ mod tests {
                 args: vec![
                     Memory(Id::from("arg1")).into(),
                     Memory(Id::from("arg2")).into(),
-                ]
+                ],
+                fn_type: FnType(
+                    vec![
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                    ],
+                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                ).into()
             }.into(),
             check_null: true
         },
-        "if (call2 == nullptr) { call2 = call1->clone();  call2->args = std::make_tuple(arg1, arg2); call2->call(); }";
-        "custom fn-call"
+        "if (call2 == nullptr) { call2 = call1->clone();  dynamic_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(arg1, arg2); dynamic_cast<FnT<Int,Int,Int>>(call2)->call(); }";
+        "custom fn call"
     )]
     #[test_case(
         Assignment {
@@ -1100,32 +1087,23 @@ mod tests {
             ),
             branches: vec![
                 MatchBranch {
-                    target: Some(Name::from("x")),
+                    target: Some(Memory(Name::from("x"))),
                     statements: vec![
-                        Declaration {
-                            memory: Memory(Id::from("z")).into(),
-                            type_: MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                        }.into(),
-                        Assignment {
-                            target: Memory(Id::from("z")).into(),
-                            value: Expression::Wrap(Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                            check_null: false
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("call")).into(),
                             value: FnCall{
                                 fn_: BuiltIn::BuiltInFn(
                                     Name::from("Comparison_GE__BuiltIn"),
-                                    FnType(
-                                        vec![
-                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                                        ],
-                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))),
-                                    ).into()
                                 ).into(),
+                                fn_type: FnType(
+                                    vec![
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                    ],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))),
+                                ),
                                 args: vec![
-                                    Memory(Id::from("z")).into(),
+                                    Memory(Id::from("x")).into(),
                                     Memory(Id::from("y")).into(),
                                 ]
                             }.into(),
@@ -1134,18 +1112,18 @@ mod tests {
                     ],
                 },
                 MatchBranch {
-                    target: Some(Name::from("x")),
+                    target: Some(Memory(Name::from("x"))),
                     statements: vec![
                         Assignment {
                             target: Memory(Id::from("call")).into(),
-                            value: Expression::Wrap(Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
+                            value: Value::from(Memory(Id::from("x"))).into(),
                             check_null: true
                         }.into(),
                     ],
                 }
             ]
         },
-        "switch (either.tag) { case 0ULL: { Left::type x = reinterpret_cast<Left*>(&either.value)->value; Lazy<Int>* z; z = new LazyConstant<Int>{x}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; call->args = std::make_tuple(z, y); call->call(); } break; } case 1ULL: { Right::type x = reinterpret_cast<Right*>(&either.value)->value; if (call == nullptr) { call = new LazyConstant<Bool>{x};} break; }}";
+        "switch (either.tag) { case 0ULL: { Lazy<Left::type> *x = new LazyConstant<Left::type>{reinterpret_cast<Left*>(&either.value)->value}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; dynamic_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x, y); dynamic_cast<FnT<Bool,Int,Int>>(call)->call(); } break; } case 1ULL: { Lazy<Right::type>* x = new LazyConstant<Right::type>{reinterpret_cast<Right*>(&either.value)->value}; if (call == nullptr) { call = x;} break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1153,15 +1131,24 @@ mod tests {
             expression: (Memory(Id::from("nat")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")])),
             branches: vec![
                 MatchBranch {
-                    target: Some(Name::from("s")),
+                    target: Some(Memory(Name::from("s"))),
                     statements: vec![
+                        Declaration {
+                            memory: Memory(Id::from("t")),
+                            type_: MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("t")),
+                            value: Expression::Unwrap(Memory(Name::from("s")).into()),
+                            check_null: false
+                        }.into(),
                         Declaration {
                             memory: Memory(Id::from("u")),
                             type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("u")),
-                            value: Expression::Dereference(Memory(Name::from("s")).into()),
+                            value: Expression::Dereference(Memory(Name::from("t")).into()),
                             check_null: false
                         }.into(),
                         Assignment {
@@ -1183,7 +1170,7 @@ mod tests {
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { Suc::type s = reinterpret_cast<Suc*>(&nat.value)->value; VariantT<Suc,Nil> u; u = *s; if (r == nullptr) { r = new LazyConstant<VariantT<Suc,Nil>>{u};} break; } case 1ULL: { if (r == nullptr) {r = new LazyConstant<VariantT<Suc,Nil>>{nil};} break; }}";
+        "switch (nat.tag) { case 0ULL: { Lazy<Suc::type> *s = new LazyConstant<Suc::type>{reinterpret_cast<Suc*>(&nat.value)->value}; VariantT<Suc,Nil> *t; t = s->value(); VariantT<Suc,Nil> u; u = *t; if(r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{u}; } break; } case 1ULL: { if (r == nullptr) {r = new LazyConstant<VariantT<Suc,Nil>>{nil};} break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1413,14 +1400,14 @@ mod tests {
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
-                            FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ).into()
                         ).into(),
+                        fn_type: FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ),
                         args: vec![
                             Memory(Id::from("a")).into(),
                             Memory(Id::from("b")).into(),
@@ -1433,14 +1420,14 @@ mod tests {
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
-                            FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ).into()
                         ).into(),
+                        fn_type: FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ),
                         args: vec![
                             Memory(Id::from("c")).into(),
                             Memory(Id::from("d")).into()
@@ -1453,14 +1440,14 @@ mod tests {
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
-                            FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ).into()
                         ).into(),
+                        fn_type: FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ),
                         args: vec![
                             Memory(Id::from("call1")).into(),
                             Memory(Id::from("call2")).into(),
@@ -1502,7 +1489,7 @@ mod tests {
                 )
             ]
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{}; call1->args = std::make_tuple(a, b); call1->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{}; call2->args = std::make_tuple(c, d); call2->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{}; call3->args = std::make_tuple(call1, call2); call3->call(); } return call3; } };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call1)->args = std::make_tuple(a, b); dynamic_cast<FnT<Int,Int,Int>>(call1)->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(c, d); dynamic_cast<FnT<Int,Int,Int>>(call2)->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call3)->args = std::make_tuple(call1, call2); dynamic_cast<FnT<Int,Int,Int>>(call3)->call(); } return call3; } };";
         "four way plus int"
     )]
     #[test_case(
@@ -1530,13 +1517,13 @@ mod tests {
                                 value: FnCall{
                                     fn_: BuiltIn::BuiltInFn(
                                         Name::from("Increment__BuiltIn"),
-                                        FnType(
-                                            vec![
-                                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                            ],
-                                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                                        ).into()
                                     ).into(),
+                                    fn_type: FnType(
+                                        vec![
+                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                        ],
+                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                    ),
                                     args: vec![
                                         Memory(Id::from("x")).into()
                                     ]
@@ -1552,6 +1539,10 @@ mod tests {
                     check_null: true,
                     value: FnCall{
                         fn_: Memory(Id::from("block_tmp")).into(),
+                        fn_type: FnType(
+                            Vec::new(),
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ),
                         args: Vec::new()
                     }.into()
                 }.into(),
@@ -1576,7 +1567,7 @@ mod tests {
                 )
             ]
         },
-        "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int, Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { FnT<Int> block_tmp; block_tmp = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn {}; call -> args = std::make_tuple(x); call -> call(); } return call; }); if (block == nullptr) { block = block_tmp->clone(); block->args = std::make_tuple(); block->call(); } return block; } };";
+        "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int, Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { FnT<Int> block_tmp; block_tmp = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn {}; dynamic_cast<FnT<Int,Int>>(call)->args = std::make_tuple(x); dynamic_cast<FnT<Int,Int>>(call)->call(); } return call; }); if (block == nullptr) { block = block_tmp->clone(); dynamic_cast<FnT<Int>>(block)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(block)->call(); } return block; } };";
         "flat block example"
     )]
     #[test_case(
@@ -1590,14 +1581,14 @@ mod tests {
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
-                            FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ).into()
                         ).into(),
+                        fn_type: FnType(
+                            vec![
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                            ],
+                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                        ),
                         args: vec![
                             Memory(Id::from("x")).into(),
                             Memory(Id::from("env")).into(),
@@ -1620,7 +1611,7 @@ mod tests {
                 )
             ]
         },
-    "struct Adder : Closure<Adder, Lazy<Int> *, Int, Int> { using Closure<Adder, Lazy<Int> *, Int, Int>::Closure; FnT<Int, Int, Int> inner_res = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (inner_res == nullptr) { inner_res = new Plus__BuiltIn{}; inner_res->args = std::make_tuple(x, env); inner_res->call(); } return inner_res; } };";
+    "struct Adder : Closure<Adder, Lazy<Int> *, Int, Int> { using Closure<Adder, Lazy<Int> *, Int, Int>::Closure; FnT<Int, Int, Int> inner_res = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (inner_res == nullptr) { inner_res = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(inner_res)->args = std::make_tuple(x, env); dynamic_cast<FnT<Int,Int,Int>>(inner_res)->call(); } return inner_res; } };";
     "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1651,14 +1642,14 @@ mod tests {
                             value: FnCall{
                                 fn_: BuiltIn::BuiltInFn(
                                     Name::from("Plus__BuiltIn"),
-                                    FnType(
-                                        vec![
-                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                                        ],
-                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                                    ).into()
                                 ).into(),
+                                fn_type: FnType(
+                                    vec![
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                    ],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                ),
                                 args: vec![
                                     Memory(Id::from("x")).into(),
                                     Memory(Id::from("y")).into(),
@@ -1702,11 +1693,11 @@ mod tests {
                             value: FnCall{
                                 fn_: BuiltIn::BuiltInFn(
                                     Name::from("Main"),
-                                    FnType(
-                                        Vec::new(),
-                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                                    ).into()
                                 ).into(),
+                                fn_type: FnType(
+                                    Vec::new(),
+                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                ),
                                 args: Vec::new()
                             }.into()
                         }.into(),
@@ -1734,7 +1725,7 @@ mod tests {
                 ),
             ]
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; Lazy<Int> *x = nullptr; Lazy<Int> *y = nullptr; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; call->args = std::make_tuple(x,y); call->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; main->args = std::make_tuple(); main->call(); } return main; } }; ";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; Lazy<Int> *x = nullptr; Lazy<Int> *y = nullptr; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

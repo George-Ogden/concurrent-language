@@ -121,41 +121,38 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
-pub type Location = Rc<RefCell<()>>;
+#[derive(Clone, Eq)]
+pub struct Location(Rc<RefCell<()>>);
 
-#[derive(Clone, FromVariants, Eq)]
+impl Location {
+    pub fn new() -> Self {
+        Self(Rc::new(RefCell::new(())))
+    }
+}
+
+impl PartialEq for Location {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ptr() == other.0.as_ptr()
+    }
+}
+
+impl Hash for Location {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_ptr().hash(state);
+    }
+}
+
+impl fmt::Debug for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self.0.as_ptr())
+    }
+}
+
+#[derive(Clone, FromVariants, PartialEq, Eq, Debug)]
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
     IntermediateMemory(Location),
     IntermediateArg(IntermediateArg),
-}
-
-impl fmt::Debug for IntermediateValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::IntermediateBuiltIn(arg0) => {
-                f.debug_tuple("IntermediateBuiltIn").field(arg0).finish()
-            }
-            Self::IntermediateMemory(arg0) => f
-                .debug_tuple("IntermediateMemory")
-                .field(&arg0.as_ptr())
-                .finish(),
-            Self::IntermediateArg(arg0) => f.debug_tuple("IntermediateArg").field(arg0).finish(),
-        }
-    }
-}
-
-impl PartialEq for IntermediateValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::IntermediateBuiltIn(l0), Self::IntermediateBuiltIn(r0)) => l0 == r0,
-            (Self::IntermediateMemory(l0), Self::IntermediateMemory(r0)) => {
-                l0.as_ptr() == r0.as_ptr()
-            }
-            (Self::IntermediateArg(l0), Self::IntermediateArg(r0)) => l0 == r0,
-            _ => false,
-        }
-    }
 }
 
 impl Hash for IntermediateValue {
@@ -167,7 +164,7 @@ impl Hash for IntermediateValue {
             }
             IntermediateValue::IntermediateMemory(location) => {
                 1.hash(state);
-                location.as_ptr().hash(state);
+                location.hash(state);
             }
             IntermediateValue::IntermediateArg(arg) => {
                 2.hash(state);
@@ -199,7 +196,7 @@ pub struct IntermediateMemory {
 impl Hash for IntermediateMemory {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.expression.as_ptr().hash(state);
-        self.location.as_ptr().hash(state);
+        self.location.hash(state);
     }
 }
 
@@ -207,7 +204,7 @@ impl From<IntermediateExpression> for IntermediateMemory {
     fn from(value: IntermediateExpression) -> Self {
         IntermediateMemory {
             expression: Rc::new(RefCell::new(value)),
-            location: Rc::new(RefCell::new(())),
+            location: Location::new(),
         }
     }
 }
@@ -216,7 +213,7 @@ impl From<IntermediateArg> for IntermediateMemory {
     fn from(value: IntermediateArg) -> Self {
         IntermediateMemory {
             expression: Rc::new(RefCell::new(value.into())),
-            location: Rc::new(RefCell::new(())),
+            location: Location::new(),
         }
     }
 }
@@ -273,8 +270,8 @@ impl From<IntermediateBuiltIn> for IntermediateExpression {
 }
 
 pub struct ExpressionEqualityChecker {
-    true_history: HashMap<*mut (), *mut ()>,
-    history: HashMap<*mut (), *mut ()>,
+    true_history: HashMap<Location, Location>,
+    history: HashMap<Location, Location>,
     args: HashMap<*mut IntermediateType, *mut IntermediateType>,
 }
 
@@ -314,15 +311,15 @@ impl ExpressionEqualityChecker {
                 .all(|(a1, a2)| self.equal_arg(a1, a2))
     }
     fn equal_locations(&mut self, l1: &Location, l2: &Location) -> bool {
-        if self.history.get(&l1.as_ptr()) == Some(&l2.as_ptr()) {
+        if self.history.get(&l1) == Some(&l2) {
             true
-        } else if matches!(self.history.get(&l1.as_ptr()), Some(_))
-            || matches!(self.history.get(&l2.as_ptr()), Some(_))
+        } else if matches!(self.history.get(&l1), Some(_))
+            || matches!(self.history.get(&l2), Some(_))
         {
             false
         } else {
-            self.history.insert(l1.as_ptr(), l2.as_ptr());
-            self.history.insert(l2.as_ptr(), l1.as_ptr());
+            self.history.insert(l1.clone(), l2.clone());
+            self.history.insert(l2.clone(), l1.clone());
             true
         }
     }
@@ -335,23 +332,23 @@ impl ExpressionEqualityChecker {
             expression: e2,
             location: l2,
         } = m2;
-        if self.true_history.get(&l1.as_ptr()) == Some(&l2.as_ptr()) {
+        if self.true_history.get(&l1) == Some(&l2) {
             true
-        } else if self.history.get(&l1.as_ptr()) == Some(&l2.as_ptr()) {
-            self.true_history.insert(l1.as_ptr(), l2.as_ptr());
-            self.true_history.insert(l2.as_ptr(), l1.as_ptr());
+        } else if self.history.get(&l1) == Some(&l2) {
+            self.true_history.insert(l1.clone(), l2.clone());
+            self.true_history.insert(l2.clone(), l1.clone());
             self.equal_expression(&e1.borrow().clone(), &e2.borrow().clone())
-        } else if matches!(self.true_history.get(&l1.as_ptr()), Some(_))
-            || matches!(self.true_history.get(&l2.as_ptr()), Some(_))
-            || matches!(self.history.get(&l1.as_ptr()), Some(_))
-            || matches!(self.history.get(&l2.as_ptr()), Some(_))
+        } else if matches!(self.true_history.get(&l1), Some(_))
+            || matches!(self.true_history.get(&l2), Some(_))
+            || matches!(self.history.get(&l1), Some(_))
+            || matches!(self.history.get(&l2), Some(_))
         {
             false
         } else {
-            self.history.insert(l1.as_ptr(), l2.as_ptr());
-            self.history.insert(l2.as_ptr(), l1.as_ptr());
-            self.true_history.insert(l1.as_ptr(), l2.as_ptr());
-            self.true_history.insert(l2.as_ptr(), l1.as_ptr());
+            self.history.insert(l1.clone(), l2.clone());
+            self.history.insert(l2.clone(), l1.clone());
+            self.true_history.insert(l1.clone(), l2.clone());
+            self.true_history.insert(l2.clone(), l1.clone());
             self.equal_expression(&e1.borrow().clone(), &e2.borrow().clone())
         }
     }
@@ -605,12 +602,7 @@ impl fmt::Debug for IntermediateStatement {
             Self::Assignment(IntermediateMemory {
                 expression,
                 location,
-            }) => write!(
-                f,
-                "{:#?} = {:?}",
-                location.as_ptr(),
-                expression.borrow().clone()
-            ),
+            }) => write!(f, "{:?} = {:?}", location, expression.borrow().clone()),
             Self::IntermediateIfStatement(arg0) => f
                 .debug_tuple("IntermediateIfStatement")
                 .field(arg0)

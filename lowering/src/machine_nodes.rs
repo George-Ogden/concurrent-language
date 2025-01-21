@@ -1,7 +1,9 @@
-use std::collections::HashSet;
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use from_variants::FromVariants;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use type_checker::{AtomicTypeEnum, Boolean, Integer};
 
@@ -60,7 +62,7 @@ pub struct Block {
 pub enum BuiltIn {
     Integer(Integer),
     Boolean(Boolean),
-    BuiltInFn(Name, MachineType),
+    BuiltInFn(Name),
 }
 
 #[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
@@ -90,6 +92,7 @@ pub struct TupleExpression(pub Vec<Value>);
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FnCall {
     pub fn_: Value,
+    pub fn_type: FnType,
     pub args: Vec<Value>,
 }
 
@@ -114,90 +117,126 @@ pub enum Statement {
     MatchStatement(MatchStatement),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AllocationState {
+    Undeclared(Option<MachineType>),
+    Declared(MachineType),
+}
+
+impl PartialOrd for AllocationState {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(match (self, other) {
+            (AllocationState::Undeclared(_), AllocationState::Undeclared(_))
+            | (AllocationState::Declared(_), AllocationState::Declared(_)) => Ordering::Equal,
+            (AllocationState::Undeclared(_), AllocationState::Declared(_)) => Ordering::Greater,
+            (AllocationState::Declared(_), AllocationState::Undeclared(_)) => Ordering::Less,
+        })
+    }
+}
+
+impl Ord for AllocationState {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+type Declarations = HashMap<Memory, AllocationState>;
+
 impl Statement {
-    fn get_declarations(&self) -> HashSet<Declaration> {
+    fn merge_declarations_serial(
+        mut declarations1: Declarations,
+        declarations2: Declarations,
+    ) -> Declarations {
+        for (key, value2) in declarations2 {
+            declarations1
+                .entry(key)
+                .and_modify(|value1| {
+                    if value2.partial_cmp(value1) == Some(Ordering::Less) {
+                        *value1 = value2.clone();
+                    }
+                })
+                .or_insert(value2);
+        }
+        declarations1
+    }
+    pub fn merge_declarations_parallel(
+        declarations1: Declarations,
+        declarations2: Declarations,
+    ) -> Declarations {
+        let shared_memory = declarations1
+            .keys()
+            .filter(|k| declarations2.contains_key(k))
+            .cloned()
+            .collect::<HashSet<_>>();
+        shared_memory
+            .into_iter()
+            .map(|memory| {
+                (
+                    memory.clone(),
+                    match (&declarations1[&memory], &declarations2[&memory]) {
+                        (AllocationState::Undeclared(t1), AllocationState::Undeclared(t2)) => {
+                            AllocationState::Undeclared(t1.clone().or(t2.clone()))
+                        }
+                        (AllocationState::Undeclared(_), AllocationState::Declared(t))
+                        | (AllocationState::Declared(t), AllocationState::Undeclared(_)) => {
+                            AllocationState::Undeclared(Some(t.clone()))
+                        }
+                        (AllocationState::Declared(t1), AllocationState::Declared(_)) => {
+                            AllocationState::Declared(t1.clone())
+                        }
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    }
+    fn get_declarations(&self) -> Declarations {
         match self {
-            Statement::Await(_) | Statement::Assignment(_) => HashSet::new(),
-            Statement::Declaration(declaration) => HashSet::from([declaration.clone()]),
+            Statement::Await(_) => HashMap::new(),
+            Statement::Assignment(Assignment {
+                target,
+                value: _,
+                check_null: _,
+            }) => HashMap::from([(target.clone(), AllocationState::Undeclared(None))]),
+            Statement::Declaration(Declaration { type_, memory }) => {
+                HashMap::from([(memory.clone(), AllocationState::Declared(type_.clone()))])
+            }
             Statement::IfStatement(IfStatement {
                 condition: _,
                 branches: (true_branch, false_branch),
-            }) => true_branch
-                .iter()
-                .chain(false_branch.iter())
-                .flat_map(|stmt| stmt.get_declarations())
-                .collect(),
+            }) => Self::merge_declarations_serial(
+                Self::declarations(true_branch),
+                Self::declarations(false_branch),
+            ),
             Statement::MatchStatement(MatchStatement {
                 expression: _,
                 branches,
-            }) => branches
-                .iter()
-                .flat_map(|branch| {
-                    branch
-                        .statements
-                        .iter()
-                        .flat_map(|statement| statement.get_declarations())
-                })
-                .collect(),
+            }) => {
+                let mut declarations = HashMap::new();
+                for branch in branches {
+                    declarations = Self::merge_declarations_serial(
+                        declarations,
+                        Self::declarations(&branch.statements),
+                    );
+                }
+                declarations
+            }
         }
     }
-    fn maybe_remove_declaration(self, declarations: &HashSet<Memory>) -> Option<Self> {
-        match self {
-            Statement::Await(await_) => Some(await_.into()),
-            Statement::Assignment(assignment) => Some(assignment.into()),
-            Statement::Declaration(Declaration { type_: _, memory })
-                if declarations.contains(&memory) =>
-            {
-                None
-            }
-            Statement::Declaration(Declaration { type_, memory }) => {
-                Some(Declaration { type_, memory }.into())
-            }
-            Statement::IfStatement(IfStatement {
-                condition,
-                branches,
-            }) => Some(
-                IfStatement {
-                    condition,
-                    branches: (
-                        Self::remove_declarations(branches.0, declarations),
-                        Self::remove_declarations(branches.1, declarations),
-                    ),
-                }
-                .into(),
-            ),
-            Statement::MatchStatement(MatchStatement {
-                expression,
-                branches,
-            }) => Some(
-                MatchStatement {
-                    expression,
-                    branches: branches
-                        .into_iter()
-                        .map(|MatchBranch { target, statements }| MatchBranch {
-                            target,
-                            statements: Self::remove_declarations(statements, declarations),
-                        })
-                        .collect_vec(),
-                }
-                .into(),
-            ),
+    pub fn declarations(statements: &Vec<Statement>) -> Declarations {
+        let mut declarations = HashMap::new();
+        for statement in statements {
+            declarations =
+                Self::merge_declarations_serial(declarations, statement.get_declarations());
         }
+        declarations
     }
-    pub fn declarations(statements: &Vec<Statement>) -> HashSet<Declaration> {
-        statements
-            .iter()
-            .map(|statement| statement.get_declarations())
-            .flatten()
-            .collect()
-    }
-    pub fn remove_declarations(
-        statements: Vec<Statement>,
-        declarations: &HashSet<Memory>,
-    ) -> Vec<Statement> {
-        statements
+    pub fn from_declarations(declarations: Declarations) -> Vec<Statement> {
+        declarations
             .into_iter()
-            .filter_map(|statement| statement.maybe_remove_declaration(declarations))
+            .filter_map(|(memory, state)| match state {
+                AllocationState::Undeclared(_) => None,
+                AllocationState::Declared(type_) => Some(Declaration { memory, type_ }.into()),
+            })
             .collect()
     }
 }
@@ -232,7 +271,7 @@ pub struct MatchStatement {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MatchBranch {
-    pub target: Option<Name>,
+    pub target: Option<Memory>,
     pub statements: Vec<Statement>,
 }
 
