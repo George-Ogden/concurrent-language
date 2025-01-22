@@ -8,9 +8,7 @@ use std::{
 };
 
 use from_variants::FromVariants;
-use type_checker::{AtomicTypeEnum, Boolean, Integer};
-
-use crate::{AtomicType, Name};
+use type_checker::{AtomicTypeEnum, Boolean, Id, Integer};
 
 #[derive(Clone, FromVariants, Eq)]
 pub enum IntermediateType {
@@ -57,6 +55,9 @@ impl PartialEq for IntermediateType {
         equality_checker.equal_type(self, other)
     }
 }
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AtomicType(pub AtomicTypeEnum);
 
 struct TypeEqualityChecker {
     equal_references: HashMap<*mut IntermediateType, *mut IntermediateType>,
@@ -200,7 +201,7 @@ impl From<Location> for IntermediateValue {
 pub enum IntermediateBuiltIn {
     Integer(Integer),
     Boolean(Boolean),
-    BuiltInFn(Name, IntermediateType),
+    BuiltInFn(Id, IntermediateType),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -842,8 +843,9 @@ pub struct IntermediateMatchBranch {
     pub statements: Vec<IntermediateStatement>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntermediateProgram {
     pub statements: Vec<IntermediateStatement>,
     pub main: IntermediateValue,
+    pub types: Vec<Rc<RefCell<IntermediateType>>>,
 }

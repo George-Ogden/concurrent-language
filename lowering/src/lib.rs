@@ -1,3 +1,4 @@
+mod compiler;
 mod intermediate_nodes;
 mod lower;
 mod machine_nodes;
