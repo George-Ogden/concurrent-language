@@ -298,9 +298,8 @@ pub struct FnDef {
     pub allocations: Vec<Declaration>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Program {
     pub type_defs: Vec<TypeDef>,
-    pub globals: Vec<Declaration>,
     pub fn_defs: Vec<FnDef>,
 }

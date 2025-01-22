@@ -302,9 +302,8 @@ impl Translator {
     }
     fn translate_program(&self, program: Program) -> Code {
         let type_def_code = self.translate_type_defs(program.type_defs);
-        let globals_code = self.translate_memory_allocations(program.globals);
         let fn_def_code = self.translate_fn_defs(program.fn_defs);
-        format!("#include \"main/include.hpp\"\n\n{type_def_code} {globals_code} {fn_def_code}")
+        format!("#include \"main/include.hpp\"\n\n{type_def_code} {fn_def_code}")
     }
     pub fn translate(program: Program) -> Code {
         let translator = Translator {};
@@ -1733,18 +1732,8 @@ mod tests {
                     ]
                 }
             ],
-            globals: vec![
-                Declaration{
-                    memory: Memory(Id::from("x")),
-                    type_: MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                },
-                Declaration{
-                    memory: Memory(Id::from("y")),
-                    type_: MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                },
-            ]
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; Lazy<Int> *x = nullptr; Lazy<Int> *y = nullptr; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

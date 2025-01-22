@@ -7,8 +7,8 @@ use std::{
 use crate::{
     intermediate_nodes::*, AllocationState, Assignment, AtomicType, Await, BuiltIn,
     ClosureInstantiation, ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef,
-    FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Statement,
-    TupleExpression, TupleType, TypeDef, UnionType, Value,
+    FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program,
+    Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::{zip_eq, Either, Itertools};
 use once_cell::sync::Lazy;
@@ -698,6 +698,50 @@ impl Lowerer {
         IntermediateProgram {
             statements: self.remove_wasted_allocations_from_statements(self.statements.clone()),
             main: self.remove_wasted_allocations_from_value(main),
+        }
+    }
+
+    fn register_memory(&mut self, statements: &Vec<IntermediateStatement>) {
+        for statement in statements {
+            match statement {
+                IntermediateStatement::Assignment(IntermediateMemory {
+                    expression,
+                    location,
+                }) => {
+                    match &expression.borrow().clone() {
+                        IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                            args: _,
+                            statements,
+                            return_value: _,
+                        }) => {
+                            self.register_memory(statements);
+                        }
+                        _ => {}
+                    }
+                    if !self.memory.contains_key(&location) {
+                        self.memory.insert(location.clone(), Vec::new());
+                    }
+                    self.memory
+                        .get_mut(&location)
+                        .unwrap()
+                        .push(expression.clone());
+                }
+                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                    condition: _,
+                    branches,
+                }) => {
+                    self.register_memory(&branches.0);
+                    self.register_memory(&branches.1);
+                }
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject: _,
+                    branches,
+                }) => {
+                    for branch in branches {
+                        self.register_memory(&branch.statements)
+                    }
+                }
+            }
         }
     }
 
@@ -1414,7 +1458,13 @@ impl Lowerer {
         open_vars
             .iter()
             .zip(new_locations.iter())
-            .map(|(var, loc)| (var.clone(), loc.clone()))
+            .map(|(val, loc)| {
+                self.update_memory(&IntermediateMemory {
+                    location: loc.clone(),
+                    expression: Rc::new(RefCell::new(val.clone().into())),
+                });
+                (val.clone(), loc.clone())
+            })
             .collect()
     }
     fn closure_prefix(&mut self, env_types: &Vec<(Location, MachineType)>) -> Vec<Statement> {
@@ -1536,6 +1586,37 @@ impl Lowerer {
             )
         } else {
             (Vec::new(), ClosureInstantiation { name, env: None })
+        }
+    }
+    fn compile_program(&mut self, program: IntermediateProgram) -> Program {
+        let IntermediateProgram {
+            mut statements,
+            main,
+        } = program;
+        let type_defs = self.compile_type_defs(self.type_defs.values().cloned().collect_vec());
+        let call = Location::new();
+        let memory = IntermediateMemory {
+            expression: Rc::new(RefCell::new(
+                IntermediateFnCall {
+                    fn_: main.clone().into(),
+                    args: Vec::new(),
+                }
+                .into(),
+            )),
+            location: call.clone(),
+        };
+        self.update_memory(&memory);
+        statements.push(IntermediateStatement::Assignment(memory));
+        let (statements, _) = self.compile_fn_def(IntermediateFnDef {
+            args: Vec::new(),
+            return_value: call.clone().into(),
+            statements: statements,
+        });
+        assert_eq!(statements.len(), 0);
+        self.fn_defs.last_mut().unwrap().name = Name::from("Main");
+        Program {
+            fn_defs: self.fn_defs.clone(),
+            type_defs,
         }
     }
 }
@@ -5194,40 +5275,7 @@ mod tests {
         let (args, statements) = args_statements;
         let mut lowerer = Lowerer::new();
         lowerer.compile_args(&args);
-        for statement in &statements {
-            if let IntermediateStatement::Assignment(IntermediateMemory {
-                expression,
-                location,
-            }) = statement
-            {
-                if !lowerer.memory.contains_key(&location) {
-                    lowerer.memory.insert(location.clone(), Vec::new());
-                }
-                lowerer
-                    .memory
-                    .get_mut(&location)
-                    .unwrap()
-                    .push(expression.clone());
-            }
-            if let IntermediateStatement::IntermediateIfStatement(if_statement) = statement {
-                for statement in &if_statement.branches.0 {
-                    if let IntermediateStatement::Assignment(IntermediateMemory {
-                        expression,
-                        location,
-                    }) = statement
-                    {
-                        if !lowerer.memory.contains_key(&location) {
-                            lowerer.memory.insert(location.clone(), Vec::new());
-                        }
-                        lowerer
-                            .memory
-                            .get_mut(&location)
-                            .unwrap()
-                            .push(expression.clone());
-                    }
-                }
-            }
-        }
+        lowerer.register_memory(&statements);
         let compiled_statements = lowerer.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
@@ -5700,40 +5748,7 @@ mod tests {
         let mut lowerer = Lowerer::new();
         lowerer.compile_args(&args);
         lowerer.compile_type_defs(types);
-        for statement in &statements {
-            if let IntermediateStatement::Assignment(IntermediateMemory {
-                expression,
-                location,
-            }) = statement
-            {
-                if !lowerer.memory.contains_key(&location) {
-                    lowerer.memory.insert(location.clone(), Vec::new());
-                }
-                lowerer
-                    .memory
-                    .get_mut(&location)
-                    .unwrap()
-                    .push(expression.clone());
-            }
-            if let IntermediateStatement::IntermediateMatchStatement(match_statement) = statement {
-                for statement in &match_statement.branches[0].statements {
-                    if let IntermediateStatement::Assignment(IntermediateMemory {
-                        expression,
-                        location,
-                    }) = statement
-                    {
-                        if !lowerer.memory.contains_key(&location) {
-                            lowerer.memory.insert(location.clone(), Vec::new());
-                        }
-                        lowerer
-                            .memory
-                            .get_mut(&location)
-                            .unwrap()
-                            .push(expression.clone());
-                    }
-                }
-            }
-        }
+        lowerer.register_memory(&statements);
         let compiled_statements = lowerer.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
@@ -5981,20 +5996,430 @@ mod tests {
         let (expected_statements, expected_value, expected_fn_def) = expected;
 
         let mut lowerer = Lowerer::new();
-        for (location, expression) in locations {
-            if !lowerer.memory.contains_key(&location) {
-                lowerer.memory.insert(location.clone(), Vec::new());
-            }
-            lowerer
-                .memory
-                .get_mut(&location)
-                .unwrap()
-                .push(expression.clone());
-        }
+        lowerer.register_memory(&fn_def.statements);
+        let extra_statements = locations
+            .into_iter()
+            .map(|(location, expression)| {
+                IntermediateStatement::Assignment(
+                    IntermediateMemory {
+                        location,
+                        expression,
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+        lowerer.register_memory(&extra_statements);
 
         let compiled = lowerer.compile_fn_def(fn_def);
         assert_eq!(compiled, (expected_statements, expected_value));
         let compiled_fn_def = &lowerer.fn_defs[0];
         assert_eq!(compiled_fn_def, &expected_fn_def);
+    }
+
+    #[test_case(
+        {
+            let identity = Location::new();
+            let main = Location::new();
+            let y = Location::new();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            IntermediateProgram {
+                statements: vec![
+                    IntermediateStatement::Assignment(IntermediateMemory{
+                        location: identity.clone(),
+                        expression: Rc::new(RefCell::new(
+                            IntermediateFnDef{
+                                args: vec![arg.clone()],
+                                statements: Vec::new(),
+                                return_value: arg.clone().into()
+                            }.into()
+                        ))
+                    }),
+                    IntermediateStatement::Assignment(IntermediateMemory{
+                        location: main.clone(),
+                        expression: Rc::new(RefCell::new(
+                            IntermediateFnDef{
+                                args: Vec::new(),
+                                statements: vec![
+                                    IntermediateStatement::Assignment(IntermediateMemory{
+                                        location: y.clone(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateFnCall{
+                                                fn_: identity.clone().into(),
+                                                args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
+                                            }.into()
+                                        ))
+                                    })
+                                ],
+                                return_value: y.clone().into()
+                            }.into()
+                        ))
+                    }),
+                ],
+                main: main.clone().into()
+            }
+        },
+        Vec::new(),
+        Program {
+            type_defs: Vec::new(),
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: vec![(Memory(Id::from("a0")), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))],
+                    statements: Vec::new(),
+                    ret: (Memory(Id::from("a0")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    env: None,
+                    allocations: Vec::new()
+                },
+                FnDef {
+                    name: Name::from("F1"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Declaration {
+                            type_: MachineType::Lazy(Box::new(FnType(
+                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))).into())
+                            ).into(),
+                            memory: Memory(Id::from("m1")),
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m1")),
+                            value: ElementAccess {
+                                value: Memory(Id::from("env")).into(),
+                                idx: 0
+                            }.into(),
+                            check_null: false
+                        }.into(),
+                        Await(vec![Memory(Id::from("m1"))]).into(),
+                        Declaration {
+                            type_: FnType(
+                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                            ).into(),
+                            memory: Memory(Id::from("m2"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m2")),
+                            value: Expression::Unwrap(Memory(Id::from("m1")).into()),
+                            check_null: false
+                        }.into(),
+                        Declaration {
+                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            memory: Memory(Id::from("m3"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m3")),
+                            value: Expression::Wrap(
+                                BuiltIn::from(Integer { value: 0 }).into(),
+                                AtomicTypeEnum::INT.into()
+                            ),
+                            check_null: false
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m4")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m2")).into(),
+                                fn_type: FnType(
+                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                ),
+                                args: vec![Memory(Id::from("m3")).into()]
+                            }.into(),
+                            check_null: true
+                        }.into()
+                    ],
+                    ret: (Memory(Id::from("m4")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    env: Some(TupleType(vec![
+                        MachineType::Lazy(
+                            Box::new(FnType(
+                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                            ).into())
+                        )
+                    ]).into()),
+                    allocations: vec![
+                        Declaration {
+                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            memory: Memory(Id::from("m4"))
+                        }
+                    ]
+                },
+                FnDef {
+                    name: Name::from("Main"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Declaration {
+                            type_: FnType(
+                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                            ).into(),
+                            memory: Memory(Id::from("m0"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: ClosureInstantiation { name: Name::from("F0"), env: None }.into(),
+                            check_null: false
+                        }.into(),
+                        Declaration {
+                            type_: MachineType::Lazy(
+                                Box::new(FnType(
+                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                ).into())
+                            ),
+                            memory: Memory(Id::from("m6"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m6")),
+                            value: Expression::Wrap(
+                                Memory(Id::from("m0")).into(),
+                                FnType(
+                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                ).into()
+                            ),
+                            check_null: false
+                        }.into(),
+                        Declaration {
+                            type_: TupleType(
+                                vec![MachineType::Lazy(
+                                    Box::new(FnType(
+                                        vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
+                                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                    ).into())
+                                )]
+                            ).into(),
+                            memory: Memory(Id::from("m5"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m5")),
+                            value: TupleExpression(vec![Memory(Id::from("m6")).into()]).into(),
+                            check_null: false
+                        }.into(),
+                        Declaration {
+                            type_: FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))).into(),
+                            memory: Memory(Id::from("m7"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m7")),
+                            value: ClosureInstantiation {
+                                name: Name::from("F1"),
+                                env: Some(Memory(Id::from("m5")).into())
+                            }.into(),
+                            check_null: false
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m8")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m7")).into(),
+                                fn_type: FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))).into(),
+                                args: Vec::new()
+                            }.into(),
+                            check_null: true
+                        }.into()
+                    ],
+                    ret: (Memory(Id::from("m8")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    env: None,
+                    allocations: vec![
+                        Declaration {
+                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            memory: Memory(Id::from("m8"))
+                        }
+                    ]
+                }
+            ]
+        };
+        "identity call program"
+    )]
+    #[test_case(
+        {
+            let main = Location::new();
+            let c = Location::new();
+            let r = Location::new();
+            IntermediateProgram {
+                statements: vec![
+                    IntermediateStatement::Assignment(IntermediateMemory{
+                        location: main.clone(),
+                        expression: Rc::new(RefCell::new(
+                            IntermediateFnDef{
+                                args: Vec::new(),
+                                statements: vec![
+                                    IntermediateStatement::Assignment (IntermediateMemory{
+                                        location: c.clone(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateCtorCall {
+                                                idx: 0,
+                                                data: None,
+                                                type_: IntermediateUnionType(vec![None,None])
+                                            }.into()
+                                        ))
+                                    }),
+                                    IntermediateMatchStatement {
+                                        subject: c.clone().into(),
+                                        branches: vec![
+                                            IntermediateMatchBranch{
+                                                target: None,
+                                                statements: vec![
+                                                    IntermediateStatement::Assignment (IntermediateMemory{
+                                                        location: r.clone(),
+                                                        expression: Rc::new(RefCell::new(
+                                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                                        ))
+                                                    }),
+                                                ]
+                                            },
+                                            IntermediateMatchBranch{
+                                                target: None,
+                                                statements: vec![
+                                                    IntermediateStatement::Assignment (IntermediateMemory{
+                                                        location: r.clone(),
+                                                        expression: Rc::new(RefCell::new(
+                                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
+                                                        ))
+                                                    }),
+                                                ]
+                                            }
+                                        ]
+                                    }.into()
+                                ],
+                                return_value: r.clone().into()
+                            }.into()
+                        ))
+                    }),
+                ],
+                main: main.clone().into()
+            }
+        },
+        vec![
+            (
+                Type::Union(Id::from("Bull"), vec![None,None]),
+                Rc::new(RefCell::new(
+                    IntermediateUnionType(vec![None,None]).into()
+                ))
+            )
+        ],
+        Program{
+            type_defs: vec![
+                TypeDef {
+                    name: Name::from("T0"),
+                    constructors: vec![
+                        (Name::from("T0C0"), None),
+                        (Name::from("T0C1"), None)
+                    ]
+                }
+            ],
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(), statements: vec![
+                        Declaration {
+                            type_: UnionType(vec![Name::from("T0C0"), Name::from("T0C1")]).into(),
+                            memory: Memory(Id::from("m0"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: ConstructorCall { idx: 0, data: None }.into(),
+                            check_null: false
+                        }.into(),
+                        Declaration {
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory: Memory(Id::from("m1"))
+                        }.into(),
+                        MatchStatement {
+                            expression: (Memory(Id::from("m0")).into(), UnionType(vec![Name::from("T0C0"), Name::from("T0C1")])),
+                            branches: vec![
+                                MatchBranch {
+                                    target: None,
+                                    statements: vec![
+                                        Assignment {
+                                            target: Memory(Id::from("m1")),
+                                            value: Value::from(BuiltIn::from(Integer { value: 0 })).into(),
+                                            check_null: false
+                                        }.into()
+                                    ]
+                                },
+                                MatchBranch {
+                                    target: None,
+                                    statements: vec![
+                                        Assignment {
+                                            target: Memory(Id::from("m1")),
+                                            value: Value::from(BuiltIn::from(Integer { value: 1 })).into(),
+                                            check_null: false
+                                        }.into()
+                                    ]
+                                }
+                            ]
+                        }.into(),
+                        Declaration {
+                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            memory: Memory(Id::from("m2"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m2")),
+                            value: Expression::Wrap(
+                                Memory(Id::from("m1")).into(),
+                                AtomicTypeEnum::INT.into()
+                            ),
+                            check_null: false
+                        }.into()
+                    ],
+                    ret: (Memory(Id::from("m2")).into(),MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    env: None,
+                    allocations: Vec::new()
+                },
+                FnDef {
+                    name: Name::from("Main"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Declaration {
+                            type_: FnType(
+                                Vec::new(),
+                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                            ).into(),
+                            memory: Memory(Id::from("m3"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m3")),
+                            value: ClosureInstantiation { name: Name::from("F0"), env: None }.into(),
+                            check_null: false
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m4")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m3")).into(),
+                                fn_type: FnType(
+                                    Vec::new(),
+                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                ),
+                                args: Vec::new()
+                            }.into(),
+                            check_null: true
+                        }.into()
+                    ],
+                    ret: (Memory(Id::from("m4")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    env: None,
+                    allocations: vec![
+                        Declaration {
+                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            memory: Memory(Id::from("m4"))
+                        }
+                    ]
+                }
+            ]
+        };
+        "program with type defs"
+    )]
+    fn test_compile_program(
+        program: IntermediateProgram,
+        type_defs: Vec<(Type, Rc<RefCell<IntermediateType>>)>,
+        expected_program: Program,
+    ) {
+        let mut lowerer = Lowerer::new();
+        lowerer.register_memory(&program.statements);
+        for (type_, intermediate_type) in type_defs {
+            lowerer.type_defs.insert(type_, intermediate_type);
+        }
+        let compiled_program = lowerer.compile_program(program);
+        assert_eq!(compiled_program, expected_program);
     }
 }

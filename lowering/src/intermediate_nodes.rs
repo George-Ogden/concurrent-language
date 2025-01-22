@@ -245,6 +245,16 @@ pub enum IntermediateExpression {
 }
 
 impl IntermediateExpression {
+    pub fn targets(&self) -> Vec<Location> {
+        match self {
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                statements,
+                args: _,
+                return_value: _,
+            }) => IntermediateStatement::all_targets(statements),
+            _ => Vec::new(),
+        }
+    }
     pub fn values(&self) -> Vec<IntermediateValue> {
         match self {
             IntermediateExpression::IntermediateValue(value) => vec![value.clone()],
@@ -271,14 +281,18 @@ impl IntermediateExpression {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args,
                 statements,
-                return_value: _,
-            }) => IntermediateStatement::all_values(statements)
-                .into_iter()
-                .filter(|value| match value {
-                    IntermediateValue::IntermediateArg(arg) => !args.contains(&arg),
-                    _ => true,
-                })
-                .collect(),
+                return_value,
+            }) => {
+                let mut values: Vec<_> = IntermediateStatement::all_values(statements);
+                values.push(return_value.clone());
+                values
+                    .into_iter()
+                    .filter(|value| match value {
+                        IntermediateValue::IntermediateArg(arg) => !args.contains(&arg),
+                        _ => true,
+                    })
+                    .collect()
+            }
         }
     }
     fn substitute(&mut self, substitution: &Substitution) {
@@ -723,9 +737,13 @@ impl IntermediateStatement {
     fn targets(&self) -> Vec<Location> {
         match self {
             IntermediateStatement::Assignment(IntermediateMemory {
-                expression: _,
+                expression,
                 location,
-            }) => vec![location.clone()],
+            }) => {
+                let mut targets = expression.borrow().targets();
+                targets.push(location.clone());
+                targets
+            }
             IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
                 condition: _,
                 branches,
