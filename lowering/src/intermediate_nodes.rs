@@ -1,6 +1,11 @@
 use core::fmt;
 use itertools::Itertools;
-use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    rc::Rc,
+};
 
 use from_variants::FromVariants;
 use type_checker::{AtomicTypeEnum, Boolean, Integer};
@@ -155,6 +160,17 @@ pub enum IntermediateValue {
     IntermediateArg(IntermediateArg),
 }
 
+impl IntermediateValue {
+    fn substitute(&self, substitution: &Substitution) -> IntermediateValue {
+        substitution.get(&self).unwrap_or(&self).clone()
+    }
+    fn substitute_all(values: &mut Vec<Self>, substitution: &Substitution) {
+        for value in values {
+            *value = value.substitute(substitution);
+        }
+    }
+}
+
 impl Hash for IntermediateValue {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
@@ -252,7 +268,48 @@ impl IntermediateExpression {
                 None => Vec::new(),
                 Some(v) => vec![v.clone()],
             },
-            IntermediateExpression::IntermediateFnDef(_) => Vec::new(),
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                args,
+                statements,
+                return_value: _,
+            }) => IntermediateStatement::all_values(statements)
+                .into_iter()
+                .filter(|value| match value {
+                    IntermediateValue::IntermediateArg(arg) => !args.contains(&arg),
+                    _ => true,
+                })
+                .collect(),
+        }
+    }
+    fn substitute(&mut self, substitution: &Substitution) {
+        match self {
+            IntermediateExpression::IntermediateValue(value) => {
+                *value = value.substitute(substitution);
+            }
+            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
+                value,
+                idx: _,
+            }) => {
+                *value = value.substitute(substitution);
+            }
+            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                values,
+            )) => {
+                IntermediateValue::substitute_all(values, substitution);
+            }
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
+                *fn_ = fn_.substitute(substitution);
+                IntermediateValue::substitute_all(args, substitution)
+            }
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx: _,
+                data,
+                type_: _,
+            }) => match data {
+                None => (),
+                Some(data) => *data = data.substitute(substitution),
+            },
+            IntermediateExpression::IntermediateFnDef(fn_def) => fn_def.substitute(substitution),
         }
     }
 }
@@ -589,11 +646,139 @@ pub struct IntermediateFnDef {
     pub return_value: IntermediateValue,
 }
 
+type Substitution = HashMap<IntermediateValue, IntermediateValue>;
+
+impl IntermediateFnDef {
+    pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
+        let targets: HashSet<Location> =
+            HashSet::from_iter(IntermediateStatement::all_targets(&self.statements));
+        let values = IntermediateExpression::from(self.clone()).values();
+        values
+            .into_iter()
+            .unique()
+            .into_iter()
+            .filter(|value| match value {
+                IntermediateValue::IntermediateBuiltIn(_) => false,
+                IntermediateValue::IntermediateMemory(location) => !targets.contains(location),
+                IntermediateValue::IntermediateArg(_) => true,
+            })
+            .collect()
+    }
+    pub fn substitute(&mut self, substitution: &Substitution) {
+        IntermediateStatement::substitute_all(&mut self.statements, substitution);
+    }
+}
+
 #[derive(Clone, PartialEq, FromVariants, Eq, Hash)]
 pub enum IntermediateStatement {
     Assignment(IntermediateMemory),
     IntermediateIfStatement(IntermediateIfStatement),
     IntermediateMatchStatement(IntermediateMatchStatement),
+}
+
+impl IntermediateStatement {
+    fn values(&self) -> Vec<IntermediateValue> {
+        match self {
+            IntermediateStatement::Assignment(IntermediateMemory {
+                expression,
+                location: _,
+            }) => expression.borrow().clone().values(),
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition,
+                branches,
+            }) => {
+                let mut values = IntermediateStatement::all_values(&branches.0);
+                values.extend(IntermediateStatement::all_values(&branches.1));
+                values.push(condition.clone());
+                values
+            }
+            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                subject,
+                branches,
+            }) => {
+                let mut values = branches
+                    .iter()
+                    .flat_map(|IntermediateMatchBranch { target, statements }| {
+                        IntermediateStatement::all_values(statements)
+                            .into_iter()
+                            .filter(|value| match value {
+                                IntermediateValue::IntermediateArg(arg) => {
+                                    Some(arg) != target.as_ref()
+                                }
+                                _ => true,
+                            })
+                    })
+                    .collect_vec();
+                values.push(subject.clone());
+                values
+            }
+        }
+    }
+    fn all_values(statements: &Vec<Self>) -> Vec<IntermediateValue> {
+        statements
+            .iter()
+            .flat_map(|statement| statement.values())
+            .collect()
+    }
+    fn targets(&self) -> Vec<Location> {
+        match self {
+            IntermediateStatement::Assignment(IntermediateMemory {
+                expression: _,
+                location,
+            }) => vec![location.clone()],
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition: _,
+                branches,
+            }) => {
+                let mut targets = IntermediateStatement::all_targets(&branches.0);
+                targets.extend(IntermediateStatement::all_targets(&branches.1));
+                targets
+            }
+            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                subject: _,
+                branches,
+            }) => branches
+                .iter()
+                .flat_map(|branch| IntermediateStatement::all_targets(&branch.statements))
+                .collect(),
+        }
+    }
+    fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
+        statements
+            .iter()
+            .flat_map(|statement| statement.targets())
+            .collect()
+    }
+    fn substitute(&mut self, substitution: &Substitution) {
+        match self {
+            IntermediateStatement::Assignment(IntermediateMemory {
+                expression,
+                location: _,
+            }) => expression.borrow_mut().substitute(substitution),
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition,
+                branches,
+            }) => {
+                *condition = condition.substitute(substitution);
+                IntermediateStatement::substitute_all(&mut branches.0, substitution);
+                IntermediateStatement::substitute_all(&mut branches.1, substitution);
+            }
+            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                subject,
+                branches,
+            }) => {
+                *subject = subject.substitute(substitution);
+                for branch in branches {
+                    IntermediateStatement::substitute_all(&mut branch.statements, substitution);
+                }
+            }
+        }
+    }
+    fn substitute_all(statements: &mut Vec<Self>, substitution: &Substitution) {
+        for statement in statements {
+            statement.substitute(substitution)
+        }
+    }
 }
 
 impl fmt::Debug for IntermediateStatement {

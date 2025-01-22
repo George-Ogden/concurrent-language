@@ -5,8 +5,8 @@ use std::fmt::Formatter;
 use lowering::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
-    IfStatement, Integer, MachineType, MatchStatement, Memory, MemoryAllocation, Program,
-    Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
+    IfStatement, Integer, MachineType, MatchStatement, Memory, Program, Statement, TupleExpression,
+    TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -111,7 +111,10 @@ impl Translator {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                format!("new {name}{{{}}}", self.translate_value(env))
+                format!(
+                    "new {name}{{{}}}",
+                    env.map_or_else(Code::new, |env| self.translate_value(env))
+                )
             }
             Expression::Block(block) => self.translate_block(block),
             e => panic!("{:?} does not translate directly as an expression", e),
@@ -228,11 +231,15 @@ impl Translator {
             .map(|statement| self.translate_statement(statement))
             .join("\n")
     }
-    fn translate_memory_allocation(&self, memory_allocation: MemoryAllocation) -> Code {
-        let MemoryAllocation(id, type_) = memory_allocation;
-        format!("{} {id} = nullptr;", self.translate_type(&type_))
+    fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
+        let Declaration { memory, type_ } = memory_allocation;
+        format!(
+            "{} {} = nullptr;",
+            self.translate_type(&type_),
+            self.translate_memory(memory)
+        )
     }
-    fn translate_memory_allocations(&self, memory_allocations: Vec<MemoryAllocation>) -> Code {
+    fn translate_memory_allocations(&self, memory_allocations: Vec<Declaration>) -> Code {
         memory_allocations
             .into_iter()
             .map(|memory_allocation| self.translate_memory_allocation(memory_allocation))
@@ -1036,8 +1043,20 @@ mod tests {
         Assignment {
             target: Memory(Id::from("closure")).into(),
             value: ClosureInstantiation{
+                name: Name::from("Closure"),
+                env: None
+            }.into(),
+            check_null: true
+        },
+        "if (closure == nullptr) { closure = new Closure{}; }";
+        "closure without env assignment"
+    )]
+    #[test_case(
+        Assignment {
+            target: Memory(Id::from("closure")).into(),
+            value: ClosureInstantiation{
                 name: Name::from("Adder"),
-                env: Memory(Id::from("x")).into()
+                env: Some(Memory(Id::from("x")).into())
             }.into(),
             check_null: true
         },
@@ -1457,36 +1476,36 @@ mod tests {
             ],
             ret: (Memory(Id::from("call3")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
             allocations: vec![
-                MemoryAllocation (
-                    Id::from("call1"),
-                    FnType(
+                Declaration {
+                    memory: Memory(Id::from("call1")),
+                    type_: FnType(
                         vec![
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
                         ],
                         Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     ).into()
-                ),
-                MemoryAllocation (
-                    Id::from("call2"),
-                    FnType(
+                },
+                Declaration {
+                    memory: Memory(Id::from("call2")),
+                    type_: FnType(
                         vec![
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
                         ],
                         Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     ).into()
-                ),
-                MemoryAllocation (
-                    Id::from("call3"),
-                    FnType(
+                },
+                Declaration {
+                    memory: Memory(Id::from("call3")),
+                    type_: FnType(
                         vec![
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
                         ],
                         Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     ).into()
-                )
+                }
             ]
         },
         "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; Lazy<Int> *body(Lazy<Int> *&a, Lazy<Int> *&b, Lazy<Int> *&c, Lazy<Int> *&d) override { if (call1 == nullptr) { call1 = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call1)->args = std::make_tuple(a, b); dynamic_cast<FnT<Int,Int,Int>>(call1)->call(); } if (call2 == nullptr) { call2 = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(c, d); dynamic_cast<FnT<Int,Int,Int>>(call2)->call(); } if (call3 == nullptr) { call3 = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call3)->args = std::make_tuple(call1, call2); dynamic_cast<FnT<Int,Int,Int>>(call3)->call(); } return call3; } };";
@@ -1549,22 +1568,22 @@ mod tests {
             ],
             ret: (Memory(Id::from("block")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
             allocations: vec![
-                MemoryAllocation(
-                    Id::from("block"),
-                    FnType(
+                Declaration{
+                    memory: Memory(Id::from("block")),
+                    type_: FnType(
                         Vec::new(),
                         Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     ).into()
-                ),
-                MemoryAllocation(
-                    Id::from("call"),
-                    FnType(
+                },
+                Declaration{
+                    memory: Memory(Id::from("call")),
+                    type_: FnType(
                         vec![
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                         ],
                         Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     ).into()
-                )
+                }
             ]
         },
         "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int, Int> call = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { FnT<Int> block_tmp; block_tmp = new BlockFn<Int>([&]() { if (call == nullptr) { call = new Increment__BuiltIn {}; dynamic_cast<FnT<Int,Int>>(call)->args = std::make_tuple(x); dynamic_cast<FnT<Int,Int>>(call)->call(); } return call; }); if (block == nullptr) { block = block_tmp->clone(); dynamic_cast<FnT<Int>>(block)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(block)->call(); } return block; } };";
@@ -1599,16 +1618,16 @@ mod tests {
             ],
             ret: (Memory(Id::from("inner_res")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
             allocations: vec![
-                MemoryAllocation(
-                    Id::from("inner_res"),
-                    FnType(
+                Declaration{
+                    memory: Memory(Id::from("inner_res")),
+                    type_: FnType(
                         vec![
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                             MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                         ],
                         Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     ).into()
-                )
+                }
             ]
         },
     "struct Adder : Closure<Adder, Lazy<Int> *, Int, Int> { using Closure<Adder, Lazy<Int> *, Int, Int>::Closure; FnT<Int, Int, Int> inner_res = nullptr; Lazy<Int> *body(Lazy<Int> *&x) override { if (inner_res == nullptr) { inner_res = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(inner_res)->args = std::make_tuple(x, env); dynamic_cast<FnT<Int,Int,Int>>(inner_res)->call(); } return inner_res; } };";
@@ -1660,16 +1679,16 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     allocations: vec![
-                        MemoryAllocation(
-                            Id::from("call"),
-                            FnType(
+                        Declaration{
+                            memory: Memory(Id::from("call")),
+                            type_: FnType(
                                 vec![
                                     MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                                     MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
                                 ],
                                 Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                             ).into()
-                        )
+                        }
                     ]
                 },
                 FnDef {
@@ -1704,25 +1723,25 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("main")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                     allocations: vec![
-                        MemoryAllocation(
-                            Id::from("main"),
-                            FnType(
+                        Declaration{
+                            memory: Memory(Id::from("main")),
+                            type_: FnType(
                                 Vec::new(),
                                 Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
                             ).into()
-                        )
+                        }
                     ]
                 }
             ],
             globals: vec![
-                MemoryAllocation(
-                    Id::from("x"),
-                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                ),
-                MemoryAllocation(
-                    Id::from("y"),
-                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                ),
+                Declaration{
+                    memory: Memory(Id::from("x")),
+                    type_: MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                },
+                Declaration{
+                    memory: Memory(Id::from("y")),
+                    type_: MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                },
             ]
         },
         "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; Lazy<Int> *x = nullptr; Lazy<Int> *y = nullptr; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";

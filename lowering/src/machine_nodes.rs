@@ -105,7 +105,7 @@ pub struct ConstructorCall {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ClosureInstantiation {
     pub name: Name,
-    pub env: Value,
+    pub env: Option<Value>,
 }
 
 #[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
@@ -194,6 +194,19 @@ impl Statement {
             Statement::Await(_) => HashMap::new(),
             Statement::Assignment(Assignment {
                 target,
+                value:
+                    Expression::FnCall(FnCall {
+                        fn_: _,
+                        fn_type: FnType(_, r),
+                        args: _,
+                    }),
+                check_null: _,
+            }) => HashMap::from([(
+                target.clone(),
+                AllocationState::Undeclared(Some(*r.clone())),
+            )]),
+            Statement::Assignment(Assignment {
+                target,
                 value: _,
                 check_null: _,
             }) => HashMap::from([(target.clone(), AllocationState::Undeclared(None))]),
@@ -276,21 +289,18 @@ pub struct MatchBranch {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct MemoryAllocation(pub Id, pub MachineType);
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FnDef {
     pub name: Name,
     pub arguments: Vec<(Memory, MachineType)>,
     pub statements: Vec<Statement>,
     pub ret: (Value, MachineType),
     pub env: Option<MachineType>,
-    pub allocations: Vec<MemoryAllocation>,
+    pub allocations: Vec<Declaration>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
     pub type_defs: Vec<TypeDef>,
-    pub globals: Vec<MemoryAllocation>,
+    pub globals: Vec<Declaration>,
     pub fn_defs: Vec<FnDef>,
 }
