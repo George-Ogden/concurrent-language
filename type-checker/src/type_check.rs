@@ -742,8 +742,9 @@ impl TypeChecker {
                         };
                         let mut context = context.clone();
                         let variable = assignee.map(|(id, type_)| {
-                            context.insert(id, type_.clone().into());
-                            TypedVariable::from(type_.clone())
+                            let typed_variable = TypedVariable::from(type_.clone());
+                            context.insert(id, typed_variable.clone());
+                            typed_variable
                         });
                         let match_items = block
                             .matches
