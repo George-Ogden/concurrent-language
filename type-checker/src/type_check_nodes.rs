@@ -133,7 +133,7 @@ pub enum Type {
 
 impl PartialEq for Type {
     fn eq(&self, other: &Type) -> bool {
-        return Type::type_equality(self, other, &mut HashMap::new());
+        Type::strict_equality(self, other, &mut HashSet::new())
     }
 }
 
@@ -187,6 +187,9 @@ impl Type {
             _ => false,
         }
     }
+    pub fn equality(t1: &Self, t2: &Self) -> bool {
+        Self::type_equality(t1, t2, &mut HashMap::new())
+    }
     pub fn type_equality(
         t1: &Self,
         t2: &Self,
@@ -235,6 +238,74 @@ impl Type {
             }
             _ => false,
         }
+    }
+    pub fn strict_equality(
+        t1: &Self,
+        t2: &Self,
+        visited: &mut HashSet<*mut ParametricType>,
+    ) -> bool {
+        match (t1, t2) {
+            (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
+            (Type::Union(s1, t1), Type::Union(s2, t2)) => {
+                s1 == s2 && Type::strict_equalities_option(t1, t2, visited)
+            }
+            (Type::Tuple(t1), Type::Tuple(t2)) => Type::strict_equalities(t1, t2, visited),
+            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
+                Type::strict_equalities(a1, a2, visited) && Type::strict_equality(r1, r2, visited)
+            }
+            (Type::Variable(r1), Type::Variable(r2)) => r1.as_ptr() == r2.as_ptr(),
+            (Type::Instantiation(r1, v1), Type::Instantiation(r2, v2)) => {
+                let p1 = r1.as_ptr();
+                let p2 = r2.as_ptr();
+                if p1 == p2 && Type::strict_equalities(v1, v2, visited) {
+                    true
+                } else if visited.contains(&p1) || visited.contains(&p2) {
+                    false
+                } else {
+                    let mut visited_2 = visited.clone();
+                    visited.insert(p1);
+                    if Type::strict_equality(t2, &r1.borrow().instantiate(v1), visited) {
+                        true
+                    } else {
+                        visited_2.insert(p2);
+                        Type::strict_equality(t1, &r2.borrow().instantiate(v2), &mut visited_2)
+                    }
+                }
+            }
+            (t2, Self::Instantiation(r1, v1)) | (Self::Instantiation(r1, v1), t2) => {
+                let p1 = r1.as_ptr();
+                if visited.contains(&p1) {
+                    false
+                } else {
+                    visited.insert(p1);
+                    Type::strict_equality(t2, &r1.borrow().instantiate(v1), visited)
+                }
+            }
+            (_, _) => false,
+        }
+    }
+    pub fn strict_equalities(
+        t1: &Vec<Self>,
+        t2: &Vec<Self>,
+        visited: &mut HashSet<*mut ParametricType>,
+    ) -> bool {
+        t1.len() == t2.len()
+            && t1
+                .iter()
+                .zip(t2.iter())
+                .all(|(t1, t2)| Type::strict_equality(t1, t2, visited))
+    }
+    pub fn strict_equalities_option(
+        t1: &Vec<Option<Self>>,
+        t2: &Vec<Option<Self>>,
+        visited: &mut HashSet<*mut ParametricType>,
+    ) -> bool {
+        t1.len() == t2.len()
+            && t1.iter().zip(t2.iter()).all(|(t1, t2)| match (t1, t2) {
+                (None, None) => true,
+                (Some(t1), Some(t2)) => Type::strict_equality(t1, t2, visited),
+                _ => false,
+            })
     }
 }
 
@@ -815,7 +886,7 @@ impl From<(&Vec<Id>, &V)> for GenericVariables {
 }
 
 #[derive(Clone)]
-pub struct TypeDefinitions(HashMap<K, V>);
+pub struct TypeDefinitions(pub HashMap<K, V>);
 
 impl TypeDefinitions {
     pub fn new() -> Self {
