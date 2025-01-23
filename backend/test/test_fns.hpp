@@ -6,6 +6,7 @@
 #include "system/work_manager.hpp"
 #include "types/builtin.hpp"
 #include "types/compound.hpp"
+#include "types/utils.hpp"
 
 #include <gtest/gtest.h>
 
@@ -669,21 +670,18 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ListInt tail{};
     tail.tag = 1ULL;
-    ListInt *wrapped_tail = new ListInt{tail};
     ListInt third{};
     third.tag = 0ULL;
-    *reinterpret_cast<Cons *>(&third.value) =
-        Cons{std::make_tuple(8, wrapped_tail)};
-    ListInt *wrapped_third = new ListInt{third};
+    reinterpret_cast<Cons *>(&third.value)->value =
+        create_references<Cons::type>(std::make_tuple(8, tail));
     ListInt second{};
     second.tag = 0ULL;
-    *reinterpret_cast<Cons *>(&second.value) =
-        Cons{std::make_tuple(4, wrapped_third)};
-    ListInt wrapped_second = second;
+    reinterpret_cast<Cons *>(&second.value)->value =
+        create_references<Cons::type>(std::make_tuple(4, third));
     ListInt first{};
     first.tag = 0ULL;
-    *reinterpret_cast<Cons *>(&first.value) =
-        Cons{std::make_tuple(-9, &wrapped_second)};
+    reinterpret_cast<Cons *>(&first.value)->value =
+        create_references<Cons::type>(std::make_tuple(-9, second));
 
     ListIntSum *adder = new ListIntSum{first};
 

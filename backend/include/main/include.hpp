@@ -5,5 +5,6 @@
 #include "fn/operators.hpp"
 #include "types/builtin.hpp"
 #include "types/compound.hpp"
+#include "types/utils.hpp"
 
 #include <utility>

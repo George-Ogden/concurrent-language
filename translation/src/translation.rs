@@ -101,12 +101,6 @@ impl Translator {
                 self.translate_value(value)
             ),
             Expression::Unwrap(value) => format!("{}->value()", self.translate_value(value)),
-            Expression::Reference(value, type_) => format!(
-                "new {}{{{}}}",
-                self.translate_type(&type_),
-                self.translate_value(value)
-            ),
-            Expression::Dereference(value) => format!("*{}", self.translate_value(value)),
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
@@ -152,7 +146,7 @@ impl Translator {
         let value_code = match constructor_call.data {
             None => Code::new(),
             Some((name, value)) => format!(
-                "reinterpret_cast<{name}*>(&{target}.value)->value = {};",
+                "reinterpret_cast<{name}*>(&{target}.value)->value = create_references<{name}::type>({});",
                 self.translate_value(value)
             ),
         };
@@ -1026,20 +1020,6 @@ mod tests {
     )]
     #[test_case(
         Assignment {
-            target: Memory(Id::from("lr")).into(),
-            value: Expression::Reference(
-                Memory(
-                    Id::from("l"),
-                ).into(),
-                MachineType::NamedType(Name::from("ListInt"))
-            ),
-            check_null: false
-        },
-        "lr = new ListInt{l};";
-        "reference assignment"
-    )]
-    #[test_case(
-        Assignment {
             target: Memory(Id::from("closure")).into(),
             value: ClosureInstantiation{
                 name: Name::from("Closure"),
@@ -1163,11 +1143,6 @@ mod tests {
                         Declaration {
                             memory: Memory(Id::from("u")),
                             type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
-                        }.into(),
-                        Assignment {
-                            target: Memory(Id::from("u")),
-                            value: Expression::Dereference(Memory(Name::from("t")).into()),
-                            check_null: false
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("r")).into(),
@@ -1356,15 +1331,6 @@ mod tests {
                 check_null: false
             }.into(),
             Declaration{
-                type_:MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())),
-                memory: Memory(Id::from("wrapped_n")).into()
-            }.into(),
-            Assignment {
-                target: Memory(Id::from("wrapped_n")).into(),
-                value: Expression::Reference(Memory(Id::from("n")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                check_null: false
-            }.into(),
-            Declaration{
                 type_:UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
                 memory: Memory(Id::from("s"))
             }.into(),
@@ -1374,7 +1340,7 @@ mod tests {
                     idx: 0,
                     data: Some((
                         Name::from("Suc"),
-                        Memory(Id::from("wrapped_n")).into()
+                        Memory(Id::from("n")).into()
                     ))
                 }.into(),
                 check_null: false
