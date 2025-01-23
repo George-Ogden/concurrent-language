@@ -1,13 +1,13 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    intermediate_nodes::{self, *},
     AllocationState, Assignment, AtomicType, AtomicTypeEnum, Await, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
     IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement,
     TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::{Either, Itertools};
+use lowering::*;
 use once_cell::sync::Lazy;
 
 const OPERATOR_NAMES: Lazy<HashMap<Id, Id>> = Lazy::new(|| {
@@ -196,7 +196,8 @@ impl Compiler {
 
     fn compile_type(&self, type_: &IntermediateType) -> MachineType {
         match type_ {
-            IntermediateType::AtomicType(intermediate_nodes::AtomicType(atomic_type_enum)) => {
+            IntermediateType::AtomicType(atomic_type) => {
+                let atomic_type_enum = atomic_type.0;
                 atomic_type_enum.clone().into()
             }
             IntermediateType::IntermediateTupleType(IntermediateTupleType(types)) => {
@@ -1005,8 +1006,8 @@ mod tests {
 
     use super::*;
 
+    use lowering::{Boolean, Integer};
     use test_case::test_case;
-    use type_checker::{Boolean, Integer};
 
     #[test_case(
         (

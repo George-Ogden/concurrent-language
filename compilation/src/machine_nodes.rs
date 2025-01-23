@@ -4,13 +4,12 @@ use std::{
 };
 
 use from_variants::FromVariants;
-use serde::{Deserialize, Serialize};
-use type_checker::{AtomicTypeEnum, Boolean, Integer};
+use lowering::{AtomicTypeEnum, Boolean, Integer};
 
 pub type Name = String;
 pub type Id = String;
 
-#[derive(Clone, Debug, FromVariants, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, FromVariants, Hash, PartialEq, Eq)]
 pub enum MachineType {
     AtomicType(AtomicType),
     TupleType(TupleType),
@@ -27,45 +26,45 @@ impl From<AtomicTypeEnum> for MachineType {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct AtomicType(pub AtomicTypeEnum);
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TupleType(pub Vec<MachineType>);
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct FnType(pub Vec<MachineType>, pub Box<MachineType>);
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct UnionType(pub Vec<Name>);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TypeDef {
     pub name: Name,
     pub constructors: Vec<(Name, Option<MachineType>)>,
 }
 
-#[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq)]
 pub enum Value {
     BuiltIn(BuiltIn),
     Memory(Memory),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Memory(pub Id);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Block {
     pub statements: Vec<Statement>,
     pub ret: (Value, MachineType),
 }
 
-#[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq)]
 pub enum BuiltIn {
     Integer(Integer),
     Boolean(Boolean),
     BuiltInFn(Name),
 }
 
-#[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq)]
 pub enum Expression {
     Block(Block),
     Value(Value),
@@ -80,35 +79,35 @@ pub enum Expression {
     ClosureInstantiation(ClosureInstantiation),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ElementAccess {
     pub value: Value,
     pub idx: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TupleExpression(pub Vec<Value>);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FnCall {
     pub fn_: Value,
     pub fn_type: FnType,
     pub args: Vec<Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorCall {
     pub idx: usize,
     pub data: Option<(Name, Value)>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ClosureInstantiation {
     pub name: Name,
     pub env: Option<Value>,
 }
 
-#[derive(Clone, Debug, FromVariants, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq)]
 pub enum Statement {
     Await(Await),
     Declaration(Declaration),
@@ -117,7 +116,7 @@ pub enum Statement {
     MatchStatement(MatchStatement),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AllocationState {
     Undeclared(Option<MachineType>),
     Declared(MachineType),
@@ -254,41 +253,41 @@ impl Statement {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Await(pub Vec<Memory>);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Declaration {
     pub type_: MachineType,
     pub memory: Memory,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Assignment {
     pub target: Memory,
     pub value: Expression,
     pub check_null: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IfStatement {
     pub condition: Value,
     pub branches: (Vec<Statement>, Vec<Statement>),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MatchStatement {
     pub expression: (Value, UnionType),
     pub branches: Vec<MatchBranch>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MatchBranch {
     pub target: Option<Memory>,
     pub statements: Vec<Statement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FnDef {
     pub name: Name,
     pub arguments: Vec<(Memory, MachineType)>,
@@ -298,7 +297,7 @@ pub struct FnDef {
     pub allocations: Vec<Declaration>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     pub type_defs: Vec<TypeDef>,
     pub fn_defs: Vec<FnDef>,
