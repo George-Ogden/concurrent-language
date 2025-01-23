@@ -45,7 +45,7 @@ impl Translator {
                         Some(type_) => {
                             format!("using type = {}; type value;", self.translate_type(type_))
                         }
-                        None => String::new(),
+                        None => Code::from("Empty value;"),
                     };
                     format!("struct {} {{ {fields} }};", constructor.0)
                 })
