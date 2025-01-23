@@ -2,7 +2,7 @@ use core::fmt;
 use itertools::Itertools;
 use std::fmt::Formatter;
 
-use lowering::{
+use compilation::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
     IfStatement, Integer, MachineType, MatchStatement, Memory, Program, Statement, TupleExpression,
@@ -369,7 +369,7 @@ impl fmt::Display for TypesFormatter<'_> {
 mod tests {
     use super::*;
 
-    use lowering::{Block, Id, MatchBranch, Name};
+    use compilation::{Block, Id, MatchBranch, Name};
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
