@@ -15,7 +15,7 @@ type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
 type VisitedReferences = HashSet<*mut IntermediateType>;
 type MemoryMap = HashMap<Location, Vec<Rc<RefCell<IntermediateExpression>>>>;
 
-struct Lowerer {
+pub struct Lowerer {
     scope: Scope,
     history: History,
     uninstantiated: Uninstantiated,
@@ -645,6 +645,10 @@ impl Lowerer {
             main: self.remove_wasted_allocations_from_value(main),
             types: self.type_defs.values().cloned().collect(),
         }
+    }
+    pub fn lower(program: TypedProgram) -> IntermediateProgram {
+        let mut lowerer = Lowerer::new();
+        lowerer.lower_program(program)
     }
 }
 

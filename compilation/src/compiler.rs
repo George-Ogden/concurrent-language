@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    AllocationState, Assignment, AtomicType, AtomicTypeEnum, Await, BuiltIn, ClosureInstantiation,
+    AllocationState, Assignment, AtomicTypeEnum, Await, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
     IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement,
     TupleExpression, TupleType, TypeDef, UnionType, Value,
@@ -47,7 +47,7 @@ type ValueScope = HashMap<IntermediateValue, Value>;
 type TypeLookup = HashMap<IntermediateUnionType, UnionType>;
 type FnDefs = Vec<FnDef>;
 
-struct Compiler {
+pub struct Compiler {
     memory: MemoryMap,
     reference_names: ReferenceNames,
     memory_ids: MemoryIds,
@@ -288,9 +288,6 @@ impl Compiler {
         self.lazy_vals
             .insert(arg.clone().into(), memory.clone().into());
         memory
-    }
-    fn compile_args(&mut self, args: &Vec<IntermediateArg>) -> Vec<Memory> {
-        args.iter().map(|arg| self.compile_arg(arg)).collect()
     }
     fn next_arg_id(&self) -> Memory {
         Memory(format!("a{}", self.arg_ids.len()))
@@ -973,6 +970,7 @@ impl Compiler {
             main,
             types,
         } = program;
+        self.register_memory(&statements);
         let type_defs = self.compile_type_defs(types);
         let call = Location::new();
         let memory = IntermediateMemory {
@@ -999,6 +997,10 @@ impl Compiler {
             type_defs,
         }
     }
+    pub fn compile(program: IntermediateProgram) -> Program {
+        let mut compiler = Compiler::new();
+        compiler.compile_program(program)
+    }
 }
 
 #[cfg(test)]
@@ -1006,6 +1008,7 @@ mod tests {
 
     use super::*;
 
+    use crate::AtomicType;
     use lowering::{Boolean, Integer};
     use test_case::test_case;
 
@@ -2606,7 +2609,9 @@ mod tests {
     ) {
         let (args, statements) = args_statements;
         let mut compiler = Compiler::new();
-        compiler.compile_args(&args);
+        for arg in args {
+            compiler.compile_arg(&arg);
+        }
         compiler.register_memory(&statements);
         let compiled_statements = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
@@ -3078,7 +3083,9 @@ mod tests {
     ) {
         let (args, types, statements) = args_types_statements;
         let mut compiler = Compiler::new();
-        compiler.compile_args(&args);
+        for arg in args {
+            compiler.compile_arg(&arg);
+        }
         compiler.compile_type_defs(types);
         compiler.register_memory(&statements);
         let compiled_statements = compiler.compile_statements(statements);
@@ -3740,7 +3747,6 @@ mod tests {
     )]
     fn test_compile_program(program: IntermediateProgram, expected_program: Program) {
         let mut compiler = Compiler::new();
-        compiler.register_memory(&program.statements);
         let compiled_program = compiler.compile_program(program);
         assert_eq!(compiled_program, expected_program);
     }
