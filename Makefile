@@ -46,20 +46,13 @@ $(GRAMMAR): Grammar.g4
 	touch $@/__init__.py
 	touch $@
 
-parse: $(GRAMMAR)
-	cat samples/grammar.txt | xargs -0 python $(PARSER)
-
-type-check: $(TYPE_CHECKER)
-	cat samples/triangular.txt | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER)
-
-translate: $(TRANSLATOR)
-	echo '{"type_defs":[],"globals":[],"fn_defs":[{"name":"PreMain","arguments":[],"statements":[{"Assignment":{"allocation":{"Lazy":{"AtomicType":"INT"}},"target":"x","value":{"Wrap":[{"BuiltIn":{"Integer":{"value":0}}},{"AtomicType":"INT"}]}}}],"ret":[{"Memory":"x"},{"Lazy":{"AtomicType":"INT"}}],"env":null,"allocations":[["main",{"FnType":[[],{"Lazy":{"AtomicType":"INT"}}]}]]}]}' | ./$(TRANSLATOR) | tee backend/include/main/main.hpp
-
 test: $(PARSER) $(TYPE_CHECKER)
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
-	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv
+	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
+	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
+	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/triangular.txt samples/list.txt; do \
