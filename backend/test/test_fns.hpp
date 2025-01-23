@@ -744,6 +744,38 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
               reinterpret_cast<Suc *>(&inner.value)->value);
 }
 
+using F = TupleT<Lazy<FnT<Int, Int>> *>;
+struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
+    using Closure<SelfRecursiveFn, F, Int, Int>::Closure;
+    FnT<Int, Int> g = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        WorkManager::await(x);
+        if (x->value() > 0) {
+            auto lz = std::get<0>(this->env);
+            auto f = lz->value();
+            if (g == nullptr) {
+                g = f->clone();
+                auto y = new LazyConstant<Int>{x->value() - 1};
+                g->args = std::make_tuple(y);
+                g->call();
+            }
+            return g;
+        } else {
+            return x;
+        }
+    }
+};
+TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
+    FnT<Int, Int> f = new SelfRecursiveFn{};
+    dynamic_cast<SelfRecursiveFn *>(f)->env =
+        std::make_tuple(new LazyConstant<FnT<Int, Int>>{f});
+    Lazy<Int> *x = new LazyConstant<Int>{5};
+    f->args = std::make_tuple(x);
+
+    WorkManager::run(f);
+    ASSERT_EQ(f->ret, 0);
+}
+
 const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));

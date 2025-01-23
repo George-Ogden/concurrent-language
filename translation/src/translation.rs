@@ -104,12 +104,6 @@ impl Translator {
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
-            Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                format!(
-                    "new {name}{{{}}}",
-                    env.map_or_else(Code::new, |env| self.translate_value(env))
-                )
-            }
             Expression::Block(block) => self.translate_block(block),
             e => panic!("{:?} does not translate directly as an expression", e),
         }
@@ -167,6 +161,14 @@ impl Translator {
             Expression::ConstructorCall(constructor_call) => {
                 self.translate_constructor_call(id.clone(), constructor_call)
             }
+            Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
+                return env.map_or_else(Code::new, |env| {
+                    format!(
+                        "dynamic_cast<{name}*>({id})->env = {};",
+                        self.translate_value(env)
+                    )
+                })
+            }
             value => self.translate_expression(value),
         };
         let assignment_code = format!("{id} = {value_code};");
@@ -221,10 +223,40 @@ impl Translator {
         }
     }
     fn translate_statements(&self, statements: Vec<Statement>) -> Code {
-        statements
+        let (declarations, other_statements): (Vec<_>, Vec<_>) = statements
+            .into_iter()
+            .partition(|statement| matches!(statement, Statement::Declaration(_)));
+
+        let declarations_code = declarations
             .into_iter()
             .map(|statement| self.translate_statement(statement))
-            .join("\n")
+            .join("\n");
+
+        let closure_predefinitions = other_statements
+            .iter()
+            .filter_map(|statement| {
+                if let Statement::Assignment(Assignment {
+                    target,
+                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: _ }),
+                    check_null: _,
+                }) = statement
+                {
+                    Some(format!(
+                        "{} = new {name}{{}};",
+                        self.translate_memory(target.clone())
+                    ))
+                } else {
+                    None
+                }
+            })
+            .join("\n");
+
+        let other_code = other_statements
+            .into_iter()
+            .map(|statement| self.translate_statement(statement))
+            .join("\n");
+
+        format!("{declarations_code}\n{closure_predefinitions}\n{other_code}")
     }
     fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
         let Declaration { memory, type_ } = memory_allocation;
