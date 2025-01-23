@@ -8,15 +8,32 @@ TRANSLATOR := translation/target/debug/translation
 TRANSLATOR_MANIFEST := translation/Cargo.toml
 LOWERER := lowering/target/debug/lowering
 LOWERER_MANIFEST := lowering/Cargo.toml
+COMPILER := compilation/target/debug/compilation
+COMPILER_MANIFEST := compilation/Cargo.toml
+PIPELINE := pipeline/target/debug/pipeline
+PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
 
-all: $(TYPE_CHECKER) $(PARSER) $(BACKEND) $(TRANSLATOR)
+all: $(PIPELINE) $(BACKEND)
 
-$(TYPE_CHECKER): $(PARSER) $(wildcard type-checker/src/*)
+run: $(PIPELINE)
+	cat samples/simple.txt | xargs -0 python $(PARSER) | ./$(PIPELINE) > backend/include/main/main.hpp
+	sudo make -C backend run
+
+$(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
 
-$(TRANSLATOR): $(wildcard translation/src/*)
+$(LOWERER): $(wildcard lowering/src/*) $(TYPE_CHECKER)
+	cargo build --manifest-path $(LOWERER_MANIFEST)
+
+$(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
+	cargo build --manifest-path $(COMPILER_MANIFEST)
+
+$(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
 	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
+
+$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR)
+	cargo build --manifest-path $(PIPELINE_MANIFEST)
 
 $(BACKEND):
 	make -C backend
