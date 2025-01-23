@@ -193,8 +193,9 @@ impl Translator {
                 let assignment_code = match branch.target {
                     Some(Memory(id)) => {
                         let type_name = &types[i];
+                        let lazy_type = format!("destroy_references_t<{type_name}::type>");
                         format!(
-                            "Lazy<{type_name}::type> *{id} = new LazyConstant<{type_name}::type>{{reinterpret_cast<{type_name}*>(&{expression_code}.value)->value}};",
+                            "Lazy<{lazy_type}> *{id} = new LazyConstant<{lazy_type}>{{destroy_references(reinterpret_cast<{type_name}*>(&{expression_code}.value)->value)}};",
                         )
                     }
                     None => Code::new(),
@@ -1306,11 +1307,6 @@ mod tests {
             Declaration{
                 type_: UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into(),
                 memory: Memory(Id::from("tail"))
-            }.into(),
-            Assignment {
-                target: Memory(Id::from("tail")),
-                value: Expression::Dereference(Memory(Id::from("tail_")).into()),
-                check_null: false
             }.into(),
         ],
         "List *tail_; tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail; tail = *tail_;";

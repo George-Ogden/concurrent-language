@@ -32,3 +32,35 @@ auto create_references(const Source &t) {
         return t;
     }
 }
+
+template <typename Tuple, std::size_t... Is>
+auto destroy_references_helper(const Tuple &t, std::index_sequence<Is...>) {
+    return std::make_tuple([&]() {
+        using ElementType = std::tuple_element_t<Is, Tuple>;
+
+        if constexpr (std::is_same_v<ElementType,
+                                     std::remove_pointer_t<ElementType>>) {
+            return std::get<Is>(t);
+        } else {
+            return *std::get<Is>(t);
+        }
+    }()...);
+}
+
+template <typename T> auto destroy_references(const T &t) {
+    if constexpr (is_tuple_v<T>) {
+        return destroy_references_helper<T>(
+            t, std::make_index_sequence<std::tuple_size_v<T>>());
+    } else {
+        return t;
+    }
+}
+
+template <typename T> struct destroy_references_struct { using type = T; };
+
+template <typename... Ts> struct destroy_references_struct<TupleT<Ts...>> {
+    using type = TupleT<std::remove_pointer_t<Ts>...>;
+};
+
+template <typename T>
+using destroy_references_t = typename destroy_references_struct<T>::type;

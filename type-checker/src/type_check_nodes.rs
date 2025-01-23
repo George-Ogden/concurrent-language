@@ -371,8 +371,14 @@ impl Hash for Type {
     }
 }
 
-#[derive(Debug, Eq, Clone)]
+#[derive(Eq, Clone)]
 pub struct Variable(pub Rc<RefCell<()>>);
+
+impl fmt::Debug for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Variable").field(&self.0.as_ptr()).finish()
+    }
+}
 
 impl Variable {
     pub fn new() -> Self {

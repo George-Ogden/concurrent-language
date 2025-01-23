@@ -70,7 +70,6 @@ pub enum Expression {
     Value(Value),
     Wrap(Value, MachineType),
     Unwrap(Value),
-    Dereference(Value),
     ElementAccess(ElementAccess),
     TupleExpression(TupleExpression),
     FnCall(FnCall),

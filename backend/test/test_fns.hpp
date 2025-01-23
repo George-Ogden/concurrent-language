@@ -638,13 +638,14 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
         ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            Lazy<Cons::type> *cons_lazy = new LazyConstant<Cons::type>{
-                reinterpret_cast<Cons *>(&list.value)->value};
+            Lazy<destroy_references_t<Cons::type>> *cons_lazy =
+                new LazyConstant<destroy_references_t<Cons::type>>{
+                    destroy_references(
+                        reinterpret_cast<Cons *>(&list.value)->value)};
             WorkManager::await(cons_lazy);
-            Cons::type cons = cons_lazy->value();
+            destroy_references_t<Cons::type> cons = cons_lazy->value();
             Int head = std::get<0ULL>(cons);
-            ListInt *tail_ = std::get<1ULL>(cons);
-            ListInt tail = *tail_;
+            ListInt tail = std::get<1ULL>(cons);
 
             if (call1 == nullptr) {
                 call1 = new ListIntSum{};

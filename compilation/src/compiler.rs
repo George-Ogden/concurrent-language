@@ -468,36 +468,8 @@ impl Compiler {
                 value,
                 idx,
             }) => {
-                let IntermediateType::IntermediateTupleType(IntermediateTupleType(mut types)) =
-                    self.value_type(&value)
-                else {
-                    panic!("Accessing non-tuple type.")
-                };
-                let type_ = types.remove(idx);
-                let (mut statements, value) = self.compile_value(value, false);
-                let value = ElementAccess { value, idx }.into();
-                let value = if matches!(&type_, IntermediateType::Reference(_)) {
-                    let memory = self.new_memory_location();
-                    statements.push(
-                        Declaration {
-                            memory: memory.clone(),
-                            type_: self.compile_type(&type_),
-                        }
-                        .into(),
-                    );
-                    statements.push(
-                        Assignment {
-                            target: memory.clone(),
-                            value,
-                            check_null: false,
-                        }
-                        .into(),
-                    );
-                    Expression::Dereference(memory.into())
-                } else {
-                    value
-                };
-                (statements, value)
+                let (statements, value) = self.compile_value(value, false);
+                (statements, ElementAccess { value, idx }.into())
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
                 let MachineType::FnType(fn_type) = self.compile_type(&self.value_type(&fn_)) else {
@@ -1706,61 +1678,6 @@ mod tests {
         }
         let result = compiler.compile_expression(expression);
         assert_eq!(result, expected);
-    }
-    #[test]
-    fn test_compile_tuple_access_expression_with_dereference() {
-        let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
-        let nat_type: IntermediateType = IntermediateUnionType(vec![
-            Some(IntermediateType::Reference(reference.clone())),
-            None,
-        ])
-        .into();
-        *reference.borrow_mut() = nat_type.clone();
-
-        let argument = IntermediateArg::from(IntermediateType::from(IntermediateTupleType(vec![
-            IntermediateType::Reference(reference.clone()),
-        ])));
-
-        let location = Location::new();
-        let intermediate_expression = IntermediateElementAccess {
-            value: location.clone().into(),
-            idx: 0,
-        }
-        .into();
-
-        let mut compiler = Compiler::new();
-        compiler.compile_type_defs(vec![reference]);
-        compiler
-            .memory
-            .insert(location, vec![Rc::new(RefCell::new(argument.into()))]);
-
-        let (statements, expression) = compiler.compile_expression(intermediate_expression);
-        assert_eq!(
-            statements,
-            vec![
-                Declaration {
-                    memory: Memory(Id::from("m1")),
-                    type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from(
-                        "T0"
-                    ))))
-                }
-                .into(),
-                Assignment {
-                    target: Memory(Id::from("m1")),
-                    check_null: false,
-                    value: ElementAccess {
-                        value: Memory(Id::from("m0")).into(),
-                        idx: 0
-                    }
-                    .into()
-                }
-                .into()
-            ]
-        );
-        assert_eq!(
-            expression,
-            Expression::Dereference(Memory(Id::from("m1")).into())
-        );
     }
     #[test_case(
         {
