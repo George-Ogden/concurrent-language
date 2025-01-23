@@ -191,12 +191,12 @@ impl Definition {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Integer {
     pub value: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Boolean {
     pub value: bool,
 }

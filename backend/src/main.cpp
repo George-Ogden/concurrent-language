@@ -4,7 +4,7 @@
 #include <iostream>
 
 int main() {
-    PreMain main{};
+    Main main{};
     WorkManager::run(&main);
     std::cout << main.value() << std::endl;
     return 0;

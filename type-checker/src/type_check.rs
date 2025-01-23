@@ -1,18 +1,17 @@
 use crate::type_check_nodes::{
-    ConstructorType, GenericVariables, ParametricExpression, ParametricType,
-    PartiallyTypedFunctionDefinition, Type, TypeCheckError, TypeContext, TypeDefinitions,
-    TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall, TypedElementAccess,
-    TypedExpression, TypedFunctionCall, TypedFunctionDefinition, TypedIf, TypedMatch,
-    TypedMatchBlock, TypedMatchItem, TypedParametricVariable, TypedProgram, TypedTuple,
-    TypedVariable, TYPE_BOOL, TYPE_INT,
+    ConstructorType, GenericVariables, ParametricType, PartiallyTypedFunctionDefinition, Type,
+    TypeCheckError, TypeContext, TypeDefinitions, TypedAccess, TypedAssignment, TypedBlock,
+    TypedConstructorCall, TypedElementAccess, TypedExpression, TypedFunctionCall,
+    TypedFunctionDefinition, TypedIf, TypedMatch, TypedMatchBlock, TypedMatchItem, TypedProgram,
+    TypedTuple, TypedVariable, TYPE_BOOL, TYPE_INT,
 };
 use crate::utils::UniqueError;
 use crate::{
     utils, AtomicType, AtomicTypeEnum, Block, ConstructorCall, Definition, ElementAccess,
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
-    Program, TransparentTypeDefinition, TupleExpression, TupleType, TypeInstance,
-    UnionTypeDefinition,
+    ParametricExpression, Program, TransparentTypeDefinition, TupleExpression, TupleType,
+    TypeInstance, UnionTypeDefinition, Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -21,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use strum::IntoEnumIterator;
 
-const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
+thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
     let integer_binary_operators = [
         "**", "*", "/", "%", "+", "-", ">>", "<<", "<=>", "&", "^", "|",
     ]
@@ -60,6 +59,7 @@ const DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             .map(|(id, type_)| (id, type_.into())),
     )
 });
+}
 
 #[derive(Debug)]
 pub struct TypeChecker {
@@ -417,35 +417,26 @@ impl TypeChecker {
                 let variable = context.get(&id);
                 match variable {
                     Some(typed_variable) => {
-                        let TypedParametricVariable { variable, type_ } = typed_variable;
-                        if type_instances.len() != type_.borrow().parameters.len() {
+                        let type_ = &typed_variable.type_;
+                        if type_instances.len() != type_.parameters.len() {
                             return Err(TypeCheckError::WrongNumberOfTypeParameters {
-                                type_: type_.borrow().clone(),
+                                type_: type_.clone(),
                                 type_instances,
                             });
                         }
-                        let type_ = if type_instances.is_empty() {
-                            type_.borrow().type_.clone()
-                        } else {
-                            Type::Instantiation(
-                                type_.clone(),
-                                type_instances
-                                    .into_iter()
-                                    .map(|type_instance| {
-                                        TypeChecker::convert_ast_type(
-                                            type_instance,
-                                            &self.type_definitions,
-                                            generic_variables,
-                                        )
-                                    })
-                                    .collect::<Result<_, _>>()?,
-                            )
-                        };
+                        let types = type_instances
+                            .into_iter()
+                            .map(|type_instance| {
+                                TypeChecker::convert_ast_type(
+                                    type_instance,
+                                    &self.type_definitions,
+                                    generic_variables,
+                                )
+                            })
+                            .collect::<Result<_, _>>()?;
                         TypedAccess {
-                            variable: TypedVariable {
-                                variable: variable.clone(),
-                                type_,
-                            },
+                            variable: typed_variable.clone(),
+                            parameters: types,
                         }
                         .into()
                     }
@@ -538,7 +529,7 @@ impl TypeChecker {
                         (
                             id,
                             TypedVariable {
-                                variable: Rc::new(RefCell::new(())),
+                                variable: Variable::new(),
                                 type_: type_.into(),
                             },
                         )
@@ -645,7 +636,7 @@ impl TypeChecker {
                 let Type::Union(_, variant_types) = &output_type else {
                     panic!("Constructor call for non-union type.")
                 };
-                let input_type = variant_types[constructor_type.index as usize].clone();
+                let input_type = variant_types[constructor_type.index].clone();
                 match input_type {
                     Some(type_) => {
                         if vec![type_.clone()] != types {
@@ -667,7 +658,7 @@ impl TypeChecker {
                     }
                 }
                 TypedConstructorCall {
-                    id: constructor.id.clone(),
+                    idx: constructor_type.index,
                     arguments,
                     output_type,
                 }
@@ -730,7 +721,7 @@ impl TypeChecker {
                             .map(|item| {
                                 match (
                                     &item.assignee,
-                                    &variants[variant_lookup[&item.type_name].index as usize],
+                                    &variants[variant_lookup[&item.type_name].index],
                                 ) {
                                     (Some(assignee), Some(type_)) => {
                                         Ok(Some((assignee.id.clone(), type_)))
@@ -758,7 +749,7 @@ impl TypeChecker {
                             .matches
                             .into_iter()
                             .map(|item| TypedMatchItem {
-                                type_name: item.type_name.clone(),
+                                type_idx: variant_lookup[&item.type_name].index,
                                 assignee: variable.clone(),
                             })
                             .collect_vec();
@@ -830,7 +821,18 @@ impl TypeChecker {
                 self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
             let id = assignment.assignee.assignee.id;
             let assignment = TypedAssignment {
-                variable: Rc::new(RefCell::new(())),
+                variable: TypedVariable {
+                    variable: Variable::new(),
+                    type_: ParametricType {
+                        parameters: assignment
+                            .assignee
+                            .generic_variables
+                            .iter()
+                            .map(|id| generic_variables[&id].clone())
+                            .collect(),
+                        type_: typed_expression.type_(),
+                    },
+                },
                 expression: ParametricExpression {
                     expression: typed_expression,
                     parameters: assignment
@@ -841,21 +843,7 @@ impl TypeChecker {
                         .collect(),
                 },
             };
-            new_context.insert(
-                id,
-                TypedParametricVariable {
-                    variable: assignment.variable.clone(),
-                    type_: Rc::new(RefCell::new(ParametricType {
-                        type_: (assignment.expression.expression.type_()),
-                        parameters: assignment
-                            .expression
-                            .parameters
-                            .iter()
-                            .map(|(_, rc)| rc.clone())
-                            .collect_vec(),
-                    })),
-                },
-            );
+            new_context.insert(id, assignment.variable.clone());
             assignments.push(assignment);
         }
         let typed_expression =
@@ -956,12 +944,12 @@ impl TypeChecker {
             }
             .into(),
             TypedExpression::TypedConstructorCall(TypedConstructorCall {
-                id,
+                idx,
                 output_type,
                 arguments,
             }) => TypedConstructorCall {
-                id: id,
-                output_type: output_type,
+                idx,
+                output_type,
                 arguments: self.check_functions_in_expressions(
                     arguments,
                     context,
@@ -1080,6 +1068,11 @@ impl TypeChecker {
         };
         let typed_block =
             type_checker.check_block(program_block, context, &GenericVariables::new())?;
+        if let Type::Function(_, _) = typed_block.type_() {
+            return Err(TypeCheckError::MainFunctionReturnsFunction {
+                type_: typed_block.type_(),
+            });
+        }
         let TypedExpression::TypedFunctionCall(TypedFunctionCall {
             function,
             arguments,
@@ -1090,7 +1083,11 @@ impl TypeChecker {
         if arguments.len() != 0 {
             panic!("Main function call changed form.")
         }
-        let TypedExpression::TypedAccess(TypedAccess { variable }) = *function else {
+        let TypedExpression::TypedAccess(TypedAccess {
+            variable,
+            parameters: _,
+        }) = *function
+        else {
             panic!("Main function call changed form.")
         };
         Ok(TypedProgram {
@@ -1100,7 +1097,7 @@ impl TypeChecker {
         })
     }
     pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {
-        Self::check_program(program, &DEFAULT_CONTEXT)
+        DEFAULT_CONTEXT.with(|context| Self::check_program(program, context))
     }
 }
 
@@ -4420,6 +4417,47 @@ mod tests {
         Ok(()),
         TypeContext::new();
         "function type instantiation"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: FunctionType{
+                            argument_types: vec![ATOMIC_TYPE_INT.into()],
+                            return_type: Box::new(ATOMIC_TYPE_INT.into()),
+                        }.into(),
+                        body: ExpressionBlock(GenericVariable{
+                            id: Id::from("identity"),
+                            type_instances: vec![ATOMIC_TYPE_INT.into()]
+                        }.into())
+                    }.into())
+                }.into(),
+                Assignment{
+                    assignee: ParametricAssignee{
+                        assignee: Assignee { id: Id::from("identity") },
+                        generic_variables: vec![Id::from("T")]
+                    },
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Assignee {
+                                    id: Id::from("x")
+                                },
+                                type_: Typename("T").into()
+                            }
+                        ],
+                        return_type: Typename("T").into(),
+                        body: ExpressionBlock(Var("x").into())
+                    }.into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "returning function from main"
     )]
     fn test_program(program: Program, result: Result<(), ()>, context: TypeContext) {
         let type_check_result = TypeChecker::check_program(program, &context);

@@ -1,0 +1,11 @@
+[package]
+name = "pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+compilation = { version = "0.1.0", path = "../compilation" }
+lowering = { version = "0.1.0", path = "../lowering" }
+serde_json = "1.0.137"
+translation = { version = "0.1.0", path = "../translation" }
+type_checker = { version = "0.1.0", path = "../type-checker" }
