@@ -124,10 +124,14 @@ fn_call_access_free_expr
     | prefix_call
     ;
 
-fn_call_free_expr: fn_call_access_free_expr | access;
+access_free_expr: fn_call_access_free_expr | fn_call;
 access: access_head access_tail;
-access_head: fn_call_access_free_expr;
+access_head: access_free_expr;
 access_tail: DOT UINT access_tail?;
+fn_call_free_expr: fn_call_access_free_expr | access;
+// access: access_head access_tail;
+// access_head: fn_call_access_free_expr;
+// access_tail: DOT UINT access_tail?;
 
 infix_free_expr: fn_call_free_expr | fn_call;
 expr: infix_free_expr | infix_call;
@@ -139,7 +143,7 @@ constructor_call: generic_constructor '{' WS* expr_list WS* '}' ;
 generic_constructor: generic_instance;
 
 fn_call: fn_call_head fn_call_tail;
-fn_call_head: fn_call_free_expr;
+fn_call_head: fn_call_access_free_expr;
 fn_call_tail: '(' WS* expr_list WS* ')' fn_call_tail?;
 
 infix_operator
