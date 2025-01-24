@@ -32,11 +32,12 @@ add = (x: int, y: int) -> int {
     x + y
 };
 
-main = () -> int {
+main = () -> List{int} {
     __::__ = (h : int, t : List{int}) -> List{int} {
         Cons{int}{(h, t)}
     };
-    // xs = 0 :: 3 :: (-1) :: 4 :: (-11) :: 10 :: Nil{int}{};
-    // t = map{int,int}(adder_v2(4), xs);
-    curry{int,int,int}(add)(4)(5)
+    xs = 0 :: 3 :: (-1) :: 4 :: (-11) :: 10 :: Nil{int}{};
+    t = map{int,int}(adder_v2(4), xs);
+    y = curry{int,int,int}(add)(4)(5);
+    y :: t
 };

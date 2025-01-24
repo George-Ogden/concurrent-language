@@ -16,9 +16,14 @@ BACKEND := backend/bin/main
 
 all: $(PIPELINE) $(BACKEND)
 
-run: $(PIPELINE) samples/simple.txt
-	cat samples/simple.txt | xargs -0 python $(PARSER) | RUST_BACKTRACE=1 ./$(PIPELINE) > backend/include/main/main.hpp
+FILE := samples/samples.txt
+
+run: build
 	sudo make -C backend run
+
+build: $(PIPELINE) $(FILE)
+	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > backend/include/main/main.hpp
+	make -C backend build
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
@@ -55,8 +60,10 @@ test: $(PARSER) $(TYPE_CHECKER)
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
-	for sample in samples/triangular.txt samples/list.txt; do \
-		cat $$sample | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER); \
+	for sample in samples/*; do \
+		if [ "$$sample" != "samples/grammar.txt" ]; then \
+			make build FILE=$$sample || exit 1; \
+		fi \
 	done;
 
 clean:
