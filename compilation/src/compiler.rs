@@ -637,8 +637,11 @@ impl Compiler {
             branches: (true_branch, false_branch),
         } = if_statement;
         let (mut statements, condition) = self.compile_value(condition, false);
+        let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
         let true_branch = self.compile_statements(true_branch);
+        (self.non_lazy_vals, self.lazy_vals) = vals.clone();
         let false_branch = self.compile_statements(false_branch);
+        (self.non_lazy_vals, self.lazy_vals) = vals.clone();
         let true_declarations = Statement::declarations(&true_branch);
         let false_declarations = Statement::declarations(&false_branch);
         let shared_declarations =
@@ -666,14 +669,17 @@ impl Compiler {
             panic!("Match expression subject has non-union type.")
         };
         let (mut statements, subject) = self.compile_value(subject, false);
+        let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
         let branches = branches
             .into_iter()
-            .map(
-                |IntermediateMatchBranch { target, statements }| MatchBranch {
+            .map(|IntermediateMatchBranch { target, statements }| {
+                let branch = MatchBranch {
                     target: target.map(|arg| self.compile_arg(&arg)),
                     statements: self.compile_statements(statements),
-                },
-            )
+                };
+                (self.non_lazy_vals, self.lazy_vals) = vals.clone();
+                branch
+            })
             .collect_vec();
         let mut shared_declarations = HashMap::new();
         let mut it = branches
