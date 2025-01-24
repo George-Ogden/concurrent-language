@@ -2,13 +2,13 @@
 
 PARSER := parser
 GRAMMAR := parser/grammar
-TYPE_CHECKER := type-checker/target/debug/type_checker
+TYPE_CHECKER := type-checker/target/debug/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
-TRANSLATOR := translation/target/debug/translation
+TRANSLATOR := translation/target/debug/libtranslation.d
 TRANSLATOR_MANIFEST := translation/Cargo.toml
-LOWERER := lowering/target/debug/lowering
+LOWERER := lowering/target/debug/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
-COMPILER := compilation/target/debug/compilation
+COMPILER := compilation/target/debug/libcompilation.d
 COMPILER_MANIFEST := compilation/Cargo.toml
 PIPELINE := pipeline/target/debug/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
@@ -16,8 +16,8 @@ BACKEND := backend/bin/main
 
 all: $(PIPELINE) $(BACKEND)
 
-run: $(PIPELINE)
-	cat samples/simple.txt | xargs -0 python $(PARSER) | ./$(PIPELINE) > backend/include/main/main.hpp
+run: $(PIPELINE) samples/simple.txt
+	cat samples/simple.txt | xargs -0 python $(PARSER) | RUST_BACKTRACE=1 ./$(PIPELINE) > backend/include/main/main.hpp
 	sudo make -C backend run
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)

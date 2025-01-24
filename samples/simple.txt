@@ -1,3 +1,42 @@
+typedef List{T} {Cons (T, List{T}) | Nil};
+map{T,U} = (f: T -> U, xs: List{T}) -> List{U} {
+    match (xs) {
+        Cons x: {
+            h = x.0;
+            t = x.1;
+            Cons{U}{(f(h), map{T,U}(f,t))}
+        },
+        Nil : {
+            Nil{U}{}
+        }
+    }
+};
+
+adder = (x: int) -> (int -> int) {
+    (y: int) -> int {
+        x + y
+    }
+};
+
+curry{T,U,V} = (f: (T, U) -> V) -> (T -> (U -> V)) {
+    (x: T) -> (U -> V) {
+        (y: U) -> V {
+            f(x, y)
+        }
+    }
+};
+
+adder_v2 = curry{int,int,int}(__+__);
+
+add = (x: int, y: int) -> int {
+    x + y
+};
+
 main = () -> int {
-    0
-}
+    __::__ = (h : int, t : List{int}) -> List{int} {
+        Cons{int}{(h, t)}
+    };
+    // xs = 0 :: 3 :: (-1) :: 4 :: (-11) :: 10 :: Nil{int}{};
+    // t = map{int,int}(adder_v2(4), xs);
+    curry{int,int,int}(add)(4)(5)
+};

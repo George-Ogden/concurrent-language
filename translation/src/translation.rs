@@ -602,7 +602,7 @@ mod tests {
                 (Name::from("Faws"), None)
             ]
         },
-        "struct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{};";
+        "struct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{ Empty value; }; struct Faws{ Empty value; };";
         "bull union"
     )]
     #[test_case(
@@ -731,7 +731,7 @@ mod tests {
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
-            Name::from("new Comparison_GE__BuiltIn{}"),
+            Name::from("Comparison_GE__BuiltIn"),
         ),
         "new Comparison_GE__BuiltIn{}";
         "builtin greater than or equal to translation"
@@ -1070,7 +1070,7 @@ mod tests {
             }.into(),
             check_null: false
         },
-        "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = 4LL; wrapper.tag = 0ULL;";
+        "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = create_references<Wrapper::type>(4LL); wrapper.tag = 0ULL;";
         "wrapper constructor assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
@@ -1152,7 +1152,7 @@ mod tests {
                 }
             ]
         },
-        "switch (either.tag) { case 0ULL: { Lazy<Left::type> *x = new LazyConstant<Left::type>{reinterpret_cast<Left*>(&either.value)->value}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; dynamic_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x, y); dynamic_cast<FnT<Bool,Int,Int>>(call)->call(); } break; } case 1ULL: { Lazy<Right::type>* x = new LazyConstant<Right::type>{reinterpret_cast<Right*>(&either.value)->value}; if (call == nullptr) { call = x;} break; }}";
+        "switch (either.tag) {case 0ULL: { Lazy<destroy_references_t<Left::type>> *x = new LazyConstant<destroy_references_t<Left::type>>{destroy_references(reinterpret_cast<Left*>(&either.value)->value)}; if (call==nullptr){ call=new Comparison_GE__BuiltIn{}; dynamic_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Bool,Int,Int>>(call)->call(); } break; } case 1ULL:{ Lazy<destroy_references_t<Right::type>>*x = new LazyConstant<destroy_references_t<Right::type>>{destroy_references(reinterpret_cast<Right*>(&either.value)->value)}; if (call==nullptr){ call=x; } break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1194,7 +1194,7 @@ mod tests {
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { Lazy<Suc::type> *s = new LazyConstant<Suc::type>{reinterpret_cast<Suc*>(&nat.value)->value}; VariantT<Suc,Nil> *t; t = s->value(); VariantT<Suc,Nil> u; u = *t; if(r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{u}; } break; } case 1ULL: { if (r == nullptr) {r = new LazyConstant<VariantT<Suc,Nil>>{nil};} break; }}";
+        "switch (nat.tag) { case 0ULL: { Lazy<destroy_references_t<Suc::type>> *s = new LazyConstant<destroy_references_t<Suc::type>>{destroy_references(reinterpret_cast<Suc*>(&nat.value)->value)}; VariantT<Suc,Nil> *t; VariantT<Suc,Nil> u; t = s->value(); if (r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{u}; } break; } case 1ULL: {if (r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{nil}; } break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1341,17 +1341,17 @@ mod tests {
                 check_null: false
             }.into()
         ],
-        "WorkManager::await(t); TupleT<Int,Int> tuple; tuple = t->value(); Int x; x = std::get<1ULL>(tuple);";
+        "TupleT<Int,Int> tuple; Int x; WorkManager::await(t); tuple = t->value(); x = std::get<1ULL>(tuple);";
         "tuple access"
     )]
     #[test_case(
         vec![
             Declaration{
                 type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from("List")))).into(),
-                memory:  Memory(Id::from("tail_")),
+                memory:  Memory(Id::from("tail")),
             }.into(),
             Assignment {
-                target: Memory(Id::from("tail_")),
+                target: Memory(Id::from("tail")),
                 value: ElementAccess{
                     value: Memory(Id::from("cons")).into(),
                     idx: 1
@@ -1363,7 +1363,7 @@ mod tests {
                 memory: Memory(Id::from("tail"))
             }.into(),
         ],
-        "List *tail_; tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail; tail = *tail_;";
+        "List *tail; VariantT<Cons,Nil> tail; tail = std::get<1ULL>(cons);";
         "cons extraction"
     )]
     #[test_case(
@@ -1396,7 +1396,7 @@ mod tests {
                 check_null: false
             }.into(),
         ],
-        "VariantT<Suc, Nil> n; n = {}; n.tag = 1ULL; VariantT<Suc, Nil> *wrapped_n; wrapped_n = new VariantT<Suc, Nil>{n}; VariantT<Suc, Nil> s; s= {}; reinterpret_cast<Suc *>(&s.value)->value = wrapped_n; s.tag = 0ULL;";
+        "VariantT<Suc, Nil> n; VariantT<Suc, Nil> s; n = {}; n.tag = 1ULL; s= {}; reinterpret_cast<Suc *>(&s.value)->value = create_references<Suc::type>(n); s.tag = 0ULL;";
         "simple recursive type extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
@@ -1749,7 +1749,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
