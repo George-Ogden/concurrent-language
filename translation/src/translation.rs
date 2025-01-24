@@ -62,7 +62,7 @@ impl Translator {
         match value {
             BuiltIn::Integer(Integer { value }) => format!("{value}LL"),
             BuiltIn::Boolean(Boolean { value }) => format!("{value}"),
-            BuiltIn::BuiltInFn(name) => name,
+            BuiltIn::BuiltInFn(name) => format!("new {name}{{}}"),
         }
     }
     fn translate_memory(&self, memory: Memory) -> Code {
@@ -118,14 +118,13 @@ impl Translator {
     }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
         let fn_initialization_code = match fn_call.fn_ {
-            Value::BuiltIn(BuiltIn::BuiltInFn(name)) => {
-                format!("new {name}{{}};")
+            Value::BuiltIn(built_in) => {
+                format!("{};", self.translate_builtin(built_in))
             }
             Value::Memory(memory) => {
                 let memory_code = self.translate_memory(memory);
                 format!("{memory_code}->clone();",)
             }
-            _ => panic!("Calling invalid function"),
         };
         let type_code = self.translate_type(&fn_call.fn_type.into());
         let args_assignment = format!(
@@ -238,13 +237,20 @@ impl Translator {
                 if let Statement::Assignment(Assignment {
                     target,
                     value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: _ }),
-                    check_null: _,
+                    check_null,
                 }) = statement
                 {
-                    Some(format!(
-                        "{} = new {name}{{}};",
-                        self.translate_memory(target.clone())
-                    ))
+                    if *check_null {
+                        let target = self.translate_memory(target.clone());
+                        Some(format!(
+                            "if ({target} == nullptr) {{ {target} = new {name}{{}}; }}"
+                        ))
+                    } else {
+                        Some(format!(
+                            "{} = new {name}{{}};",
+                            self.translate_memory(target.clone())
+                        ))
+                    }
                 } else {
                     None
                 }
@@ -634,7 +640,7 @@ mod tests {
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{};";
+        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{ Empty value; };";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
@@ -677,7 +683,7 @@ mod tests {
                 ]
             }
         ],
-        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{}; struct Some { using type = Expression*; type value; };";
+        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{Empty value;}; struct Some { using type = Expression*; type value; };";
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
@@ -720,14 +726,14 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
-        "Plus__BuiltIn";
+        "new Plus__BuiltIn{}";
         "builtin plus translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
-            Name::from("Comparison_GE__BuiltIn"),
+            Name::from("new Comparison_GE__BuiltIn{}"),
         ),
-        "Comparison_GE__BuiltIn";
+        "new Comparison_GE__BuiltIn{}";
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
@@ -754,7 +760,7 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
-        "Comparison_LT__BuiltIn";
+        "new Comparison_LT__BuiltIn{}";
         "builtin function translation"
     )]
     #[test_case(
@@ -782,6 +788,22 @@ mod tests {
         }.into(),
         "std::get<1ULL>(tuple)";
         "tuple index access"
+    )]
+    #[test_case(
+        Expression::Wrap(
+            BuiltIn::BuiltInFn(Name::from("Plus__BuiltIn")).into(),
+            FnType(
+                vec![
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                ],
+                Box::new(
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                )
+            ).into()
+        ),
+        "new LazyConstant<FnT<Int,Int,Int>>{new Plus__BuiltIn{}}";
+        "lazy function instantiation"
     )]
     fn test_expression_translation(expression: Expression, expected: &str) {
         let code = TRANSLATOR.translate_expression(expression);
@@ -1051,30 +1073,6 @@ mod tests {
         "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = 4LL; wrapper.tag = 0ULL;";
         "wrapper constructor assignment"
     )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("closure")).into(),
-            value: ClosureInstantiation{
-                name: Name::from("Closure"),
-                env: None
-            }.into(),
-            check_null: true
-        },
-        "if (closure == nullptr) { closure = new Closure{}; }";
-        "closure without env assignment"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("closure")).into(),
-            value: ClosureInstantiation{
-                name: Name::from("Adder"),
-                env: Some(Memory(Id::from("x")).into())
-            }.into(),
-            check_null: true
-        },
-        "if (closure == nullptr) { closure = new Adder{x}; }";
-        "closure assignment"
-    )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);
         let expected_code = Code::from(expected);
@@ -1290,6 +1288,30 @@ mod tests {
         assert_eq_code(code, expected_code);
     }
 
+    #[test_case(
+        vec![Assignment {
+            target: Memory(Id::from("closure")).into(),
+            value: ClosureInstantiation{
+                name: Name::from("Closure"),
+                env: None
+            }.into(),
+            check_null: true
+        }.into()],
+        "if (closure==nullptr) { closure=new Closure{}; }";
+        "closure without env assignment"
+    )]
+    #[test_case(
+        vec![Assignment {
+            target: Memory(Id::from("closure")).into(),
+            value: ClosureInstantiation{
+                name: Name::from("Adder"),
+                env: Some(Memory(Id::from("x")).into())
+            }.into(),
+            check_null: true
+        }.into()],
+        "if (closure == nullptr) { closure = new Adder{}; } dynamic_cast<Adder*>(closure)->env = x;";
+        "closure assignment"
+    )]
     #[test_case(
         vec![
             Await(vec![
