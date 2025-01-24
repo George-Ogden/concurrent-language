@@ -831,6 +831,9 @@ impl Compiler {
             })
             .collect_vec();
 
+        let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
+        self.lazy_vals = HashMap::new();
+        self.non_lazy_vals = HashMap::new();
         let IntermediateFnDef {
             args,
             statements,
@@ -852,6 +855,7 @@ impl Compiler {
         let ret_type = MachineType::Lazy(Box::new(self.compile_type(&return_type)));
         let (extra_statements, ret_val) = self.compile_value(return_value, true);
         statements.extend(extra_statements);
+        (self.non_lazy_vals, self.lazy_vals) = vals;
         let declarations = Statement::declarations(&statements);
         let allocations = declarations
             .into_iter()
@@ -3195,6 +3199,49 @@ mod tests {
         assert_eq!(compiled, (expected_statements, expected_value));
         let compiled_fn_def = &compiler.fn_defs[0];
         assert_eq!(compiled_fn_def, &expected_fn_def);
+    }
+
+    #[test]
+    fn test_memory_sharing_across_fn_defs() {
+        let f0 = IntermediateStatement::Assignment(IntermediateMemory {
+            location: Location::new(),
+            expression: Rc::new(RefCell::new(
+                IntermediateFnDef {
+                    args: Vec::new(),
+                    statements: Vec::new(),
+                    ret: (
+                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
+                            .into(),
+                        AtomicTypeEnum::BOOL.into(),
+                    ),
+                }
+                .into(),
+            )),
+        });
+        let f1 = IntermediateStatement::Assignment(IntermediateMemory {
+            location: Location::new(),
+            expression: Rc::new(RefCell::new(
+                IntermediateFnDef {
+                    args: Vec::new(),
+                    statements: Vec::new(),
+                    ret: (
+                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
+                            .into(),
+                        AtomicTypeEnum::BOOL.into(),
+                    ),
+                }
+                .into(),
+            )),
+        });
+        let statements = vec![f0, f1];
+
+        let mut compiler = Compiler::new();
+        compiler.register_memory(&statements);
+        compiler.compile_statements(statements);
+        let [ref f0, ref f1] = compiler.fn_defs[..] else {
+            panic!("Wrong number of fn-defs generated.")
+        };
+        assert_ne!(f0.ret, f1.ret)
     }
 
     #[test_case(
