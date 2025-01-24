@@ -243,30 +243,42 @@ impl Compiler {
             self.reference_names
                 .insert(*ptr, MachineType::NamedType(format!("T{i}")));
         }
-        types
-            .into_iter()
+        let machine_types = types
+            .iter()
             .enumerate()
             .map(|(i, (_, IntermediateUnionType(types)))| {
-                let union_type = IntermediateUnionType(types.clone());
-                let constructors = types
-                    .into_iter()
+                let names = types
+                    .iter()
                     .enumerate()
-                    .map(|(j, type_)| {
-                        (
-                            format!("T{i}C{j}"),
-                            type_.as_ref().map(|type_| self.compile_type(type_)),
-                        )
-                    })
+                    .map(|(j, _)| format!("T{i}C{j}"))
                     .collect_vec();
+                let intermediate_type = UnionType(names);
                 self.type_lookup.insert(
-                    union_type,
-                    UnionType(constructors.iter().map(|(name, _)| name.clone()).collect()),
+                    IntermediateUnionType(types.clone()),
+                    intermediate_type.clone(),
                 );
-                TypeDef {
-                    name: format!("T{i}"),
-                    constructors,
-                }
+                (format!("T{i}"), intermediate_type)
             })
+            .collect_vec();
+        types
+            .into_iter()
+            .zip(machine_types.into_iter())
+            .map(
+                |((_, IntermediateUnionType(types)), (type_name, machine_type))| {
+                    let UnionType(ctor_names) = machine_type;
+                    let constructors = types
+                        .into_iter()
+                        .zip(ctor_names.into_iter())
+                        .map(|(type_, name)| {
+                            (name, type_.as_ref().map(|type_| self.compile_type(type_)))
+                        })
+                        .collect_vec();
+                    TypeDef {
+                        name: type_name,
+                        constructors,
+                    }
+                },
+            )
             .collect_vec()
     }
 

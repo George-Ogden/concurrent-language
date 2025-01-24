@@ -32,7 +32,7 @@ impl fmt::Debug for IntermediateType {
             Self::IntermediateUnionType(arg0) => {
                 f.debug_tuple("IntermediateUnionType").field(arg0).finish()
             }
-            Self::Reference(_) => f.debug_tuple("Reference").finish(),
+            Self::Reference(r) => f.debug_tuple("Reference").field(&r.as_ptr()).finish(),
         }
     }
 }
