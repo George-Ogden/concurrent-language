@@ -37,6 +37,12 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             Type::Function(vec![TYPE_INT], Box::new(TYPE_INT)),
         )
     });
+    let boolean_unary_operators = ["!"].into_iter().map(|operator| {
+        (
+            Id::from(operator),
+            Type::Function(vec![TYPE_BOOL], Box::new(TYPE_BOOL)),
+        )
+    });
     let boolean_binary_operators = ["&&", "||"].into_iter().map(|operator| {
         (
             Id::from(operator),
@@ -56,6 +62,7 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             .chain(boolean_binary_operators)
             .chain(integer_comparisons)
             .chain(integer_unary_operators)
+            .chain(boolean_unary_operators)
             .map(|(id, type_)| (id, type_.into())),
     )
 });

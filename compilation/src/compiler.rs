@@ -33,6 +33,7 @@ const OPERATOR_NAMES: Lazy<HashMap<Id, Id>> = Lazy::new(|| {
             (">=", "Comparison_GE__BuiltIn"),
             ("==", "Comparison_EQ__BuiltIn"),
             ("!=", "Comparison_NE__BuiltIn"),
+            ("!", "Negation__BuiltIn"),
         ]
         .into_iter()
         .map(|(op, name)| (Id::from(op), Id::from(name))),

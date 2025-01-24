@@ -81,6 +81,7 @@ TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
         ASSERT_EQ(fn->ret, expected);
     }
 }
+
 INSTANTIATE_TEST_SUITE_P(
     UnaryOperators, UnaryOperatorsTests,
     ::testing::Values(
@@ -118,3 +119,21 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(new Comparison_EQ__BuiltIn{}, std::equal_to<Int>()),
         std::make_tuple(new Comparison_NE__BuiltIn{},
                         std::not_equal_to<Int>())));
+
+TEST(NegationTests, OperatorCorrectness) {
+    auto fn = new Negation__BuiltIn{};
+    {
+        auto t = true;
+        fn->args = Fn::reference_all(t);
+
+        WorkManager::run(fn);
+        ASSERT_EQ(fn->ret, false);
+    }
+    {
+        auto f = false;
+        fn->args = Fn::reference_all(f);
+
+        WorkManager::run(fn);
+        ASSERT_EQ(fn->ret, true);
+    }
+}
