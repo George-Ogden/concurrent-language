@@ -90,7 +90,7 @@ impl Compiler {
                         IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                             args: _,
                             statements,
-                            return_value: _,
+                            ret: _,
                         }) => {
                             self.register_memory(statements);
                         }
@@ -134,12 +134,12 @@ impl Compiler {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args,
                 statements: _,
-                return_value,
+                ret: (_, return_type),
             }) => IntermediateFnType(
                 args.iter()
                     .map(|arg| self.value_type(&arg.clone().into()))
                     .collect(),
-                Box::new(self.value_type(return_value)),
+                Box::new(return_type.clone()),
             )
             .into(),
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args: _ }) => {
@@ -833,7 +833,7 @@ impl Compiler {
         let IntermediateFnDef {
             args,
             statements,
-            return_value,
+            ret: (return_value, return_type),
         } = fn_def;
         let args = args
             .into_iter()
@@ -848,8 +848,7 @@ impl Compiler {
         let mut statements = self.compile_statements(statements);
         prefix.extend(statements);
         statements = prefix;
-        let ret_type =
-            MachineType::Lazy(Box::new(self.compile_type(&self.value_type(&return_value))));
+        let ret_type = MachineType::Lazy(Box::new(self.compile_type(&return_type)));
         let (extra_statements, ret_val) = self.compile_value(return_value, true);
         statements.extend(extra_statements);
         let declarations = Statement::declarations(&statements);
@@ -928,10 +927,15 @@ impl Compiler {
             location: call.clone(),
         };
         self.update_memory(&memory);
+        let IntermediateType::IntermediateFnType(IntermediateFnType(_, return_type)) =
+            self.value_type(&main)
+        else {
+            panic!("Main has non-fn type")
+        };
         statements.push(IntermediateStatement::Assignment(memory));
         let (statements, _) = self.compile_fn_def(IntermediateFnDef {
             args: Vec::new(),
-            return_value: call.clone().into(),
+            ret: (call.clone().into(), *return_type),
             statements: statements,
         });
         assert_eq!(statements.len(), 0);
@@ -1080,7 +1084,7 @@ mod tests {
             IntermediateFnDef{
                 args: Vec::new(),
                 statements: Vec::new(),
-                return_value: IntermediateBuiltIn::from(Integer{value: 5}).into()
+                ret: (IntermediateBuiltIn::from(Integer{value: 5}).into(), AtomicTypeEnum::INT.into())
             }.into(),
             MemoryMap::new()
         ),
@@ -1097,7 +1101,7 @@ mod tests {
                 IntermediateFnDef{
                     args: args.clone(),
                     statements: Vec::new(),
-                    return_value: args[1].clone().into()
+                    ret: (args[1].clone().into(), args[1].clone().0.borrow().clone())
                 }.into()
             },
             MemoryMap::new()
@@ -2412,7 +2416,7 @@ mod tests {
                         expression: Rc::new(RefCell::new(IntermediateFnDef {
                             args: vec![arg.clone()],
                             statements: Vec::new(),
-                            return_value: arg.clone().into()
+                            ret: (arg.clone().into(),AtomicTypeEnum::BOOL.into())
                         }.into()))
                     })
                 ]
@@ -2958,7 +2962,7 @@ mod tests {
                             expression: y_expression,
                         })
                     ],
-                    return_value: y.into()
+                    ret: (y.into(), AtomicTypeEnum::INT.into())
                 }
             )
         },
@@ -3043,7 +3047,7 @@ mod tests {
                             expression: z_expression,
                         })
                     ],
-                    return_value: z.into()
+                    ret: (z.into(), AtomicTypeEnum::INT.into())
                 }
             )
         },
@@ -3206,7 +3210,7 @@ mod tests {
                             IntermediateFnDef{
                                 args: vec![arg.clone()],
                                 statements: Vec::new(),
-                                return_value: arg.clone().into()
+                                ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
                         ))
                     }),
@@ -3226,7 +3230,7 @@ mod tests {
                                         ))
                                     })
                                 ],
-                                return_value: y.clone().into()
+                                ret: (y.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
                         ))
                     }),
@@ -3457,7 +3461,7 @@ mod tests {
                                         ]
                                     }.into()
                                 ],
-                                return_value: r.clone().into()
+                                ret: (r.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
                         ))
                     }),
