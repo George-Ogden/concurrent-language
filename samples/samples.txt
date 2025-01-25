@@ -1,4 +1,5 @@
 typedef List{T} {Cons (T, List{T}) | Nil};
+
 map{T,U} = (f: T -> U, xs: List{T}) -> List{U} {
     match (xs) {
         Cons x: {
@@ -26,18 +27,31 @@ curry{T,U,V} = (f: (T, U) -> V) -> (T -> (U -> V)) {
     }
 };
 
+typedef Either{T,U} {Left T | Right U};
+select = (x: Either{int,bool}) -> bool {
+    match (x) {
+        Left x: {
+            x > 0
+        },
+        Right y: {
+            y
+        }
+    }
+};
+
 adder_v2 = curry{int,int,int}(__+__);
 
 add = (x: int, y: int) -> int {
     x + y
 };
 
-main = () -> List{int} {
+main = () -> bool {
     __::__ = (h : int, t : List{int}) -> List{int} {
         Cons{int}{(h, t)}
     };
     xs = 0 :: 3 :: (-1) :: 4 :: (-11) :: 10 :: Nil{int}{};
     t = map{int,int}(adder_v2(4), xs);
     y = curry{int,int,int}(add)(4)(5);
+    j = select(Right{int,bool}{false})
     y :: t
 };
