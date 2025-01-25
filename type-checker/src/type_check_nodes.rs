@@ -133,7 +133,7 @@ pub enum Type {
 
 impl PartialEq for Type {
     fn eq(&self, other: &Type) -> bool {
-        Type::strict_equality(self, other, &mut HashSet::new())
+        Type::strict_equality(self, other, HashSet::new())
     }
 }
 
@@ -242,7 +242,7 @@ impl Type {
     pub fn strict_equality(
         t1: &Self,
         t2: &Self,
-        visited: &mut HashSet<*mut ParametricType>,
+        mut visited: HashSet<*mut ParametricType>,
     ) -> bool {
         match (t1, t2) {
             (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
@@ -251,24 +251,24 @@ impl Type {
             }
             (Type::Tuple(t1), Type::Tuple(t2)) => Type::strict_equalities(t1, t2, visited),
             (Type::Function(a1, r1), Type::Function(a2, r2)) => {
-                Type::strict_equalities(a1, a2, visited) && Type::strict_equality(r1, r2, visited)
+                Type::strict_equalities(a1, a2, visited.clone())
+                    && Type::strict_equality(r1, r2, visited)
             }
             (Type::Variable(r1), Type::Variable(r2)) => r1.as_ptr() == r2.as_ptr(),
             (Type::Instantiation(r1, v1), Type::Instantiation(r2, v2)) => {
                 let p1 = r1.as_ptr();
                 let p2 = r2.as_ptr();
-                if p1 == p2 && Type::strict_equalities(v1, v2, visited) {
+                if p1 == p2 && Type::strict_equalities(v1, v2, visited.clone()) {
                     true
                 } else if visited.contains(&p1) || visited.contains(&p2) {
                     false
                 } else {
-                    let mut visited_2 = visited.clone();
                     visited.insert(p1);
-                    if Type::strict_equality(t2, &r1.borrow().instantiate(v1), visited) {
+                    if Type::strict_equality(t2, &r1.borrow().instantiate(v1), visited.clone()) {
                         true
                     } else {
-                        visited_2.insert(p2);
-                        Type::strict_equality(t1, &r2.borrow().instantiate(v2), &mut visited_2)
+                        visited.insert(p2);
+                        Type::strict_equality(t1, &r2.borrow().instantiate(v2), visited)
                     }
                 }
             }
@@ -287,23 +287,23 @@ impl Type {
     pub fn strict_equalities(
         t1: &Vec<Self>,
         t2: &Vec<Self>,
-        visited: &mut HashSet<*mut ParametricType>,
+        visited: HashSet<*mut ParametricType>,
     ) -> bool {
         t1.len() == t2.len()
             && t1
                 .iter()
                 .zip(t2.iter())
-                .all(|(t1, t2)| Type::strict_equality(t1, t2, visited))
+                .all(|(t1, t2)| Type::strict_equality(t1, t2, visited.clone()))
     }
     pub fn strict_equalities_option(
         t1: &Vec<Option<Self>>,
         t2: &Vec<Option<Self>>,
-        visited: &mut HashSet<*mut ParametricType>,
+        visited: HashSet<*mut ParametricType>,
     ) -> bool {
         t1.len() == t2.len()
             && t1.iter().zip(t2.iter()).all(|(t1, t2)| match (t1, t2) {
                 (None, None) => true,
-                (Some(t1), Some(t2)) => Type::strict_equality(t1, t2, visited),
+                (Some(t1), Some(t2)) => Type::strict_equality(t1, t2, visited.clone()),
                 _ => false,
             })
     }
@@ -658,6 +658,122 @@ impl TypedExpression {
             .iter()
             .map(|expression| expression.instantiate())
             .collect_vec()
+    }
+
+    pub fn equal(e1: &Self, e2: &Self) -> bool {
+        match (e1, e2) {
+            (TypedExpression::Integer(i1), TypedExpression::Integer(i2)) => i1 == i2,
+            (TypedExpression::Boolean(b1), TypedExpression::Boolean(b2)) => b1 == b2,
+            (
+                TypedExpression::TypedTuple(TypedTuple { expressions: e1 }),
+                TypedExpression::TypedTuple(TypedTuple { expressions: e2 }),
+            ) => Self::equal_expressions(e1, e2),
+            (
+                TypedExpression::TypedAccess(TypedAccess {
+                    variable: _,
+                    parameters: p1,
+                }),
+                TypedExpression::TypedAccess(TypedAccess {
+                    variable: _,
+                    parameters: p2,
+                }),
+            ) => p1.len() == p2.len(),
+            (
+                TypedExpression::TypedElementAccess(TypedElementAccess {
+                    expression: e1,
+                    index: i1,
+                }),
+                TypedExpression::TypedElementAccess(TypedElementAccess {
+                    expression: e2,
+                    index: i2,
+                }),
+            ) => i1 == i2 && Self::equal(&*e1, &*e2),
+            (
+                TypedExpression::TypedIf(TypedIf {
+                    condition: c1,
+                    true_block: t1,
+                    false_block: f1,
+                }),
+                TypedExpression::TypedIf(TypedIf {
+                    condition: c2,
+                    true_block: t2,
+                    false_block: f2,
+                }),
+            ) => {
+                Self::equal(&*c1, &*c2) && Self::equal_blocks(t1, t2) && Self::equal_blocks(f1, f2)
+            }
+            (
+                TypedExpression::TypedMatch(TypedMatch {
+                    subject: s1,
+                    blocks: b1,
+                }),
+                TypedExpression::TypedMatch(TypedMatch {
+                    subject: s2,
+                    blocks: b2,
+                }),
+            ) => {
+                Self::equal(&*s1, &*s2)
+                    && b1.len() == b2.len()
+                    && b1.iter().zip_eq(b2.iter()).all(|(b1, b2)| {
+                        b1.matches.len() == b2.matches.len()
+                            && Self::equal_blocks(&b1.block, &b2.block)
+                    })
+            }
+            (
+                TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                    parameters: p1,
+                    return_type: r1,
+                    body: b1,
+                }),
+                TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                    parameters: p2,
+                    return_type: r2,
+                    body: b2,
+                }),
+            ) => p1.len() == p2.len() && r1 == r2 && Self::equal_blocks(b1, b2),
+            (
+                TypedExpression::TypedFunctionCall(TypedFunctionCall {
+                    function: f1,
+                    arguments: a1,
+                }),
+                TypedExpression::TypedFunctionCall(TypedFunctionCall {
+                    function: f2,
+                    arguments: a2,
+                }),
+            ) => Self::equal(&*f1, &*f2) && Self::equal_expressions(a1, a2),
+            (
+                TypedExpression::TypedConstructorCall(TypedConstructorCall {
+                    idx: i1,
+                    output_type: o1,
+                    arguments: a1,
+                }),
+                TypedExpression::TypedConstructorCall(TypedConstructorCall {
+                    idx: i2,
+                    output_type: o2,
+                    arguments: a2,
+                }),
+            ) => i1 == i2 && o1 == o2 && Self::equal_expressions(a1, a2),
+            _ => false,
+        }
+    }
+    pub fn equal_expressions(e1: &Vec<Self>, e2: &Vec<Self>) -> bool {
+        e1.len() == e2.len()
+            && e1
+                .iter()
+                .zip_eq(e2.iter())
+                .all(|(e1, e2)| Self::equal(e1, e2))
+    }
+    pub fn equal_blocks(b1: &TypedBlock, b2: &TypedBlock) -> bool {
+        b1.assignments.len() == b2.assignments.len()
+            && b1
+                .assignments
+                .iter()
+                .zip_eq(b2.assignments.iter())
+                .all(|(a1, a2)| {
+                    a1.variable.type_ == a2.variable.type_
+                        && Self::equal(&a1.expression.expression, &a2.expression.expression)
+                })
+            && Self::equal(&b1.expression, &b2.expression)
     }
 }
 
@@ -1568,9 +1684,9 @@ mod tests {
         types: Vec<Type>,
         expected: TypedExpression,
     ) {
-        assert_eq!(
-            format!("{:?}", expression.instantiate(&types)),
-            format!("{:?}", expected)
-        );
+        assert!(TypedExpression::equal(
+            &expression.instantiate(&types),
+            &expected
+        ));
     }
 }
