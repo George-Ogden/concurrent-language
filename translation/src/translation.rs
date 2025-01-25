@@ -24,10 +24,7 @@ impl Translator {
                 type_def
                     .constructors
                     .iter()
-                    .map(|(name, type_)| match type_ {
-                        None => format!("struct {name} {{ Empty value; }};"),
-                        Some(_) => format!("struct {name};"),
-                    })
+                    .map(|constructor| format!("struct {};", constructor.0))
             })
             .flatten();
         let type_definitions = type_defs.iter().map(|type_def| {
@@ -43,18 +40,15 @@ impl Translator {
         let constructor_definitions = type_defs
             .iter()
             .map(|type_def| {
-                type_def
-                    .constructors
-                    .iter()
-                    .map(|(name, type_)| match &type_ {
+                type_def.constructors.iter().map(|constructor| {
+                    let fields = match &constructor.1 {
                         Some(type_) => {
-                            format!(
-                                "struct {name} {{ using type = {}; type value; }};",
-                                self.translate_type(type_)
-                            )
+                            format!("using type = {}; type value;", self.translate_type(type_))
                         }
-                        None => Code::new(),
-                    })
+                        None => Code::from("Empty value;"),
+                    };
+                    format!("struct {} {{ {fields} }};", constructor.0)
+                })
             })
             .flatten();
         format!(
@@ -608,7 +602,7 @@ mod tests {
                 (Name::from("Faws"), None)
             ]
         },
-        "struct Twoo{ Empty value; }; struct Faws{ Empty value; }; typedef VariantT<Twoo, Faws> Bull;";
+        "struct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{ Empty value; }; struct Faws{ Empty value; };";
         "bull union"
     )]
     #[test_case(
@@ -646,7 +640,7 @@ mod tests {
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct Cons_Int; struct Nil_Int{ Empty value; }; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;};";
+        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{ Empty value; };";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
@@ -689,7 +683,7 @@ mod tests {
                 ]
             }
         ],
-        "struct Basic; struct Complex; struct None{ Empty value; }; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct Some { using type = Expression*; type value; };";
+        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{Empty value;}; struct Some { using type = Expression*; type value; };";
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
@@ -1755,7 +1749,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo { Empty value; }; struct Faws{ Empty value; }; typedef VariantT<Twoo, Faws> Bull; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
