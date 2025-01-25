@@ -13,6 +13,7 @@ COMPILER_MANIFEST := compilation/Cargo.toml
 PIPELINE := pipeline/target/debug/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
+TARGET := backend/include/main/main.hpp
 
 all: $(PIPELINE) $(BACKEND)
 
@@ -21,9 +22,11 @@ FILE := samples/samples.txt
 run: build
 	sudo make -C backend run
 
-build: $(PIPELINE) $(FILE)
-	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > backend/include/main/main.hpp
+build: $(TARGET)
 	make -C backend build
+
+$(TARGET): $(PIPELINE) $(FILE)
+	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > $(TARGET)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
