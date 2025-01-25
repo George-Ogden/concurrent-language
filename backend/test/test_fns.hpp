@@ -6,6 +6,7 @@
 #include "system/work_manager.hpp"
 #include "types/builtin.hpp"
 #include "types/compound.hpp"
+#include "types/utils.hpp"
 
 #include <gtest/gtest.h>
 
@@ -637,13 +638,14 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
         ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            Lazy<Cons::type> *cons_lazy = new LazyConstant<Cons::type>{
-                reinterpret_cast<Cons *>(&list.value)->value};
+            Lazy<destroy_references_t<Cons::type>> *cons_lazy =
+                new LazyConstant<destroy_references_t<Cons::type>>{
+                    destroy_references(
+                        reinterpret_cast<Cons *>(&list.value)->value)};
             WorkManager::await(cons_lazy);
-            Cons::type cons = cons_lazy->value();
+            destroy_references_t<Cons::type> cons = cons_lazy->value();
             Int head = std::get<0ULL>(cons);
-            ListInt *tail_ = std::get<1ULL>(cons);
-            ListInt tail = *tail_;
+            ListInt tail = std::get<1ULL>(cons);
 
             if (call1 == nullptr) {
                 call1 = new ListIntSum{};
@@ -669,21 +671,18 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ListInt tail{};
     tail.tag = 1ULL;
-    ListInt *wrapped_tail = new ListInt{tail};
     ListInt third{};
     third.tag = 0ULL;
-    *reinterpret_cast<Cons *>(&third.value) =
-        Cons{std::make_tuple(8, wrapped_tail)};
-    ListInt *wrapped_third = new ListInt{third};
+    reinterpret_cast<Cons *>(&third.value)->value =
+        create_references<Cons::type>(std::make_tuple(8, tail));
     ListInt second{};
     second.tag = 0ULL;
-    *reinterpret_cast<Cons *>(&second.value) =
-        Cons{std::make_tuple(4, wrapped_third)};
-    ListInt wrapped_second = second;
+    reinterpret_cast<Cons *>(&second.value)->value =
+        create_references<Cons::type>(std::make_tuple(4, third));
     ListInt first{};
     first.tag = 0ULL;
-    *reinterpret_cast<Cons *>(&first.value) =
-        Cons{std::make_tuple(-9, &wrapped_second)};
+    reinterpret_cast<Cons *>(&first.value)->value =
+        create_references<Cons::type>(std::make_tuple(-9, second));
 
     ListIntSum *adder = new ListIntSum{first};
 
@@ -743,6 +742,38 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
     ASSERT_EQ(fn->ret.tag, inner.tag);
     ASSERT_EQ(reinterpret_cast<Suc *>(&fn->ret.value)->value,
               reinterpret_cast<Suc *>(&inner.value)->value);
+}
+
+using F = TupleT<Lazy<FnT<Int, Int>> *>;
+struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
+    using Closure<SelfRecursiveFn, F, Int, Int>::Closure;
+    FnT<Int, Int> g = nullptr;
+    Lazy<Int> *body(Lazy<Int> *&x) override {
+        WorkManager::await(x);
+        if (x->value() > 0) {
+            auto lz = std::get<0>(this->env);
+            auto f = lz->value();
+            if (g == nullptr) {
+                g = f->clone();
+                auto y = new LazyConstant<Int>{x->value() - 1};
+                g->args = std::make_tuple(y);
+                g->call();
+            }
+            return g;
+        } else {
+            return x;
+        }
+    }
+};
+TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
+    FnT<Int, Int> f = new SelfRecursiveFn{};
+    dynamic_cast<SelfRecursiveFn *>(f)->env =
+        std::make_tuple(new LazyConstant<FnT<Int, Int>>{f});
+    Lazy<Int> *x = new LazyConstant<Int>{5};
+    f->args = std::make_tuple(x);
+
+    WorkManager::run(f);
+    ASSERT_EQ(f->ret, 0);
 }
 
 const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};

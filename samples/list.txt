@@ -1,24 +1,27 @@
-typedef List<T> {Cons (T, List<T>) | Nil};
-map<T,U> = (f: T -> U, xs: List<T>) -> List<U> {
+typedef List{T} {Cons (T, List{T}) | Nil};
+map{T,U} = (f: T -> U, xs: List{T}) -> List{U} {
     match (xs) {
         Cons x: {
             h = x.0;
             t = x.1;
-            Cons<T>{(f(h), t)}
+            Cons{U}{(f(h), map{T,U}(f, t))}
         },
         Nil : {
-            Nil<T>{}
+            Nil{U}{}
         }
     }
 };
 
-main = () -> List<bool> {
-    __::__ = (h : int, t : List<int>) -> List<int> {
-        Cons<int>{(h, t)}
+main = () -> (List{bool}, List{bool}) {
+    __::__ = (h : int, t : List{int}) -> List{int} {
+        Cons{int}{(h, t)}
     };
-    xs = 0 :: 3 :: -1 :: 4 :: 8 :: Nil<int>{};
+    xs = 0 :: 3 :: (-1) :: 4 :: 8 :: Nil{int}{};
     gt0 = (x: int) -> bool {
         x > 0
     };
-    map<int,bool>(gt0, xs)
+    lt0 = (x: int) -> bool {
+        x < 0
+    };
+    (map{int,bool}(gt0, xs), map{int,bool}(lt0, xs))
 };

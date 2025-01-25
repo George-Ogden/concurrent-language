@@ -47,15 +47,15 @@ from ast_nodes import (
         ("(int)", AtomicType.INT, "type_instance"),
         ("((int))", AtomicType.INT, "type_instance"),
         ("foo", Typename("foo"), "type_instance"),
-        ("foo<int>", GenericType("foo", [AtomicType.INT]), "type_instance"),
-        ("foo<int,>", GenericType("foo", [AtomicType.INT]), "type_instance"),
+        ("foo{int}", GenericType("foo", [AtomicType.INT]), "type_instance"),
+        ("foo{int,}", GenericType("foo", [AtomicType.INT]), "type_instance"),
         (
-            "foo<int,bool>",
+            "foo{int,bool}",
             GenericType("foo", [AtomicType.INT, AtomicType.BOOL]),
             "type_instance",
         ),
         (
-            "foo<bar<int>,bool>",
+            "foo{bar{int},bool}",
             GenericType(
                 "foo",
                 [
@@ -169,26 +169,26 @@ from ast_nodes import (
         ("__^__", Var("^"), "expr"),
         ("___^__", None, "expr"),
         ("__^^^__", Var("^^^"), "expr"),
-        ("map<int>", GenericVariable("map", [AtomicType.INT]), "expr"),
-        ("map<int,>", GenericVariable("map", [AtomicType.INT]), "expr"),
-        ("map<T>", GenericVariable("map", [Typename("T")]), "expr"),
+        ("map{int}", GenericVariable("map", [AtomicType.INT]), "expr"),
+        ("map{int,}", GenericVariable("map", [AtomicType.INT]), "expr"),
+        ("map{T}", GenericVariable("map", [Typename("T")]), "expr"),
         (
-            "map<f<int>>",
+            "map{f{int}}",
             GenericVariable("map", [GenericType("f", [AtomicType.INT])]),
             "expr",
         ),
         (
-            "map<f<g<T>>>",
+            "map{f{g{T}}}",
             GenericVariable("map", [GenericType("f", [GenericType("g", [Typename("T")])])]),
             "expr",
         ),
         (
-            "map<int,bool>",
+            "map{int,bool}",
             GenericVariable("map", [AtomicType.INT, AtomicType.BOOL]),
             "expr",
         ),
         (
-            "map<(int,int)>",
+            "map{(int,int)}",
             GenericVariable("map", [TupleType([AtomicType.INT, AtomicType.INT])]),
             "expr",
         ),
@@ -395,7 +395,7 @@ from ast_nodes import (
             "expr",
         ),
         (
-            "2 + 3 <<!>> 4 + 5",
+            "2 + 3 <!> 4 + 5",
             FunctionCall(
                 Var("+"),
                 [
@@ -403,7 +403,7 @@ from ast_nodes import (
                         Var("+"),
                         [
                             Integer(2),
-                            FunctionCall(Var("<<!>>"), [Integer(3), Integer(4)]),
+                            FunctionCall(Var("<!>"), [Integer(3), Integer(4)]),
                         ],
                     ),
                     Integer(5),
@@ -412,9 +412,9 @@ from ast_nodes import (
             "expr",
         ),
         (
-            "2 __add__ 3 <<!>> 4 __add__ 5",
+            "2 __add__ 3 <!> 4 __add__ 5",
             FunctionCall(
-                Var("<<!>>"),
+                Var("<!>"),
                 [
                     FunctionCall(Var("add"), [Integer(2), Integer(3)]),
                     FunctionCall(Var("add"), [Integer(4), Integer(5)]),
@@ -580,8 +580,8 @@ from ast_nodes import (
             "assignment",
         ),
         (
-            "__>>__ = 3",
-            Assignment(ParametricAssignee(Assignee(">>"), []), Integer(3)),
+            "__>__ = 3",
+            Assignment(ParametricAssignee(Assignee(">"), []), Integer(3)),
             "assignment",
         ),
         ("__>__ = 3", Assignment(ParametricAssignee(Assignee(">"), []), Integer(3)), "assignment"),
@@ -611,33 +611,33 @@ from ast_nodes import (
             "assignment",
         ),
         (
-            "a<T> = f<T>",
+            "a{T} = f{T}",
             Assignment(
                 ParametricAssignee(Assignee("a"), ["T"]), GenericVariable("f", [Typename("T")])
             ),
             "assignment",
         ),
         (
-            "a<T> = f<T>",
+            "a{T} = f{T}",
             Assignment(
                 ParametricAssignee(Assignee("a"), ["T"]), GenericVariable("f", [Typename("T")])
             ),
             "assignment",
         ),
         (
-            "a<T,> = t<T,>",
+            "a{T,} = t{T,}",
             Assignment(
                 ParametricAssignee(Assignee("a"), ["T"]), GenericVariable("t", [Typename("T")])
             ),
             "assignment",
         ),
         (
-            "a<T,U> = -4",
+            "a{T,U} = -4",
             Assignment(ParametricAssignee(Assignee("a"), ["T", "U"]), Integer(-4)),
             "assignment",
         ),
         (
-            "a<T,U> = f<U,T>",
+            "a{T,U} = f{U,T}",
             Assignment(
                 ParametricAssignee(Assignee("a"), ["T", "U"]),
                 GenericVariable("f", [Typename("U"), Typename("T")]),
@@ -645,7 +645,7 @@ from ast_nodes import (
             "assignment",
         ),
         (
-            "a<T,U,> = 0",
+            "a{T,U,} = 0",
             Assignment(ParametricAssignee(Assignee("a"), ["T", "U"]), Integer(0)),
             "assignment",
         ),
@@ -661,7 +661,7 @@ from ast_nodes import (
         ("{; 8}", None, "block"),
         ("{w = x;; 8}", None, "block"),
         (
-            "{w = x;y<T> = x<T,T>; -8}",
+            "{w = x;y{T} = x{T,T}; -8}",
             Block(
                 [
                     Assignment(ParametricAssignee(Assignee("w"), []), Var("x")),
@@ -844,7 +844,7 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef tuple<T> (T, T)",
+            "typedef tuple{T} (T, T)",
             OpaqueTypeDefinition(
                 GenericTypeVariable("tuple", ["T"]),
                 TupleType([Typename("T"), Typename("T")]),
@@ -852,7 +852,7 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef tuple<T,U> (F<U>, T)",
+            "typedef tuple{T,U} (F{U}, T)",
             OpaqueTypeDefinition(
                 GenericTypeVariable("tuple", ["T", "U"]),
                 TupleType([GenericType("F", [Typename("U")]), Typename("T")]),
@@ -860,7 +860,7 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef apply<T,U> T<U>",
+            "typedef apply{T,U} T{U}",
             OpaqueTypeDefinition(
                 GenericTypeVariable("apply", ["T", "U"]),
                 GenericType("T", [Typename("U")]),
@@ -868,7 +868,7 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef alias<T,> T",
+            "typedef alias{T,} T",
             OpaqueTypeDefinition(GenericTypeVariable("alias", ["T"]), Typename("T")),
             "type_def",
         ),
@@ -878,14 +878,14 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef Integer<> int",
+            "typedef Integer{} int",
             OpaqueTypeDefinition(TypeVariable("Integer"), AtomicType.INT),
             "type_def",
         ),
         ("typedef None", EmptyTypeDefinition("None"), "type_def"),
-        ("typedef None<T>", None, "type_def"),
+        ("typedef None{T}", None, "type_def"),
         (
-            "typedef Maybe<T> { Some T | None }",
+            "typedef Maybe{T} { Some T | None }",
             UnionTypeDefinition(
                 GenericTypeVariable("Maybe", ["T"]),
                 [TypeItem("Some", Typename("T")), TypeItem("None", None)],
@@ -893,7 +893,7 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef Choice<T, U> { Left T | Right U }",
+            "typedef Choice{T, U} { Left T | Right U }",
             UnionTypeDefinition(
                 GenericTypeVariable("Choice", ["T", "U"]),
                 [
@@ -922,12 +922,12 @@ from ast_nodes import (
             "type_def",
         ),
         (
-            "typedef Error<T> {Error1<T> | Error2}",
+            "typedef Error{T} {Error1{T} | Error2}",
             None,
             "type_def",
         ),
         (
-            "typedef Error<T> {Error1 | Error2}",
+            "typedef Error{T} {Error1 | Error2}",
             UnionTypeDefinition(
                 GenericTypeVariable("Error", ["T"]),
                 [TypeItem("Error1", None), TypeItem("Error2", None)],
@@ -945,7 +945,7 @@ from ast_nodes import (
             "type_alias",
         ),
         (
-            "typealias id<T> T -> T",
+            "typealias id{T} T -> T",
             TransparentTypeDefinition(
                 GenericTypeVariable("id", ["T"]),
                 FunctionType([Typename("T")], Typename("T")),
@@ -953,12 +953,12 @@ from ast_nodes import (
             "type_alias",
         ),
         (
-            "typealias int8<> int",
+            "typealias int8{} int",
             TransparentTypeDefinition(TypeVariable("int8"), AtomicType.INT),
             "type_alias",
         ),
         (
-            "typealias id<T> (T -> T)",
+            "typealias id{T} (T -> T)",
             TransparentTypeDefinition(
                 GenericTypeVariable("id", ["T"]),
                 FunctionType([Typename("T")], Typename("T")),

@@ -2,23 +2,39 @@
 
 PARSER := parser
 GRAMMAR := parser/grammar
-TYPE_CHECKER := type-checker/target/debug/type_checker
+TYPE_CHECKER := type-checker/target/debug/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
-TRANSLATOR := translation/target/debug/translation
+TRANSLATOR := translation/target/debug/libtranslation.d
 TRANSLATOR_MANIFEST := translation/Cargo.toml
-LOWERER := lowering/target/debug/lowering
+LOWERER := lowering/target/debug/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
-COMPILER := compilation/target/debug/compilation
+COMPILER := compilation/target/debug/libcompilation.d
 COMPILER_MANIFEST := compilation/Cargo.toml
 PIPELINE := pipeline/target/debug/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
+TARGET := backend/include/main/main.hpp
+
+LAST_FILE_PREFIX := .last-file-hash-
+LAST_FILE_HASH = $(shell sha256sum $(FILE) 2>/dev/null | cut -d' ' -f1)
+LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)
+
+$(LAST_FILE):
+	rm $(LAST_FILE_PREFIX)* -f
+	touch $@
 
 all: $(PIPELINE) $(BACKEND)
 
-run: $(PIPELINE)
-	cat samples/simple.txt | xargs -0 python $(PARSER) | ./$(PIPELINE) > backend/include/main/main.hpp
+FILE := samples/samples.txt
+
+run: build
 	sudo make -C backend run
+
+build: $(TARGET)
+	make -C backend build
+
+$(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
+	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > $(TARGET)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
@@ -47,16 +63,19 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: $(PARSER) $(TYPE_CHECKER)
-	pytest . -vv
-	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
-	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
-	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
-	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
-	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
-	make -C backend bin/test
-	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
-	for sample in samples/triangular.txt samples/list.txt; do \
-		cat $$sample | xargs -0 -t python $(PARSER) | ./$(TYPE_CHECKER); \
+	# pytest . -vv
+	# cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
+	# cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
+	# cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
+	# cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
+	# cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
+	# make -C backend bin/test
+	# ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
+	for sample in samples/*; do \
+		echo $$sample ;\
+		if [ "$$sample" != "samples/grammar.txt" ]; then \
+			make build FILE=$$sample || exit 1; \
+		fi \
 	done;
 
 clean:

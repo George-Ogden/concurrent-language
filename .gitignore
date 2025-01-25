@@ -3,6 +3,9 @@ grammar
 *.interp
 *.tokens
 
+# Last file has
+.last-file-hash-*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -53,7 +53,7 @@ $(TEST_BUILDDIR)/: $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
 
 $(TEST_FILE): $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
 	echo "" > $@; \
-	for file in $^; do \
+	for file in $(TEST_INCLUDE); do \
 		echo "#include \"$$file\"" >> $@; \
 	done
 
@@ -79,10 +79,12 @@ $(COMPILER_FILE): | $(BUILD_DIR)
 	rm -f $(COMPILER_PREFIX)*
 	touch $@
 
+build: $(TARGET)
+
 run: $(TARGET)
 	./$(TARGET) $(FLAGS)
 
 %: $(TARGET_DIR)/%
 	ASAN_OPTIONS=detect_leaks=0 ./$<
 
-.PHONY: all clean default run
+.PHONY: all build clean default run

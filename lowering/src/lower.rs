@@ -12,7 +12,6 @@ type Scope = HashMap<(Variable, Vec<Type>), IntermediateMemory>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<Variable, ParametricExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
-type VisitedReferences = HashSet<*mut IntermediateType>;
 type MemoryMap = HashMap<Location, Vec<Rc<RefCell<IntermediateExpression>>>>;
 
 pub struct Lowerer {
@@ -21,7 +20,6 @@ pub struct Lowerer {
     uninstantiated: Uninstantiated,
     type_defs: TypeDefs,
     statements: Vec<IntermediateStatement>,
-    visited_references: VisitedReferences,
     memory: MemoryMap,
 }
 
@@ -33,7 +31,6 @@ impl Lowerer {
             uninstantiated: Uninstantiated::new(),
             type_defs: TypeDefs::new(),
             statements: Vec::new(),
-            visited_references: VisitedReferences::new(),
             memory: MemoryMap::new(),
         };
         let scope = DEFAULT_CONTEXT.with(|context| {
@@ -165,7 +162,7 @@ impl Lowerer {
         TypedFunctionDefinition {
             parameters,
             body,
-            return_type: _,
+            return_type,
         }: TypedFunctionDefinition,
     ) -> IntermediateValue {
         let variables = parameters
@@ -183,9 +180,9 @@ impl Lowerer {
         }
         let (statements, return_value) = self.lower_block(body, false);
         let intermediate_expression = IntermediateFnDef {
-            args: args,
-            statements: statements,
-            return_value: return_value,
+            args,
+            statements,
+            ret: (return_value, self.lower_type(&return_type)),
         }
         .into();
         self.get_cached_value(intermediate_expression)
@@ -406,11 +403,11 @@ impl Lowerer {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args,
                 statements,
-                return_value,
+                ret,
             }) => IntermediateFnDef {
                 args,
                 statements: self.remove_wasted_allocations_from_statements(statements),
-                return_value: self.remove_wasted_allocations_from_value(return_value),
+                ret: (self.remove_wasted_allocations_from_value(ret.0), ret.1),
             }
             .into(),
         }
@@ -520,40 +517,44 @@ impl Lowerer {
             .collect()
     }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
-        self.visited_references.clear();
         let type_ = self.clear_names(type_);
-        let lower_type = self.lower_type_internal(&type_);
-        self.visited_references.clear();
+        let lower_type = self.lower_type_internal(&type_, HashSet::new());
         lower_type
     }
-    fn lower_type_internal(&mut self, type_: &Type) -> IntermediateType {
+    fn lower_type_internal(
+        &mut self,
+        type_: &Type,
+        mut visited_references: HashSet<*mut IntermediateType>,
+    ) -> IntermediateType {
         match type_ {
             Type::Atomic(atomic) => atomic.clone().into(),
             Type::Union(_, types) => {
                 let type_ = self.clear_names(&Type::Union(String::new(), types.clone()));
-                let lower_type = |this: &mut Self| {
-                    IntermediateUnionType(
-                        types
-                            .iter()
-                            .map(|type_: &Option<Type>| {
-                                type_.as_ref().map(|type_| this.lower_type_internal(type_))
-                            })
-                            .collect(),
-                    )
-                    .into()
-                };
+                let lower_type =
+                    |this: &mut Self, visited_references: HashSet<*mut IntermediateType>| {
+                        IntermediateUnionType(
+                            types
+                                .iter()
+                                .map(|type_: &Option<Type>| {
+                                    type_.as_ref().map(|type_| {
+                                        this.lower_type_internal(type_, visited_references.clone())
+                                    })
+                                })
+                                .collect(),
+                        )
+                        .into()
+                    };
                 match self.type_defs.entry(type_.clone()) {
                     std::collections::hash_map::Entry::Occupied(occupied_entry) => {
-                        self.visited_references
-                            .insert(occupied_entry.get().as_ptr());
-                        lower_type(self)
+                        visited_references.insert(occupied_entry.get().as_ptr());
+                        lower_type(self, visited_references)
                     }
                     std::collections::hash_map::Entry::Vacant(vacant_entry) => {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
-                        self.visited_references.insert(reference.as_ptr());
-                        let lower_type = lower_type(self);
+                        visited_references.insert(reference.as_ptr());
+                        let lower_type = lower_type(self, visited_references);
                         *reference.clone().borrow_mut() = lower_type.clone();
                         lower_type
                     }
@@ -563,14 +564,10 @@ impl Lowerer {
                 let instantiation = self.clear_names(&type_.borrow().instantiate(params));
                 match self.type_defs.entry(instantiation.clone()) {
                     std::collections::hash_map::Entry::Occupied(occupied_entry) => {
-                        if self
-                            .visited_references
-                            .contains(&occupied_entry.get().as_ptr())
-                        {
+                        if visited_references.contains(&occupied_entry.get().as_ptr()) {
                             IntermediateType::Reference(occupied_entry.get().clone())
                         } else {
-                            self.visited_references
-                                .insert(occupied_entry.get().as_ptr());
+                            visited_references.insert(occupied_entry.get().as_ptr());
                             occupied_entry.get().borrow().clone()
                         }
                     }
@@ -578,26 +575,33 @@ impl Lowerer {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
-                        self.visited_references.insert(reference.as_ptr());
-                        let lower_type = self.lower_type_internal(&instantiation);
+                        visited_references.insert(reference.as_ptr());
+                        let lower_type =
+                            self.lower_type_internal(&instantiation, visited_references);
                         *reference.clone().borrow_mut() = lower_type;
                         self.type_defs[&instantiation].borrow().clone()
                     }
                 }
             }
-            Type::Tuple(types) => IntermediateTupleType(self.lower_types_internal(types)).into(),
+            Type::Tuple(types) => {
+                IntermediateTupleType(self.lower_types_internal(types, visited_references)).into()
+            }
             Type::Function(args, ret) => IntermediateFnType(
-                self.lower_types_internal(args),
-                Box::new(self.lower_type_internal(&*ret)),
+                self.lower_types_internal(args, visited_references.clone()),
+                Box::new(self.lower_type_internal(&*ret, visited_references)),
             )
             .into(),
             Type::Variable(_) => panic!("Attempt to lower type variable."),
         }
     }
-    pub fn lower_types_internal(&mut self, types: &Vec<Type>) -> Vec<IntermediateType> {
+    pub fn lower_types_internal(
+        &mut self,
+        types: &Vec<Type>,
+        visited_references: HashSet<*mut IntermediateType>,
+    ) -> Vec<IntermediateType> {
         types
             .iter()
-            .map(|type_| self.lower_type_internal(type_))
+            .map(|type_| self.lower_type_internal(type_, visited_references.clone()))
             .collect()
     }
     fn add_placeholder_assignment(
@@ -795,7 +799,7 @@ mod tests {
             let memory: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: args.clone(),
                 statements: Vec::new(),
-                return_value: args[0].clone().into()
+                ret: (args[0].clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             (memory.location.clone().into(), vec![memory.into()])
         };
@@ -833,7 +837,10 @@ mod tests {
                 statements: vec![
                     result.clone().into()
                 ],
-                return_value: result.location.into()
+                ret: (
+                    result.location.into(),
+                    AtomicTypeEnum::BOOL.into()
+                )
             }).into();
             (memory.location.clone().into(), vec![memory.into()])
         };
@@ -927,7 +934,7 @@ mod tests {
                     IntermediateStatement::Assignment(call1),
                     IntermediateStatement::Assignment(call2.clone()),
                 ],
-                return_value: call2.location.into()
+                ret: (call2.location.into(), AtomicTypeEnum::INT.into())
             }).into();
             (fn_def.location.clone().into(), vec![fn_def.into()])
         };
@@ -1121,7 +1128,7 @@ mod tests {
                         )
                     }.into()
                 ],
-                return_value: return_address.location.clone().into()
+                ret: (return_address.location.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             (
                 memory.location.clone().into(),
@@ -1295,7 +1302,7 @@ mod tests {
                         )
                     }.into()
                 ],
-                return_value: return_address.location.clone().into()
+                ret: (return_address.location.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             (
                 memory.location.clone().into(),
@@ -1387,7 +1394,7 @@ mod tests {
                         ]
                     }.into()
                 ],
-                return_value: return_address.location.clone().into()
+                ret: (return_address.location.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             (
                 memory.location.clone().into(),
@@ -1470,7 +1477,7 @@ mod tests {
                         ]
                     }.into()
                 ],
-                return_value: return_address.location.clone().into()
+                ret: (return_address.location.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             (
                 memory.location.clone().into(),
@@ -1563,7 +1570,7 @@ mod tests {
                         ]
                     }.into()
                 ],
-                return_value: return_address.location.clone().into()
+                ret: (return_address.location.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             (
                 memory.location.clone().into(),
@@ -1580,7 +1587,7 @@ mod tests {
         let expected_fn: IntermediateExpression = IntermediateFnDef {
             args: Vec::new(),
             statements,
-            return_value: value,
+            ret: (value, IntermediateTupleType(Vec::new()).into()),
         }
         .into();
         let mut lowerer = Lowerer::new();
@@ -1591,7 +1598,7 @@ mod tests {
         let efficient_fn = IntermediateFnDef {
             args: Vec::new(),
             statements: efficient_statements,
-            return_value: efficient_value,
+            ret: (efficient_value, IntermediateTupleType(Vec::new()).into()),
         };
         assert!(ExpressionEqualityChecker::equal(
             &expected_fn,
@@ -1609,7 +1616,7 @@ mod tests {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: args.clone(),
                 statements: Vec::new(),
-                return_value: args[0].clone().into(),
+                ret: (args[0].clone().into(), AtomicTypeEnum::INT.into()),
             })
         };
         let p1 = {
@@ -1620,7 +1627,7 @@ mod tests {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: args.clone(),
                 statements: Vec::new(),
-                return_value: args[1].clone().into(),
+                ret: (args[1].clone().into(), AtomicTypeEnum::INT.into()),
             })
         };
         let q0 = {
@@ -1631,7 +1638,7 @@ mod tests {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: args.clone(),
                 statements: Vec::new(),
-                return_value: args[0].clone().into(),
+                ret: (args[0].clone().into(), AtomicTypeEnum::INT.into()),
             })
         };
         let q1 = {
@@ -1642,7 +1649,7 @@ mod tests {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: args.clone(),
                 statements: Vec::new(),
-                return_value: args[1].clone().into(),
+                ret: (args[1].clone().into(), AtomicTypeEnum::INT.into()),
             })
         };
 
@@ -1909,12 +1916,58 @@ mod tests {
         };
         "instantiated list int"
     )]
+    #[test_case(
+        {
+            let parameter = Rc::new(RefCell::new(None));
+            let list_type = Rc::new(RefCell::new(ParametricType {
+                parameters: vec![parameter.clone()],
+                type_: Type::new(),
+            }));
+            list_type.borrow_mut().type_ = Type::Union(
+                Id::from("List"),
+                vec![
+                    Some(Type::Tuple(vec![
+                        Type::Variable(parameter.clone()),
+                        Type::Instantiation(
+                            list_type.clone(),
+                            vec![Type::Variable(parameter.clone())],
+                        ),
+                    ])),
+                    None,
+                ],
+            );
+            Type::Tuple(vec![
+                Type::Instantiation(list_type.clone(), vec![TYPE_BOOL]),
+                Type::Instantiation(list_type.clone(), vec![TYPE_BOOL]),
+            ])
+        },
+        |type_defs| {
+            assert_eq!(type_defs.len(), 1);
+            let reference = type_defs.values().cloned().collect::<Vec<_>>()[0].clone();
+            IntermediateTupleType(vec![
+                IntermediateUnionType(vec![
+                    Some(IntermediateTupleType(vec![
+                        AtomicTypeEnum::BOOL.into(),
+                        IntermediateType::Reference(reference.clone().into())
+                    ]).into()),
+                    None
+                ]).into(),
+                IntermediateUnionType(vec![
+                    Some(IntermediateTupleType(vec![
+                        AtomicTypeEnum::BOOL.into(),
+                        IntermediateType::Reference(reference.into())
+                    ]).into()),
+                    None
+                ]).into()
+            ]).into()
+        };
+        "instantiated list bool tuple"
+    )]
     fn test_lower_type(type_: Type, expected_gen: impl Fn(&TypeDefs) -> IntermediateType) {
         let mut lowerer = Lowerer::new();
         let type_ = lowerer.lower_type(&type_);
         let expected = expected_gen(&lowerer.type_defs);
         assert_eq!(type_, expected);
-        assert!(lowerer.visited_references.is_empty())
     }
 
     #[ignore]
@@ -2084,7 +2137,7 @@ mod tests {
             let fn_: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
                 args: vec![arg.clone()],
                 statements: Vec::new(),
-                return_value: arg.clone().into()
+                ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             let value: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
@@ -2154,7 +2207,7 @@ mod tests {
                 statements: vec![
                     recursive_call.clone().into()
                 ],
-                return_value: recursive_call.location.into()
+                ret: (recursive_call.location.into(), AtomicTypeEnum::INT.into())
             }).into();
             let value: IntermediateMemory = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
@@ -2235,14 +2288,14 @@ mod tests {
                 statements: vec![
                     b_call.clone().into()
                 ],
-                return_value: b_call.location.into()
+                ret: (b_call.location.into(), AtomicTypeEnum::BOOL.into())
             }).into();
             *b_fn.expression.clone().borrow_mut() = IntermediateExpression::IntermediateFnDef(IntermediateFnDef{
                 args: Vec::new(),
                 statements: vec![
                     a_call.clone().into()
                 ],
-                return_value: a_call.location.into()
+                ret: (a_call.location.into(), AtomicTypeEnum::BOOL.into())
             }).into();
             (
                 vec![
@@ -2324,12 +2377,12 @@ mod tests {
         let id_int_fn: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
             args: vec![int_arg.clone()],
             statements: Vec::new(),
-            return_value: int_arg.into()
+            ret: (int_arg.into(), AtomicTypeEnum::INT.into())
         }).into();
         let id_bool_fn: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
             args: vec![bool_arg.clone()],
             statements: Vec::new(),
-            return_value: bool_arg.into()
+            ret: (bool_arg.into(), AtomicTypeEnum::BOOL.into())
         }).into();
         (
             vec![
@@ -2449,7 +2502,7 @@ mod tests {
             let main: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: Vec::new(),
                 statements: Vec::new(),
-                return_value: IntermediateBuiltIn::from(Integer{value: 0}).into()
+                ret: (IntermediateBuiltIn::from(Integer{value: 0}).into(), AtomicTypeEnum::INT.into())
             }).into();
             IntermediateProgram{
                 statements: vec![
@@ -2569,7 +2622,7 @@ mod tests {
             let main: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: Vec::new(),
                 statements: Vec::new(),
-                return_value: location.clone().into()
+                ret: (location.clone().into(), AtomicTypeEnum::INT.into())
             }).into();
             IntermediateProgram{
                 statements: vec![
@@ -2675,7 +2728,7 @@ mod tests {
             let id_int: IntermediateMemory = IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args: vec![arg.clone()],
                 statements: Vec::new(),
-                return_value: arg.into()
+                ret: (arg.into(), AtomicTypeEnum::INT.into())
             }).into();
             let fn_call: IntermediateMemory = IntermediateExpression::from(IntermediateFnCall{
                 args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()],
@@ -2687,7 +2740,7 @@ mod tests {
                     id_int.into(),
                     fn_call.clone().into()
                 ],
-                return_value: fn_call.location.into()
+                ret: (fn_call.location.into(), AtomicTypeEnum::INT.into())
             }).into();
             IntermediateProgram{
                 statements: vec![
@@ -2705,13 +2758,13 @@ mod tests {
         let lower_fn: IntermediateExpression = IntermediateFnDef {
             args: Vec::new(),
             statements: lower_program.statements,
-            return_value: lower_program.main,
+            ret: (lower_program.main, IntermediateTupleType(Vec::new()).into()),
         }
         .into();
         let expected_fn: IntermediateExpression = IntermediateFnDef {
             args: Vec::new(),
             statements: expected.statements,
-            return_value: expected.main,
+            ret: (expected.main, IntermediateTupleType(Vec::new()).into()),
         }
         .into();
         assert!(ExpressionEqualityChecker::equal(&lower_fn, &expected_fn));

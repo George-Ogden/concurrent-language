@@ -22,6 +22,7 @@ struct Op__BuiltIn : public ParametricFn<R, Ts...> {
 };
 
 using Unary_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int>;
+using Unary_Bool_Bool_Op__BuiltIn = Op__BuiltIn<Bool, Bool>;
 using Binary_Int_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int, Int>;
 using Binary_Int_Int_Bool_Op__BuiltIn = Op__BuiltIn<Bool, Int, Int>;
 
@@ -153,6 +154,14 @@ struct Decrement__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
         return new Decrement__BuiltIn{};
     }
     Int op(const Int x) const override { return x - 1; }
+};
+
+struct Negation__BuiltIn : public Unary_Bool_Bool_Op__BuiltIn {
+    using Unary_Bool_Bool_Op__BuiltIn::Op__BuiltIn;
+    Unary_Bool_Bool_Op__BuiltIn *clone() const override {
+        return new Negation__BuiltIn{};
+    }
+    Bool op(const Bool x) const override { return !x; }
 };
 
 struct Comparison_LT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {

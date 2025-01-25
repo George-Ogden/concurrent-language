@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iostream>
+#include <tuple>
 #include <type_traits>
 
 #include "fn/fn.hpp"
@@ -17,6 +19,26 @@ template <typename... Types> struct VariantT {
     std::aligned_union_t<0, Types...> value;
 
     VariantT() = default;
+
+    friend std::ostream &operator<<(std::ostream &os,
+                                    const VariantT<Types...> &variant) {
+        os << '[' << static_cast<Int>(variant.tag) << "; ";
+        [&]<std::size_t... I>(std::index_sequence<I...>) {
+            ((variant.tag == I
+                  ? (os << reinterpret_cast<const std::tuple_element_t<
+                               I, std::tuple<Types...>> *>(&variant.value)
+                               ->value,
+                     void())
+                  : void()),
+             ...);
+            if ((variant.tag >= sizeof...(I))) {
+                os << "unknown";
+            }
+        }
+        (std::make_index_sequence<sizeof...(Types)>());
+        os << ']';
+        return os;
+    }
 };
 
 template <typename R, typename... As> using FnT = ParametricFn<R, As...> *;

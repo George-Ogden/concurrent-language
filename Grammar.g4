@@ -52,11 +52,11 @@ operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot;
 operator_id: '__' operator '__';
 
 id_list : | id  WS* (',' WS* id WS* )* ','? ;
-generic_assignee : non_generic_assignee ('<' WS* id_list WS* '>')? ;
+generic_assignee : non_generic_assignee ('{' WS* id_list WS* '}')? ;
 non_generic_assignee: id | '__';
 
 generic_list : | type_instance WS* (',' WS* type_instance WS*)* ','? WS* ;
-generic_instance : id ('<' generic_list '>')? |  operator_id;
+generic_instance : id ('{' generic_list '}')? |  operator_id;
 
 atomic_type
     : BOOL
@@ -124,10 +124,14 @@ fn_call_access_free_expr
     | prefix_call
     ;
 
-fn_call_free_expr: fn_call_access_free_expr | access;
+access_free_expr: fn_call_access_free_expr | fn_call;
 access: access_head access_tail;
-access_head: fn_call_access_free_expr;
+access_head: access_free_expr;
 access_tail: DOT UINT access_tail?;
+fn_call_free_expr: fn_call_access_free_expr | access;
+// access: access_head access_tail;
+// access_head: fn_call_access_free_expr;
+// access_tail: DOT UINT access_tail?;
 
 infix_free_expr: fn_call_free_expr | fn_call;
 expr: infix_free_expr | infix_call;
@@ -139,7 +143,7 @@ constructor_call: generic_constructor '{' WS* expr_list WS* '}' ;
 generic_constructor: generic_instance;
 
 fn_call: fn_call_head fn_call_tail;
-fn_call_head: fn_call_free_expr;
+fn_call_head: fn_call_access_free_expr;
 fn_call_tail: '(' WS* expr_list WS* ')' fn_call_tail?;
 
 infix_operator

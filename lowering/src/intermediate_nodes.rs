@@ -32,7 +32,7 @@ impl fmt::Debug for IntermediateType {
             Self::IntermediateUnionType(arg0) => {
                 f.debug_tuple("IntermediateUnionType").field(arg0).finish()
             }
-            Self::Reference(_) => f.debug_tuple("Reference").finish(),
+            Self::Reference(r) => f.debug_tuple("Reference").field(&r.as_ptr()).finish(),
         }
     }
 }
@@ -251,7 +251,7 @@ impl IntermediateExpression {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 statements,
                 args: _,
-                return_value: _,
+                ret: _,
             }) => IntermediateStatement::all_targets(statements),
             _ => Vec::new(),
         }
@@ -282,7 +282,7 @@ impl IntermediateExpression {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args,
                 statements,
-                return_value,
+                ret: (return_value, _),
             }) => {
                 let mut values: Vec<_> = IntermediateStatement::all_values(statements);
                 values.push(return_value.clone());
@@ -486,17 +486,18 @@ impl ExpressionEqualityChecker {
                 IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                     args: a1,
                     statements: s1,
-                    return_value: r1,
+                    ret: r1,
                 }),
                 IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                     args: a2,
                     statements: s2,
-                    return_value: r2,
+                    ret: r2,
                 }),
             ) => {
                 self.equal_args(a1, a2)
                     && self.equal_statements(&s1, &s2)
-                    && self.equal_value(&r1, &r2)
+                    && r1.1 == r2.1
+                    && self.equal_value(&r1.0, &r2.0)
             }
             _ => false,
         }
@@ -658,7 +659,7 @@ pub struct IntermediateCtorCall {
 pub struct IntermediateFnDef {
     pub args: Vec<IntermediateArg>,
     pub statements: Vec<IntermediateStatement>,
-    pub return_value: IntermediateValue,
+    pub ret: (IntermediateValue, IntermediateType),
 }
 
 type Substitution = HashMap<IntermediateValue, IntermediateValue>;

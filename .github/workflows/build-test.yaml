@@ -1,3 +1,5 @@
+name: Build and Test
+
 on:
   push:
     branches:
@@ -43,9 +45,9 @@ jobs:
     - name: Temporary Script
       run: |
         echo '#include "main/include.hpp"' > backend/include/main/main.hpp
-        echo 'struct PreMain : Closure<PreMain, Empty, Int> {using Closure<PreMain, Empty, Int>::Closure; Lazy<Int> *body() override { return new LazyConstant<Int>{0LL}; }};' >> backend/include/main/main.hpp
+        echo 'struct Main : Closure<Main, Empty, Int> {using Closure<Main, Empty, Int>::Closure; Lazy<Int> *body() override { return new LazyConstant<Int>{0LL}; }};' >> backend/include/main/main.hpp
 
-    - name: Build parser and type checker
+    - name: Build
       run: |
         make
 

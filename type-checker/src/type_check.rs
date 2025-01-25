@@ -37,6 +37,12 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             Type::Function(vec![TYPE_INT], Box::new(TYPE_INT)),
         )
     });
+    let boolean_unary_operators = ["!"].into_iter().map(|operator| {
+        (
+            Id::from(operator),
+            Type::Function(vec![TYPE_BOOL], Box::new(TYPE_BOOL)),
+        )
+    });
     let boolean_binary_operators = ["&&", "||"].into_iter().map(|operator| {
         (
             Id::from(operator),
@@ -56,6 +62,7 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             .chain(boolean_binary_operators)
             .chain(integer_comparisons)
             .chain(integer_unary_operators)
+            .chain(boolean_unary_operators)
             .map(|(id, type_)| (id, type_.into())),
     )
 });
@@ -742,8 +749,9 @@ impl TypeChecker {
                         };
                         let mut context = context.clone();
                         let variable = assignee.map(|(id, type_)| {
-                            context.insert(id, type_.clone().into());
-                            TypedVariable::from(type_.clone())
+                            let typed_variable = TypedVariable::from(type_.clone());
+                            context.insert(id, typed_variable.clone());
+                            typed_variable
                         });
                         let match_items = block
                             .matches
@@ -1986,7 +1994,7 @@ mod tests {
             parameters: vec![parameter],
         }))
     });
-    const TYPE_DEFINITIONS: Lazy<TypeDefinitions> = Lazy::new(|| {
+    thread_local! {pub static TYPE_DEFINITIONS: Lazy<TypeDefinitions> = Lazy::new(|| {
         TypeDefinitions::from([
             (
                 Id::from("opaque_int"),
@@ -2079,97 +2087,110 @@ mod tests {
                 }))
             }),
         ])
-    });
+    })}
     const TYPE_CONSTRUCTORS: Lazy<HashMap<Id, ConstructorType>> = Lazy::new(|| {
         HashMap::from([
             (
                 Id::from("opaque_int"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("opaque_int")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("opaque_int")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("opaque_int_2"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("opaque_int_2")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("opaque_int_2")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("recursive"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("recursive")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("recursive")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("Cons"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("List")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("List")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("Nil"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("List")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("List")].clone()),
                     index: 1,
                 },
             ),
             (
                 Id::from("twoo"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Bull")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Bull")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("faws"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Bull")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Bull")].clone()),
                     index: 1,
                 },
             ),
             (
                 Id::from("two"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Bul")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Bul")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("faw"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Bul")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Bul")].clone()),
                     index: 1,
                 },
             ),
             (
                 Id::from("Some"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Option")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Option")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("None"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Option")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Option")].clone()),
                     index: 1,
                 },
             ),
             (
                 Id::from("Left"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Either")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Either")].clone()),
                     index: 0,
                 },
             ),
             (
                 Id::from("Right"),
                 ConstructorType {
-                    type_: TYPE_DEFINITIONS[&Id::from("Either")].clone(),
+                    type_: TYPE_DEFINITIONS
+                        .with(|definitions| definitions[&Id::from("Either")].clone()),
                     index: 1,
                 },
             ),
@@ -2599,10 +2620,10 @@ mod tests {
             Id::from("+"),
             Type::Function(
                 vec![
-                    Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new()),
-                    Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())
+                    Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new()),
+                    Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new())
                 ],
-                Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new()))
+                Box::new(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new()))
             ).into()
         )]);
         "addition function call with aliases"
@@ -2614,7 +2635,7 @@ mod tests {
                 Integer{ value: 5}.into(),
             ],
         }.into(),
-        Some(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new())),
+        Some(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), Vec::new())),
         TypeContext::new();
         "constructor call"
     )]
@@ -2660,7 +2681,7 @@ mod tests {
             },
             arguments: Vec::new(),
         }.into(),
-        Some(TYPE_DEFINITIONS[&Id::from("List")].borrow().instantiate(&vec![TYPE_INT])),
+        Some(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("List")].borrow().instantiate(&vec![TYPE_INT]))),
         TypeContext::new();
         "constructor call output generic"
     )]
@@ -2685,7 +2706,7 @@ mod tests {
                 }.into()
             ],
         }.into(),
-        Some(TYPE_DEFINITIONS[&Id::from("List")].borrow().instantiate(&vec![TYPE_INT])),
+        Some(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("List")].borrow().instantiate(&vec![TYPE_INT]))),
         TypeContext::new();
         "constructor call generic"
     )]
@@ -2723,7 +2744,7 @@ mod tests {
         Some(TYPE_UNIT),
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+            TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("Bull")].clone()).into()
         )]);
         "basic match expression"
     )]
@@ -2754,7 +2775,7 @@ mod tests {
         Some(TYPE_UNIT),
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+            TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Bull")].clone()).into()
         )]);
         "split match expression"
     )]
@@ -2780,7 +2801,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+            TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Bull")].clone()).into()
         )]);
         "match equivalent types"
     )]
@@ -2811,7 +2832,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+            TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Bull")].clone()).into()
         )]);
         "differing match blocks"
     )]
@@ -2828,7 +2849,6 @@ mod tests {
                     ],
                     block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
                 },
-
             ]
         }.into(),
         None,
@@ -2848,13 +2868,12 @@ mod tests {
                     ],
                     block: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
                 },
-
             ]
         }.into(),
         None,
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+            TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Bull")].clone()).into()
         )]);
         "non-exhaustive matches"
     )]
@@ -2887,7 +2906,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("random_bull"),
-            TYPE_DEFINITIONS[&String::from("Bull")].clone().into()
+            TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Bull")].clone()).into()
         )]);
         "empty match assignee"
     )]
@@ -2920,7 +2939,7 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
         )]);
         "valid match assignment"
     )]
@@ -2951,7 +2970,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
         )]);
         "missing variant assignee"
     )]
@@ -2984,7 +3003,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
         )]);
         "match out-of-scope variable"
     )]
@@ -3012,7 +3031,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![TYPE_INT]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
         )]);
         "match partially-used variable"
     )]
@@ -3042,7 +3061,7 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS[&String::from("transparent_int")].clone(),Vec::new())]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("transparent_int")].clone()),Vec::new())]).into()
         )]);
         "match same type variable"
     )]
@@ -3072,7 +3091,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS[&String::from("opaque_int")].clone(),Vec::new())]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("opaque_int")].clone()),Vec::new())]).into()
         )]);
         "match different type variables"
     )]
@@ -3102,7 +3121,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS[&String::from("transparent_int")].clone(),Vec::new())]).into()
+            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("transparent_int")].clone()),Vec::new())]).into()
         )]);
         "different variable names"
     )]
@@ -3169,11 +3188,11 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("x"),
-                Type::Instantiation(TYPE_DEFINITIONS[&String::from("Option")].clone(),vec![Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,TYPE_BOOL]).into()]).into()
+                Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,TYPE_BOOL]).into()]).into()
             ),
             (
                 Id::from("*"),
-                Type::Function(vec![Type::Instantiation(TYPE_DEFINITIONS[&String::from("Either")].clone(),vec![TYPE_INT,TYPE_BOOL]).into(),TYPE_BOOL], Box::new(TYPE_INT)).into()
+                Type::Function(vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,TYPE_BOOL]).into(),TYPE_BOOL], Box::new(TYPE_INT)).into()
             ),
         ]);
         "nested match"
@@ -3184,7 +3203,8 @@ mod tests {
         context: TypeContext,
     ) {
         let type_checker = TypeChecker {
-            type_definitions: TYPE_DEFINITIONS.clone(),
+            type_definitions: TYPE_DEFINITIONS
+                .with(|definitions| TypeDefinitions::from(definitions.0.clone())),
             constructors: TYPE_CONSTRUCTORS.clone(),
         };
         let type_check_result =
@@ -3192,7 +3212,7 @@ mod tests {
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {
-                    assert_eq!(typed_expression.type_(), type_)
+                    assert!(Type::equality(&typed_expression.type_(), &type_))
                 }
                 Err(msg) => {
                     dbg!(msg);
@@ -3354,6 +3374,129 @@ mod tests {
         "function duplicate parameter"
     )]
     #[test_case(
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: ParametricAssignee{
+                        assignee: Assignee{
+                            id: Id::from("g")
+                        },
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    },
+                    expression: Box::new(
+                        FunctionDefinition {
+                            parameters: vec![
+                                TypedAssignee{
+                                    assignee: Id::from("f").into(),
+                                    type_: FunctionType{
+                                        argument_types: vec![
+                                            GenericType{
+                                                id: Id::from("T"),
+                                                type_variables: Vec::new()
+                                            }.into()
+                                        ],
+                                        return_type: Box::new(GenericType{
+                                            id: Id::from("U"),
+                                            type_variables: Vec::new()
+                                        }.into())
+                                    }.into(),
+                                },
+                                TypedAssignee{
+                                    assignee: Id::from("x").into(),
+                                    type_: GenericType{
+                                        id: Id::from("T"),
+                                        type_variables: Vec::new()
+                                    }.into()
+                                },
+                            ],
+                            return_type: GenericType{
+                                id: Id::from("U"),
+                                type_variables: Vec::new()
+                            }.into(),
+                            body: ExpressionBlock(FunctionCall{
+                                function: Box::new(Var("f").into()),
+                                arguments: vec![Var("x").into()]
+                            }.into())
+                        }.into()
+                    )
+                }
+            ],
+            expression: Box::new(GenericVariable{
+                id: Id::from("g"),
+                type_instances: vec![
+                    ATOMIC_TYPE_INT.into(),
+                    ATOMIC_TYPE_BOOL.into()
+                ]
+            }.into())
+        },
+        Some(Type::Function(
+            vec![
+                Type::Function(vec![TYPE_INT],Box::new(TYPE_BOOL)),
+                TYPE_INT
+            ],
+            Box::new(TYPE_BOOL),
+        )),
+        TypeContext::new();
+        "function matched generics"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment {
+                    assignee: ParametricAssignee{
+                        assignee: Assignee{
+                            id: Id::from("g")
+                        },
+                        generic_variables: vec![Id::from("T"), Id::from("U")]
+                    },
+                    expression: Box::new(
+                        FunctionDefinition {
+                            parameters: vec![
+                                TypedAssignee{
+                                    assignee: Id::from("f").into(),
+                                    type_: FunctionType{
+                                        argument_types: vec![
+                                            GenericType{
+                                                id: Id::from("T"),
+                                                type_variables: Vec::new()
+                                            }.into()
+                                        ],
+                                        return_type: Box::new(GenericType{
+                                            id: Id::from("U"),
+                                            type_variables: Vec::new()
+                                        }.into())
+                                    }.into(),
+                                },
+                                TypedAssignee{
+                                    assignee: Id::from("x").into(),
+                                    type_: GenericType{
+                                        id: Id::from("T"),
+                                        type_variables: Vec::new()
+                                    }.into()
+                                },
+                            ],
+                            return_type: GenericType{
+                                id: Id::from("U"),
+                                type_variables: Vec::new()
+                            }.into(),
+                            body: ExpressionBlock(Var("x").into())
+                        }.into()
+                    )
+                }
+            ],
+            expression: Box::new(GenericVariable{
+                id: Id::from("g"),
+                type_instances: vec![
+                    ATOMIC_TYPE_INT.into(),
+                    ATOMIC_TYPE_BOOL.into()
+                ]
+            }.into())
+        },
+        None,
+        TypeContext::new();
+        "function mismatched generics"
+    )]
+    #[test_case(
         ExpressionBlock(FunctionDefinition {
             parameters: vec![
                 TypedAssignee{
@@ -3365,8 +3508,8 @@ mod tests {
             body: ExpressionBlock(Var("x").into()),
         }.into()),
         Some(Type::Function(
-            vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new())],
-            Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("opaque_int")).unwrap().clone(), Vec::new()))
+            vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), Vec::new())],
+            Box::new(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), Vec::new()))
         )),
         TypeContext::new();
         "opaque type reference"
@@ -3383,7 +3526,7 @@ mod tests {
             body: ExpressionBlock(Var("x").into()),
         }.into()),
         Some(Type::Function(
-            vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())],
+            vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new())],
             Box::new(TYPE_INT)
         )),
         TypeContext::new();
@@ -3401,8 +3544,8 @@ mod tests {
             body: ExpressionBlock(Var("x").into()),
         }.into()),
         Some(Type::Function(
-            vec![Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int")).unwrap().clone(), Vec::new())],
-            Box::new(Type::Instantiation(TYPE_DEFINITIONS.get(&Id::from("transparent_int_2")).unwrap().clone(), Vec::new()))
+            vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new())],
+            Box::new(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int_2")].clone()), Vec::new()))
         )),
         TypeContext::new();
         "double transparent type reference"
@@ -3902,14 +4045,15 @@ mod tests {
     )]
     fn test_check_blocks(block: Block, expected_type: Option<Type>, context: TypeContext) {
         let type_checker = TypeChecker {
-            type_definitions: TYPE_DEFINITIONS.clone(),
+            type_definitions: TYPE_DEFINITIONS
+                .with(|definitions| TypeDefinitions::from(definitions.0.clone())),
             constructors: TYPE_CONSTRUCTORS.clone(),
         };
         let type_check_result = type_checker.check_block(block, &context, &GenericVariables::new());
         match expected_type {
             Some(type_) => match &type_check_result {
                 Ok(typed_expression) => {
-                    assert_eq!(typed_expression.type_(), type_)
+                    assert!(Type::equality(&typed_expression.type_(), &type_))
                 }
                 Err(msg) => {
                     dbg!(msg);

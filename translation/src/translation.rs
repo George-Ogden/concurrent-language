@@ -1,12 +1,15 @@
 use core::fmt;
 use itertools::Itertools;
-use std::fmt::Formatter;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Formatter,
+};
 
 use compilation::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
-    IfStatement, Integer, MachineType, MatchStatement, Memory, Program, Statement, TupleExpression,
-    TupleType, TypeDef, UnionType, Value,
+    IfStatement, Integer, MachineType, MatchStatement, Memory, Name, Program, Statement,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -16,6 +19,43 @@ pub struct Translator {}
 impl Translator {
     fn translate_type(&self, type_: &MachineType) -> Code {
         format!("{}", TypeFormatter(type_))
+    }
+    fn top_sort(&self, type_defs: &Vec<TypeDef>) -> Vec<(Name, Option<MachineType>)> {
+        let mut visited = HashSet::<Name>::new();
+        let mut result = Vec::new();
+        let type_defs_by_name = type_defs
+            .iter()
+            .map(|type_def| (type_def.name.clone(), type_def.clone()))
+            .collect();
+        for type_def in type_defs {
+            self.top_sort_internal(
+                type_def.clone(),
+                &type_defs_by_name,
+                &mut visited,
+                &mut result,
+            );
+        }
+        result
+    }
+    fn top_sort_internal(
+        &self,
+        type_def: TypeDef,
+        type_defs: &HashMap<Name, TypeDef>,
+        visited: &mut HashSet<Name>,
+        result: &mut Vec<(Name, Option<MachineType>)>,
+    ) {
+        if visited.contains(&type_def.name) {
+            return;
+        }
+        visited.insert(type_def.name.clone());
+        let used_types = type_def.directly_used_types();
+        for type_name in used_types {
+            let type_name = type_name
+                .split_once("C")
+                .map_or(type_name.clone(), |(before, _)| String::from(before));
+            self.top_sort_internal(type_defs[&type_name].clone(), type_defs, visited, result);
+        }
+        result.extend(type_def.constructors.iter().map(|ctor| ctor.clone()));
     }
     fn translate_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
         let forward_constructor_definitions = type_defs
@@ -37,20 +77,16 @@ impl Translator {
             )));
             format!("typedef {variant_definition} {};", type_def.name)
         });
-        let constructor_definitions = type_defs
-            .iter()
-            .map(|type_def| {
-                type_def.constructors.iter().map(|constructor| {
-                    let fields = match &constructor.1 {
-                        Some(type_) => {
-                            format!("using type = {}; type value;", self.translate_type(type_))
-                        }
-                        None => String::new(),
-                    };
-                    format!("struct {} {{ {fields} }};", constructor.0)
-                })
-            })
-            .flatten();
+        let ctors = self.top_sort(&type_defs);
+        let constructor_definitions = ctors.iter().map(|(name, type_)| {
+            let fields = match type_ {
+                Some(type_) => {
+                    format!("using type = {}; type value;", self.translate_type(type_))
+                }
+                None => Code::from("Empty value;"),
+            };
+            format!("struct {name} {{ {fields} }};")
+        });
         format!(
             "{} {} {}",
             itertools::join(forward_constructor_definitions, "\n"),
@@ -62,7 +98,7 @@ impl Translator {
         match value {
             BuiltIn::Integer(Integer { value }) => format!("{value}LL"),
             BuiltIn::Boolean(Boolean { value }) => format!("{value}"),
-            BuiltIn::BuiltInFn(name) => name,
+            BuiltIn::BuiltInFn(name) => format!("new {name}{{}}"),
         }
     }
     fn translate_memory(&self, memory: Memory) -> Code {
@@ -101,20 +137,8 @@ impl Translator {
                 self.translate_value(value)
             ),
             Expression::Unwrap(value) => format!("{}->value()", self.translate_value(value)),
-            Expression::Reference(value, type_) => format!(
-                "new {}{{{}}}",
-                self.translate_type(&type_),
-                self.translate_value(value)
-            ),
-            Expression::Dereference(value) => format!("*{}", self.translate_value(value)),
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
-            }
-            Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                format!(
-                    "new {name}{{{}}}",
-                    env.map_or_else(Code::new, |env| self.translate_value(env))
-                )
             }
             Expression::Block(block) => self.translate_block(block),
             e => panic!("{:?} does not translate directly as an expression", e),
@@ -130,14 +154,13 @@ impl Translator {
     }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
         let fn_initialization_code = match fn_call.fn_ {
-            Value::BuiltIn(BuiltIn::BuiltInFn(name)) => {
-                format!("new {name}{{}};")
+            Value::BuiltIn(built_in) => {
+                format!("{};", self.translate_builtin(built_in))
             }
             Value::Memory(memory) => {
                 let memory_code = self.translate_memory(memory);
                 format!("{memory_code}->clone();",)
             }
-            _ => panic!("Calling invalid function"),
         };
         let type_code = self.translate_type(&fn_call.fn_type.into());
         let args_assignment = format!(
@@ -152,7 +175,7 @@ impl Translator {
         let value_code = match constructor_call.data {
             None => Code::new(),
             Some((name, value)) => format!(
-                "reinterpret_cast<{name}*>(&{target}.value)->value = {};",
+                "reinterpret_cast<{name}*>(&{target}.value)->value = create_references<{name}::type>({});",
                 self.translate_value(value)
             ),
         };
@@ -172,6 +195,14 @@ impl Translator {
             Expression::FnCall(fn_call) => self.translate_fn_call(id.clone(), fn_call),
             Expression::ConstructorCall(constructor_call) => {
                 self.translate_constructor_call(id.clone(), constructor_call)
+            }
+            Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
+                return env.map_or_else(Code::new, |env| {
+                    format!(
+                        "dynamic_cast<{name}*>({id})->env = {};",
+                        self.translate_value(env)
+                    )
+                })
             }
             value => self.translate_expression(value),
         };
@@ -199,8 +230,9 @@ impl Translator {
                 let assignment_code = match branch.target {
                     Some(Memory(id)) => {
                         let type_name = &types[i];
+                        let lazy_type = format!("destroy_references_t<{type_name}::type>");
                         format!(
-                            "Lazy<{type_name}::type> *{id} = new LazyConstant<{type_name}::type>{{reinterpret_cast<{type_name}*>(&{expression_code}.value)->value}};",
+                            "Lazy<{lazy_type}> *{id} = new LazyConstant<{lazy_type}>{{destroy_references(reinterpret_cast<{type_name}*>(&{expression_code}.value)->value)}};",
                         )
                     }
                     None => Code::new(),
@@ -226,10 +258,47 @@ impl Translator {
         }
     }
     fn translate_statements(&self, statements: Vec<Statement>) -> Code {
-        statements
+        let (declarations, other_statements): (Vec<_>, Vec<_>) = statements
+            .into_iter()
+            .partition(|statement| matches!(statement, Statement::Declaration(_)));
+
+        let declarations_code = declarations
             .into_iter()
             .map(|statement| self.translate_statement(statement))
-            .join("\n")
+            .join("\n");
+
+        let closure_predefinitions = other_statements
+            .iter()
+            .filter_map(|statement| {
+                if let Statement::Assignment(Assignment {
+                    target,
+                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: _ }),
+                    check_null,
+                }) = statement
+                {
+                    if *check_null {
+                        let target = self.translate_memory(target.clone());
+                        Some(format!(
+                            "if ({target} == nullptr) {{ {target} = new {name}{{}}; }}"
+                        ))
+                    } else {
+                        Some(format!(
+                            "{} = new {name}{{}};",
+                            self.translate_memory(target.clone())
+                        ))
+                    }
+                } else {
+                    None
+                }
+            })
+            .join("\n");
+
+        let other_code = other_statements
+            .into_iter()
+            .map(|statement| self.translate_statement(statement))
+            .join("\n");
+
+        format!("{declarations_code}\n{closure_predefinitions}\n{other_code}")
     }
     fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
         let Declaration { memory, type_ } = memory_allocation;
@@ -569,7 +638,7 @@ mod tests {
                 (Name::from("Faws"), None)
             ]
         },
-        "struct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{};";
+        "struct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{ Empty value; }; struct Faws{ Empty value; };";
         "bull union"
     )]
     #[test_case(
@@ -607,7 +676,7 @@ mod tests {
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{};";
+        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{ Empty value; };";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
@@ -650,7 +719,7 @@ mod tests {
                 ]
             }
         ],
-        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{}; struct Some { using type = Expression*; type value; };";
+        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{Empty value;}; struct Some { using type = Expression*; type value; };";
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
@@ -693,14 +762,14 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
-        "Plus__BuiltIn";
+        "new Plus__BuiltIn{}";
         "builtin plus translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
         ),
-        "Comparison_GE__BuiltIn";
+        "new Comparison_GE__BuiltIn{}";
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
@@ -727,7 +796,7 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
-        "Comparison_LT__BuiltIn";
+        "new Comparison_LT__BuiltIn{}";
         "builtin function translation"
     )]
     #[test_case(
@@ -755,6 +824,22 @@ mod tests {
         }.into(),
         "std::get<1ULL>(tuple)";
         "tuple index access"
+    )]
+    #[test_case(
+        Expression::Wrap(
+            BuiltIn::BuiltInFn(Name::from("Plus__BuiltIn")).into(),
+            FnType(
+                vec![
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                ],
+                Box::new(
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                )
+            ).into()
+        ),
+        "new LazyConstant<FnT<Int,Int,Int>>{new Plus__BuiltIn{}}";
+        "lazy function instantiation"
     )]
     fn test_expression_translation(expression: Expression, expected: &str) {
         let code = TRANSLATOR.translate_expression(expression);
@@ -1021,46 +1106,8 @@ mod tests {
             }.into(),
             check_null: false
         },
-        "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = 4LL; wrapper.tag = 0ULL;";
+        "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = create_references<Wrapper::type>(4LL); wrapper.tag = 0ULL;";
         "wrapper constructor assignment"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("lr")).into(),
-            value: Expression::Reference(
-                Memory(
-                    Id::from("l"),
-                ).into(),
-                MachineType::NamedType(Name::from("ListInt"))
-            ),
-            check_null: false
-        },
-        "lr = new ListInt{l};";
-        "reference assignment"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("closure")).into(),
-            value: ClosureInstantiation{
-                name: Name::from("Closure"),
-                env: None
-            }.into(),
-            check_null: true
-        },
-        "if (closure == nullptr) { closure = new Closure{}; }";
-        "closure without env assignment"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("closure")).into(),
-            value: ClosureInstantiation{
-                name: Name::from("Adder"),
-                env: Some(Memory(Id::from("x")).into())
-            }.into(),
-            check_null: true
-        },
-        "if (closure == nullptr) { closure = new Adder{x}; }";
-        "closure assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
         let code = TRANSLATOR.translate_assignment(assignment);
@@ -1141,7 +1188,7 @@ mod tests {
                 }
             ]
         },
-        "switch (either.tag) { case 0ULL: { Lazy<Left::type> *x = new LazyConstant<Left::type>{reinterpret_cast<Left*>(&either.value)->value}; if (call == nullptr) { call = new Comparison_GE__BuiltIn{}; dynamic_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x, y); dynamic_cast<FnT<Bool,Int,Int>>(call)->call(); } break; } case 1ULL: { Lazy<Right::type>* x = new LazyConstant<Right::type>{reinterpret_cast<Right*>(&either.value)->value}; if (call == nullptr) { call = x;} break; }}";
+        "switch (either.tag) {case 0ULL: { Lazy<destroy_references_t<Left::type>> *x = new LazyConstant<destroy_references_t<Left::type>>{destroy_references(reinterpret_cast<Left*>(&either.value)->value)}; if (call==nullptr){ call=new Comparison_GE__BuiltIn{}; dynamic_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Bool,Int,Int>>(call)->call(); } break; } case 1ULL:{ Lazy<destroy_references_t<Right::type>>*x = new LazyConstant<destroy_references_t<Right::type>>{destroy_references(reinterpret_cast<Right*>(&either.value)->value)}; if (call==nullptr){ call=x; } break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1165,11 +1212,6 @@ mod tests {
                             type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
                         }.into(),
                         Assignment {
-                            target: Memory(Id::from("u")),
-                            value: Expression::Dereference(Memory(Name::from("t")).into()),
-                            check_null: false
-                        }.into(),
-                        Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Wrap(Memory(Name::from("u")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
                             check_null: true
@@ -1188,7 +1230,7 @@ mod tests {
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { Lazy<Suc::type> *s = new LazyConstant<Suc::type>{reinterpret_cast<Suc*>(&nat.value)->value}; VariantT<Suc,Nil> *t; t = s->value(); VariantT<Suc,Nil> u; u = *t; if(r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{u}; } break; } case 1ULL: { if (r == nullptr) {r = new LazyConstant<VariantT<Suc,Nil>>{nil};} break; }}";
+        "switch (nat.tag) { case 0ULL: { Lazy<destroy_references_t<Suc::type>> *s = new LazyConstant<destroy_references_t<Suc::type>>{destroy_references(reinterpret_cast<Suc*>(&nat.value)->value)}; VariantT<Suc,Nil> *t; VariantT<Suc,Nil> u; t = s->value(); if (r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{u}; } break; } case 1ULL: {if (r==nullptr){ r=new LazyConstant<VariantT<Suc,Nil>>{nil}; } break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1283,6 +1325,30 @@ mod tests {
     }
 
     #[test_case(
+        vec![Assignment {
+            target: Memory(Id::from("closure")).into(),
+            value: ClosureInstantiation{
+                name: Name::from("Closure"),
+                env: None
+            }.into(),
+            check_null: true
+        }.into()],
+        "if (closure==nullptr) { closure=new Closure{}; }";
+        "closure without env assignment"
+    )]
+    #[test_case(
+        vec![Assignment {
+            target: Memory(Id::from("closure")).into(),
+            value: ClosureInstantiation{
+                name: Name::from("Adder"),
+                env: Some(Memory(Id::from("x")).into())
+            }.into(),
+            check_null: true
+        }.into()],
+        "if (closure == nullptr) { closure = new Adder{}; } dynamic_cast<Adder*>(closure)->env = x;";
+        "closure assignment"
+    )]
+    #[test_case(
         vec![
             Await(vec![
                 Memory(Id::from("t"))
@@ -1311,17 +1377,17 @@ mod tests {
                 check_null: false
             }.into()
         ],
-        "WorkManager::await(t); TupleT<Int,Int> tuple; tuple = t->value(); Int x; x = std::get<1ULL>(tuple);";
+        "TupleT<Int,Int> tuple; Int x; WorkManager::await(t); tuple = t->value(); x = std::get<1ULL>(tuple);";
         "tuple access"
     )]
     #[test_case(
         vec![
             Declaration{
                 type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from("List")))).into(),
-                memory:  Memory(Id::from("tail_")),
+                memory:  Memory(Id::from("tail")),
             }.into(),
             Assignment {
-                target: Memory(Id::from("tail_")),
+                target: Memory(Id::from("tail")),
                 value: ElementAccess{
                     value: Memory(Id::from("cons")).into(),
                     idx: 1
@@ -1332,13 +1398,8 @@ mod tests {
                 type_: UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into(),
                 memory: Memory(Id::from("tail"))
             }.into(),
-            Assignment {
-                target: Memory(Id::from("tail")),
-                value: Expression::Dereference(Memory(Id::from("tail_")).into()),
-                check_null: false
-            }.into(),
         ],
-        "List *tail_; tail_ = std::get<1ULL>(cons); VariantT<Cons,Nil> tail; tail = *tail_;";
+        "List *tail; VariantT<Cons,Nil> tail; tail = std::get<1ULL>(cons);";
         "cons extraction"
     )]
     #[test_case(
@@ -1356,15 +1417,6 @@ mod tests {
                 check_null: false
             }.into(),
             Declaration{
-                type_:MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into())),
-                memory: Memory(Id::from("wrapped_n")).into()
-            }.into(),
-            Assignment {
-                target: Memory(Id::from("wrapped_n")).into(),
-                value: Expression::Reference(Memory(Id::from("n")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                check_null: false
-            }.into(),
-            Declaration{
                 type_:UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
                 memory: Memory(Id::from("s"))
             }.into(),
@@ -1374,13 +1426,13 @@ mod tests {
                     idx: 0,
                     data: Some((
                         Name::from("Suc"),
-                        Memory(Id::from("wrapped_n")).into()
+                        Memory(Id::from("n")).into()
                     ))
                 }.into(),
                 check_null: false
             }.into(),
         ],
-        "VariantT<Suc, Nil> n; n = {}; n.tag = 1ULL; VariantT<Suc, Nil> *wrapped_n; wrapped_n = new VariantT<Suc, Nil>{n}; VariantT<Suc, Nil> s; s= {}; reinterpret_cast<Suc *>(&s.value)->value = wrapped_n; s.tag = 0ULL;";
+        "VariantT<Suc, Nil> n; VariantT<Suc, Nil> s; n = {}; n.tag = 1ULL; s= {}; reinterpret_cast<Suc *>(&s.value)->value = create_references<Suc::type>(n); s.tag = 0ULL;";
         "simple recursive type extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
@@ -1733,7 +1785,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{}; struct Faws{}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; Lazy<Int> *body() override { if (call == nullptr){ call = new Plus__BuiltIn{}; dynamic_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); dynamic_cast<FnT<Int,Int,Int>>(call)->call(); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; Lazy<Int> *body() override { if (x == nullptr) {x = new LazyConstant<Int>{9LL};} if (y == nullptr) {y = new LazyConstant<Int>{5LL}; }if (main == nullptr){ main = new Main{}; dynamic_cast<FnT<Int>>(main)->args = std::make_tuple(); dynamic_cast<FnT<Int>>(main)->call(); } return main; } }; ";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

@@ -111,15 +111,22 @@ template <typename T> struct BlockFn : public ParametricFn<T> {
     ParametricFn<T> *clone() const override { return new BlockFn<T>{body_fn}; }
 };
 
-template <typename T, typename E, typename R, typename... A>
-struct Closure : public ParametricFn<R, A...> {
+template <typename E> struct ClosureRoot {
     E env;
-    explicit Closure(const E &e) : env(e) {}
-    ParametricFn<R, A...> *clone() const override { return new T{env}; }
+    explicit ClosureRoot(const E &e) : env(e) {}
+    explicit ClosureRoot() = default;
 };
 
+template <typename T, typename E, typename R, typename... A>
+struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
+    using ClosureRoot<E>::ClosureRoot;
+    ParametricFn<R, A...> *clone() const override { return new T{this->env}; }
+};
+
+template <> struct ClosureRoot<Empty> {};
+
 template <typename T, typename R, typename... A>
-struct Closure<T, Empty, R, A...> : public ParametricFn<R, A...> {
+struct Closure<T, Empty, R, A...> : ClosureRoot<Empty>, ParametricFn<R, A...> {
     explicit Closure() {}
     explicit Closure(const Empty &e) {}
     ParametricFn<R, A...> *clone() const override { return new T{}; }

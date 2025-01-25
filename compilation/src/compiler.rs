@@ -33,6 +33,7 @@ const OPERATOR_NAMES: Lazy<HashMap<Id, Id>> = Lazy::new(|| {
             (">=", "Comparison_GE__BuiltIn"),
             ("==", "Comparison_EQ__BuiltIn"),
             ("!=", "Comparison_NE__BuiltIn"),
+            ("!", "Negation__BuiltIn"),
         ]
         .into_iter()
         .map(|(op, name)| (Id::from(op), Id::from(name))),
@@ -90,7 +91,7 @@ impl Compiler {
                         IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                             args: _,
                             statements,
-                            return_value: _,
+                            ret: _,
                         }) => {
                             self.register_memory(statements);
                         }
@@ -134,12 +135,12 @@ impl Compiler {
             IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                 args,
                 statements: _,
-                return_value,
+                ret: (_, return_type),
             }) => IntermediateFnType(
                 args.iter()
                     .map(|arg| self.value_type(&arg.clone().into()))
                     .collect(),
-                Box::new(self.value_type(return_value)),
+                Box::new(return_type.clone()),
             )
             .into(),
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args: _ }) => {
@@ -242,30 +243,42 @@ impl Compiler {
             self.reference_names
                 .insert(*ptr, MachineType::NamedType(format!("T{i}")));
         }
-        types
-            .into_iter()
+        let machine_types = types
+            .iter()
             .enumerate()
             .map(|(i, (_, IntermediateUnionType(types)))| {
-                let union_type = IntermediateUnionType(types.clone());
-                let constructors = types
-                    .into_iter()
+                let names = types
+                    .iter()
                     .enumerate()
-                    .map(|(j, type_)| {
-                        (
-                            format!("T{i}C{j}"),
-                            type_.as_ref().map(|type_| self.compile_type(type_)),
-                        )
-                    })
+                    .map(|(j, _)| format!("T{i}C{j}"))
                     .collect_vec();
+                let intermediate_type = UnionType(names);
                 self.type_lookup.insert(
-                    union_type,
-                    UnionType(constructors.iter().map(|(name, _)| name.clone()).collect()),
+                    IntermediateUnionType(types.clone()),
+                    intermediate_type.clone(),
                 );
-                TypeDef {
-                    name: format!("T{i}"),
-                    constructors,
-                }
+                (format!("T{i}"), intermediate_type)
             })
+            .collect_vec();
+        types
+            .into_iter()
+            .zip(machine_types.into_iter())
+            .map(
+                |((_, IntermediateUnionType(types)), (type_name, machine_type))| {
+                    let UnionType(ctor_names) = machine_type;
+                    let constructors = types
+                        .into_iter()
+                        .zip(ctor_names.into_iter())
+                        .map(|(type_, name)| {
+                            (name, type_.as_ref().map(|type_| self.compile_type(type_)))
+                        })
+                        .collect_vec();
+                    TypeDef {
+                        name: type_name,
+                        constructors,
+                    }
+                },
+            )
             .collect_vec()
     }
 
@@ -461,71 +474,15 @@ impl Compiler {
             IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 values,
             )) => {
-                let referenced_value_indices = values
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, value)| match self.value_type(value) {
-                        IntermediateType::Reference(type_) => Some((i, type_)),
-                        _ => None,
-                    })
-                    .collect_vec();
-                let (mut statements, mut values) = self.compile_values(values, false);
-                for (i, type_) in referenced_value_indices {
-                    let memory = self.new_memory_location();
-                    let type_ = self.compile_type(&type_.borrow().clone());
-                    statements.push(
-                        Declaration {
-                            memory: memory.clone(),
-                            type_: MachineType::Reference(Box::new(type_.clone())),
-                        }
-                        .into(),
-                    );
-                    statements.push(
-                        Assignment {
-                            target: memory.clone(),
-                            check_null: false,
-                            value: Expression::Reference(values[i].clone(), type_),
-                        }
-                        .into(),
-                    );
-                    values[i] = memory.into();
-                }
+                let (statements, values) = self.compile_values(values, false);
                 (statements, TupleExpression(values).into())
             }
             IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
                 value,
                 idx,
             }) => {
-                let IntermediateType::IntermediateTupleType(IntermediateTupleType(mut types)) =
-                    self.value_type(&value)
-                else {
-                    panic!("Accessing non-tuple type.")
-                };
-                let type_ = types.remove(idx);
-                let (mut statements, value) = self.compile_value(value, false);
-                let value = ElementAccess { value, idx }.into();
-                let value = if matches!(&type_, IntermediateType::Reference(_)) {
-                    let memory = self.new_memory_location();
-                    statements.push(
-                        Declaration {
-                            memory: memory.clone(),
-                            type_: self.compile_type(&type_),
-                        }
-                        .into(),
-                    );
-                    statements.push(
-                        Assignment {
-                            target: memory.clone(),
-                            value,
-                            check_null: false,
-                        }
-                        .into(),
-                    );
-                    Expression::Dereference(memory.into())
-                } else {
-                    value
-                };
-                (statements, value)
+                let (statements, value) = self.compile_value(value, false);
+                (statements, ElementAccess { value, idx }.into())
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
                 let MachineType::FnType(fn_type) = self.compile_type(&self.value_type(&fn_)) else {
@@ -692,8 +649,11 @@ impl Compiler {
             branches: (true_branch, false_branch),
         } = if_statement;
         let (mut statements, condition) = self.compile_value(condition, false);
+        let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
         let true_branch = self.compile_statements(true_branch);
+        (self.non_lazy_vals, self.lazy_vals) = vals.clone();
         let false_branch = self.compile_statements(false_branch);
+        (self.non_lazy_vals, self.lazy_vals) = vals.clone();
         let true_declarations = Statement::declarations(&true_branch);
         let false_declarations = Statement::declarations(&false_branch);
         let shared_declarations =
@@ -721,14 +681,17 @@ impl Compiler {
             panic!("Match expression subject has non-union type.")
         };
         let (mut statements, subject) = self.compile_value(subject, false);
+        let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
         let branches = branches
             .into_iter()
-            .map(
-                |IntermediateMatchBranch { target, statements }| MatchBranch {
+            .map(|IntermediateMatchBranch { target, statements }| {
+                let branch = MatchBranch {
                     target: target.map(|arg| self.compile_arg(&arg)),
                     statements: self.compile_statements(statements),
-                },
-            )
+                };
+                (self.non_lazy_vals, self.lazy_vals) = vals.clone();
+                branch
+            })
             .collect_vec();
         let mut shared_declarations = HashMap::new();
         let mut it = branches
@@ -886,10 +849,13 @@ impl Compiler {
             })
             .collect_vec();
 
+        let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
+        self.lazy_vals = HashMap::new();
+        self.non_lazy_vals = HashMap::new();
         let IntermediateFnDef {
             args,
             statements,
-            return_value,
+            ret: (return_value, return_type),
         } = fn_def;
         let args = args
             .into_iter()
@@ -904,10 +870,10 @@ impl Compiler {
         let mut statements = self.compile_statements(statements);
         prefix.extend(statements);
         statements = prefix;
-        let ret_type =
-            MachineType::Lazy(Box::new(self.compile_type(&self.value_type(&return_value))));
+        let ret_type = MachineType::Lazy(Box::new(self.compile_type(&return_type)));
         let (extra_statements, ret_val) = self.compile_value(return_value, true);
         statements.extend(extra_statements);
+        (self.non_lazy_vals, self.lazy_vals) = vals;
         let declarations = Statement::declarations(&statements);
         let allocations = declarations
             .into_iter()
@@ -984,10 +950,15 @@ impl Compiler {
             location: call.clone(),
         };
         self.update_memory(&memory);
+        let IntermediateType::IntermediateFnType(IntermediateFnType(_, return_type)) =
+            self.value_type(&main)
+        else {
+            panic!("Main has non-fn type")
+        };
         statements.push(IntermediateStatement::Assignment(memory));
         let (statements, _) = self.compile_fn_def(IntermediateFnDef {
             args: Vec::new(),
-            return_value: call.clone().into(),
+            ret: (call.clone().into(), *return_type),
             statements: statements,
         });
         assert_eq!(statements.len(), 0);
@@ -1136,7 +1107,7 @@ mod tests {
             IntermediateFnDef{
                 args: Vec::new(),
                 statements: Vec::new(),
-                return_value: IntermediateBuiltIn::from(Integer{value: 5}).into()
+                ret: (IntermediateBuiltIn::from(Integer{value: 5}).into(), AtomicTypeEnum::INT.into())
             }.into(),
             MemoryMap::new()
         ),
@@ -1153,7 +1124,7 @@ mod tests {
                 IntermediateFnDef{
                     args: args.clone(),
                     statements: Vec::new(),
-                    return_value: args[1].clone().into()
+                    ret: (args[1].clone().into(), args[1].clone().0.borrow().clone())
                 }.into()
             },
             MemoryMap::new()
@@ -1734,114 +1705,6 @@ mod tests {
         }
         let result = compiler.compile_expression(expression);
         assert_eq!(result, expected);
-    }
-    #[test]
-    fn test_compile_tuple_expression_with_reference() {
-        let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
-        let nat_type: IntermediateType = IntermediateUnionType(vec![
-            Some(
-                IntermediateTupleType(vec![IntermediateType::Reference(reference.clone())]).into(),
-            ),
-            None,
-        ])
-        .into();
-        *reference.borrow_mut() = nat_type.clone();
-
-        let argument = IntermediateArg::from(IntermediateType::Reference(reference.clone()));
-
-        let location = Location::new();
-        let intermediate_expression =
-            IntermediateTupleExpression(vec![location.clone().into()]).into();
-
-        let mut compiler = Compiler::new();
-        compiler.compile_type_defs(vec![reference]);
-        compiler
-            .memory
-            .insert(location, vec![Rc::new(RefCell::new(argument.into()))]);
-
-        let (statements, expression) = compiler.compile_expression(intermediate_expression);
-        assert_eq!(
-            statements,
-            vec![
-                Declaration {
-                    memory: Memory(Id::from("m1")),
-                    type_: MachineType::Reference(Box::new(MachineType::UnionType(UnionType(
-                        vec![Id::from("T0C0"), Id::from("T0C1"),]
-                    ))))
-                }
-                .into(),
-                Assignment {
-                    target: Memory(Id::from("m1")),
-                    check_null: false,
-                    value: Expression::Reference(
-                        Memory(Id::from("m0")).into(),
-                        MachineType::UnionType(UnionType(
-                            vec![Id::from("T0C0"), Id::from("T0C1"),]
-                        ))
-                    )
-                }
-                .into()
-            ]
-        );
-        assert_eq!(
-            expression,
-            TupleExpression(vec![Memory(Id::from("m1")).into()]).into()
-        );
-    }
-    #[test]
-    fn test_compile_tuple_access_expression_with_dereference() {
-        let reference = Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
-        let nat_type: IntermediateType = IntermediateUnionType(vec![
-            Some(IntermediateType::Reference(reference.clone())),
-            None,
-        ])
-        .into();
-        *reference.borrow_mut() = nat_type.clone();
-
-        let argument = IntermediateArg::from(IntermediateType::from(IntermediateTupleType(vec![
-            IntermediateType::Reference(reference.clone()),
-        ])));
-
-        let location = Location::new();
-        let intermediate_expression = IntermediateElementAccess {
-            value: location.clone().into(),
-            idx: 0,
-        }
-        .into();
-
-        let mut compiler = Compiler::new();
-        compiler.compile_type_defs(vec![reference]);
-        compiler
-            .memory
-            .insert(location, vec![Rc::new(RefCell::new(argument.into()))]);
-
-        let (statements, expression) = compiler.compile_expression(intermediate_expression);
-        assert_eq!(
-            statements,
-            vec![
-                Declaration {
-                    memory: Memory(Id::from("m1")),
-                    type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from(
-                        "T0"
-                    ))))
-                }
-                .into(),
-                Assignment {
-                    target: Memory(Id::from("m1")),
-                    check_null: false,
-                    value: ElementAccess {
-                        value: Memory(Id::from("m0")).into(),
-                        idx: 0
-                    }
-                    .into()
-                }
-                .into()
-            ]
-        );
-        assert_eq!(
-            expression,
-            Expression::Dereference(Memory(Id::from("m1")).into())
-        );
     }
     #[test_case(
         {
@@ -2576,7 +2439,7 @@ mod tests {
                         expression: Rc::new(RefCell::new(IntermediateFnDef {
                             args: vec![arg.clone()],
                             statements: Vec::new(),
-                            return_value: arg.clone().into()
+                            ret: (arg.clone().into(),AtomicTypeEnum::BOOL.into())
                         }.into()))
                     })
                 ]
@@ -3122,7 +2985,7 @@ mod tests {
                             expression: y_expression,
                         })
                     ],
-                    return_value: y.into()
+                    ret: (y.into(), AtomicTypeEnum::INT.into())
                 }
             )
         },
@@ -3207,7 +3070,7 @@ mod tests {
                             expression: z_expression,
                         })
                     ],
-                    return_value: z.into()
+                    ret: (z.into(), AtomicTypeEnum::INT.into())
                 }
             )
         },
@@ -3356,6 +3219,49 @@ mod tests {
         assert_eq!(compiled_fn_def, &expected_fn_def);
     }
 
+    #[test]
+    fn test_memory_sharing_across_fn_defs() {
+        let f0 = IntermediateStatement::Assignment(IntermediateMemory {
+            location: Location::new(),
+            expression: Rc::new(RefCell::new(
+                IntermediateFnDef {
+                    args: Vec::new(),
+                    statements: Vec::new(),
+                    ret: (
+                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
+                            .into(),
+                        AtomicTypeEnum::BOOL.into(),
+                    ),
+                }
+                .into(),
+            )),
+        });
+        let f1 = IntermediateStatement::Assignment(IntermediateMemory {
+            location: Location::new(),
+            expression: Rc::new(RefCell::new(
+                IntermediateFnDef {
+                    args: Vec::new(),
+                    statements: Vec::new(),
+                    ret: (
+                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
+                            .into(),
+                        AtomicTypeEnum::BOOL.into(),
+                    ),
+                }
+                .into(),
+            )),
+        });
+        let statements = vec![f0, f1];
+
+        let mut compiler = Compiler::new();
+        compiler.register_memory(&statements);
+        compiler.compile_statements(statements);
+        let [ref f0, ref f1] = compiler.fn_defs[..] else {
+            panic!("Wrong number of fn-defs generated.")
+        };
+        assert_ne!(f0.ret, f1.ret)
+    }
+
     #[test_case(
         {
             let identity = Location::new();
@@ -3370,7 +3276,7 @@ mod tests {
                             IntermediateFnDef{
                                 args: vec![arg.clone()],
                                 statements: Vec::new(),
-                                return_value: arg.clone().into()
+                                ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
                         ))
                     }),
@@ -3390,7 +3296,7 @@ mod tests {
                                         ))
                                     })
                                 ],
-                                return_value: y.clone().into()
+                                ret: (y.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
                         ))
                     }),
@@ -3621,7 +3527,7 @@ mod tests {
                                         ]
                                     }.into()
                                 ],
-                                return_value: r.clone().into()
+                                ret: (r.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
                         ))
                     }),
