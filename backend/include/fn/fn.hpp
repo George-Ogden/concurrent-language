@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -32,7 +33,8 @@ class Fn {
         WorkManager::queue.release();
     }
     template <typename... Ts> auto static reference_all(Ts... args) {
-        return std::make_tuple(new LazyConstant<std::decay_t<Ts>>(args)...);
+        return std::make_tuple(
+            std::make_shared<LazyConstant<std::decay_t<Ts>>>(args)...);
     }
     template <typename T, typename... Ts>
     static void initialize(T *&fn, Ts &&...args) {
@@ -44,7 +46,7 @@ class Fn {
 
 template <typename Ret, typename... Args>
 struct ParametricFn : public Fn, Lazy<Ret> {
-    using ArgsT = std::tuple<std::add_pointer_t<Lazy<std::decay_t<Args>>>...>;
+    using ArgsT = std::tuple<std::shared_ptr<Lazy<std::decay_t<Args>>>...>;
     using R = std::decay_t<Ret>;
     std::atomic<bool> done_flag{false};
     Locked<std::vector<Continuation>> continuations;
@@ -53,18 +55,19 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     ParametricFn() = default;
 
     explicit ParametricFn(
-        std::add_pointer_t<
+        std::shared_ptr<
             Lazy<std::decay_t<Args>>>... args) requires(sizeof...(Args) > 0)
         : args(args...) {}
 
     explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
                               Args>>... args) requires(sizeof...(Args) > 0)
         : args(reference_all(args...)) {}
-    virtual ParametricFn<Ret, Args...> *clone() const = 0;
-    virtual Lazy<R> *body(std::add_lvalue_reference_t<
-                          std::add_pointer_t<Lazy<std::decay_t<Args>>>>...) = 0;
+    virtual std::unique_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
+    virtual std::unique_ptr<Lazy<R>>
+    body(std::add_lvalue_reference_t<
+         std::shared_ptr<Lazy<std::decay_t<Args>>>>...) = 0;
     void run() override {
-        Lazy<R> *return_ =
+        std::unique_ptr<Lazy<R>> return_ =
             std::apply([this](auto &&...t) { return body(t...); }, args);
         WorkManager::await(return_);
         ret = return_->value();
@@ -95,7 +98,9 @@ struct ParametricFn : public Fn, Lazy<Ret> {
 template <typename F, typename R, typename... A>
 struct EasyCloneFn : ParametricFn<R, A...> {
     using ParametricFn<R, A...>::ParametricFn;
-    ParametricFn<R, A...> *clone() const override { return new F{}; }
+    std::unique_ptr<ParametricFn<R, A...>> clone() const override {
+        return new F{};
+    }
 };
 
 class FinishWork : public Fn {
@@ -105,10 +110,14 @@ class FinishWork : public Fn {
 
 template <typename T> struct BlockFn : public ParametricFn<T> {
     std::function<Lazy<T> *()> body_fn;
-    Lazy<T> *body() override { return body_fn(); }
-    explicit BlockFn(std::function<Lazy<T> *()> &&f) : body_fn(std::move(f)){};
-    explicit BlockFn(const std::function<Lazy<T> *()> &f) : body_fn(f){};
-    ParametricFn<T> *clone() const override { return new BlockFn<T>{body_fn}; }
+    std::unique_ptr<Lazy<T>> body() override { return body_fn(); }
+    explicit BlockFn(std::function<std::unique_ptr<Lazy<T>>()> &&f)
+        : body_fn(std::move(f)){};
+    explicit BlockFn(const std::function<std::unique_ptr<Lazy<T>>()> &f)
+        : body_fn(f){};
+    std::unique_ptr<ParametricFn<T>> clone() const override {
+        return std::make_unique<BlockFn<T>>(body_fn);
+    }
 };
 
 template <typename E> struct ClosureRoot {
@@ -120,7 +129,9 @@ template <typename E> struct ClosureRoot {
 template <typename T, typename E, typename R, typename... A>
 struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
     using ClosureRoot<E>::ClosureRoot;
-    ParametricFn<R, A...> *clone() const override { return new T{this->env}; }
+    std::unique_ptr<ParametricFn<R, A...>> clone() const override {
+        return std::make_unique<T>(this->env);
+    }
 };
 
 template <> struct ClosureRoot<Empty> {};
@@ -129,7 +140,9 @@ template <typename T, typename R, typename... A>
 struct Closure<T, Empty, R, A...> : ClosureRoot<Empty>, ParametricFn<R, A...> {
     explicit Closure() {}
     explicit Closure(const Empty &e) {}
-    ParametricFn<R, A...> *clone() const override { return new T{}; }
+    std::unique_ptr<ParametricFn<R, A...>> clone() const override {
+        return std::make_unique<T>();
+    }
 };
 
 #include "system/work_manager.hpp"
