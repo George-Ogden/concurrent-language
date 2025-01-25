@@ -13,11 +13,11 @@
 template <typename R, typename... Ts>
 struct Op__BuiltIn : public ParametricFn<R, Ts...> {
     using ParametricFn<R, Ts...>::ParametricFn;
-    std::unique_ptr<Lazy<R>>
+    std::shared_ptr<Lazy<R>>
     body(std::add_lvalue_reference_t<
          std::shared_ptr<Lazy<std::decay_t<Ts>>>>... args) override {
         WorkManager::await(args...);
-        return std::make_unique<LazyConstant<R>>(op(args->value()...));
+        return std::make_shared<LazyConstant<R>>(op(args->value()...));
     };
     virtual std::decay_t<R> op(std::add_const_t<Ts>...) const = 0;
 };
@@ -33,45 +33,45 @@ using Binary_Int_Int_Bool_Op__BuiltIn_Base = ParametricFn<Bool, Int, Int>;
 
 struct Plus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Plus__BuiltIn>();
+        return std::make_shared<Plus__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x + y; }
 };
 
 struct Minus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Minus__BuiltIn>();
+        return std::make_shared<Minus__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x - y; }
 };
 
 struct Multiply__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Multiply__BuiltIn>();
+        return std::make_shared<Multiply__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x * y; }
 };
 
 struct Divide__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Divide__BuiltIn>();
+        return std::make_shared<Divide__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x / y; }
 };
 
 struct Exponentiate__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Exponentiate__BuiltIn>();
+        return std::make_shared<Exponentiate__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override {
         if (y < 0)
@@ -89,36 +89,36 @@ struct Exponentiate__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
 
 struct Modulo__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Modulo__BuiltIn>();
+        return std::make_shared<Modulo__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x % y; }
 };
 
 struct Left_Shift__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Left_Shift__BuiltIn>();
+        return std::make_shared<Left_Shift__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x << y; }
 };
 
 struct Right_Shift__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Right_Shift__BuiltIn>();
+        return std::make_shared<Right_Shift__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x >> y; }
 };
 
 struct Spaceship__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Spaceship__BuiltIn>();
+        return std::make_shared<Spaceship__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override {
         const auto o = (x <=> y);
@@ -132,105 +132,105 @@ struct Spaceship__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
 
 struct Bitwise_And__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Bitwise_And__BuiltIn>();
+        return std::make_shared<Bitwise_And__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x & y; }
 };
 
 struct Bitwise_Or__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Bitwise_Or__BuiltIn>();
+        return std::make_shared<Bitwise_Or__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x | y; }
 };
 
 struct Bitwise_Xor__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
     using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Bitwise_Xor__BuiltIn>();
+        return std::make_shared<Bitwise_Xor__BuiltIn>();
     }
     Int op(const Int x, const Int y) const override { return x ^ y; }
 };
 
 struct Increment__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
     using Unary_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Unary_Int_Int_Op__BuiltIn_Base> clone() const override {
-        return std::make_unique<Increment__BuiltIn>();
+    std::shared_ptr<Unary_Int_Int_Op__BuiltIn_Base> clone() const override {
+        return std::make_shared<Increment__BuiltIn>();
     }
     Int op(const Int x) const override { return x + 1; }
 };
 
 struct Decrement__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
     using Unary_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Unary_Int_Int_Op__BuiltIn_Base> clone() const override {
-        return std::make_unique<Decrement__BuiltIn>();
+    std::shared_ptr<Unary_Int_Int_Op__BuiltIn_Base> clone() const override {
+        return std::make_shared<Decrement__BuiltIn>();
     }
     Int op(const Int x) const override { return x - 1; }
 };
 
 struct Negation__BuiltIn : public Unary_Bool_Bool_Op__BuiltIn {
     using Unary_Bool_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Unary_Bool_Bool_Op__BuiltIn_Base> clone() const override {
-        return std::make_unique<Negation__BuiltIn>();
+    std::shared_ptr<Unary_Bool_Bool_Op__BuiltIn_Base> clone() const override {
+        return std::make_shared<Negation__BuiltIn>();
     }
     Bool op(const Bool x) const override { return !x; }
 };
 
 struct Comparison_LT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Comparison_LT__BuiltIn>();
+        return std::make_shared<Comparison_LT__BuiltIn>();
     }
     Bool op(const Int x, const Int y) const override { return x < y; }
 };
 
 struct Comparison_LE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Comparison_LE__BuiltIn>();
+        return std::make_shared<Comparison_LE__BuiltIn>();
     }
     Bool op(const Int x, const Int y) const override { return x <= y; }
 };
 
 struct Comparison_GT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Comparison_GT__BuiltIn>();
+        return std::make_shared<Comparison_GT__BuiltIn>();
     }
     Bool op(const Int x, const Int y) const override { return x > y; }
 };
 
 struct Comparison_GE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Comparison_GE__BuiltIn>();
+        return std::make_shared<Comparison_GE__BuiltIn>();
     }
     Bool op(const Int x, const Int y) const override { return x >= y; }
 };
 
 struct Comparison_EQ__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Comparison_EQ__BuiltIn>();
+        return std::make_shared<Comparison_EQ__BuiltIn>();
     }
     Bool op(const Int x, const Int y) const override { return x == y; }
 };
 
 struct Comparison_NE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
     using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::unique_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
+    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
     clone() const override {
-        return std::make_unique<Comparison_NE__BuiltIn>();
+        return std::make_shared<Comparison_NE__BuiltIn>();
     }
     Bool op(const Int x, const Int y) const override { return x != y; }
 };

@@ -27,11 +27,6 @@ class Fn {
 
   public:
     virtual ~Fn() = default;
-    virtual void call() {
-        WorkManager::queue.acquire();
-        WorkManager::queue->push_back(this);
-        WorkManager::queue.release();
-    }
     template <typename... Ts> auto static reference_all(Ts... args) {
         return std::make_tuple(
             std::make_shared<LazyConstant<std::decay_t<Ts>>>(args)...);
@@ -62,12 +57,12 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
                               Args>>... args) requires(sizeof...(Args) > 0)
         : args(reference_all(args...)) {}
-    virtual std::unique_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
-    virtual std::unique_ptr<Lazy<R>>
+    virtual std::shared_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
+    virtual std::shared_ptr<Lazy<R>>
     body(std::add_lvalue_reference_t<
          std::shared_ptr<Lazy<std::decay_t<Args>>>>...) = 0;
     void run() override {
-        std::unique_ptr<Lazy<R>> return_ =
+        std::shared_ptr<Lazy<R>> return_ =
             std::apply([this](auto &&...t) { return body(t...); }, args);
         WorkManager::await(return_);
         ret = return_->value();
@@ -98,8 +93,8 @@ struct ParametricFn : public Fn, Lazy<Ret> {
 template <typename F, typename R, typename... A>
 struct EasyCloneFn : ParametricFn<R, A...> {
     using ParametricFn<R, A...>::ParametricFn;
-    std::unique_ptr<ParametricFn<R, A...>> clone() const override {
-        return new F{};
+    std::shared_ptr<ParametricFn<R, A...>> clone() const override {
+        return std::make_shared<F>();
     }
 };
 
@@ -109,14 +104,14 @@ class FinishWork : public Fn {
 };
 
 template <typename T> struct BlockFn : public ParametricFn<T> {
-    std::function<Lazy<T> *()> body_fn;
-    std::unique_ptr<Lazy<T>> body() override { return body_fn(); }
-    explicit BlockFn(std::function<std::unique_ptr<Lazy<T>>()> &&f)
+    std::function<std::shared_ptr<Lazy<T>>()> body_fn;
+    std::shared_ptr<Lazy<T>> body() override { return body_fn(); }
+    explicit BlockFn(std::function<std::shared_ptr<Lazy<T>>()> &&f)
         : body_fn(std::move(f)){};
-    explicit BlockFn(const std::function<std::unique_ptr<Lazy<T>>()> &f)
+    explicit BlockFn(const std::function<std::shared_ptr<Lazy<T>>()> &f)
         : body_fn(f){};
-    std::unique_ptr<ParametricFn<T>> clone() const override {
-        return std::make_unique<BlockFn<T>>(body_fn);
+    std::shared_ptr<ParametricFn<T>> clone() const override {
+        return std::make_shared<BlockFn<T>>(body_fn);
     }
 };
 
@@ -129,8 +124,8 @@ template <typename E> struct ClosureRoot {
 template <typename T, typename E, typename R, typename... A>
 struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
     using ClosureRoot<E>::ClosureRoot;
-    std::unique_ptr<ParametricFn<R, A...>> clone() const override {
-        return std::make_unique<T>(this->env);
+    std::shared_ptr<ParametricFn<R, A...>> clone() const override {
+        return std::make_shared<T>(this->env);
     }
 };
 
@@ -140,8 +135,8 @@ template <typename T, typename R, typename... A>
 struct Closure<T, Empty, R, A...> : ClosureRoot<Empty>, ParametricFn<R, A...> {
     explicit Closure() {}
     explicit Closure(const Empty &e) {}
-    std::unique_ptr<ParametricFn<R, A...>> clone() const override {
-        return std::make_unique<T>();
+    std::shared_ptr<ParametricFn<R, A...>> clone() const override {
+        return std::make_shared<T>();
     }
 };
 

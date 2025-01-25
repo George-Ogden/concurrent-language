@@ -5,12 +5,13 @@
 #include "system/work_manager_pre.hpp"
 
 #include <atomic>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
-void WorkManager::run(Fn *fn) {
-    std::atomic<Fn *> ref{fn};
+void WorkManager::run(std::shared_ptr<Fn> fn) {
+    std::atomic<std::shared_ptr<Fn>> ref{fn};
     ThreadManager::RunConfig config{ThreadManager::available_concurrency(),
                                     false};
     WorkManager::queue->clear();
@@ -20,23 +21,30 @@ void WorkManager::run(Fn *fn) {
     WorkManager::queue->clear();
 }
 
-std::monostate WorkManager::main(std::atomic<Fn *> *ref) {
+void WorkManager::call(std::shared_ptr<Fn> fn) {
+    WorkManager::queue.acquire();
+    WorkManager::queue->push_back(fn);
+    WorkManager::queue.release();
+}
+
+std::monostate WorkManager::main(std::atomic<std::shared_ptr<Fn>> *ref) {
     {
-        Fn *fn = ref->exchange(nullptr, std::memory_order_relaxed);
+        std::shared_ptr<Fn> fn =
+            ref->exchange(nullptr, std::memory_order_relaxed);
         if (fn != nullptr) {
             fn->run();
-            (new FinishWork{})->call();
+            call(std::make_shared<FinishWork>());
         }
     }
     while (1) {
 
-        Fn *fn = get_work();
+        std::shared_ptr<Fn> fn = get_work();
         if (fn == nullptr) {
             sleep(1us);
             continue;
         }
-        if (dynamic_cast<FinishWork *>(fn) != nullptr) {
-            fn->call();
+        if (dynamic_cast<FinishWork *>(fn.get()) != nullptr) {
+            call(fn);
             break;
         }
         fn->run();
@@ -44,13 +52,13 @@ std::monostate WorkManager::main(std::atomic<Fn *> *ref) {
     return std::monostate{};
 }
 
-Fn *WorkManager::get_work() {
+std::shared_ptr<Fn> WorkManager::get_work() {
     WorkManager::queue.acquire();
     if (WorkManager::queue->empty()) {
         WorkManager::queue.release();
         return nullptr;
     }
-    Fn *fn = WorkManager::queue->front();
+    std::shared_ptr<Fn> fn = WorkManager::queue->front();
     WorkManager::queue->pop_front();
     WorkManager::queue.release();
     return fn;
@@ -71,7 +79,7 @@ template <typename... Vs> void WorkManager::await(Vs &...vs) {
         return;
     }
     while (true) {
-        Fn *fn = get_work();
+        std::shared_ptr<Fn> fn = get_work();
         try {
             if (counter.load(std::memory_order_relaxed) > 0) {
                 throw stack_inversion{};
@@ -81,7 +89,7 @@ template <typename... Vs> void WorkManager::await(Vs &...vs) {
             }
         } catch (stack_inversion &e) {
             if (fn != nullptr && !fn->done()) {
-                fn->call();
+                call(fn);
             }
             valid->acquire();
             bool was_valid = **valid;

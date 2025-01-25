@@ -42,4 +42,5 @@ template <typename... Types> struct VariantT {
     }
 };
 
-template <typename R, typename... As> using FnT = ParametricFn<R, As...> *;
+template <typename R, typename... As>
+using FnT = std::shared_ptr<ParametricFn<R, As...>>;

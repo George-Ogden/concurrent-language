@@ -66,3 +66,16 @@ template <typename... Ts> struct destroy_references_struct<TupleT<Ts...>> {
 
 template <typename T>
 using destroy_references_t = typename destroy_references_struct<T>::type;
+
+template <typename T> struct remove_shared_ptr { using type = T; };
+
+template <typename T> struct remove_shared_ptr<std::shared_ptr<T>> {
+    using type = T;
+};
+
+template <typename T>
+using remove_shared_ptr_t = typename remove_shared_ptr<T>::type;
+
+template <typename U, typename T> U dynamic_fn_cast(T f) {
+    return std::dynamic_pointer_cast<remove_shared_ptr_t<U>>(f);
+}
