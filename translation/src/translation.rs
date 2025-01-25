@@ -1,12 +1,15 @@
 use core::fmt;
 use itertools::Itertools;
-use std::fmt::Formatter;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Formatter,
+};
 
 use compilation::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
-    IfStatement, Integer, MachineType, MatchStatement, Memory, Program, Statement, TupleExpression,
-    TupleType, TypeDef, UnionType, Value,
+    IfStatement, Integer, MachineType, MatchStatement, Memory, Name, Program, Statement,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 
 type Code = String;
@@ -16,6 +19,43 @@ pub struct Translator {}
 impl Translator {
     fn translate_type(&self, type_: &MachineType) -> Code {
         format!("{}", TypeFormatter(type_))
+    }
+    fn top_sort(&self, type_defs: &Vec<TypeDef>) -> Vec<(Name, Option<MachineType>)> {
+        let mut visited = HashSet::<Name>::new();
+        let mut result = Vec::new();
+        let type_defs_by_name = type_defs
+            .iter()
+            .map(|type_def| (type_def.name.clone(), type_def.clone()))
+            .collect();
+        for type_def in type_defs {
+            self.top_sort_internal(
+                type_def.clone(),
+                &type_defs_by_name,
+                &mut visited,
+                &mut result,
+            );
+        }
+        result
+    }
+    fn top_sort_internal(
+        &self,
+        type_def: TypeDef,
+        type_defs: &HashMap<Name, TypeDef>,
+        visited: &mut HashSet<Name>,
+        result: &mut Vec<(Name, Option<MachineType>)>,
+    ) {
+        if visited.contains(&type_def.name) {
+            return;
+        }
+        visited.insert(type_def.name.clone());
+        let used_types = type_def.directly_used_types();
+        for type_name in used_types {
+            let type_name = type_name
+                .split_once("C")
+                .map_or(type_name.clone(), |(before, _)| String::from(before));
+            self.top_sort_internal(type_defs[&type_name].clone(), type_defs, visited, result);
+        }
+        result.extend(type_def.constructors.iter().map(|ctor| ctor.clone()));
     }
     fn translate_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
         let forward_constructor_definitions = type_defs
@@ -37,20 +77,16 @@ impl Translator {
             )));
             format!("typedef {variant_definition} {};", type_def.name)
         });
-        let constructor_definitions = type_defs
-            .iter()
-            .map(|type_def| {
-                type_def.constructors.iter().map(|constructor| {
-                    let fields = match &constructor.1 {
-                        Some(type_) => {
-                            format!("using type = {}; type value;", self.translate_type(type_))
-                        }
-                        None => Code::from("Empty value;"),
-                    };
-                    format!("struct {} {{ {fields} }};", constructor.0)
-                })
-            })
-            .flatten();
+        let ctors = self.top_sort(&type_defs);
+        let constructor_definitions = ctors.iter().map(|(name, type_)| {
+            let fields = match type_ {
+                Some(type_) => {
+                    format!("using type = {}; type value;", self.translate_type(type_))
+                }
+                None => Code::from("Empty value;"),
+            };
+            format!("struct {name} {{ {fields} }};")
+        });
         format!(
             "{} {} {}",
             itertools::join(forward_constructor_definitions, "\n"),

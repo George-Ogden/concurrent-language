@@ -4,6 +4,7 @@ use std::{
 };
 
 use from_variants::FromVariants;
+use itertools::Itertools;
 use lowering::{AtomicTypeEnum, Boolean, Integer};
 
 pub type Name = String;
@@ -40,6 +41,38 @@ pub struct UnionType(pub Vec<Name>);
 pub struct TypeDef {
     pub name: Name,
     pub constructors: Vec<(Name, Option<MachineType>)>,
+}
+
+impl TypeDef {
+    pub fn directly_used_types(&self) -> Vec<Name> {
+        self.constructors
+            .iter()
+            .flat_map(|(_, type_)| match type_ {
+                None => Vec::new(),
+                Some(type_) => self.used_types(type_),
+            })
+            .collect_vec()
+    }
+    fn used_types(&self, type_: &MachineType) -> Vec<Name> {
+        match type_ {
+            MachineType::AtomicType(_) | MachineType::Reference(_) => Vec::new(),
+            MachineType::TupleType(TupleType(types)) => self.all_used_types(types),
+            MachineType::FnType(FnType(args, ret)) => {
+                let mut types = self.all_used_types(args);
+                types.extend(self.used_types(&*ret));
+                types
+            }
+            MachineType::UnionType(UnionType(names)) => names.clone(),
+            MachineType::NamedType(name) => vec![name.clone()],
+            MachineType::Lazy(type_) => self.used_types(&*type_),
+        }
+    }
+    fn all_used_types(&self, types: &Vec<MachineType>) -> Vec<Name> {
+        types
+            .iter()
+            .flat_map(|type_| self.used_types(type_))
+            .collect_vec()
+    }
 }
 
 #[derive(Clone, Debug, FromVariants, PartialEq)]
