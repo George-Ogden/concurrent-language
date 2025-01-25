@@ -12,7 +12,6 @@ type Scope = HashMap<(Variable, Vec<Type>), IntermediateMemory>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<Variable, ParametricExpression>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
-type VisitedReferences = HashSet<*mut IntermediateType>;
 type MemoryMap = HashMap<Location, Vec<Rc<RefCell<IntermediateExpression>>>>;
 
 pub struct Lowerer {
@@ -21,7 +20,6 @@ pub struct Lowerer {
     uninstantiated: Uninstantiated,
     type_defs: TypeDefs,
     statements: Vec<IntermediateStatement>,
-    visited_references: VisitedReferences,
     memory: MemoryMap,
 }
 
@@ -33,7 +31,6 @@ impl Lowerer {
             uninstantiated: Uninstantiated::new(),
             type_defs: TypeDefs::new(),
             statements: Vec::new(),
-            visited_references: VisitedReferences::new(),
             memory: MemoryMap::new(),
         };
         let scope = DEFAULT_CONTEXT.with(|context| {
@@ -183,8 +180,8 @@ impl Lowerer {
         }
         let (statements, return_value) = self.lower_block(body, false);
         let intermediate_expression = IntermediateFnDef {
-            args: args,
-            statements: statements,
+            args,
+            statements,
             ret: (return_value, self.lower_type(&return_type)),
         }
         .into();
@@ -520,40 +517,44 @@ impl Lowerer {
             .collect()
     }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
-        self.visited_references.clear();
         let type_ = self.clear_names(type_);
-        let lower_type = self.lower_type_internal(&type_);
-        self.visited_references.clear();
+        let lower_type = self.lower_type_internal(&type_, HashSet::new());
         lower_type
     }
-    fn lower_type_internal(&mut self, type_: &Type) -> IntermediateType {
+    fn lower_type_internal(
+        &mut self,
+        type_: &Type,
+        mut visited_references: HashSet<*mut IntermediateType>,
+    ) -> IntermediateType {
         match type_ {
             Type::Atomic(atomic) => atomic.clone().into(),
             Type::Union(_, types) => {
                 let type_ = self.clear_names(&Type::Union(String::new(), types.clone()));
-                let lower_type = |this: &mut Self| {
-                    IntermediateUnionType(
-                        types
-                            .iter()
-                            .map(|type_: &Option<Type>| {
-                                type_.as_ref().map(|type_| this.lower_type_internal(type_))
-                            })
-                            .collect(),
-                    )
-                    .into()
-                };
+                let lower_type =
+                    |this: &mut Self, visited_references: HashSet<*mut IntermediateType>| {
+                        IntermediateUnionType(
+                            types
+                                .iter()
+                                .map(|type_: &Option<Type>| {
+                                    type_.as_ref().map(|type_| {
+                                        this.lower_type_internal(type_, visited_references.clone())
+                                    })
+                                })
+                                .collect(),
+                        )
+                        .into()
+                    };
                 match self.type_defs.entry(type_.clone()) {
                     std::collections::hash_map::Entry::Occupied(occupied_entry) => {
-                        self.visited_references
-                            .insert(occupied_entry.get().as_ptr());
-                        lower_type(self)
+                        visited_references.insert(occupied_entry.get().as_ptr());
+                        lower_type(self, visited_references)
                     }
                     std::collections::hash_map::Entry::Vacant(vacant_entry) => {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
-                        self.visited_references.insert(reference.as_ptr());
-                        let lower_type = lower_type(self);
+                        visited_references.insert(reference.as_ptr());
+                        let lower_type = lower_type(self, visited_references);
                         *reference.clone().borrow_mut() = lower_type.clone();
                         lower_type
                     }
@@ -563,14 +564,10 @@ impl Lowerer {
                 let instantiation = self.clear_names(&type_.borrow().instantiate(params));
                 match self.type_defs.entry(instantiation.clone()) {
                     std::collections::hash_map::Entry::Occupied(occupied_entry) => {
-                        if self
-                            .visited_references
-                            .contains(&occupied_entry.get().as_ptr())
-                        {
+                        if visited_references.contains(&occupied_entry.get().as_ptr()) {
                             IntermediateType::Reference(occupied_entry.get().clone())
                         } else {
-                            self.visited_references
-                                .insert(occupied_entry.get().as_ptr());
+                            visited_references.insert(occupied_entry.get().as_ptr());
                             occupied_entry.get().borrow().clone()
                         }
                     }
@@ -578,26 +575,33 @@ impl Lowerer {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
-                        self.visited_references.insert(reference.as_ptr());
-                        let lower_type = self.lower_type_internal(&instantiation);
+                        visited_references.insert(reference.as_ptr());
+                        let lower_type =
+                            self.lower_type_internal(&instantiation, visited_references);
                         *reference.clone().borrow_mut() = lower_type;
                         self.type_defs[&instantiation].borrow().clone()
                     }
                 }
             }
-            Type::Tuple(types) => IntermediateTupleType(self.lower_types_internal(types)).into(),
+            Type::Tuple(types) => {
+                IntermediateTupleType(self.lower_types_internal(types, visited_references)).into()
+            }
             Type::Function(args, ret) => IntermediateFnType(
-                self.lower_types_internal(args),
-                Box::new(self.lower_type_internal(&*ret)),
+                self.lower_types_internal(args, visited_references.clone()),
+                Box::new(self.lower_type_internal(&*ret, visited_references)),
             )
             .into(),
             Type::Variable(_) => panic!("Attempt to lower type variable."),
         }
     }
-    pub fn lower_types_internal(&mut self, types: &Vec<Type>) -> Vec<IntermediateType> {
+    pub fn lower_types_internal(
+        &mut self,
+        types: &Vec<Type>,
+        visited_references: HashSet<*mut IntermediateType>,
+    ) -> Vec<IntermediateType> {
         types
             .iter()
-            .map(|type_| self.lower_type_internal(type_))
+            .map(|type_| self.lower_type_internal(type_, visited_references.clone()))
             .collect()
     }
     fn add_placeholder_assignment(
@@ -1912,12 +1916,58 @@ mod tests {
         };
         "instantiated list int"
     )]
+    #[test_case(
+        {
+            let parameter = Rc::new(RefCell::new(None));
+            let list_type = Rc::new(RefCell::new(ParametricType {
+                parameters: vec![parameter.clone()],
+                type_: Type::new(),
+            }));
+            list_type.borrow_mut().type_ = Type::Union(
+                Id::from("List"),
+                vec![
+                    Some(Type::Tuple(vec![
+                        Type::Variable(parameter.clone()),
+                        Type::Instantiation(
+                            list_type.clone(),
+                            vec![Type::Variable(parameter.clone())],
+                        ),
+                    ])),
+                    None,
+                ],
+            );
+            Type::Tuple(vec![
+                Type::Instantiation(list_type.clone(), vec![TYPE_BOOL]),
+                Type::Instantiation(list_type.clone(), vec![TYPE_BOOL]),
+            ])
+        },
+        |type_defs| {
+            assert_eq!(type_defs.len(), 1);
+            let reference = type_defs.values().cloned().collect::<Vec<_>>()[0].clone();
+            IntermediateTupleType(vec![
+                IntermediateUnionType(vec![
+                    Some(IntermediateTupleType(vec![
+                        AtomicTypeEnum::BOOL.into(),
+                        IntermediateType::Reference(reference.clone().into())
+                    ]).into()),
+                    None
+                ]).into(),
+                IntermediateUnionType(vec![
+                    Some(IntermediateTupleType(vec![
+                        AtomicTypeEnum::BOOL.into(),
+                        IntermediateType::Reference(reference.into())
+                    ]).into()),
+                    None
+                ]).into()
+            ]).into()
+        };
+        "instantiated list bool tuple"
+    )]
     fn test_lower_type(type_: Type, expected_gen: impl Fn(&TypeDefs) -> IntermediateType) {
         let mut lowerer = Lowerer::new();
         let type_ = lowerer.lower_type(&type_);
         let expected = expected_gen(&lowerer.type_defs);
         assert_eq!(type_, expected);
-        assert!(lowerer.visited_references.is_empty())
     }
 
     #[ignore]
