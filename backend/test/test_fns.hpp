@@ -269,7 +269,8 @@ struct NestedFnExample : EasyCloneFn<NestedFnExample, Int, Int> {
     FnT<Int, Int> res = nullptr;
     std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
         if (closure == nullptr) {
-            closure = std::make_shared<Adder>(x);
+            closure = std::make_shared<Adder>();
+            std::dynamic_pointer_cast<Adder>(closure)->env = x;
         }
         if (res == nullptr) {
             res = closure->clone();
@@ -627,7 +628,7 @@ struct EitherIntBoolEdgeCase
                 y = std::make_shared<Comparison_GT__BuiltIn>();
                 dynamic_fn_cast<FnT<Bool, Int, Int>>(y)->args =
                     std::make_tuple(i, z);
-                WorkManager::call(std::dynamic_pointer_cast<Fn>(y));
+                WorkManager::call(dynamic_fn_cast<FnT<Bool, Int, Int>>(y));
             }
             break;
         }
@@ -819,7 +820,7 @@ struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
 
 TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
     FnT<Int, Int> f = std::make_shared<SelfRecursiveFn>();
-    dynamic_cast<SelfRecursiveFn *>(f.get())->env =
+    std::dynamic_pointer_cast<SelfRecursiveFn>(f)->env =
         std::make_tuple(new LazyConstant<FnT<Int, Int>>{f});
     std::shared_ptr<Lazy<Int>> x = std::make_shared<LazyConstant<Int>>(5);
     f->args = std::make_tuple(x);

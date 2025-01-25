@@ -4,8 +4,8 @@
 #include <iostream>
 
 int main() {
-    Main main{};
-    WorkManager::run(&main);
-    std::cout << main.value() << std::endl;
+    std::shared_ptr<Main> main = std::make_shared<Main>();
+    WorkManager::run(main);
+    std::cout << main->value() << std::endl;
     return 0;
 }
