@@ -6,6 +6,7 @@
 #include "fn/operators.hpp"
 #include "system/thread_manager.hpp"
 #include "types/builtin.hpp"
+#include "types/compound.hpp"
 
 #include <gtest/gtest.h>
 
@@ -56,19 +57,15 @@ TEST_F(LazyConstantTest, InvalidFinishedContinuationBehaviour) {
 
 class LazyFunctionTest : public ::testing::Test {
   protected:
-    ParametricFn<Int, Int> *lazy_fn;
-    LazyConstant<Int> x{4};
+    FnT<Int, Int> lazy_fn;
     void SetUp() override {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
         WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
-        lazy_fn = new Increment__BuiltIn{};
-        lazy_fn->args = std::make_tuple(&x);
+        lazy_fn = std::make_shared<Increment__BuiltIn>();
+        lazy_fn->args = std::make_tuple(std::make_shared<LazyConstant<Int>>(4));
     }
-    void TearDown() override {
-        delete lazy_fn;
-        ThreadManager::reset_concurrency_override();
-    }
+    void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };
 
 TEST_F(LazyFunctionTest, DoneLater) {

@@ -3,6 +3,7 @@
 #include "fn/fn.hpp"
 #include "fn/operators.hpp"
 #include "system/work_manager.hpp"
+#include "types/compound.hpp"
 
 #include <gtest/gtest.h>
 
@@ -10,8 +11,8 @@
 #include <functional>
 
 class BinaryOperatorsTests
-    : public ::testing::TestWithParam<std::tuple<
-          ParametricFn<Int, Int, Int> *, std::function<Int(Int, Int)>>> {};
+    : public ::testing::TestWithParam<
+          std::tuple<FnT<Int, Int, Int>, std::function<Int(Int, Int)>>> {};
 
 TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
     auto &[fn, op] = GetParam();
@@ -31,11 +32,13 @@ TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
 INSTANTIATE_TEST_SUITE_P(
     BinaryOperators, BinaryOperatorsTests,
     ::testing::Values(
-        std::make_tuple(new Plus__BuiltIn{}, std::plus<Int>()),
-        std::make_tuple(new Minus__BuiltIn{}, std::minus<Int>()),
-        std::make_tuple(new Multiply__BuiltIn{}, std::multiplies<Int>()),
-        std::make_tuple(new Divide__BuiltIn{}, std::divides<Int>()),
-        std::make_tuple(new Exponentiate__BuiltIn{},
+        std::make_tuple(std::make_shared<Plus__BuiltIn>(), std::plus<Int>()),
+        std::make_tuple(std::make_shared<Minus__BuiltIn>(), std::minus<Int>()),
+        std::make_tuple(std::make_shared<Multiply__BuiltIn>(),
+                        std::multiplies<Int>()),
+        std::make_tuple(std::make_shared<Divide__BuiltIn>(),
+                        std::divides<Int>()),
+        std::make_tuple(std::make_shared<Exponentiate__BuiltIn>(),
                         [](Int x, Int y) {
                             if (y < 0)
                                 return static_cast<Int>(0);
@@ -45,12 +48,13 @@ INSTANTIATE_TEST_SUITE_P(
                             }
                             return res;
                         }),
-        std::make_tuple(new Modulo__BuiltIn{}, std::modulus<Int>()),
-        std::make_tuple(new Left_Shift__BuiltIn{},
+        std::make_tuple(std::make_shared<Modulo__BuiltIn>(),
+                        std::modulus<Int>()),
+        std::make_tuple(std::make_shared<Left_Shift__BuiltIn>(),
                         [](Int x, Int y) { return x << y; }),
-        std::make_tuple(new Right_Shift__BuiltIn{},
+        std::make_tuple(std::make_shared<Right_Shift__BuiltIn>(),
                         [](Int x, Int y) { return x >> y; }),
-        std::make_tuple(new Spaceship__BuiltIn{},
+        std::make_tuple(std::make_shared<Spaceship__BuiltIn>(),
                         [](Int x, Int y) {
                             const auto o = std::compare_three_way()(x, y);
                             if (o == std::strong_ordering::less)
@@ -61,13 +65,16 @@ INSTANTIATE_TEST_SUITE_P(
                                 return 0;
                             return 2;
                         }),
-        std::make_tuple(new Bitwise_And__BuiltIn{}, std::bit_and<Int>()),
-        std::make_tuple(new Bitwise_Or__BuiltIn{}, std::bit_or<Int>()),
-        std::make_tuple(new Bitwise_Xor__BuiltIn{}, std::bit_xor<Int>())));
+        std::make_tuple(std::make_shared<Bitwise_And__BuiltIn>(),
+                        std::bit_and<Int>()),
+        std::make_tuple(std::make_shared<Bitwise_Or__BuiltIn>(),
+                        std::bit_or<Int>()),
+        std::make_tuple(std::make_shared<Bitwise_Xor__BuiltIn>(),
+                        std::bit_xor<Int>())));
 
 class UnaryOperatorsTests
     : public ::testing::TestWithParam<
-          std::tuple<ParametricFn<Int, Int> *, std::function<Int(Int)>>> {};
+          std::tuple<FnT<Int, Int>, std::function<Int(Int)>>> {};
 
 TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
     auto &[fn, op] = GetParam();
@@ -84,13 +91,14 @@ TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
 
 INSTANTIATE_TEST_SUITE_P(
     UnaryOperators, UnaryOperatorsTests,
-    ::testing::Values(
-        std::make_tuple(new Increment__BuiltIn{}, [](Int x) { return ++x; }),
-        std::make_tuple(new Decrement__BuiltIn{}, [](Int x) { return --x; })));
+    ::testing::Values(std::make_tuple(std::make_shared<Increment__BuiltIn>(),
+                                      [](Int x) { return ++x; }),
+                      std::make_tuple(std::make_shared<Decrement__BuiltIn>(),
+                                      [](Int x) { return --x; })));
 
 class BinaryComparisonsTests
-    : public ::testing::TestWithParam<std::tuple<
-          ParametricFn<Bool, Int, Int> *, std::function<Bool(Int, Int)>>> {};
+    : public ::testing::TestWithParam<
+          std::tuple<FnT<Bool, Int, Int>, std::function<Bool(Int, Int)>>> {};
 
 TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
     auto &[fn, op] = GetParam();
@@ -111,17 +119,21 @@ TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
 INSTANTIATE_TEST_SUITE_P(
     BinaryComparisons, BinaryComparisonsTests,
     ::testing::Values(
-        std::make_tuple(new Comparison_LT__BuiltIn{}, std::less<Int>()),
-        std::make_tuple(new Comparison_GT__BuiltIn{}, std::greater<Int>()),
-        std::make_tuple(new Comparison_LE__BuiltIn{}, std::less_equal<Int>()),
-        std::make_tuple(new Comparison_GE__BuiltIn{},
+        std::make_tuple(std::make_shared<Comparison_LT__BuiltIn>(),
+                        std::less<Int>()),
+        std::make_tuple(std::make_shared<Comparison_GT__BuiltIn>(),
+                        std::greater<Int>()),
+        std::make_tuple(std::make_shared<Comparison_LE__BuiltIn>(),
+                        std::less_equal<Int>()),
+        std::make_tuple(std::make_shared<Comparison_GE__BuiltIn>(),
                         std::greater_equal<Int>()),
-        std::make_tuple(new Comparison_EQ__BuiltIn{}, std::equal_to<Int>()),
-        std::make_tuple(new Comparison_NE__BuiltIn{},
+        std::make_tuple(std::make_shared<Comparison_EQ__BuiltIn>(),
+                        std::equal_to<Int>()),
+        std::make_tuple(std::make_shared<Comparison_NE__BuiltIn>(),
                         std::not_equal_to<Int>())));
 
 TEST(NegationTests, OperatorCorrectness) {
-    auto fn = new Negation__BuiltIn{};
+    auto fn = std::make_shared<Negation__BuiltIn>();
     {
         auto t = true;
         fn->args = Fn::reference_all(t);
