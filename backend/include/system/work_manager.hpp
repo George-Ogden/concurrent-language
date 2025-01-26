@@ -72,7 +72,7 @@ template <typename... Vs> void WorkManager::await(Vs &...vs) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{n};
     std::atomic<unsigned> &counter = counters[ThreadManager::get_id()];
     Locked<bool> *valid = new Locked<bool>{true};
-    Continuation c{*remaining, counter, *valid};
+    Continuation c{remaining, counter, *valid};
     (vs->add_continuation(c), ...);
     if (all_done(vs...)) {
         counter.fetch_sub(1, std::memory_order_relaxed);

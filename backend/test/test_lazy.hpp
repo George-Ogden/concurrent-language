@@ -26,31 +26,30 @@ TEST_F(LazyConstantTest, AlwaysDone) {
 TEST_F(LazyConstantTest, CorrectValue) { ASSERT_EQ(x.value(), 3); }
 
 TEST_F(LazyConstantTest, UnfinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{2};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{true};
     x.add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 1);
+    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, true);
+    delete remaining;
 }
 
 TEST_F(LazyConstantTest, FinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{1};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{true};
     x.add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(*valid, false);
 }
 
 TEST_F(LazyConstantTest, InvalidFinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{1};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{false};
     x.add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, false);
 }
@@ -80,78 +79,76 @@ TEST_F(LazyFunctionTest, CorrectValue) {
 }
 
 TEST_F(LazyFunctionTest, DoneUnfinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{2};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{true};
     lazy_fn->run();
     lazy_fn->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 1);
+    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, true);
+    delete remaining;
 }
 
 TEST_F(LazyFunctionTest, NotDoneUnfinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{2};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{true};
     lazy_fn->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 2);
+    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 2);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, true);
     lazy_fn->run();
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 1);
+    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, true);
+    delete remaining;
 }
 
 TEST_F(LazyFunctionTest, DoneFinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{1};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{true};
     ASSERT_EQ(*valid, true);
     lazy_fn->run();
     lazy_fn->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(*valid, false);
 }
 
 TEST_F(LazyFunctionTest, NotDoneFinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{1};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{true};
     lazy_fn->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 1);
+    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, true);
     lazy_fn->run();
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(*valid, false);
 }
 
 TEST_F(LazyFunctionTest, DoneInvalidFinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{1};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{false};
     ASSERT_EQ(*valid, false);
     lazy_fn->run();
     lazy_fn->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, false);
 }
 
 TEST_F(LazyFunctionTest, NotDoneInvalidFinishedContinuationBehaviour) {
-    std::atomic<unsigned> remaining{1};
+    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> valid{false};
     lazy_fn->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 1);
+    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, false);
     lazy_fn->run();
-    ASSERT_EQ(remaining.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(*valid, false);
 }
