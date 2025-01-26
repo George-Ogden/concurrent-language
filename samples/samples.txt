@@ -19,6 +19,12 @@ adder = (x: int) -> (int -> int) {
     }
 };
 
+appender = (x: List{int}) -> (int -> List{int}) {
+    (y: int) -> List{int} {
+        Cons{int}{(y, x)}
+    }
+};
+
 curry{T,U,V} = (f: (T, U) -> V) -> (T -> (U -> V)) {
     (x: T) -> (U -> V) {
         (y: U) -> V {
@@ -53,5 +59,6 @@ main = () -> List{int} {
     t = map{int,int}(adder_v2(4), xs);
     y = curry{int,int,int}(add)(4)(5);
     j = select(Right{int,bool}{false});
-    y :: t
+    c = appender(t);
+    c(y)
 };
