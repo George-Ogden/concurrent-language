@@ -28,7 +28,7 @@ all: $(PIPELINE) $(BACKEND)
 FILE := samples/samples.txt
 
 run: build
-	sudo make -C backend run
+	sudo make -C backend run --quiet
 
 build: $(TARGET)
 	make -C backend build
