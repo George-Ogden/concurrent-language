@@ -8,7 +8,7 @@ TARGET_DIR := bin
 SRC_DIR := src
 TARGET := $(TARGET_DIR)/main
 TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*.cpp))
-BUILD_DIR := build
+BUILD_DIR := build_
 HEADERS := $(wildcard include/*.hpp include/**/*.hpp)
 
 USER := $(shell user=$$(who -m | awk '{print $$1}'); [ -z "$$user" ] && whoami || echo $$user)
@@ -81,7 +81,7 @@ $(COMPILER_FILE): | $(BUILD_DIR)
 
 build: $(TARGET)
 
-run: $(TARGET)
+run: build
 	./$(TARGET) $(FLAGS)
 
 %: $(TARGET_DIR)/%

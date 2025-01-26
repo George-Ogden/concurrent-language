@@ -13,17 +13,28 @@ COMPILER_MANIFEST := compilation/Cargo.toml
 PIPELINE := pipeline/target/debug/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
+TARGET := backend/include/main/main.hpp
+
+LAST_FILE_PREFIX := .last-file-hash-
+LAST_FILE_HASH = $(shell sha256sum $(FILE) 2>/dev/null | cut -d' ' -f1)
+LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)
+
+$(LAST_FILE):
+	rm $(LAST_FILE_PREFIX)* -f
+	touch $@
 
 all: $(PIPELINE) $(BACKEND)
 
 FILE := samples/samples.txt
 
 run: build
-	sudo make -C backend run
+	sudo make -C backend run --quiet
 
-build: $(PIPELINE) $(FILE)
-	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > backend/include/main/main.hpp
+build: $(TARGET)
 	make -C backend build
+
+$(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
+	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > $(TARGET)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
@@ -61,6 +72,7 @@ test: $(PARSER) $(TYPE_CHECKER)
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/*; do \
+		echo $$sample ;\
 		if [ "$$sample" != "samples/grammar.txt" ]; then \
 			make build FILE=$$sample || exit 1; \
 		fi \
