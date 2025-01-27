@@ -51,6 +51,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
                               Args>>... args) requires(sizeof...(Args) > 0)
         : args(reference_all(args...)) {}
+    virtual ~ParametricFn() { cleanup_args(); }
     virtual std::shared_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
     virtual std::shared_ptr<Lazy<R>>
     body(std::add_lvalue_reference_t<
@@ -72,7 +73,8 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         cleanup();
         continuations.release();
     }
-    virtual void cleanup() { this->args = ArgsT{}; }
+    virtual void cleanup() { cleanup_args(); }
+    void cleanup_args() { this->args = ArgsT{}; }
     bool done() const override {
         return done_flag.load(std::memory_order_relaxed);
     }
@@ -127,10 +129,8 @@ struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
     std::shared_ptr<ParametricFn<R, A...>> clone() const override {
         return std::make_shared<T>(this->env);
     }
-    virtual void cleanup() override {
-        ParametricFn<R, A...>::cleanup();
-        this->env = E{};
-    }
+    void cleanup_env() { this->env = E{}; }
+    virtual ~Closure() { cleanup_env(); }
 };
 
 template <> struct ClosureRoot<Empty> {};
