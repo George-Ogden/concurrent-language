@@ -796,7 +796,7 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
               reinterpret_cast<Suc *>(&inner.value)->value);
 }
 
-using F = TupleT<Lazy<FnT<Int, Int>> *>;
+using F = TupleT<std::shared_ptr<Lazy<FnT<Int, Int>>>>;
 struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
     using Closure<SelfRecursiveFn, F, Int, Int>::Closure;
     FnT<Int, Int> g = nullptr;
@@ -821,8 +821,8 @@ struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
 TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
     FnT<Int, Int> f = std::make_shared<SelfRecursiveFn>();
     std::dynamic_pointer_cast<SelfRecursiveFn>(f)->env =
-        std::make_tuple(new LazyConstant<FnT<Int, Int>>{f});
-    std::shared_ptr<Lazy<Int>> x = std::make_shared<LazyConstant<Int>>(5);
+        std::make_tuple(std::make_shared<LazyConstant<FnT<Int, Int>>>(f));
+    std::shared_ptr<Lazy<Int>> x = std::make_shared<LazyConstant<Int>>(2);
     f->args = std::make_tuple(x);
 
     WorkManager::run(f);

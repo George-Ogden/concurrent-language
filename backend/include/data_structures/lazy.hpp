@@ -8,7 +8,7 @@ template <typename T> struct Lazy {
     virtual bool done() const = 0;
     virtual T value() = 0;
     virtual void add_continuation(Continuation c) = 0;
-    virtual ~Lazy(){};
+    virtual ~Lazy() = default;
     void update_continuation(Continuation c) {
         if (c.remaining->fetch_sub(1, std::memory_order_relaxed) == 1) {
             delete c.remaining;

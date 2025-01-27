@@ -62,18 +62,23 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     body(std::add_lvalue_reference_t<
          std::shared_ptr<Lazy<std::decay_t<Args>>>>...) = 0;
     void run() override {
-        std::shared_ptr<Lazy<R>> return_ =
-            std::apply([this](auto &&...t) { return body(t...); }, args);
-        WorkManager::await(return_);
-        ret = return_->value();
+        auto arguments = this->args;
+        if (!done_flag.load(std::memory_order_acquire)) {
+            std::shared_ptr<Lazy<R>> return_ = std::apply(
+                [this](auto &&...t) { return body(t...); }, arguments);
+            WorkManager::await(return_);
+            ret = return_->value();
+        }
         continuations.acquire();
         for (const Continuation &c : *continuations) {
             Lazy<Ret>::update_continuation(c);
         }
         continuations->clear();
-        done_flag.store(true, std::memory_order_relaxed);
+        done_flag.store(true, std::memory_order_release);
+        cleanup();
         continuations.release();
     }
+    virtual void cleanup() { this->args = ArgsT{}; }
     bool done() const override {
         return done_flag.load(std::memory_order_relaxed);
     }
@@ -119,6 +124,7 @@ template <typename E> struct ClosureRoot {
     E env;
     explicit ClosureRoot(const E &e) : env(e) {}
     explicit ClosureRoot() = default;
+    virtual ~ClosureRoot() = default;
 };
 
 template <typename T, typename E, typename R, typename... A>
@@ -126,6 +132,10 @@ struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
     using ClosureRoot<E>::ClosureRoot;
     std::shared_ptr<ParametricFn<R, A...>> clone() const override {
         return std::make_shared<T>(this->env);
+    }
+    virtual void cleanup() override {
+        ParametricFn<R, A...>::cleanup();
+        this->env = E{};
     }
 };
 
