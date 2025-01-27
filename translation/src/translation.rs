@@ -177,7 +177,7 @@ impl Translator {
         let value_code = match constructor_call.data {
             None => Code::new(),
             Some((name, value)) => format!(
-                "reinterpret_cast<{name}*>(&{target}.value)->value = create_references<{name}::type>({});",
+                "new (&{target}.value) {name}{{create_references<{name}::type>({})}};",
                 self.translate_value(value)
             ),
         };
@@ -414,7 +414,9 @@ impl fmt::Display for TypeFormatter<'_> {
                 write!(f, "VariantT<{}>", type_names.join(","))
             }
             MachineType::NamedType(name) => write!(f, "{}", name),
-            MachineType::Reference(type_) => write!(f, "{}*", TypeFormatter(&**type_)),
+            MachineType::Reference(type_) => {
+                write!(f, "std::shared_ptr<{}>", TypeFormatter(&**type_))
+            }
             MachineType::Lazy(type_) => {
                 write!(f, "std::shared_ptr<Lazy<{}>>", TypeFormatter(&**type_))
             }
@@ -625,7 +627,7 @@ mod tests {
                 Name::from("Cons")
             )
         )),
-        "Cons*";
+        "std::shared_ptr<Cons>";
         "reference type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
@@ -680,7 +682,7 @@ mod tests {
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt*>; type value;}; struct Nil_Int{ Empty value; };";
+        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,std::shared_ptr<ListInt>>; type value;}; struct Nil_Int{ Empty value; };";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
@@ -723,7 +725,7 @@ mod tests {
                 ]
             }
         ],
-        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<Value*, Value*>; type value; }; struct None{Empty value;}; struct Some { using type = Expression*; type value; };";
+        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<std::shared_ptr<Value>, std::shared_ptr<Value>>; type value; }; struct None{Empty value;}; struct Some { using type = std::shared_ptr<Expression>; type value; };";
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
@@ -1110,7 +1112,7 @@ mod tests {
             }.into(),
             check_null: false
         },
-        "wrapper = {}; reinterpret_cast<Wrapper*>(&wrapper.value)->value = create_references<Wrapper::type>(4LL); wrapper.tag = 0ULL;";
+        "wrapper = {}; new (&wrapper.value) Wrapper{create_references<Wrapper::type>(4LL)}; wrapper.tag = 0ULL;";
         "wrapper constructor assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
@@ -1234,7 +1236,7 @@ mod tests {
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { std::shared_ptr<Lazy<destroy_references_t<Suc::type>>> s = std::make_shared<LazyConstant<destroy_references_t<Suc::type>>>(destroy_references(reinterpret_cast<Suc*>(&nat.value)->value)); VariantT<Suc,Nil> *t; VariantT<Suc,Nil> u; t = s->value(); if (r==nullptr){ r=std::make_shared<LazyConstant<VariantT<Suc,Nil>>>(u); } break; } case 1ULL: {if (r==nullptr){ r=std::make_shared<LazyConstant<VariantT<Suc,Nil>>>(nil); } break; }}";
+        "switch (nat.tag) { case 0ULL: { std::shared_ptr<Lazy<destroy_references_t<Suc::type>>> s = std::make_shared<LazyConstant<destroy_references_t<Suc::type>>>(destroy_references(reinterpret_cast<Suc*>(&nat.value)->value)); std::shared_ptr<VariantT<Suc,Nil>> t; VariantT<Suc,Nil> u; t = s->value(); if (r==nullptr){ r=std::make_shared<LazyConstant<VariantT<Suc,Nil>>>(u); } break; } case 1ULL: {if (r==nullptr){ r=std::make_shared<LazyConstant<VariantT<Suc,Nil>>>(nil); } break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1403,7 +1405,7 @@ mod tests {
                 memory: Memory(Id::from("tail"))
             }.into(),
         ],
-        "List *tail; VariantT<Cons,Nil> tail; tail = std::get<1ULL>(cons);";
+        "std::shared_ptr<List> tail; VariantT<Cons,Nil> tail; tail = std::get<1ULL>(cons);";
         "cons extraction"
     )]
     #[test_case(
@@ -1436,7 +1438,7 @@ mod tests {
                 check_null: false
             }.into(),
         ],
-        "VariantT<Suc, Nil> n; VariantT<Suc, Nil> s; n = {}; n.tag = 1ULL; s= {}; reinterpret_cast<Suc *>(&s.value)->value = create_references<Suc::type>(n); s.tag = 0ULL;";
+        "VariantT<Suc, Nil> n; VariantT<Suc, Nil> s; n = {}; n.tag = 1ULL; s= {}; new (&s.value) Suc{create_references<Suc::type>(n)}; s.tag = 0ULL;";
         "simple recursive type extraction"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {

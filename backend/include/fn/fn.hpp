@@ -31,12 +31,6 @@ class Fn {
         return std::make_tuple(
             std::make_shared<LazyConstant<std::decay_t<Ts>>>(args)...);
     }
-    template <typename T, typename... Ts>
-    static void initialize(T *&fn, Ts &&...args) {
-        if (fn == nullptr) {
-            fn = new T(std::forward<Ts>(args)...);
-        }
-    }
 };
 
 template <typename Ret, typename... Args>

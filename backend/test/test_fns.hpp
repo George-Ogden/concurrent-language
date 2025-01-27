@@ -595,10 +595,9 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         EitherIntBool either{};
         either.tag = tag;
         if (tag == 0) {
-
-            reinterpret_cast<Left *>(&either.value)->value = value;
+            new (&either.value) Left{value};
         } else {
-            reinterpret_cast<Right *>(&either.value)->value = value;
+            new (&either.value) Right{static_cast<Bool>(value)};
         }
 
         std::shared_ptr<EitherIntBoolExtractor> fn =
@@ -655,9 +654,9 @@ TEST_P(FnCorrectnessTest, EdgeCaseTest) {
         either.tag = tag;
         if (tag == 0) {
 
-            reinterpret_cast<Left *>(&either.value)->value = value;
+            new (&either.value) Left{value};
         } else {
-            reinterpret_cast<Right *>(&either.value)->value = value;
+            new (&either.value) Right{static_cast<Bool>(value)};
         }
 
         std::shared_ptr<EitherIntBoolEdgeCase> fn =
@@ -672,10 +671,12 @@ struct Cons;
 struct Nil;
 typedef VariantT<Cons, Nil> ListInt;
 struct Cons {
-    using type = TupleT<Int, ListInt *>;
+    using type = TupleT<Int, std::shared_ptr<ListInt>>;
     type value;
 };
-struct Nil {};
+struct Nil {
+    Empty value;
+};
 
 struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
     using EasyCloneFn<ListIntSum, Int, ListInt>::EasyCloneFn;
@@ -723,16 +724,16 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     tail.tag = 1ULL;
     ListInt third{};
     third.tag = 0ULL;
-    reinterpret_cast<Cons *>(&third.value)->value =
-        create_references<Cons::type>(std::make_tuple(8, tail));
+    new (&third.value)
+        Cons{create_references<Cons::type>(std::make_tuple(8, tail))};
     ListInt second{};
     second.tag = 0ULL;
-    reinterpret_cast<Cons *>(&second.value)->value =
-        create_references<Cons::type>(std::make_tuple(4, third));
+    new (&second.value)
+        Cons{create_references<Cons::type>(std::make_tuple(4, third))};
     ListInt first{};
     first.tag = 0ULL;
-    reinterpret_cast<Cons *>(&first.value)->value =
-        create_references<Cons::type>(std::make_tuple(-9, second));
+    new (&first.value)
+        Cons{create_references<Cons::type>(std::make_tuple(-9, second))};
 
     std::shared_ptr<ListIntSum> adder = std::make_shared<ListIntSum>(first);
 
@@ -743,7 +744,7 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
 struct Suc;
 typedef VariantT<Suc, Nil> Nat;
 struct Suc {
-    using type = Nat *;
+    using type = std::shared_ptr<Nat>;
     type value;
 };
 
@@ -775,17 +776,14 @@ struct SimpleRecursiveTypeExample
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
     VariantT<Suc, Nil> n = {};
     n.tag = 1ULL;
-    VariantT<Suc, Nil> *wrapped_n = new VariantT<Suc, Nil>{n};
 
     VariantT<Suc, Nil> inner = {};
     inner.tag = 0ULL;
-    reinterpret_cast<Suc *>(&inner.value)->value = wrapped_n;
-    Nat *wrapped_inner = new Nat(inner);
+    new (&inner.value) Suc{std::make_shared<VariantT<Suc, Nil>>(n)};
 
     VariantT<Suc, Nil> outer = {};
-
     outer.tag = 0ULL;
-    reinterpret_cast<Suc *>(&outer.value)->value = wrapped_inner;
+    new (&outer.value) Suc{std::make_shared<VariantT<Suc, Nil>>(inner)};
 
     std::shared_ptr<SimpleRecursiveTypeExample> fn =
         std::make_shared<SimpleRecursiveTypeExample>(outer);
@@ -822,7 +820,7 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
     FnT<Int, Int> f = std::make_shared<SelfRecursiveFn>();
     std::dynamic_pointer_cast<SelfRecursiveFn>(f)->env =
         std::make_tuple(std::make_shared<LazyConstant<FnT<Int, Int>>>(f));
-    std::shared_ptr<Lazy<Int>> x = std::make_shared<LazyConstant<Int>>(2);
+    std::shared_ptr<Lazy<Int>> x = std::make_shared<LazyConstant<Int>>(5);
     f->args = std::make_tuple(x);
 
     WorkManager::run(f);
