@@ -52,7 +52,7 @@ TEST(TupleDeAllocationTests, NonTupleSequence) {
 TEST(VariantDestructorTests, ContainedIntegerTest) {
     VariantT<Int, std::shared_ptr<Int>> v;
     v.tag = 0;
-    *reinterpret_cast<Int *>(&v.value) = 4LL;
+    new (&v.value) Int{4LL};
     ASSERT_EQ(*reinterpret_cast<Int *>(&v.value), 4LL);
 }
 
@@ -61,7 +61,7 @@ TEST(VariantDestructorTests, ContainedSharedPtrTest) {
     {
         std::shared_ptr<Int> p = std::make_shared<Int>(4);
         v.tag = 1;
-        *reinterpret_cast<std::shared_ptr<Int> *>(&v.value) = p;
+        new (&v.value) std::shared_ptr<Int>{p};
     }
     ASSERT_EQ(**reinterpret_cast<std::shared_ptr<Int> *>(&v.value), 4);
 }
