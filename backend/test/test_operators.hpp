@@ -15,15 +15,16 @@ class BinaryOperatorsTests
           std::tuple<FnT<Int, Int, Int>, std::function<Int(Int, Int)>>> {};
 
 TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
-    auto &[fn, op] = GetParam();
+    auto &[op, validate] = GetParam();
 
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
                                   1000000000224LL}) {
         for (Int y : {-8, 4, 3, 17}) {
+            auto fn = op->clone();
             fn->args = Fn::reference_all(x, y);
 
             WorkManager::run(fn);
-            Int expected = op(x, y);
+            Int expected = validate(x, y);
             ASSERT_EQ(fn->ret, expected);
         }
     }
@@ -77,14 +78,15 @@ class UnaryOperatorsTests
           std::tuple<FnT<Int, Int>, std::function<Int(Int)>>> {};
 
 TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
-    auto &[fn, op] = GetParam();
+    auto &[op, validate] = GetParam();
 
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
                                   1000000000224LL}) {
+        auto fn = op->clone();
         fn->args = Fn::reference_all(x);
 
         WorkManager::run(fn);
-        Int expected = op(x);
+        Int expected = validate(x);
         ASSERT_EQ(fn->ret, expected);
     }
 }
@@ -101,16 +103,17 @@ class BinaryComparisonsTests
           std::tuple<FnT<Bool, Int, Int>, std::function<Bool(Int, Int)>>> {};
 
 TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
-    auto &[fn, op] = GetParam();
+    auto &[op, validate] = GetParam();
 
     const std::vector<Int> xs{-1000000009LL, -55,   24,
                               200,           10024, 1000000000224LL};
     for (Int x : xs) {
         for (Int y : xs) {
+            auto fn = op->clone();
             fn->args = Fn::reference_all(x, y);
 
             WorkManager::run(fn);
-            Bool expected = op(x, y);
+            Bool expected = validate(x, y);
             ASSERT_EQ(fn->ret, expected);
         }
     }
@@ -133,8 +136,8 @@ INSTANTIATE_TEST_SUITE_P(
                         std::not_equal_to<Int>())));
 
 TEST(NegationTests, OperatorCorrectness) {
-    auto fn = std::make_shared<Negation__BuiltIn>();
     {
+        auto fn = std::make_shared<Negation__BuiltIn>();
         auto t = true;
         fn->args = Fn::reference_all(t);
 
@@ -142,6 +145,7 @@ TEST(NegationTests, OperatorCorrectness) {
         ASSERT_EQ(fn->ret, false);
     }
     {
+        auto fn = std::make_shared<Negation__BuiltIn>();
         auto f = false;
         fn->args = Fn::reference_all(f);
 
