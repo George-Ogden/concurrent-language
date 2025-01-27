@@ -11,5 +11,5 @@ ack = (m: int, n: int) -> int {
 };
 
 main = () -> int {
-    ack(3, 3)
+    ack(3, 4)
 }

@@ -71,11 +71,12 @@ template <typename... Vs> void WorkManager::await(Vs &...vs) {
     }
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{n};
     std::atomic<unsigned> &counter = counters[ThreadManager::get_id()];
-    std::shared_ptr<Locked<bool>> valid = std::make_shared<Locked<bool>>(true);
+    Locked<bool> *valid = new Locked<bool>{true};
     Continuation c{remaining, counter, valid};
     (vs->add_continuation(c), ...);
     if (all_done(vs...)) {
         counter.fetch_sub(1, std::memory_order_relaxed);
+        delete valid;
         return;
     }
     while (true) {
@@ -95,6 +96,9 @@ template <typename... Vs> void WorkManager::await(Vs &...vs) {
             bool was_valid = **valid;
             **valid = false;
             valid->release();
+            if (!was_valid) {
+                delete valid;
+            }
             if (all_done(vs...)) {
                 counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
                 return;
