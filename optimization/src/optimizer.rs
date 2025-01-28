@@ -5,12 +5,11 @@ use std::{
 
 use itertools::zip_eq;
 use lowering::{
-    IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
-    IntermediateFnDef, IntermediateStatement, Location,
+    IntermediateAssignment, IntermediateExpression, IntermediateFnCall, IntermediateFnDef,
+    IntermediateStatement, Location,
 };
 
 struct Optimizer {
-    arg_translation: HashMap<IntermediateArg, Location>,
     single_constraints: HashMap<Location, HashSet<Location>>,
     double_constraints: HashMap<(Location, Location), HashSet<Location>>,
     fn_args: HashMap<Location, Vec<Location>>,
@@ -19,14 +18,10 @@ struct Optimizer {
 impl Optimizer {
     fn new() -> Self {
         Optimizer {
-            arg_translation: HashMap::new(),
             single_constraints: HashMap::new(),
             double_constraints: HashMap::new(),
             fn_args: HashMap::new(),
         }
-    }
-    fn translate_arg(&self, arg: IntermediateArg) -> Location {
-        self.arg_translation[&arg].clone()
     }
     fn find_used_values(&mut self, expression: &IntermediateExpression) -> Vec<Location> {
         let values = expression.values();
@@ -34,7 +29,7 @@ impl Optimizer {
             .into_iter()
             .filter_map(|value| match value {
                 lowering::IntermediateValue::IntermediateMemory(location) => Some(location),
-                lowering::IntermediateValue::IntermediateArg(arg) => Some(self.translate_arg(arg)),
+                lowering::IntermediateValue::IntermediateArg(arg) => Some(arg.location),
                 lowering::IntermediateValue::IntermediateBuiltIn(_) => None,
             })
             .collect()
@@ -76,13 +71,7 @@ impl Optimizer {
                         statements,
                         ret,
                     }) => {
-                        for arg in args {
-                            self.arg_translation.insert(arg.clone(), Location::new());
-                        }
-                        let args = args
-                            .into_iter()
-                            .map(|arg| self.translate_arg(arg.clone()))
-                            .collect();
+                        let args = args.into_iter().map(|arg| arg.location.clone()).collect();
                         self.fn_args.insert(location.clone(), args);
                         self.generate_constraints(statements);
                         let dependents = self.find_used_values(&ret.0.clone().into());
@@ -142,7 +131,6 @@ mod tests {
                 })
             ).into(),
             Vec::new(),
-            Vec::new(),
         );
         "integer"
     )]
@@ -153,7 +141,6 @@ mod tests {
                     value: false
                 })
             ).into(),
-            Vec::new(),
             Vec::new(),
         );
         "boolean"
@@ -170,7 +157,6 @@ mod tests {
                 )
             ).into(),
             Vec::new(),
-            Vec::new(),
         );
         "built-in fn"
     )]
@@ -182,7 +168,6 @@ mod tests {
                     location.clone()
                 ).into(),
                 vec![location.clone()],
-                Vec::new(),
             )
         };
         "memory location"
@@ -194,8 +179,7 @@ mod tests {
                 IntermediateValue::from(
                     arg.clone()
                 ).into(),
-                Vec::new(),
-                vec![arg.clone()],
+                vec![arg.location],
             )
         };
         "arg"
@@ -208,8 +192,7 @@ mod tests {
                 IntermediateTupleExpression(vec![
                     arg.clone().into(), location.clone().into(), IntermediateBuiltIn::from(Integer{value: 7}).into()
                 ]).into(),
-                vec![location.clone()],
-                vec![arg.clone()],
+                vec![location.clone(), arg.location],
             )
         };
         "tuple"
@@ -223,36 +206,15 @@ mod tests {
                     idx: 8
                 }.into(),
                 vec![location.clone()],
-                Vec::new(),
             )
         };
         "element access"
     )]
-    fn test_find_used_values(
-        expression_locations_args: (IntermediateExpression, Vec<Location>, Vec<IntermediateArg>),
-    ) {
-        let (expression, expected_locations, expected_args) = expression_locations_args;
+    fn test_find_used_values(expression_locations: (IntermediateExpression, Vec<Location>)) {
+        let (expression, expected_locations) = expression_locations;
         let mut optimizer = Optimizer::new();
 
-        for value in expression.values() {
-            match value {
-                IntermediateValue::IntermediateArg(arg) => {
-                    optimizer
-                        .arg_translation
-                        .insert(arg.clone(), Location::new());
-                }
-                _ => {}
-            }
-        }
-
-        let expected: HashSet<_> = expected_locations
-            .into_iter()
-            .chain(
-                expected_args
-                    .into_iter()
-                    .map(|arg| optimizer.translate_arg(arg)),
-            )
-            .collect();
+        let expected: HashSet<_> = expected_locations.into_iter().collect();
         let locations = optimizer.find_used_values(&expression);
         assert_eq!(HashSet::from_iter(locations), expected);
     }
@@ -269,7 +231,6 @@ mod tests {
                     location: Location::new()
                 }.into()
             ],
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -301,7 +262,6 @@ mod tests {
                     (tuple.clone(), vec![var1.clone(), var2.clone()]),
                     (res.clone(), vec![tuple.clone()]),
                 ],
-                Vec::new(),
                 Vec::new(),
             )
         };
@@ -335,13 +295,11 @@ mod tests {
                 ],
                 vec![
                     (y.clone(), vec![id.clone()]),
-                ],
-                vec![
-                    (id.clone(), vec![arg.clone()]),
+                    (id.clone(), vec![arg.location.clone()]),
                 ],
                 vec![
                     (
-                        (y.clone(), arg.clone()),
+                        (y.clone(), arg.location.clone()),
                         vec![x.clone()]
                     )
                 ]
@@ -350,46 +308,29 @@ mod tests {
         "identity fn"
     )]
     fn test_constraint_generation(
-        statements_singles_args_doubles: (
+        statements_singles_doubles: (
             Vec<IntermediateStatement>,
             Vec<(Location, Vec<Location>)>,
-            Vec<(Location, Vec<IntermediateArg>)>,
-            Vec<((Location, IntermediateArg), Vec<Location>)>,
+            Vec<((Location, Location), Vec<Location>)>,
         ),
     ) {
-        let (
-            statements,
-            expected_single_constraints,
-            expected_arg_constraints,
-            expected_double_constraints,
-        ) = statements_singles_args_doubles;
+        let (statements, expected_single_constraints, expected_double_constraints) =
+            statements_singles_doubles;
         let mut optimizer = Optimizer::new();
 
         optimizer.generate_constraints(&statements);
 
-        let mut expected_single_constraints = HashMap::from_iter(
+        let expected_single_constraints = HashMap::from_iter(
             expected_single_constraints
                 .into_iter()
                 .map(|(k, v)| (k, HashSet::from_iter(v))),
         );
-        for (location, values) in expected_arg_constraints {
-            if !expected_single_constraints.contains_key(&location) {
-                expected_single_constraints.insert(location.clone(), HashSet::new());
-            }
-            for value in values {
-                expected_single_constraints
-                    .get_mut(&location)
-                    .unwrap()
-                    .insert(optimizer.translate_arg(value));
-            }
-        }
         let expected_double_constraints = HashMap::from_iter(
             expected_double_constraints
                 .into_iter()
-                .map(|((loc, arg), v)| {
-                    let loc2 = optimizer.translate_arg(arg);
+                .map(|((loc1, loc2), v)| {
                     (
-                        (min(loc.clone(), loc2.clone()), max(loc, loc2)),
+                        (min(loc1.clone(), loc2.clone()), max(loc1, loc2)),
                         HashSet::from_iter(v),
                     )
                 }),
