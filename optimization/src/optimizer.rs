@@ -5,8 +5,8 @@ use std::{
 
 use itertools::zip_eq;
 use lowering::{
-    IntermediateArg, IntermediateExpression, IntermediateFnCall, IntermediateFnDef,
-    IntermediateMemory, IntermediateStatement, Location,
+    IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
+    IntermediateFnDef, IntermediateStatement, Location,
 };
 
 struct Optimizer {
@@ -67,7 +67,7 @@ impl Optimizer {
     fn generate_constraints(&mut self, statements: &Vec<IntermediateStatement>) {
         for statement in statements {
             match statement {
-                IntermediateStatement::Assignment(IntermediateMemory {
+                IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                     expression,
                     location,
                 }) => match &expression.borrow().clone() {
@@ -130,8 +130,7 @@ mod tests {
     use lowering::{
         AtomicTypeEnum, Boolean, Id, Integer, IntermediateArg, IntermediateBuiltIn,
         IntermediateElementAccess, IntermediateFnCall, IntermediateFnDef, IntermediateFnType,
-        IntermediateMemory, IntermediateStatement, IntermediateTupleExpression, IntermediateType,
-        IntermediateValue,
+        IntermediateStatement, IntermediateTupleExpression, IntermediateType, IntermediateValue,
     };
     use test_case::test_case;
 
@@ -261,14 +260,14 @@ mod tests {
     #[test_case(
         (
             vec![
-                IntermediateStatement::Assignment(IntermediateMemory{
+                IntermediateAssignment{
                     expression: Rc::new(RefCell::new(IntermediateValue::from(
                         IntermediateBuiltIn::from(Integer{
                             value: 8
                         })
                     ).into())),
                     location: Location::new()
-                })
+                }.into()
             ],
             Vec::new(),
             Vec::new(),
@@ -284,19 +283,19 @@ mod tests {
             let res = Location::new();
             (
                 vec![
-                    IntermediateStatement::Assignment(IntermediateMemory{
+                    IntermediateAssignment{
                         expression: Rc::new(RefCell::new(IntermediateTupleExpression(vec![
                             var1.clone().into(), var2.clone().into()
                         ]).into())),
                         location: tuple.clone()
-                    }),
-                    IntermediateStatement::Assignment(IntermediateMemory{
+                    }.into(),
+                    IntermediateAssignment{
                         expression: Rc::new(RefCell::new(IntermediateElementAccess{
                             value: tuple.clone().into(),
                             idx: 0
                         }.into())),
                         location: res.clone()
-                    })
+                    }.into()
                 ],
                 vec![
                     (tuple.clone(), vec![var1.clone(), var2.clone()]),
@@ -317,15 +316,15 @@ mod tests {
             dbg!(&id, &arg, &x, &y);
             (
                 vec![
-                    IntermediateStatement::Assignment(IntermediateMemory{
+                    IntermediateAssignment{
                         expression: Rc::new(RefCell::new(IntermediateFnDef{
                             args: vec![arg.clone()],
                             statements: Vec::new(),
                             ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
                         }.into())),
                         location: id.clone()
-                    }),
-                    IntermediateStatement::Assignment(IntermediateMemory{
+                    }.into(),
+                    IntermediateAssignment{
                         expression: Rc::new(RefCell::new(IntermediateFnCall{
                             fn_: id.clone().into(),
                             args: vec![
@@ -333,7 +332,7 @@ mod tests {
                             ]
                         }.into())),
                         location: y.clone()
-                    })
+                    }.into()
                 ],
                 vec![
                     (y.clone(), vec![id.clone()]),
