@@ -37,17 +37,18 @@ mod tests {
 
     use lowering::{
         AtomicTypeEnum, Boolean, Id, Integer, IntermediateArg, IntermediateBuiltIn,
-        IntermediateFnType, IntermediateType, IntermediateValue,
+        IntermediateElementAccess, IntermediateFnType, IntermediateTupleExpression,
+        IntermediateType, IntermediateValue,
     };
     use test_case::test_case;
 
     #[test_case(
         (
-            IntermediateExpression::from(IntermediateValue::from(
+            IntermediateValue::from(
                 IntermediateBuiltIn::from(Integer{
                     value: 8
                 })
-            )),
+            ).into(),
             Vec::new(),
             Vec::new(),
         );
@@ -55,11 +56,11 @@ mod tests {
     )]
     #[test_case(
         (
-            IntermediateExpression::from(IntermediateValue::from(
+            IntermediateValue::from(
                 IntermediateBuiltIn::from(Boolean{
                     value: false
                 })
-            )),
+            ).into(),
             Vec::new(),
             Vec::new(),
         );
@@ -67,7 +68,7 @@ mod tests {
     )]
     #[test_case(
         (
-            IntermediateExpression::from(IntermediateValue::from(
+            IntermediateValue::from(
                 IntermediateBuiltIn::BuiltInFn(
                     Id::from("+"),
                     IntermediateFnType(
@@ -75,7 +76,7 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into())
                     ).into()
                 )
-            )),
+            ).into(),
             Vec::new(),
             Vec::new(),
         );
@@ -85,9 +86,9 @@ mod tests {
         {
             let location = Location::new();
             (
-                IntermediateExpression::from(IntermediateValue::from(
+                IntermediateValue::from(
                     location.clone()
-                )),
+                ).into(),
                 vec![location.clone()],
                 Vec::new(),
             )
@@ -98,14 +99,42 @@ mod tests {
         {
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
             (
-                IntermediateExpression::from(IntermediateValue::from(
+                IntermediateValue::from(
                     arg.clone()
-                )),
+                ).into(),
                 Vec::new(),
                 vec![arg.clone()],
             )
         };
         "arg"
+    )]
+    #[test_case(
+        {
+            let location = Location::new();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            (
+                IntermediateTupleExpression(vec![
+                    arg.clone().into(), location.clone().into(), IntermediateBuiltIn::from(Integer{value: 7}).into()
+                ]).into(),
+                vec![location.clone()],
+                vec![arg.clone()],
+            )
+        };
+        "tuple"
+    )]
+    #[test_case(
+        {
+            let location = Location::new();
+            (
+                IntermediateElementAccess{
+                    value: location.clone().into(),
+                    idx: 8
+                }.into(),
+                vec![location.clone()],
+                Vec::new(),
+            )
+        };
+        "element access"
     )]
     fn test_find_used_values(
         expression_locations_args: (IntermediateExpression, Vec<Location>, Vec<IntermediateArg>),
