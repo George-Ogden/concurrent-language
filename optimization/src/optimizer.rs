@@ -77,6 +77,14 @@ impl Optimizer {
                         let args = args.into_iter().map(|arg| arg.location.clone()).collect();
                         self.fn_args.insert(location.clone(), args);
                     }
+                    IntermediateExpression::IntermediateValue(
+                        IntermediateValue::IntermediateMemory(fn_),
+                    ) => match self.fn_args.get(fn_) {
+                        Some(args) => {
+                            self.fn_args.insert(location.clone(), args.clone());
+                        }
+                        _ => {}
+                    },
                     _ => {}
                 },
                 _ => {}
@@ -503,6 +511,54 @@ mod tests {
             )
         };
         "mutually recursive fns"
+    )]
+    #[test_case(
+        {
+            let f = Location::new();
+            let g = Location::new();
+            let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let x = Location::new();
+            let y = Location::new();
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                            args: vec![arg.clone()],
+                            statements: Vec::new(),
+                            ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
+                        }.into())),
+                        location: f.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateValue::from(
+                            f.clone()
+                        ).into())),
+                        location: g.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnCall{
+                            fn_: g.clone().into(),
+                            args: vec![
+                                x.clone().into()
+                            ]
+                        }.into())),
+                        location: y.clone()
+                    }.into()
+                ],
+                vec![
+                    (y.clone(), vec![g.clone()]),
+                    (f.clone(), vec![arg.location.clone()]),
+                    (g.clone(), vec![f]),
+                ],
+                vec![
+                    (
+                        (y.clone(), arg.location),
+                        vec![x.clone()]
+                    )
+                ]
+            )
+        };
+        "reassigned fn"
     )]
     fn test_constraint_generation(
         statements_singles_doubles: (
