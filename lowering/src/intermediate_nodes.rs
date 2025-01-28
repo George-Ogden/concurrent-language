@@ -629,7 +629,7 @@ impl From<IntermediateType> for IntermediateArg {
 
 impl Hash for IntermediateArg {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.borrow().hash(state);
+        self.0.as_ptr().hash(state);
     }
 }
 

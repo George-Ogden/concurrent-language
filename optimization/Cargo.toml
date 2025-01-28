@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 lowering = { version = "0.1.0", path = "../lowering" }
+test-case = "3.3.1"
