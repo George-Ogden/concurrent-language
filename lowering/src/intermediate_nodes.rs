@@ -127,7 +127,7 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
-#[derive(Clone, Eq)]
+#[derive(Clone, Eq, PartialOrd)]
 pub struct Location(Rc<RefCell<()>>);
 
 impl Location {
@@ -139,6 +139,12 @@ impl Location {
 impl PartialEq for Location {
     fn eq(&self, other: &Self) -> bool {
         self.0.as_ptr() == other.0.as_ptr()
+    }
+}
+
+impl Ord for Location {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.as_ptr().cmp(&other.0.as_ptr())
     }
 }
 
