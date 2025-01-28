@@ -5,8 +5,8 @@ use std::{
 
 use itertools::zip_eq;
 use lowering::{
-    IntermediateAssignment, IntermediateExpression, IntermediateFnCall, IntermediateFnDef,
-    IntermediateStatement, Location,
+    IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
+    IntermediateFnDef, IntermediateStatement, IntermediateValue, Location,
 };
 
 struct Optimizer {
@@ -23,15 +23,18 @@ impl Optimizer {
             fn_args: HashMap::new(),
         }
     }
+    fn used_value(&mut self, value: &IntermediateValue) -> Option<Location> {
+        match value {
+            lowering::IntermediateValue::IntermediateMemory(location) => Some(location.clone()),
+            lowering::IntermediateValue::IntermediateArg(arg) => Some(arg.location.clone()),
+            lowering::IntermediateValue::IntermediateBuiltIn(_) => None,
+        }
+    }
     fn find_used_values(&mut self, expression: &IntermediateExpression) -> Vec<Location> {
         let values = expression.values();
         values
             .into_iter()
-            .filter_map(|value| match value {
-                lowering::IntermediateValue::IntermediateMemory(location) => Some(location),
-                lowering::IntermediateValue::IntermediateArg(arg) => Some(arg.location),
-                lowering::IntermediateValue::IntermediateBuiltIn(_) => None,
-            })
+            .filter_map(|value| self.used_value(&value))
             .collect()
     }
     fn add_single_constraint(&mut self, location: Location, dependents: Vec<Location>) {
@@ -74,7 +77,8 @@ impl Optimizer {
                         let args = args.into_iter().map(|arg| arg.location.clone()).collect();
                         self.fn_args.insert(location.clone(), args);
                         self.generate_constraints(statements);
-                        let dependents = self.find_used_values(&ret.0.clone().into());
+                        let dependents =
+                            self.used_value(&ret.0).map(|v| vec![v]).unwrap_or_default();
                         self.add_single_constraint(location.clone(), dependents);
                     }
                     IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
@@ -82,16 +86,31 @@ impl Optimizer {
                         args,
                     }) => match fn_ {
                         lowering::IntermediateValue::IntermediateBuiltIn(_) => {
-                            todo!()
+                            let dependents = args
+                                .iter()
+                                .filter_map(|value| self.used_value(value))
+                                .collect();
+                            self.add_single_constraint(location.clone(), dependents);
                         }
                         lowering::IntermediateValue::IntermediateMemory(fn_) => {
                             self.add_single_constraint(location.clone(), vec![fn_.clone()]);
                             for (loc, arg) in zip_eq(self.fn_args[&fn_].clone(), args) {
-                                let dependents = self.find_used_values(&arg.clone().into());
+                                let dependents =
+                                    self.used_value(arg).map(|x| vec![x]).unwrap_or_default();
                                 self.add_double_constraint(loc, location.clone(), dependents)
                             }
                         }
-                        lowering::IntermediateValue::IntermediateArg(_) => todo!(),
+                        lowering::IntermediateValue::IntermediateArg(IntermediateArg {
+                            type_: _,
+                            location: arg_loc,
+                        }) => {
+                            self.add_single_constraint(location.clone(), vec![arg_loc.clone()]);
+                            let dependents = args
+                                .iter()
+                                .filter_map(|value| self.used_value(value))
+                                .collect();
+                            self.add_single_constraint(location.clone(), dependents);
+                        }
                     },
                     expression => {
                         let used_values = self.find_used_values(&expression);
@@ -306,6 +325,68 @@ mod tests {
             )
         };
         "identity fn"
+    )]
+    #[test_case(
+        {
+            let x = Location::new();
+            let y = Location::new();
+            let z = Location::new();
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnCall{
+                            fn_: IntermediateBuiltIn::BuiltInFn(
+                                Id::from("*"),
+                                IntermediateFnType(
+                                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            ).into(),
+                            args: vec![
+                                x.clone().into(),
+                                y.clone().into()
+                            ]
+                        }.into())),
+                        location: z.clone()
+                    }.into()
+                ],
+                vec![
+                    (z, vec![x, y]),
+                ],
+                Vec::new()
+            )
+        };
+        "built-in fn call"
+    )]
+    #[test_case(
+        {
+            let f = IntermediateArg::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let x = Location::new();
+            let y = Location::new();
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnCall{
+                            fn_: f.clone().into(),
+                            args: vec![
+                                x.clone().into(),
+                            ]
+                        }.into())),
+                        location: y.clone()
+                    }.into()
+                ],
+                vec![
+                    (y, vec![f.location, x]),
+                ],
+                Vec::new()
+            )
+        };
+        "argument fn call"
     )]
     fn test_constraint_generation(
         statements_singles_doubles: (
