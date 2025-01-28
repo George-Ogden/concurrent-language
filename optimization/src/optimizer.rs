@@ -71,11 +71,28 @@ impl Optimizer {
                 }) => match &expression.borrow().clone() {
                     IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
                         args,
-                        statements,
-                        ret,
+                        statements: _,
+                        ret: _,
                     }) => {
                         let args = args.into_iter().map(|arg| arg.location.clone()).collect();
                         self.fn_args.insert(location.clone(), args);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        for statement in statements {
+            match statement {
+                IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                    expression,
+                    location,
+                }) => match &expression.borrow().clone() {
+                    IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                        args: _,
+                        statements,
+                        ret,
+                    }) => {
                         self.generate_constraints(statements);
                         let dependents =
                             self.used_value(&ret.0).map(|v| vec![v]).unwrap_or_default();
@@ -387,6 +404,105 @@ mod tests {
             )
         };
         "argument fn call"
+    )]
+    #[test_case(
+        {
+            let fn_ = Location::new();
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let z = Location::new();
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                            args: vec![x.clone(), y.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: z.clone(),
+                                    expression: Rc::new(RefCell::new(IntermediateFnCall{
+                                        fn_: IntermediateValue::from(
+                                            IntermediateBuiltIn::BuiltInFn(
+                                                Id::from("+"),
+                                                IntermediateFnType(
+                                                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ).into()
+                                            )
+                                        ),
+                                        args: vec![y.location.clone().into(), IntermediateBuiltIn::from(Integer{value: 9}).into()]
+                                    }.into()))
+                                }.into()
+                            ],
+                            ret: (x.clone().into(), AtomicTypeEnum::INT.into())
+                        }.into())),
+                        location: fn_.clone()
+                    }.into(),
+                ],
+                vec![
+                    (fn_.clone(), vec![x.location.clone()]),
+                    (z.clone(), vec![y.location.clone()]),
+                ],
+                Vec::new()
+            )
+        };
+        "fn with statements"
+    )]
+    #[test_case(
+        {
+            let foo = Location::new();
+            let bar = Location::new();
+            let foo_call = Location::new();
+            let bar_call = Location::new();
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                            args: vec![x.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: bar_call.clone(),
+                                    expression: Rc::new(RefCell::new(IntermediateFnCall{
+                                        fn_: bar.clone().into(),
+                                        args: vec![x.location.clone().into()]
+                                    }.into()))
+                                }.into()
+                            ],
+                            ret: (bar_call.clone().into(), AtomicTypeEnum::INT.into())
+                        }.into())),
+                        location: foo.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                            args: vec![y.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.clone(),
+                                    expression: Rc::new(RefCell::new(IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: vec![y.location.clone().into()]
+                                    }.into()))
+                                }.into()
+                            ],
+                            ret: (foo_call.clone().into(), AtomicTypeEnum::INT.into())
+                        }.into())),
+                        location: bar.clone()
+                    }.into(),
+                ],
+                vec![
+                    (foo.clone(), vec![bar_call.clone()]),
+                    (bar.clone(), vec![foo_call.clone()]),
+                    (foo_call.clone(), vec![foo.clone()]),
+                    (bar_call.clone(), vec![bar.clone()]),
+                ],
+                vec![
+                    ((foo_call.clone(), x.location.clone()), vec![y.location.clone()]),
+                    ((bar_call.clone(), y.location.clone()), vec![x.location.clone()]),
+                ],
+            )
+        };
+        "mutually recursive fns"
     )]
     fn test_constraint_generation(
         statements_singles_doubles: (
