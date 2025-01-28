@@ -6,7 +6,8 @@ use std::{
 use itertools::{zip_eq, Itertools};
 use lowering::{
     IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
-    IntermediateFnDef, IntermediateIfStatement, IntermediateStatement, IntermediateValue, Location,
+    IntermediateFnDef, IntermediateIfStatement, IntermediateMatchStatement, IntermediateStatement,
+    IntermediateValue, Location,
 };
 
 struct Optimizer {
@@ -160,7 +161,36 @@ impl Optimizer {
                         self.add_single_constraint(target.clone(), dependents);
                     }
                 }
-                IntermediateStatement::IntermediateMatchStatement(_) => todo!(),
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject,
+                    branches,
+                }) => {
+                    let mut shared_targets: Option<HashSet<Location>> = None;
+                    let subject_dependents: Vec<_> =
+                        self.used_value(subject).iter().cloned().collect();
+                    for branch in branches {
+                        match &branch.target {
+                            Some(IntermediateArg { type_: _, location }) => {
+                                self.add_single_constraint(
+                                    location.clone(),
+                                    subject_dependents.clone(),
+                                );
+                            }
+                            None => {}
+                        }
+                        self.generate_constraints(&branch.statements);
+                        let targets = HashSet::from_iter(IntermediateStatement::all_targets(
+                            &branch.statements,
+                        ));
+                        shared_targets = Some(match shared_targets {
+                            None => targets,
+                            Some(set) => set.intersection(&targets).cloned().collect(),
+                        })
+                    }
+                    for target in shared_targets.unwrap_or_default() {
+                        self.add_single_constraint(target, subject_dependents.clone());
+                    }
+                }
             }
         }
     }
@@ -180,8 +210,8 @@ mod tests {
     use lowering::{
         AtomicTypeEnum, Boolean, Id, Integer, IntermediateArg, IntermediateBuiltIn,
         IntermediateElementAccess, IntermediateFnCall, IntermediateFnDef, IntermediateFnType,
-        IntermediateIfStatement, IntermediateStatement, IntermediateTupleExpression,
-        IntermediateType, IntermediateValue,
+        IntermediateIfStatement, IntermediateMatchBranch, IntermediateMatchStatement,
+        IntermediateStatement, IntermediateTupleExpression, IntermediateType, IntermediateValue,
     };
     use test_case::test_case;
 
@@ -638,6 +668,84 @@ mod tests {
             )
         };
         "if statement"
+    )]
+    #[test_case(
+        {
+            let s = Location::new();
+            let t = IntermediateArg::from(IntermediateType::from(
+                AtomicTypeEnum::INT
+            ));
+            (
+                vec![
+                    IntermediateMatchStatement{
+                        subject: s.clone().into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(t.clone()),
+                                statements: Vec::new()
+                            },
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: Vec::new()
+                            },
+                        ]
+                    }.into()
+                ],
+                vec![
+                    (t.location, vec![s])
+                ],
+                Vec::new()
+            )
+        };
+        "empty match statement"
+    )]
+    #[test_case(
+        {
+            let s = Location::new();
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL));
+            let z = Location::new();
+            (
+                vec![
+                    IntermediateMatchStatement{
+                        subject: s.clone().into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(x.clone()),
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: z.clone().into(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateValue::from(x.clone()).into()
+                                        ))
+                                    }.into(),
+                                ]
+                            },
+                            IntermediateMatchBranch{
+                                target: Some(y.clone()),
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: z.clone().into(),
+                                        expression: Rc::new(RefCell::new(
+                                            IntermediateValue::from(
+                                                IntermediateBuiltIn::from(Integer{value: 0})
+                                            ).into()
+                                        ))
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into()
+                ],
+                vec![
+                    (x.location.clone(), vec![s.clone()]),
+                    (y.location.clone(), vec![s.clone()]),
+                    (z.clone(), vec![x.location, s]),
+                ],
+                Vec::new()
+            )
+        };
+        "match statement"
     )]
     fn test_constraint_generation(
         statements_singles_doubles: (
