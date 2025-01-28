@@ -3,10 +3,10 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use itertools::zip_eq;
+use itertools::{zip_eq, Itertools};
 use lowering::{
     IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
-    IntermediateFnDef, IntermediateStatement, IntermediateValue, Location,
+    IntermediateFnDef, IntermediateIfStatement, IntermediateStatement, IntermediateValue, Location,
 };
 
 struct Optimizer {
@@ -102,8 +102,7 @@ impl Optimizer {
                         ret,
                     }) => {
                         self.generate_constraints(statements);
-                        let dependents =
-                            self.used_value(&ret.0).map(|v| vec![v]).unwrap_or_default();
+                        let dependents = self.used_value(&ret.0).iter().cloned().collect_vec();
                         self.add_single_constraint(location.clone(), dependents);
                     }
                     IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
@@ -120,8 +119,7 @@ impl Optimizer {
                         lowering::IntermediateValue::IntermediateMemory(fn_) => {
                             self.add_single_constraint(location.clone(), vec![fn_.clone()]);
                             for (loc, arg) in zip_eq(self.fn_args[&fn_].clone(), args) {
-                                let dependents =
-                                    self.used_value(arg).map(|x| vec![x]).unwrap_or_default();
+                                let dependents = self.used_value(arg).iter().cloned().collect_vec();
                                 self.add_double_constraint(loc, location.clone(), dependents)
                             }
                         }
@@ -142,7 +140,26 @@ impl Optimizer {
                         self.add_single_constraint(location.clone(), used_values)
                     }
                 },
-                IntermediateStatement::IntermediateIfStatement(_) => todo!(),
+                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                    condition,
+                    branches,
+                }) => {
+                    let targets = (
+                        HashSet::<Location>::from_iter(IntermediateStatement::all_targets(
+                            &branches.0,
+                        )),
+                        HashSet::<Location>::from_iter(IntermediateStatement::all_targets(
+                            &branches.1,
+                        )),
+                    );
+                    self.generate_constraints(&branches.0);
+                    self.generate_constraints(&branches.1);
+                    let shared_targets = targets.0.intersection(&targets.1);
+                    for target in shared_targets {
+                        let dependents = self.used_value(condition).iter().cloned().collect();
+                        self.add_single_constraint(target.clone(), dependents);
+                    }
+                }
                 IntermediateStatement::IntermediateMatchStatement(_) => todo!(),
             }
         }
@@ -163,7 +180,8 @@ mod tests {
     use lowering::{
         AtomicTypeEnum, Boolean, Id, Integer, IntermediateArg, IntermediateBuiltIn,
         IntermediateElementAccess, IntermediateFnCall, IntermediateFnDef, IntermediateFnType,
-        IntermediateStatement, IntermediateTupleExpression, IntermediateType, IntermediateValue,
+        IntermediateIfStatement, IntermediateStatement, IntermediateTupleExpression,
+        IntermediateType, IntermediateValue,
     };
     use test_case::test_case;
 
@@ -559,6 +577,67 @@ mod tests {
             )
         };
         "reassigned fn"
+    )]
+    #[test_case(
+        {
+            let c = Location::new();
+            (
+                vec![
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (Vec::new(), Vec::new())
+                    }.into()
+                ],
+                Vec::new(),
+                Vec::new()
+            )
+        };
+        "empty if statement"
+    )]
+    #[test_case(
+        {
+            let c = Location::new();
+            let x = Location::new();
+            let y = Location::new();
+            let z = Location::new();
+            (
+                vec![
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: x.clone().into(),
+                                    expression: Rc::new(RefCell::new(
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                    ))
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: z.clone().into(),
+                                    expression: Rc::new(RefCell::new(
+                                        IntermediateValue::from(x.clone()).into()
+                                    ))
+                                }.into(),
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: z.clone().into(),
+                                    expression: Rc::new(RefCell::new(
+                                        IntermediateValue::from(y.clone()).into()
+                                    ))
+                                }.into(),
+                            ],
+                        )
+                    }.into()
+                ],
+                vec![(
+                    z,
+                    vec![c, x, y]
+                )],
+                Vec::new()
+            )
+        };
+        "if statement"
     )]
     fn test_constraint_generation(
         statements_singles_doubles: (

@@ -742,7 +742,7 @@ impl IntermediateStatement {
                 .collect(),
         }
     }
-    fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
+    pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
         statements
             .iter()
             .flat_map(|statement| statement.targets())
