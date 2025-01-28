@@ -85,6 +85,6 @@ run: build
 	./$(TARGET) $(FLAGS)
 
 %: $(TARGET_DIR)/%
-	ASAN_OPTIONS=detect_leaks=0 ./$<
+	ASAN_OPTIONS=detect_stack_use_after_return=1 ASAN_OPTIONS=detect_leaks=0 ./$<
 
 .PHONY: all build clean default run

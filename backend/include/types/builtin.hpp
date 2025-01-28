@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <variant>
 
 typedef int64_t Int;
 typedef bool Bool;

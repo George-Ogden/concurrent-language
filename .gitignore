@@ -2,6 +2,7 @@
 grammar
 *.interp
 *.tokens
+build_/
 
 # Last file has
 .last-file-hash-*

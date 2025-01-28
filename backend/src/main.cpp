@@ -7,12 +7,12 @@
 int main() {
     auto start = std::chrono::high_resolution_clock::now();
 
-    Main main{};
-    WorkManager::run(&main);
+    std::shared_ptr<Main> main = std::make_shared<Main>();
+    WorkManager::run(main);
 
     auto end = std::chrono::high_resolution_clock::now();
 
-    std::cout << main.value() << std::endl;
+    std::cout << main->value() << std::endl;
 
     auto duration =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);

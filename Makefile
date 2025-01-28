@@ -62,7 +62,7 @@ $(GRAMMAR): Grammar.g4
 	touch $@/__init__.py
 	touch $@
 
-test: $(PARSER) $(TYPE_CHECKER)
+test: build
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
@@ -70,9 +70,8 @@ test: $(PARSER) $(TYPE_CHECKER)
 	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
-	ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
+	ASAN_OPTIONS=detect_stack_use_after_return=1 ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/*; do \
-		echo $$sample ;\
 		if [ "$$sample" != "samples/grammar.txt" ]; then \
 			make build FILE=$$sample || exit 1; \
 		fi \

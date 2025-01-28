@@ -12,14 +12,15 @@
 class Fn;
 
 struct WorkManager {
-    static inline Locked<std::deque<Fn *>> queue;
+    static inline Locked<std::deque<std::shared_ptr<Fn>>> queue;
     static inline std::vector<std::atomic<unsigned>> counters;
-    static void run(Fn *fn);
+    static void call(std::shared_ptr<Fn> fn);
+    static void run(std::shared_ptr<Fn> fn);
     template <typename... Vs> static void await(Vs &...vs);
 
   protected:
-    static std::monostate main(std::atomic<Fn *> *ref);
-    static Fn *get_work();
+    static std::monostate main(std::atomic<std::shared_ptr<Fn>> *ref);
+    static std::shared_ptr<Fn> get_work();
     template <typename... Vs> static bool all_done(Vs &&...vs) {
         return (... && vs->done());
     }
