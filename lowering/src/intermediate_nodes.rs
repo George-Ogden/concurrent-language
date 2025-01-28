@@ -327,7 +327,6 @@ impl From<IntermediateBuiltIn> for IntermediateExpression {
 pub struct ExpressionEqualityChecker {
     true_history: HashMap<Location, Location>,
     history: HashMap<Location, Location>,
-    args: HashMap<*mut IntermediateType, *mut IntermediateType>,
 }
 
 impl ExpressionEqualityChecker {
@@ -339,24 +338,18 @@ impl ExpressionEqualityChecker {
         ExpressionEqualityChecker {
             true_history: HashMap::new(),
             history: HashMap::new(),
-            args: HashMap::new(),
         }
     }
     fn equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) -> bool {
-        let IntermediateArg(t1) = a1;
-        let IntermediateArg(t2) = a2;
-        if self.args.get(&t1.as_ptr()) == Some(&t2.as_ptr()) {
-            true
-        } else if matches!(self.args.get(&t1.as_ptr()), Some(_))
-            || matches!(self.args.get(&t2.as_ptr()), Some(_))
-            || t1 != t2
-        {
-            false
-        } else {
-            self.args.insert(t1.as_ptr(), t2.as_ptr());
-            self.args.insert(t2.as_ptr(), t1.as_ptr());
-            true
-        }
+        let IntermediateArg {
+            location: l1,
+            type_: _,
+        } = a1;
+        let IntermediateArg {
+            location: l2,
+            type_: _,
+        } = a2;
+        self.equal_locations(l1, l2)
     }
     fn equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) -> bool {
         a1.len() == a2.len()
@@ -592,32 +585,30 @@ impl ExpressionEqualityChecker {
     }
 }
 
-#[derive(Clone, Eq)]
-pub struct IntermediateArg(pub Rc<RefCell<IntermediateType>>);
-
-impl fmt::Debug for IntermediateArg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("IntermediateArg")
-            .field(&self.0.as_ptr())
-            .finish()
-    }
+#[derive(Clone, Eq, Debug)]
+pub struct IntermediateArg {
+    pub type_: IntermediateType,
+    pub location: Location,
 }
 
 impl PartialEq for IntermediateArg {
     fn eq(&self, other: &Self) -> bool {
-        self.0.as_ptr() == other.0.as_ptr()
+        self.location == other.location
     }
 }
 
 impl From<IntermediateType> for IntermediateArg {
     fn from(value: IntermediateType) -> Self {
-        IntermediateArg(Rc::new(RefCell::new(value)))
+        IntermediateArg {
+            type_: value,
+            location: Location::new(),
+        }
     }
 }
 
 impl Hash for IntermediateArg {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.as_ptr().hash(state);
+        self.location.hash(state);
     }
 }
 

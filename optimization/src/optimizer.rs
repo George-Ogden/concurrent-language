@@ -313,7 +313,6 @@ mod tests {
             let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
             let x = Location::new();
             let y = Location::new();
-            dbg!(&id, &arg, &x, &y);
             (
                 vec![
                     IntermediateAssignment{
