@@ -1,7 +1,7 @@
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
 
-PARSER := parser
-GRAMMAR := parser/grammar
+PARSER := parsing
+GRAMMAR := parsing/grammar
 TYPE_CHECKER := type-checker/target/debug/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
 TRANSLATOR := translation/target/debug/libtranslation.d
