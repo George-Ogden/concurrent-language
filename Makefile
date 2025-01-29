@@ -50,7 +50,10 @@ $(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
 $(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
 	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
 
-$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR)
+$(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
+	cargo build --manifest-path $(OPTIMIZER_MANIFEST)
+
+$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST)
 
 $(BACKEND):

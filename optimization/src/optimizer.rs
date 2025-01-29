@@ -13,7 +13,7 @@ use lowering::{
     IntermediateTupleExpression, IntermediateValue, Location,
 };
 
-struct Optimizer {
+pub struct Optimizer {
     single_constraints: HashMap<Location, HashSet<Location>>,
     double_constraints: HashMap<(Location, Location), HashSet<Location>>,
     fn_args: HashMap<Location, Vec<Location>>,
@@ -22,7 +22,7 @@ struct Optimizer {
 }
 
 impl Optimizer {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Optimizer {
             single_constraints: HashMap::new(),
             double_constraints: HashMap::new(),
@@ -461,7 +461,7 @@ impl Optimizer {
             })
             .collect_vec()
     }
-    fn remove_dead_code(program: IntermediateProgram) -> IntermediateProgram {
+    pub fn remove_dead_code(program: IntermediateProgram) -> IntermediateProgram {
         let mut optimizer = Optimizer::new();
         optimizer.generate_constraints(&program.statements);
         let IntermediateValue::IntermediateMemory(location) = &program.main else {
