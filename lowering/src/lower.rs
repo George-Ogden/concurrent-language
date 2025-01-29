@@ -967,8 +967,7 @@ mod tests {
                 memory.location.clone().into(),
                 vec![memory.into()]
             )
-        }
-        ;
+        };
         "data-free constructor"
     )]
     #[test_case(
