@@ -1,6 +1,6 @@
 use std::{
-    cmp::{max, min},
-    collections::{HashMap, HashSet},
+    cmp::minmax,
+    collections::{HashMap, HashSet, VecDeque},
 };
 
 use itertools::{zip_eq, Itertools};
@@ -54,7 +54,7 @@ impl Optimizer {
         location: Location,
         dependents: Vec<Location>,
     ) {
-        let key = (min(arg.clone(), location.clone()), max(arg, location));
+        let key = minmax(arg, location).into();
         if !self.double_constraints.contains_key(&key) {
             self.double_constraints.insert(key.clone(), HashSet::new());
         }
@@ -194,16 +194,52 @@ impl Optimizer {
             }
         }
     }
+    fn solve_constraints(&self, initial_solution: Location) -> HashSet<Location> {
+        let mut solution = HashSet::from_iter([initial_solution.clone()]);
+        let mut new_variables = VecDeque::from([initial_solution]);
+        let mut double_constraint_index: HashMap<Location, Vec<Location>> = HashMap::from_iter(
+            self.double_constraints
+                .keys()
+                .flat_map(|(l1, l2)| [(l1.clone(), Vec::new()), (l2.clone(), Vec::new())]),
+        );
+        for (k, v) in self
+            .double_constraints
+            .keys()
+            .flat_map(|(l1, l2)| [(l1.clone(), l2.clone()), (l2.clone(), l1.clone())])
+        {
+            double_constraint_index.get_mut(&k).unwrap().push(v);
+        }
+        while let Some(c) = new_variables.pop_front() {
+            if let Some(set) = self.single_constraints.get(&c) {
+                for variable in set {
+                    if !solution.contains(&variable) {
+                        solution.insert(variable.clone());
+                        new_variables.push_back(variable.clone());
+                    }
+                }
+            }
+            if let Some(others) = double_constraint_index.get(&c) {
+                for other in others {
+                    if solution.contains(other) {
+                        let key = minmax(c.clone(), other.clone()).into();
+                        for variable in &self.double_constraints[&key] {
+                            if !solution.contains(&variable) {
+                                solution.insert(variable.clone());
+                                new_variables.push_back(variable.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        solution
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::{
-        cell::RefCell,
-        cmp::{max, min},
-        rc::Rc,
-    };
+    use std::{cell::RefCell, rc::Rc};
 
     use super::*;
 
@@ -768,12 +804,7 @@ mod tests {
         let expected_double_constraints = HashMap::from_iter(
             expected_double_constraints
                 .into_iter()
-                .map(|((loc1, loc2), v)| {
-                    (
-                        (min(loc1.clone(), loc2.clone()), max(loc1, loc2)),
-                        HashSet::from_iter(v),
-                    )
-                }),
+                .map(|((loc1, loc2), v)| (minmax(loc1, loc2).into(), HashSet::from_iter(v))),
         );
 
         let single_constraints: HashMap<_, _> = optimizer
@@ -783,5 +814,91 @@ mod tests {
             .collect();
         assert_eq!(single_constraints, expected_single_constraints);
         assert_eq!(optimizer.double_constraints, expected_double_constraints);
+    }
+
+    #[test_case(
+        {
+            let location = Location::new();
+            (
+                location.clone(),
+                (Vec::new(), Vec::new()),
+                vec![location]
+            )
+        };
+        "no constraints"
+    )]
+    #[test_case(
+        {
+            let a = Location::new();
+            let b = Location::new();
+            let c = Location::new();
+            let d = Location::new();
+            let e = Location::new();
+            let f = Location::new();
+            (
+                a.clone(),
+                (
+                    vec![
+                        (a.clone(), vec![b.clone()]),
+                        (b.clone(), vec![a.clone(), c.clone()]),
+                        (c.clone(), vec![e.clone()]),
+                        (d.clone(), vec![e.clone()]),
+                        (e.clone(), Vec::new()),
+                        (f.clone(), vec![d.clone()]),
+                    ],
+                    Vec::new()
+                ),
+                vec![a,b,c,e]
+            )
+        };
+        "single constraints only"
+    )]
+    #[test_case(
+        {
+            let a = Location::new();
+            let b = Location::new();
+            let c = Location::new();
+            let d = Location::new();
+            let e = Location::new();
+            let f = Location::new();
+            (
+                a.clone(),
+                (
+                    vec![
+                        (a.clone(), vec![b.clone()]),
+                        (e.clone(), vec![d.clone()]),
+                    ],
+                    vec![
+                        ((a.clone(), b.clone()), vec![c.clone()]),
+                        ((b.clone(), c.clone()), vec![a.clone(),f.clone()]),
+                        ((a.clone(), d.clone()), vec![e.clone()]),
+                    ]
+                ),
+                vec![a,b,c,f]
+            )
+        };
+        "mixed constraints"
+    )]
+    fn test_solving_constraints(
+        initial_constraints_solution: (
+            Location,
+            (
+                Vec<(Location, Vec<Location>)>,
+                Vec<((Location, Location), Vec<Location>)>,
+            ),
+            Vec<Location>,
+        ),
+    ) {
+        let (initial_solution, (single_constraints, double_constraints), expected_solution) =
+            initial_constraints_solution;
+        let mut optimizer = Optimizer::new();
+        for (k, v) in single_constraints {
+            optimizer.add_single_constraint(k, v);
+        }
+        for ((l1, l2), v) in double_constraints {
+            optimizer.add_double_constraint(l1, l2, v);
+        }
+        let solution = optimizer.solve_constraints(initial_solution);
+        assert_eq!(solution, HashSet::from_iter(expected_solution));
     }
 }
