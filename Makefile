@@ -10,6 +10,8 @@ LOWERER := lowering/target/debug/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
 COMPILER := compilation/target/debug/libcompilation.d
 COMPILER_MANIFEST := compilation/Cargo.toml
+OPTIMIZER := optimization/target/debug/optimization
+OPTIMIZER_MANIFEST := optimization/Cargo.toml
 PIPELINE := pipeline/target/debug/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
@@ -68,6 +70,7 @@ test: build
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
+	cargo test --manifest-path $(OPTIMIZER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_stack_use_after_return=1 ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
