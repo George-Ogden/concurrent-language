@@ -48,9 +48,9 @@ struct ParametricFn : public Fn, Lazy<Ret> {
             Lazy<std::decay_t<Args>>>... args) requires(sizeof...(Args) > 0)
         : args(args...) {}
 
-    // explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
-    //                           Args>>... args) requires(sizeof...(Args) > 0)
-    //     : args(reference_all(args...)) {}
+    explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
+                              Args>>... args) requires(sizeof...(Args) > 0)
+        : args(reference_all(args...)) {}
     virtual ~ParametricFn() { cleanup_args(); }
     virtual std::shared_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
     virtual std::shared_ptr<Lazy<R>>
