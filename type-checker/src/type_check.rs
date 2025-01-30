@@ -12,7 +12,7 @@ use crate::{
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     ParametricExpression, Program, TransparentTypeDefinition, TupleExpression, TupleType,
     TypeAtomic, TypeFn, TypeInstance, TypeInstantiation, TypeTuple, TypeUnion, TypeVariable,
-    UnionTypeDefinition, Variable,
+    TypedStatement, UnionTypeDefinition, Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -886,7 +886,10 @@ impl TypeChecker {
         let typed_expression =
             self.check_expression(*block.expression, &new_context, generic_variables)?;
         let block = TypedBlock {
-            assignments,
+            statements: assignments
+                .into_iter()
+                .map(TypedStatement::from)
+                .collect_vec(),
             expression: Box::new(typed_expression),
         };
         self.check_functions_in_block(block, &new_context, generic_variables)
@@ -1011,10 +1014,10 @@ impl TypeChecker {
         generic_variables: &GenericVariables,
     ) -> Result<TypedBlock, TypeCheckError> {
         Ok(TypedBlock {
-            assignments: block
-                .assignments
+            statements: block
+                .statements
                 .into_iter()
-                .map(|assignment| {
+                .map(|TypedStatement::TypedAssignment(assignment)| {
                     let mut generic_variables = generic_variables.clone();
                     generic_variables.extend(
                         GenericVariables::from(assignment.expression.parameters.clone())
@@ -1025,12 +1028,15 @@ impl TypeChecker {
                         context,
                         &generic_variables,
                     )
-                    .map(|expression| TypedAssignment {
-                        variable: assignment.variable,
-                        expression: ParametricExpression {
-                            expression,
-                            parameters: assignment.expression.parameters,
-                        },
+                    .map(|expression| {
+                        TypedAssignment {
+                            variable: assignment.variable,
+                            expression: ParametricExpression {
+                                expression,
+                                parameters: assignment.expression.parameters,
+                            },
+                        }
+                        .into()
                     })
                 })
                 .collect::<Result<_, _>>()?,
@@ -1130,7 +1136,7 @@ impl TypeChecker {
         Ok(TypedProgram {
             type_definitions: type_checker.type_definitions,
             main: variable,
-            assignments: typed_block.assignments,
+            statements: typed_block.statements,
         })
     }
     pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {

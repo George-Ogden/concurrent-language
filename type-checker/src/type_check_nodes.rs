@@ -903,16 +903,29 @@ impl TypedExpression {
                 .all(|(e1, e2)| Self::equal(e1, e2))
     }
     pub fn equal_blocks(b1: &TypedBlock, b2: &TypedBlock) -> bool {
-        b1.assignments.len() == b2.assignments.len()
-            && b1
-                .assignments
-                .iter()
-                .zip_eq(b2.assignments.iter())
-                .all(|(a1, a2)| {
-                    a1.variable.type_ == a2.variable.type_
-                        && Self::equal(&a1.expression.expression, &a2.expression.expression)
-                })
+        Self::equal_statements(&b1.statements, &b2.statements)
             && Self::equal(&b1.expression, &b2.expression)
+    }
+    pub fn equal_statements(s1: &Vec<TypedStatement>, s2: &Vec<TypedStatement>) -> bool {
+        s1.len() == s2.len()
+            && s1
+                .iter()
+                .zip_eq(s2.iter())
+                .all(|(s1, s2)| Self::equal_statement(s1, s2))
+    }
+    pub fn equal_statement(s1: &TypedStatement, s2: &TypedStatement) -> bool {
+        match (s1, s2) {
+            (
+                TypedStatement::TypedAssignment(TypedAssignment {
+                    variable: v1,
+                    expression: e1,
+                }),
+                TypedStatement::TypedAssignment(TypedAssignment {
+                    variable: v2,
+                    expression: e2,
+                }),
+            ) => v1.type_ == v2.type_ && Self::equal(&e1.expression, &e2.expression),
+        }
     }
 }
 
@@ -940,6 +953,27 @@ impl From<TypedExpression> for ParametricExpression {
         ParametricExpression {
             expression: value,
             parameters: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, FromVariants)]
+pub enum TypedStatement {
+    TypedAssignment(TypedAssignment),
+}
+
+impl TypedStatement {
+    pub fn instantiate_statements(statements: &Vec<Self>) -> Vec<Self> {
+        statements
+            .iter()
+            .map(|statement| statement.instantiate())
+            .collect()
+    }
+    pub fn instantiate(&self) -> Self {
+        match self {
+            TypedStatement::TypedAssignment(typed_assignment) => {
+                typed_assignment.instantiate().into()
+            }
         }
     }
 }
@@ -976,7 +1010,7 @@ impl TypedAssignment {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedBlock {
-    pub assignments: Vec<TypedAssignment>,
+    pub statements: Vec<TypedStatement>,
     pub expression: Box<TypedExpression>,
 }
 
@@ -986,7 +1020,7 @@ impl TypedBlock {
     }
     pub fn instantiate(&self) -> TypedBlock {
         TypedBlock {
-            assignments: TypedAssignment::instantiate_assignments(&self.assignments),
+            statements: TypedStatement::instantiate_statements(&self.statements),
             expression: Box::new((*self.expression).instantiate()),
         }
     }
@@ -996,7 +1030,7 @@ impl TypedBlock {
 pub struct TypedProgram {
     pub type_definitions: TypeDefinitions,
     pub main: TypedVariable,
-    pub assignments: Vec<TypedAssignment>,
+    pub statements: Vec<TypedStatement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1483,7 +1517,7 @@ mod tests {
                 expression: TypedFunctionDefinition{
                     parameters: vec![arg0.clone(), arg1.clone()],
                     body: TypedBlock{
-                        assignments: Vec::new(),
+                        statements: Vec::new(),
                         expression: Box::new(TypedTuple{
                             expressions: vec![
                                 TypedAccess{
@@ -1508,7 +1542,7 @@ mod tests {
             TypedFunctionDefinition{
                 parameters: vec![arg0.clone(), arg1.clone()],
                 body: TypedBlock{
-                    assignments: Vec::new(),
+                    statements: Vec::new(),
                     expression: Box::new(TypedTuple{
                         expressions: vec![
                             TypedAccess{
@@ -1539,7 +1573,7 @@ mod tests {
                 expression: TypedFunctionDefinition{
                     parameters: vec![arg0.clone(), arg1.clone()],
                     body: TypedBlock{
-                        assignments: vec![
+                        statements: vec![
                             TypedAssignment{
                                 variable: variable.clone(),
                                 expression: TypedExpression::from(TypedFunctionCall{
@@ -1575,7 +1609,7 @@ mod tests {
             TypedFunctionDefinition{
                 parameters: vec![arg0.clone(), arg1.clone()],
                 body: TypedBlock{
-                    assignments: vec![
+                    statements: vec![
                         TypedAssignment{
                             variable: variable.clone(),
                             expression: TypedExpression::from(TypedFunctionCall{
@@ -1615,7 +1649,7 @@ mod tests {
                 expression: TypedFunctionDefinition{
                     parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
                     body: TypedBlock{
-                        assignments: Vec::new(),
+                        statements: Vec::new(),
                         expression: Box::new(TypedIf{
                             condition: Box::new(
                                 TypedAccess{
@@ -1624,7 +1658,7 @@ mod tests {
                                 }.into(),
                             ),
                             true_block: TypedBlock {
-                                assignments: Vec::new(),
+                                statements: Vec::new(),
                                 expression: Box::new(
                                     TypedAccess{
                                         variable: arg1.into(),
@@ -1633,7 +1667,7 @@ mod tests {
                                 )
                             },
                             false_block: TypedBlock {
-                                assignments: Vec::new(),
+                                statements: Vec::new(),
                                 expression: Box::new(
                                     TypedAccess{
                                         variable: arg2.into(),
@@ -1655,7 +1689,7 @@ mod tests {
             TypedFunctionDefinition{
                 parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
                 body: TypedBlock{
-                    assignments: Vec::new(),
+                    statements: Vec::new(),
                     expression: Box::new(TypedIf{
                         condition: Box::new(
                             TypedAccess{
@@ -1664,7 +1698,7 @@ mod tests {
                             }.into(),
                         ),
                         true_block: TypedBlock {
-                            assignments: Vec::new(),
+                            statements: Vec::new(),
                             expression: Box::new(
                                 TypedAccess{
                                     variable: arg1.into(),
@@ -1673,7 +1707,7 @@ mod tests {
                             )
                         },
                         false_block: TypedBlock {
-                            assignments: Vec::new(),
+                            statements: Vec::new(),
                             expression: Box::new(
                                 TypedAccess{
                                     variable: arg2.into(),
@@ -1701,7 +1735,7 @@ mod tests {
                 expression: TypedFunctionDefinition{
                     parameters: vec![arg.clone()],
                     body: TypedBlock{
-                        assignments: vec![
+                        statements: vec![
                             TypedAssignment{
                                 variable: variable.clone(),
                                 expression: TypedExpression::from(TypedConstructorCall{
@@ -1732,7 +1766,7 @@ mod tests {
                                         }
                                     ],
                                     block: TypedBlock {
-                                        assignments: Vec::new(),
+                                        statements: Vec::new(),
                                         expression: Box::new(
                                             TypedAccess{
                                                 variable: subvariable.into(),
@@ -1749,7 +1783,7 @@ mod tests {
                                         }
                                     ],
                                     block: TypedBlock {
-                                        assignments: Vec::new(),
+                                        statements: Vec::new(),
                                         expression: Box::new(
                                             TypedAccess{
                                                 variable: arg.into(),
@@ -1774,7 +1808,7 @@ mod tests {
             TypedFunctionDefinition{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
-                    assignments: vec![
+                    statements: vec![
                         TypedAssignment{
                             variable: variable.clone(),
                             expression: TypedExpression::from(TypedConstructorCall{
@@ -1805,7 +1839,7 @@ mod tests {
                                     }
                                 ],
                                 block: TypedBlock {
-                                    assignments: Vec::new(),
+                                    statements: Vec::new(),
                                     expression: Box::new(
                                         TypedAccess{
                                             variable: subvariable.into(),
@@ -1822,7 +1856,7 @@ mod tests {
                                     }
                                 ],
                                 block: TypedBlock {
-                                    assignments: Vec::new(),
+                                    statements: Vec::new(),
                                     expression: Box::new(
                                         TypedAccess{
                                             variable: arg.into(),
