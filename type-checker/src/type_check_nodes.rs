@@ -121,48 +121,72 @@ impl From<Type> for TypedVariable {
     }
 }
 
-#[derive(Clone, Eq)]
-pub enum Type {
-    Atomic(AtomicTypeEnum),
-    Union(Id, Vec<Option<Type>>),
-    Instantiation(Rc<RefCell<ParametricType>>, Vec<Type>),
-    Tuple(Vec<Type>),
-    Function(Vec<Type>, Box<Type>),
-    Variable(Rc<RefCell<Option<Type>>>),
+macro_rules! strict_partial_eq {
+    ($t:ty) => {
+        impl PartialEq for $t {
+            fn eq(&self, other: &Self) -> bool {
+                Self::strict_equality(self, other, std::collections::HashSet::new())
+            }
+        }
+    };
 }
 
-impl PartialEq for Type {
-    fn eq(&self, other: &Type) -> bool {
-        Type::strict_equality(self, other, HashSet::new())
+#[derive(Clone, Eq, Hash, FromVariants)]
+pub enum Type {
+    TypeAtomic(TypeAtomic),
+    TypeUnion(TypeUnion),
+    TypeInstantiation(TypeInstantiation),
+    TypeTuple(TypeTuple),
+    TypeFn(TypeFn),
+    TypeVariable(TypeVariable),
+}
+
+impl From<AtomicTypeEnum> for Type {
+    fn from(value: AtomicTypeEnum) -> Type {
+        TypeAtomic(value).into()
     }
 }
 
+strict_partial_eq!(Type);
+
+type Visited = HashSet<*mut ParametricType>;
+
 impl Type {
     pub fn new() -> Self {
-        Type::Tuple(Vec::new())
+        TypeTuple(Vec::new()).into()
     }
     pub fn instantiate_types(types: &Vec<Self>) -> Vec<Type> {
         types.iter().map(Type::instantiate).collect_vec()
     }
     pub fn instantiate(&self) -> Type {
         match self {
-            Self::Atomic(_) => self.clone(),
-            Self::Tuple(types) => Type::Tuple(Type::instantiate_types(types)),
-            Self::Union(id, types) => Type::Union(
-                id.clone(),
-                types
+            Self::TypeAtomic(_) => self.clone(),
+            Self::TypeTuple(TypeTuple(types)) => TypeTuple(Type::instantiate_types(types)).into(),
+            Self::TypeUnion(TypeUnion {
+                id,
+                variants: types,
+            }) => TypeUnion {
+                id: id.clone(),
+                variants: types
                     .iter()
                     .map(|type_| type_.clone().map(|type_| type_.instantiate()))
                     .collect(),
-            ),
-            Self::Instantiation(parametric_type, types) => {
-                Type::Instantiation(parametric_type.clone(), Self::instantiate_types(types))
             }
-            Self::Function(arg_types, return_type) => Type::Function(
+            .into(),
+            Self::TypeInstantiation(TypeInstantiation {
+                reference: parametric_type,
+                instances: types,
+            }) => TypeInstantiation {
+                reference: parametric_type.clone(),
+                instances: Self::instantiate_types(types),
+            }
+            .into(),
+            Self::TypeFn(TypeFn(arg_types, return_type)) => TypeFn(
                 Self::instantiate_types(arg_types),
                 Box::new(return_type.instantiate()),
-            ),
-            Self::Variable(i) => i.borrow().clone().unwrap_or(self.clone()),
+            )
+            .into(),
+            Self::TypeVariable(TypeVariable(v)) => v.borrow().clone().unwrap_or(self.clone()),
         }
     }
     pub fn types_equality(
@@ -196,14 +220,26 @@ impl Type {
         equal_references: &mut HashMap<*mut ParametricType, *mut ParametricType>,
     ) -> bool {
         match (t1, t2) {
-            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2))
-                if r1.as_ptr() == r2.as_ptr() =>
-            {
-                Type::types_equality(t1, t2, equal_references)
-            }
-            (Self::Instantiation(r1, t1), Self::Instantiation(r2, t2))
-                if r1.as_ptr() != r2.as_ptr() =>
-            {
+            (
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: t1,
+                }),
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r2,
+                    instances: t2,
+                }),
+            ) if r1.as_ptr() == r2.as_ptr() => Type::types_equality(t1, t2, equal_references),
+            (
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: t1,
+                }),
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r2,
+                    instances: t2,
+                }),
+            ) if r1.as_ptr() != r2.as_ptr() => {
                 if equal_references.get(&r1.as_ptr()) == Some(&r2.as_ptr()) {
                     true
                 } else {
@@ -215,11 +251,31 @@ impl Type {
                     )
                 }
             }
-            (Self::Instantiation(r1, t1), t2) | (t2, Self::Instantiation(r1, t1)) => {
-                Type::type_equality(t2, &r1.borrow().instantiate(t1), equal_references)
-            }
-            (Self::Atomic(a1), Self::Atomic(a2)) => a1 == a2,
-            (Self::Union(i1, t1), Self::Union(i2, t2)) => {
+            (
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: t1,
+                }),
+                t2,
+            )
+            | (
+                t2,
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: t1,
+                }),
+            ) => Type::type_equality(t2, &r1.borrow().instantiate(t1), equal_references),
+            (Self::TypeAtomic(a1), Self::TypeAtomic(a2)) => a1 == a2,
+            (
+                Self::TypeUnion(TypeUnion {
+                    id: i1,
+                    variants: t1,
+                }),
+                Self::TypeUnion(TypeUnion {
+                    id: i2,
+                    variants: t2,
+                }),
+            ) => {
                 i1 == i2
                     && t1.len() == t2.len()
                     && t1
@@ -227,35 +283,45 @@ impl Type {
                         .zip_eq(t2.iter())
                         .all(|(t1, t2)| Type::option_type_equality(t1, t2, equal_references))
             }
-            (Self::Tuple(t1), Self::Tuple(t2)) => Type::types_equality(t1, t2, equal_references),
-            (Self::Function(a1, r1), Self::Function(a2, r2)) => {
+            (Self::TypeTuple(TypeTuple(t1)), Self::TypeTuple(TypeTuple(t2))) => {
+                Type::types_equality(t1, t2, equal_references)
+            }
+            (Self::TypeFn(TypeFn(a1, r1)), Self::TypeFn(TypeFn(a2, r2))) => {
                 Type::types_equality(a1, a2, equal_references)
                     && Type::type_equality(r1, r2, equal_references)
             }
-            (Self::Variable(r1), Self::Variable(r2)) => {
+            (Self::TypeVariable(TypeVariable(r1)), Self::TypeVariable(TypeVariable(r2))) => {
                 r1.as_ptr() == r2.as_ptr()
                     || Type::option_type_equality(&r1.borrow(), &r2.borrow(), equal_references)
             }
             _ => false,
         }
     }
-    pub fn strict_equality(
-        t1: &Self,
-        t2: &Self,
-        mut visited: HashSet<*mut ParametricType>,
-    ) -> bool {
+    pub fn strict_equality(t1: &Self, t2: &Self, mut visited: Visited) -> bool {
         match (t1, t2) {
-            (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
-            (Type::Union(s1, t1), Type::Union(s2, t2)) => {
-                s1 == s2 && Type::strict_equalities_option(t1, t2, visited)
+            (Type::TypeAtomic(a1), Type::TypeAtomic(a2)) => {
+                TypeAtomic::strict_equality(a1, a2, visited)
             }
-            (Type::Tuple(t1), Type::Tuple(t2)) => Type::strict_equalities(t1, t2, visited),
-            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
-                Type::strict_equalities(a1, a2, visited.clone())
-                    && Type::strict_equality(r1, r2, visited)
+            (Type::TypeUnion(u1), Type::TypeUnion(u2)) => {
+                TypeUnion::strict_equality(u1, u2, visited)
             }
-            (Type::Variable(r1), Type::Variable(r2)) => r1.as_ptr() == r2.as_ptr(),
-            (Type::Instantiation(r1, v1), Type::Instantiation(r2, v2)) => {
+            (Type::TypeTuple(t1), Type::TypeTuple(t2)) => {
+                TypeTuple::strict_equality(t1, t2, visited)
+            }
+            (Type::TypeFn(f1), Type::TypeFn(f2)) => TypeFn::strict_equality(f1, f2, visited),
+            (Type::TypeVariable(v1), Type::TypeVariable(v2)) => {
+                TypeVariable::strict_equality(v1, v2, visited)
+            }
+            (
+                Type::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: v1,
+                }),
+                Type::TypeInstantiation(TypeInstantiation {
+                    reference: r2,
+                    instances: v2,
+                }),
+            ) => {
                 let p1 = r1.as_ptr();
                 let p2 = r2.as_ptr();
                 if p1 == p2 && Type::strict_equalities(v1, v2, visited.clone()) {
@@ -272,7 +338,20 @@ impl Type {
                     }
                 }
             }
-            (t2, Self::Instantiation(r1, v1)) | (Self::Instantiation(r1, v1), t2) => {
+            (
+                t2,
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: v1,
+                }),
+            )
+            | (
+                Self::TypeInstantiation(TypeInstantiation {
+                    reference: r1,
+                    instances: v1,
+                }),
+                t2,
+            ) => {
                 let p1 = r1.as_ptr();
                 if visited.contains(&p1) {
                     false
@@ -309,64 +388,118 @@ impl Type {
     }
 }
 
-pub const TYPE_INT: Type = Type::Atomic(AtomicTypeEnum::INT);
-pub const TYPE_BOOL: Type = Type::Atomic(AtomicTypeEnum::BOOL);
-pub const TYPE_UNIT: Type = Type::Tuple(Vec::new());
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct TypeAtomic(pub AtomicTypeEnum);
+
+impl TypeAtomic {
+    fn strict_equality(&self, other: &Self, _: Visited) -> bool {
+        self == other
+    }
+}
+
+#[derive(Clone, Eq, Hash)]
+pub struct TypeUnion {
+    pub id: Id,
+    pub variants: Vec<Option<Type>>,
+}
+
+strict_partial_eq!(TypeUnion);
+
+impl TypeUnion {
+    fn strict_equality(&self, other: &Self, visited: Visited) -> bool {
+        self.id == other.id
+            && Type::strict_equalities_option(&self.variants, &other.variants, visited)
+    }
+}
+
+#[derive(Clone, Eq)]
+pub struct TypeInstantiation {
+    pub reference: Rc<RefCell<ParametricType>>,
+    pub instances: Vec<Type>,
+}
+
+strict_partial_eq!(TypeInstantiation);
+
+impl TypeInstantiation {
+    fn strict_equality(&self, other: &Self, visited: Visited) -> bool {
+        Type::strict_equality(&self.clone().into(), &other.clone().into(), visited)
+    }
+}
+
+impl Hash for TypeInstantiation {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.reference.as_ptr().hash(state);
+        self.instances.hash(state);
+    }
+}
+
+#[derive(Clone, Eq, Hash)]
+pub struct TypeTuple(pub Vec<Type>);
+
+strict_partial_eq!(TypeTuple);
+
+impl TypeTuple {
+    fn strict_equality(&self, other: &Self, visited: Visited) -> bool {
+        Type::strict_equalities(&self.0, &other.0, visited)
+    }
+}
+
+#[derive(Clone, Eq, Hash)]
+pub struct TypeFn(pub Vec<Type>, pub Box<Type>);
+
+strict_partial_eq!(TypeFn);
+
+impl TypeFn {
+    fn strict_equality(&self, other: &Self, visited: Visited) -> bool {
+        Type::strict_equalities(&self.0, &other.0, visited.clone())
+            && Type::strict_equality(&self.1, &other.1, visited)
+    }
+}
+
+#[derive(Clone, Eq)]
+pub struct TypeVariable(pub Rc<RefCell<Option<Type>>>);
+
+strict_partial_eq!(TypeVariable);
+
+impl TypeVariable {
+    fn strict_equality(&self, other: &Self, _: Visited) -> bool {
+        self.0.as_ptr() == other.0.as_ptr()
+    }
+}
+
+impl Hash for TypeVariable {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_ptr().hash(state);
+    }
+}
+
+pub const TYPE_INT: Type = Type::TypeAtomic(TypeAtomic(AtomicTypeEnum::INT));
+pub const TYPE_BOOL: Type = Type::TypeAtomic(TypeAtomic(AtomicTypeEnum::BOOL));
+pub const TYPE_UNIT: Type = Type::TypeTuple(TypeTuple(Vec::new()));
 
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::Atomic(atomic_type) => write!(f, "Atomic({:?})", atomic_type),
-            Type::Union(id, variants) => {
-                write!(f, "Union({:?},{:?})", id, variants.iter().collect_vec())
+            Type::TypeAtomic(TypeAtomic(atomic_type)) => write!(f, "AtomicType({:?})", atomic_type),
+            Type::TypeUnion(TypeUnion { id, variants }) => {
+                write!(f, "TypeUnion({:?},{:?})", id, variants.iter().collect_vec())
             }
-            Type::Instantiation(reference, instances) => {
+            Type::TypeInstantiation(TypeInstantiation {
+                reference,
+                instances,
+            }) => {
                 write!(
                     f,
-                    "Instantiation({:p},{:?})",
+                    "TypeInstantiation({:p},{:?})",
                     Rc::as_ptr(reference),
                     instances
                 )
             }
-            Type::Tuple(types) => write!(f, "Tuple({:?})", types),
-            Type::Function(argument_type, return_type) => {
-                write!(f, "Function({:?},{:?})", argument_type, return_type)
+            Type::TypeTuple(TypeTuple(types)) => write!(f, "TypeTuple({:?})", types),
+            Type::TypeFn(TypeFn(argument_type, return_type)) => {
+                write!(f, "TypeFn({:?},{:?})", argument_type, return_type)
             }
-            Type::Variable(idx) => write!(f, "Variable({:?})", idx.as_ptr()),
-        }
-    }
-}
-
-impl Hash for Type {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Type::Atomic(atomic) => {
-                0.hash(state);
-                atomic.hash(state)
-            }
-            Type::Union(name, types) => {
-                1.hash(state);
-                name.hash(state);
-                types.hash(state)
-            }
-            Type::Instantiation(type_, params) => {
-                2.hash(state);
-                type_.as_ptr().hash(state);
-                params.hash(state)
-            }
-            Type::Tuple(types) => {
-                3.hash(state);
-                types.hash(state);
-            }
-            Type::Function(args, ret) => {
-                4.hash(state);
-                args.hash(state);
-                ret.hash(state)
-            }
-            Type::Variable(var) => {
-                5.hash(state);
-                var.as_ptr().hash(state)
-            }
+            Type::TypeVariable(TypeVariable(idx)) => write!(f, "TypeVariable({:?})", idx.as_ptr()),
         }
     }
 }
@@ -513,14 +646,14 @@ impl TypedExpression {
             Self::Integer(_) => TYPE_INT,
             Self::Boolean(_) => TYPE_BOOL,
             Self::TypedTuple(TypedTuple { expressions }) => {
-                Type::Tuple(expressions.iter().map(Self::type_).collect_vec())
+                TypeTuple(expressions.iter().map(Self::type_).collect_vec()).into()
             }
             Self::TypedAccess(TypedAccess {
                 variable: TypedVariable { variable: _, type_ },
                 parameters,
             }) => type_.instantiate(parameters),
             Self::TypedElementAccess(TypedElementAccess { expression, index }) => {
-                if let Type::Tuple(types) = expression.type_() {
+                if let Type::TypeTuple(TypeTuple(types)) = expression.type_() {
                     types[*index as usize].clone()
                 } else {
                     panic!("Type of an element access is no longer a tuple!")
@@ -535,29 +668,31 @@ impl TypedExpression {
                 parameters,
                 return_type,
                 body: _,
-            }) => Type::Function(
+            }) => TypeFn(
                 parameters
                     .iter()
                     .map(|(_, parameter)| parameter.type_.type_.clone())
                     .collect_vec(),
                 return_type.clone(),
-            ),
+            )
+            .into(),
             Self::TypedFunctionDefinition(TypedFunctionDefinition {
                 parameters,
                 return_type,
                 body: _,
-            }) => Type::Function(
+            }) => TypeFn(
                 parameters
                     .iter()
                     .map(|parameter| parameter.type_.type_.clone())
                     .collect_vec(),
                 return_type.clone(),
-            ),
+            )
+            .into(),
             Self::TypedFunctionCall(TypedFunctionCall {
                 function,
                 arguments: _,
             }) => {
-                let Type::Function(_, return_type) = function.type_() else {
+                let Type::TypeFn(TypeFn(_, return_type)) = function.type_() else {
                     panic!("Function does not have function type.")
                 };
                 *return_type
@@ -574,7 +709,11 @@ impl TypedExpression {
                 block.block.type_()
             }
         };
-        let type_ = if let Type::Instantiation(r, t) = type_ {
+        let type_ = if let Type::TypeInstantiation(TypeInstantiation {
+            reference: r,
+            instances: t,
+        }) = type_
+        {
             r.borrow().instantiate(&t)
         } else {
             type_
@@ -914,7 +1053,7 @@ pub enum TypeCheckError {
         arguments: Vec<TypedExpression>,
     },
     DifferingMatchBlockTypes(TypedMatchBlock, TypedMatchBlock),
-    NonUnionTypeMatchSubject(TypedExpression),
+    NonTypeUnionMatchSubject(TypedExpression),
     IncorrectVariants {
         blocks: Vec<MatchBlock>,
     },
@@ -1041,8 +1180,17 @@ impl TypeDefinitions {
         t2: &Type,
     ) -> bool {
         match (t1, t2) {
-            (Type::Atomic(a1), Type::Atomic(a2)) => a1 == a2,
-            (Type::Union(i1, v1), Type::Union(i2, v2)) => {
+            (Type::TypeAtomic(a1), Type::TypeAtomic(a2)) => a1 == a2,
+            (
+                Type::TypeUnion(TypeUnion {
+                    id: i1,
+                    variants: v1,
+                }),
+                Type::TypeUnion(TypeUnion {
+                    id: i2,
+                    variants: v2,
+                }),
+            ) => {
                 i1 == i2
                     && v1.len() == v2.len()
                     && v1
@@ -1061,7 +1209,16 @@ impl TypeDefinitions {
                             _ => false,
                         })
             }
-            (Type::Instantiation(t1, i1), Type::Instantiation(t2, i2)) => {
+            (
+                Type::TypeInstantiation(TypeInstantiation {
+                    reference: t1,
+                    instances: i1,
+                }),
+                Type::TypeInstantiation(TypeInstantiation {
+                    reference: t2,
+                    instances: i2,
+                }),
+            ) => {
                 self_references_index.get(&t1.as_ptr()) == other_references_index.get(&t2.as_ptr())
                     && i1.len() == i2.len()
                     && i1.into_iter().zip(i2.into_iter()).all(|(t1, t2)| {
@@ -1075,7 +1232,7 @@ impl TypeDefinitions {
                         )
                     })
             }
-            (Type::Tuple(t1), Type::Tuple(t2)) => {
+            (Type::TypeTuple(TypeTuple(t1)), Type::TypeTuple(TypeTuple(t2))) => {
                 t1.len() == t2.len()
                     && t1.iter().zip(t2.iter()).all(|(t1, t2)| {
                         TypeDefinitions::type_equality(
@@ -1088,14 +1245,14 @@ impl TypeDefinitions {
                         )
                     })
             }
-            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
+            (Type::TypeFn(TypeFn(a1, r1)), Type::TypeFn(TypeFn(a2, r2))) => {
                 TypeDefinitions::type_equality(
                     self_references_index,
                     other_references_index,
                     self_generics_index,
                     other_generics_index,
-                    &Type::Tuple(a1.clone()),
-                    &Type::Tuple(a2.clone()),
+                    &TypeTuple(a1.clone()).into(),
+                    &TypeTuple(a2.clone()).into(),
                 ) && TypeDefinitions::type_equality(
                     self_references_index,
                     other_references_index,
@@ -1105,7 +1262,7 @@ impl TypeDefinitions {
                     r2,
                 )
             }
-            (Type::Variable(r1), Type::Variable(r2)) => {
+            (Type::TypeVariable(TypeVariable(r1)), Type::TypeVariable(TypeVariable(r2))) => {
                 self_generics_index[&r1.as_ptr()] == other_generics_index[&r2.as_ptr()]
             }
             _ => false,
@@ -1197,7 +1354,7 @@ impl fmt::Debug for DebugTypeWrapper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let references_index = &self.1;
         match self.0.clone() {
-            Type::Union(id, variants) => {
+            Type::TypeUnion(TypeUnion { id, variants }) => {
                 write!(
                     f,
                     "Union({:?},{:?})",
@@ -1209,7 +1366,10 @@ impl fmt::Debug for DebugTypeWrapper {
                         .collect_vec()
                 )
             }
-            Type::Instantiation(rc, instances) => {
+            Type::TypeInstantiation(TypeInstantiation {
+                reference: rc,
+                instances,
+            }) => {
                 write!(
                     f,
                     "Instantiation({}, {:?})",
@@ -1222,7 +1382,7 @@ impl fmt::Debug for DebugTypeWrapper {
                         .collect_vec()
                 )
             }
-            Type::Tuple(types) => {
+            Type::TypeTuple(TypeTuple(types)) => {
                 write!(
                     f,
                     "Tuple({:?})",
@@ -1232,7 +1392,7 @@ impl fmt::Debug for DebugTypeWrapper {
                         .collect_vec()
                 )
             }
-            Type::Function(argument_types, return_type) => {
+            Type::TypeFn(TypeFn(argument_types, return_type)) => {
                 write!(
                     f,
                     "Function({:?},{:?})",
@@ -1316,8 +1476,8 @@ mod tests {
         {
             let left = Rc::new(RefCell::new(None));
             let right = Rc::new(RefCell::new(None));
-            let arg0 = TypedVariable::from(Type::Variable(left.clone()));
-            let arg1 = TypedVariable::from(Type::Variable(right.clone()));
+            let arg0 = TypedVariable::from(Type::TypeVariable(TypeVariable(left.clone())));
+            let arg1 = TypedVariable::from(Type::TypeVariable(TypeVariable(right.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), left.clone()), (Id::from("U"), right.clone())],
                 expression: TypedFunctionDefinition{
@@ -1337,7 +1497,7 @@ mod tests {
                             ]
                         }.into())
                     },
-                    return_type: Box::new(Type::Tuple(vec![Type::Variable(left.clone()), Type::Variable(right.clone())]))
+                    return_type: Box::new(TypeTuple(vec![TypeVariable(left.clone()).into(), TypeVariable(right.clone()).into()]).into())
                 }.into()
             }
         },
@@ -1362,7 +1522,7 @@ mod tests {
                         ]
                     }.into())
                 },
-                return_type: Box::new(Type::Tuple(vec![TYPE_INT, TYPE_BOOL]))
+                return_type: Box::new(TypeTuple(vec![TYPE_INT, TYPE_BOOL]).into())
             }.into()
         };
         "tuple function expression"
@@ -1371,9 +1531,9 @@ mod tests {
         {
             let a = Rc::new(RefCell::new(None));
             let b = Rc::new(RefCell::new(None));
-            let arg0 = TypedVariable::from(Type::Function(vec![Type::Variable(a.clone())],Box::new(Type::Variable(b.clone()))));
-            let arg1 = TypedVariable::from(Type::Variable(a.clone()));
-            let variable = TypedVariable::from(Type::Variable(b.clone()));
+            let arg0 = TypedVariable::from(Type::from(TypeFn(vec![TypeVariable(a.clone()).into()],Box::new(TypeVariable(b.clone()).into()))));
+            let arg1 = TypedVariable::from(Type::from(TypeVariable(a.clone())));
+            let variable = TypedVariable::from(Type::from(TypeVariable(b.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("F"), a.clone()), (Id::from("T"), b.clone())],
                 expression: TypedFunctionDefinition{
@@ -1403,13 +1563,13 @@ mod tests {
                             parameters: Vec::new()
                         }.into())
                     },
-                    return_type: Box::new(Type::Variable(b.clone()))
+                    return_type: Box::new(TypeVariable(b.clone()).into())
                 }.into()
             }
         },
         vec![TYPE_INT, TYPE_BOOL],
         {
-            let arg0 = TypedVariable::from(Type::Function(vec![TYPE_INT],Box::new(TYPE_BOOL)));
+            let arg0 = TypedVariable::from(Type::from(TypeFn(vec![TYPE_INT],Box::new(TYPE_BOOL))));
             let arg1 = TypedVariable::from(TYPE_INT);
             let variable = TypedVariable::from(TYPE_BOOL);
             TypedFunctionDefinition{
@@ -1448,8 +1608,8 @@ mod tests {
         {
             let parameter = Rc::new(RefCell::new(None));
             let arg0 = TypedVariable::from(TYPE_BOOL);
-            let arg1 = TypedVariable::from(Type::Variable(parameter.clone()));
-            let arg2 = TypedVariable::from(Type::Variable(parameter.clone()));
+            let arg1 = TypedVariable::from(Type::from(TypeVariable(parameter.clone())));
+            let arg2 = TypedVariable::from(Type::from(TypeVariable(parameter.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), parameter.clone())],
                 expression: TypedFunctionDefinition{
@@ -1483,7 +1643,7 @@ mod tests {
                             },
                         }.into())
                     },
-                    return_type: Box::new(Type::Variable(parameter.clone()))
+                    return_type: Box::new(TypeVariable(parameter.clone()).into())
                 }.into()
             }
         },
@@ -1533,9 +1693,9 @@ mod tests {
         {
             let left = Rc::new(RefCell::new(None));
             let right = Rc::new(RefCell::new(None));
-            let arg = TypedVariable::from(Type::Variable(left.clone()));
-            let variable = TypedVariable::from(Type::Union(Id::from("Either"), vec![Some(Type::Variable(left.clone())), Some(Type::Variable(right.clone()))]));
-            let subvariable = TypedVariable::from(Type::Variable(left.clone()));
+            let arg = TypedVariable::from(Type::from(TypeVariable(left.clone())));
+            let variable = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Either"), variants: vec![Some(TypeVariable(left.clone()).into()), Some(TypeVariable(right.clone()).into())]}));
+            let subvariable = TypedVariable::from(Type::from(TypeVariable(left.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), left.clone()),(Id::from("U"), right.clone())],
                 expression: TypedFunctionDefinition{
@@ -1601,7 +1761,7 @@ mod tests {
                             ]
                         }.into())
                     },
-                    return_type: Box::new(Type::Variable(left.clone()))
+                    return_type: Box::new(TypeVariable(left.clone()).into())
                 }.into()
             }
         },
@@ -1609,7 +1769,7 @@ mod tests {
         {
 
             let arg = TypedVariable::from(TYPE_BOOL);
-            let variable = TypedVariable::from(Type::Union(Id::from("Either"), vec![Some(TYPE_BOOL), Some(TYPE_UNIT)]));
+            let variable = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Either"), variants: vec![Some(TYPE_BOOL), Some(TYPE_UNIT)]}));
             let subvariable = TypedVariable::from(TYPE_BOOL);
             TypedFunctionDefinition{
                 parameters: vec![arg.clone()],
