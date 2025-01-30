@@ -11,7 +11,8 @@ use crate::{
     EmptyTypeDefinition, Expression, FunctionCall, FunctionDefinition, FunctionType, GenericType,
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     ParametricExpression, Program, TransparentTypeDefinition, TupleExpression, TupleType,
-    TypeInstance, UnionTypeDefinition, Variable,
+    TypeAtomic, TypeFn, TypeInstance, TypeInstantiation, TypeTuple, TypeUnion, TypeVariable,
+    UnionTypeDefinition, Variable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -28,25 +29,25 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
     .map(|operator| {
         (
             Id::from(operator),
-            Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_INT)),
+            Type::from(TypeFn(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_INT))),
         )
     });
     let integer_unary_operators = ["++", "--"].into_iter().map(|operator| {
         (
             Id::from(operator),
-            Type::Function(vec![TYPE_INT], Box::new(TYPE_INT)),
+            Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_INT))),
         )
     });
     let boolean_unary_operators = ["!"].into_iter().map(|operator| {
         (
             Id::from(operator),
-            Type::Function(vec![TYPE_BOOL], Box::new(TYPE_BOOL)),
+            Type::from(TypeFn(vec![TYPE_BOOL], Box::new(TYPE_BOOL))),
         )
     });
     let boolean_binary_operators = ["&&", "||"].into_iter().map(|operator| {
         (
             Id::from(operator),
-            Type::Function(vec![TYPE_BOOL, TYPE_BOOL], Box::new(TYPE_BOOL)),
+            Type::from(TypeFn(vec![TYPE_BOOL, TYPE_BOOL], Box::new(TYPE_BOOL))),
         )
     });
     let integer_comparisons = ["<", "<=", ">", ">=", "==", "!="]
@@ -54,7 +55,7 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
         .map(|operator| {
             (
                 Id::from(operator),
-                Type::Function(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_BOOL)),
+                Type::from(TypeFn(vec![TYPE_INT, TYPE_INT], Box::new(TYPE_BOOL))),
             )
         });
     TypeContext::from_iter(
@@ -83,11 +84,11 @@ impl TypeChecker {
         Ok(match type_instance {
             TypeInstance::AtomicType(AtomicType {
                 type_: atomic_type_enum,
-            }) => Type::Atomic(atomic_type_enum),
+            }) => TypeAtomic(atomic_type_enum).into(),
             TypeInstance::GenericType(GenericType { id, type_variables }) => {
                 if let Some(reference) = generic_variables.get(&id) {
                     if type_variables.is_empty() {
-                        Type::Variable(reference.clone())
+                        TypeVariable(reference.clone()).into()
                     } else {
                         return Err(TypeCheckError::InstantiationOfTypeVariable {
                             variable: id,
@@ -101,9 +102,9 @@ impl TypeChecker {
                             type_instances: type_variables.clone(),
                         });
                     }
-                    Type::Instantiation(
-                        reference.clone(),
-                        type_variables
+                    TypeInstantiation {
+                        reference: reference.clone(),
+                        instances: type_variables
                             .into_iter()
                             .map(|type_instance| {
                                 TypeChecker::convert_ast_type(
@@ -113,7 +114,8 @@ impl TypeChecker {
                                 )
                             })
                             .collect::<Result<_, _>>()?,
-                    )
+                    }
+                    .into()
                 } else {
                     return Err(TypeCheckError::UnknownError {
                         id,
@@ -126,16 +128,17 @@ impl TypeChecker {
                     });
                 }
             }
-            TypeInstance::TupleType(TupleType { types }) => Type::Tuple(
+            TypeInstance::TupleType(TupleType { types }) => TypeTuple(
                 types
                     .into_iter()
                     .map(|t| TypeChecker::convert_ast_type(t, type_definitions, generic_variables))
                     .collect::<Result<_, _>>()?,
-            ),
+            )
+            .into(),
             TypeInstance::FunctionType(FunctionType {
                 argument_types,
                 return_type,
-            }) => Type::Function(
+            }) => TypeFn(
                 argument_types
                     .into_iter()
                     .map(|type_| {
@@ -147,7 +150,8 @@ impl TypeChecker {
                     type_definitions,
                     generic_variables,
                 )?),
-            ),
+            )
+            .into(),
         })
     }
     fn check_type_definitions(definitions: Vec<Definition>) -> Result<Self, TypeCheckError> {
@@ -252,14 +256,15 @@ impl TypeChecker {
                             reason: String::from("constructor name"),
                         });
                     }
-                    Type::Union(
-                        id.clone(),
-                        vec![Some(TypeChecker::convert_ast_type(
+                    TypeUnion {
+                        id: id.clone(),
+                        variants: vec![Some(TypeChecker::convert_ast_type(
                             type_,
                             &type_definitions,
                             &GenericVariables::from((&generic_variables, &type_definitions[&id])),
                         )?)],
-                    )
+                    }
+                    .into()
                 }
                 Definition::UnionTypeDefinition(UnionTypeDefinition {
                     variable:
@@ -305,7 +310,11 @@ impl TypeChecker {
                             })
                             .transpose()
                     });
-                    Type::Union(id.clone(), variants.collect::<Result<_, _>>()?)
+                    TypeUnion {
+                        id: id.clone(),
+                        variants: variants.collect::<Result<_, _>>()?,
+                    }
+                    .into()
                 }
                 Definition::TransparentTypeDefinition(TransparentTypeDefinition {
                     variable:
@@ -332,7 +341,10 @@ impl TypeChecker {
                             reason: String::from("constructor name"),
                         });
                     }
-                    Type::Union(id, vec![None])
+                    Type::from(TypeUnion {
+                        id: id,
+                        variants: vec![None],
+                    })
                 }
                 Definition::Assignment(_) => continue,
             };
@@ -369,14 +381,20 @@ impl TypeChecker {
             visited: &mut HashMap<*mut ParametricType, bool>,
         ) -> Result<(), ()> {
             match type_ {
-                Type::Union(_, items) => {
+                Type::TypeUnion(TypeUnion {
+                    id: _,
+                    variants: items,
+                }) => {
                     for type_ in items {
                         if let Some(type_) = type_ {
                             update_queue(type_, start, queue, visited)?;
                         }
                     }
                 }
-                Type::Instantiation(rc, ts) => {
+                Type::TypeInstantiation(TypeInstantiation {
+                    reference: rc,
+                    instances: ts,
+                }) => {
                     if rc.as_ptr() == start.as_ptr() {
                         return Err(());
                     }
@@ -384,15 +402,20 @@ impl TypeChecker {
                         visited.insert(rc.as_ptr(), true);
                         queue.push_back(rc.clone());
                     }
-                    update_queue(&Type::Tuple(ts.clone()), start, queue, visited)?
+                    update_queue(&TypeTuple(ts.clone()).into(), start, queue, visited)?
                 }
-                Type::Tuple(types) => {
+                Type::TypeTuple(TypeTuple(types)) => {
                     for type_ in types {
                         update_queue(type_, start, queue, visited)?;
                     }
                 }
-                Type::Function(argument_types, return_type) => {
-                    update_queue(&Type::Tuple(argument_types.clone()), start, queue, visited)?;
+                Type::TypeFn(TypeFn(argument_types, return_type)) => {
+                    update_queue(
+                        &TypeTuple(argument_types.clone()).into(),
+                        start,
+                        queue,
+                        visited,
+                    )?;
                     update_queue(&*return_type, start, queue, visited)?;
                 }
                 _ => (),
@@ -459,7 +482,7 @@ impl TypeChecker {
             Expression::ElementAccess(ElementAccess { expression, index }) => {
                 let typed_expression =
                     self.check_expression(*expression, context, generic_variables)?;
-                let Type::Tuple(types) = typed_expression.type_() else {
+                let Type::TypeTuple(TypeTuple(types)) = typed_expression.type_() else {
                     return Err(TypeCheckError::InvalidAccess {
                         expression: typed_expression,
                         index,
@@ -566,7 +589,7 @@ impl TypeChecker {
                     context,
                     generic_variables,
                 )?;
-                let Type::Tuple(types) = arguments_tuple.type_() else {
+                let Type::TypeTuple(TypeTuple(types)) = arguments_tuple.type_() else {
                     panic!("Tuple expression has non-tuple type")
                 };
                 let TypedExpression::TypedTuple(TypedTuple {
@@ -575,7 +598,7 @@ impl TypeChecker {
                 else {
                     panic!("Tuple expression became non-tuple type.")
                 };
-                let Type::Function(argument_types, _) = function.type_() else {
+                let Type::TypeFn(TypeFn(argument_types, _)) = function.type_() else {
                     return Err(TypeCheckError::InvalidFunctionCall {
                         expression: function,
                         arguments,
@@ -620,7 +643,7 @@ impl TypeChecker {
                     context,
                     generic_variables,
                 )?;
-                let Type::Tuple(types) = arguments_tuple.type_() else {
+                let Type::TypeTuple(TypeTuple(types)) = arguments_tuple.type_() else {
                     panic!("Tuple expression has non-tuple type")
                 };
                 let TypedExpression::TypedTuple(TypedTuple {
@@ -629,7 +652,7 @@ impl TypeChecker {
                 else {
                     panic!("Tuple expression became non-tuple type.")
                 };
-                let Type::Tuple(type_variables) = TypeChecker::convert_ast_type(
+                let Type::TypeTuple(TypeTuple(type_variables)) = TypeChecker::convert_ast_type(
                     TypeInstance::TupleType(TupleType {
                         types: constructor.type_instances,
                     }),
@@ -640,7 +663,11 @@ impl TypeChecker {
                     panic!("Tuple type converted to non-tuple type.");
                 };
                 let output_type = constructor_type.type_.borrow().instantiate(&type_variables);
-                let Type::Union(_, variant_types) = &output_type else {
+                let Type::TypeUnion(TypeUnion {
+                    id: _,
+                    variants: variant_types,
+                }) = &output_type
+                else {
                     panic!("Constructor call for non-union type.")
                 };
                 let input_type = variant_types[constructor_type.index].clone();
@@ -673,7 +700,7 @@ impl TypeChecker {
             }
             Expression::MatchExpression(MatchExpression { subject, blocks }) => {
                 let subject = self.check_expression(*subject, context, generic_variables)?;
-                let Type::Union(id, variants) = subject.type_() else {
+                let Type::TypeUnion(TypeUnion { id, variants }) = subject.type_() else {
                     return Err(TypeCheckError::NonUnionTypeMatchSubject(subject));
                 };
                 let variant_names = blocks
@@ -704,7 +731,9 @@ impl TypeChecker {
                     return Err(TypeCheckError::IncorrectVariants { blocks });
                 };
                 if variant_lookup.values().any(|variant| {
-                    let Type::Union(ref name, _) = variant.type_.borrow().type_ else {
+                    let Type::TypeUnion(TypeUnion { id: ref name, .. }) =
+                        variant.type_.borrow().type_
+                    else {
                         panic!("Constructor body has non union type.")
                     };
                     *name != id
@@ -1076,7 +1105,7 @@ impl TypeChecker {
         };
         let typed_block =
             type_checker.check_block(program_block, context, &GenericVariables::new())?;
-        if let Type::Function(_, _) = typed_block.type_() {
+        if let Type::TypeFn(TypeFn(_, _)) = typed_block.type_() {
             return Err(TypeCheckError::MainFunctionReturnsFunction {
                 type_: typed_block.type_(),
             });
@@ -1113,12 +1142,12 @@ impl TypeChecker {
 mod tests {
 
     use crate::{
-        type_check_nodes::{ConstructorType, TYPE_BOOL, TYPE_INT, TYPE_UNIT},
+        type_check_nodes::{ConstructorType, TYPE_UNIT},
         Assignee, Assignment, Block, Boolean, Constructor, ConstructorCall, ElementAccess,
         ExpressionBlock, FunctionCall, FunctionDefinition, GenericConstructor, GenericTypeVariable,
         IfExpression, Integer, MatchBlock, MatchExpression, MatchItem, ParametricAssignee,
-        TupleExpression, TypeItem, TypeVariable, TypedAssignee, Typename, Var, VariableAssignee,
-        ATOMIC_TYPE_BOOL, ATOMIC_TYPE_INT,
+        TypeItem, TypeVariable, TypedAssignee, Typename, Var, VariableAssignee, ATOMIC_TYPE_BOOL,
+        ATOMIC_TYPE_INT,
     };
 
     use super::*;
@@ -1133,25 +1162,36 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("i"),
+                variable: GenericTypeVariable{
+                    id: Id::from("i"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into()
         ],
         Some(TypeDefinitions::from([
-            (Id::from("i"), Type::Union(Id::from("i"),vec![
+            (
+                Id::from("i"),
+                Type::from(TypeUnion{id: Id::from("i"),variants: vec![
                 Some(TYPE_INT)
-            ]))
+            ]}))
         ]));
         "atomic opaque type definition"
     )]
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("i"),
+                variable: GenericTypeVariable{
+                    id: Id::from("i"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into(),
             OpaqueTypeDefinition {
-                variable: TypeVariable("i"),
+                variable: GenericTypeVariable{
+                    id: Id::from("i"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_BOOL.into()
             }.into()
         ],
@@ -1161,11 +1201,17 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("i"),
+                variable: GenericTypeVariable{
+                    id: Id::from("i"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into(),
             OpaqueTypeDefinition {
-                variable: TypeVariable("i"),
+                variable: GenericTypeVariable{
+                    id: Id::from("i"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into()
         ],
@@ -1175,7 +1221,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition {
-                variable: TypeVariable("int_or_bool"),
+                variable: GenericTypeVariable{
+                    id: Id::from("int_or_bool"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem {
                         id: Id::from("Int"),
@@ -1191,13 +1240,13 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("int_or_bool"),
-                Type::Union(
-                    Id::from("int_or_bool"),
-                    vec![
+                Type::from(TypeUnion{
+                    id: Id::from("int_or_bool"),
+                    variants: vec![
                         Some(TYPE_INT.into()),
                         Some(TYPE_BOOL.into())
                     ]
-                )
+                })
             )
         ]));
         "basic union type definition"
@@ -1205,7 +1254,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition {
-                variable: TypeVariable("int_list"),
+                variable: GenericTypeVariable{
+                    id: Id::from("int_list"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem{
                         id: Id::from("Cons"),
@@ -1223,10 +1275,10 @@ mod tests {
                 Id::from("int_list"),
                 ({
                     let reference = Rc::new(RefCell::new(ParametricType::new()));
-                    let union_type = Type::Union(Id::from("int_list"),vec![
-                        Some(Type::Instantiation(Rc::clone(&reference), Vec::new())),
+                    let union_type = Type::from(TypeUnion{id: Id::from("int_list"),variants: vec![
+                        Some(Type::from(TypeInstantiation{reference: Rc::clone(&reference), instances: Vec::new()})),
                         None,
-                    ]);
+                    ]});
                     *reference.borrow_mut() = union_type.into();
                     reference
                 })
@@ -1237,26 +1289,32 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("Int"),
+                variable: GenericTypeVariable{
+                    id: Id::from("Int"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into(),
             OpaqueTypeDefinition {
-                variable: TypeVariable("Bool"),
+                variable: GenericTypeVariable{
+                    id: Id::from("Bool"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_BOOL.into()
             }.into()
         ],
         Some(TypeDefinitions::from([
             (
                 Id::from("Int"),
-                Type::Union(Id::from("Int"),vec![
+                Type::from(TypeUnion{id: Id::from("Int"),variants: vec![
                     Some(TYPE_INT)
-                ])
+                ]})
             ),
             (
                 Id::from("Bool"),
-                Type::Union(Id::from("Bool"),vec![
+                Type::from(TypeUnion{id: Id::from("Bool"),variants: vec![
                     Some(TYPE_BOOL)
-                ])
+                ]})
             ),
         ]));
         "two type definitions"
@@ -1264,7 +1322,10 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("int"),
+                variable: GenericTypeVariable{
+                    id: Id::from("int"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into(),
         ],
@@ -1274,7 +1335,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition {
-                variable: TypeVariable("bool"),
+                variable: GenericTypeVariable{
+                    id: Id::from("bool"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem { id: Id::from("two"), type_: None},
                     TypeItem { id: Id::from("four"), type_: None},
@@ -1287,7 +1351,10 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("ii"),
+                variable: GenericTypeVariable{
+                    id: Id::from("ii"),
+                    generic_variables: Vec::new()
+                },
                 type_: TupleType{
                     types: vec![ATOMIC_TYPE_INT.into(),ATOMIC_TYPE_INT.into()]
                 }.into()
@@ -1296,9 +1363,9 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("ii"),
-                Type::Union(Id::from("ii"),vec![
-                    Some(Type::Tuple(vec![TYPE_INT, TYPE_INT]))
-                ])
+                Type::from(TypeUnion{id: Id::from("ii"),variants: vec![
+                    Some(Type::from(TypeTuple(vec![TYPE_INT, TYPE_INT])))
+                ]})
             ),
         ]));
         "tuple type definition"
@@ -1306,7 +1373,10 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition {
-                variable: TypeVariable("i2b"),
+                variable: GenericTypeVariable{
+                    id: Id::from("i2b"),
+                    generic_variables: Vec::new()
+                },
                 type_: FunctionType{
                     argument_types: vec![ATOMIC_TYPE_INT.into()],
                     return_type: Box::new(ATOMIC_TYPE_BOOL.into()),
@@ -1316,9 +1386,9 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("i2b"),
-                Type::Union(Id::from("i2b"),vec![
-                    Some(Type::Function(vec![TYPE_INT], Box::new(TYPE_BOOL)))
-                ])
+                Type::from(TypeUnion{id: Id::from("i2b"),variants: vec![
+                    Some(Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_BOOL))))
+                ]})
             ),
         ]));
         "function type definition"
@@ -1326,7 +1396,10 @@ mod tests {
     #[test_case(
         vec![
             TransparentTypeDefinition {
-                variable: TypeVariable("u2u"),
+                variable: GenericTypeVariable{
+                    id: Id::from("u2u"),
+                    generic_variables: Vec::new()
+                },
                 type_: FunctionType{
                     argument_types: Vec::new(),
                     return_type: Box::new(TupleType{types: Vec::new()}.into()),
@@ -1336,7 +1409,7 @@ mod tests {
         Some(TypeDefinitions::from([
             (
                 Id::from("u2u"),
-                Type::Function(Vec::new(), Box::new(Type::Tuple(Vec::new())))
+                Type::from(TypeFn(Vec::new(), Box::new(Type::from(TypeTuple(Vec::new())))))
             ),
         ]));
         "transparent function type definition"
@@ -1349,9 +1422,9 @@ mod tests {
             TypeDefinitions::from([
                 (
                     Id::from("None"),
-                    Type::Union(Id::from("None"),vec![
+                    Type::from(TypeUnion{id: Id::from("None"),variants: vec![
                         None
-                    ])
+                    ]})
                 )
             ])
         );
@@ -1360,23 +1433,29 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition{
-                variable: TypeVariable("iint"),
+                variable: GenericTypeVariable{
+                    id: Id::from("iint"),
+                    generic_variables: Vec::new()
+                },
                 type_: ATOMIC_TYPE_INT.into()
             }.into(),
             OpaqueTypeDefinition{
-                variable: TypeVariable("iiint"),
+                variable: GenericTypeVariable{
+                    id: Id::from("iiint"),
+                    generic_variables: Vec::new()
+                },
                 type_: Typename("iint").into(),
             }.into(),
         ],
         Some(
             TypeDefinitions::from({
                 let iint = Rc::new(RefCell::new(
-                    Type::Union(Id::from("iint"),vec![Some(TYPE_INT)]).into()
+                    Type::from(TypeUnion{id: Id::from("iint"),variants: vec![Some(TYPE_INT)]}).into()
                 ));
                 let iiint = Rc::new(RefCell::new(
-                    Type::Union(Id::from("iiint"),vec![
-                        Some(Type::Instantiation(iint.clone(), Vec::new()))
-                    ]).into()
+                    Type::from(TypeUnion{id: Id::from("iiint"),variants: vec![
+                        Some(Type::from(TypeInstantiation{reference: iint.clone(), instances: Vec::new()}))
+                    ]}).into()
                 ));
                 [(Id::from("iint"), iint), (Id::from("iiint"), iiint)]
             })
@@ -1386,7 +1465,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition{
-                variable: TypeVariable("left"),
+                variable: GenericTypeVariable{
+                    id: Id::from("left"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem{
                         id: Id::from("Right"),
@@ -1406,7 +1488,10 @@ mod tests {
                 ]
             }.into(),
             UnionTypeDefinition{
-                variable: TypeVariable("right"),
+                variable: GenericTypeVariable{
+                    id: Id::from("right"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem{
                         id: Id::from("Left"),
@@ -1423,22 +1508,22 @@ mod tests {
             TypeDefinitions::from({
                 let left = Rc::new(RefCell::new(ParametricType::new()));
                 let right = Rc::new(RefCell::new(
-                    Type::Union(Id::from("right"),vec![
+                    Type::from(TypeUnion{id: Id::from("right"),variants: vec![
                         Some(
-                            Type::Instantiation(left.clone(), Vec::new())
+                            Type::from(TypeInstantiation{reference: left.clone(), instances: Vec::new()})
                         ),
                         None
-                    ]).into()
+                    ]}).into()
                 ));
-                *left.borrow_mut() = Type::Union(Id::from("left"),vec![
+                *left.borrow_mut() = Type::from(TypeUnion{id: Id::from("left"),variants: vec![
                     Some(
-                        Type::Tuple(vec![
-                            Type::Instantiation(right.clone(), Vec::new()),
+                        Type::from(TypeTuple(vec![
+                            Type::from(TypeInstantiation{reference: right.clone(), instances: Vec::new()}),
                             TYPE_BOOL
-                        ])
+                        ]))
                     ),
                     None
-                ]).into();
+                ]}).into();
                 [(Id::from("left"), left), (Id::from("right"), right)]
             })
         );
@@ -1447,7 +1532,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition{
-                variable: TypeVariable("Left_Right"),
+                variable: GenericTypeVariable{
+                    id: Id::from("Left_Right"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem{
                         id: Id::from("left"),
@@ -1466,7 +1554,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition{
-                variable: TypeVariable("Left_Right"),
+                variable: GenericTypeVariable{
+                    id: Id::from("Left_Right"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem{
                         id: Id::from("left"),
@@ -1499,9 +1590,9 @@ mod tests {
                     {
                         let parameter = Rc::new(RefCell::new(None));
                         ParametricType{
-                            type_: Type::Union(Id::from("wrapper"),vec![
-                                Some(Type::Variable(parameter.clone()))
-                            ]),
+                            type_: Type::from(TypeUnion{id: Id::from("wrapper"),variants: vec![
+                                Some(Type::from(TypeVariable(parameter.clone())))
+                            ]}),
                             parameters: vec![parameter]
                         }
                     }
@@ -1527,7 +1618,7 @@ mod tests {
                     {
                         let parameter = Rc::new(RefCell::new(None));
                         ParametricType{
-                            type_: Type::Variable(parameter.clone()),
+                            type_: Type::from(TypeVariable(parameter.clone())),
                             parameters: vec![parameter]
                         }
                     }
@@ -1567,10 +1658,10 @@ mod tests {
                         let left_parameter = Rc::new(RefCell::new(None));
                         let right_parameter = Rc::new(RefCell::new(None));
                         ParametricType{
-                            type_: Type::Union(Id::from("Either"),vec![
-                                Some(Type::Variable(left_parameter.clone())),
-                                Some(Type::Variable(right_parameter.clone())),
-                            ]),
+                            type_: Type::from(TypeUnion{id: Id::from("Either"),variants: vec![
+                                Some(Type::from(TypeVariable(left_parameter.clone()))),
+                                Some(Type::from(TypeVariable(right_parameter.clone()))),
+                            ]}),
                             parameters: vec![left_parameter, right_parameter]
                         }
                     }
@@ -1582,7 +1673,10 @@ mod tests {
     #[test_case(
         vec![
             OpaqueTypeDefinition{
-                variable: TypeVariable("Zero"),
+                variable: GenericTypeVariable{
+                    id: Id::from("Zero"),
+                    generic_variables: Vec::new()
+                },
                 type_: Typename("Unknown").into(),
             }.into()
         ],
@@ -1673,9 +1767,9 @@ mod tests {
                         {
                             let parameter = Rc::new(RefCell::new(None));
                             ParametricType{
-                                type_: Type::Union(Id::from("U"),vec![
-                                    Some(Type::Variable(parameter.clone()))
-                                ]),
+                                type_: Type::from(TypeUnion{id: Id::from("U"),variants: vec![
+                                    Some(Type::from(TypeVariable(parameter.clone())))
+                                ]}),
                                 parameters: vec![parameter]
                             }
                         }
@@ -1685,9 +1779,9 @@ mod tests {
                         {
                             let parameter = Rc::new(RefCell::new(None));
                             ParametricType{
-                                type_: Type::Union(Id::from("V"),vec![
-                                    Some(Type::Variable(parameter.clone()))
-                                ]),
+                                type_: Type::from(TypeUnion{id: Id::from("V"),variants: vec![
+                                    Some(Type::from(TypeVariable(parameter.clone())))
+                                ]}),
                                 parameters: vec![parameter]
                             }
                         }
@@ -1700,7 +1794,10 @@ mod tests {
     #[test_case(
         vec![
             TransparentTypeDefinition{
-                variable: TypeVariable("generic_int"),
+                variable: GenericTypeVariable{
+                    id: Id::from("generic_int"),
+                    generic_variables: Vec::new()
+                },
                 type_: GenericType{
                     id: Id::from("wrapper"),
                     type_variables: vec![ATOMIC_TYPE_INT.into()]
@@ -1718,13 +1815,13 @@ mod tests {
             TypeDefinitions::from({
                 let parameter = Rc::new(RefCell::new(None));
                 let wrapper = Rc::new(RefCell::new(ParametricType{
-                    type_: Type::Union(Id::from("wrapper"),vec![
-                        Some(Type::Variable(parameter.clone()))
-                    ]),
+                    type_: Type::from(TypeUnion{id: Id::from("wrapper"),variants: vec![
+                        Some(Type::from(TypeVariable(parameter.clone())))
+                    ]}),
                     parameters: vec![parameter]
                 }));
                 let generic_int = Rc::new(RefCell::new(ParametricType{
-                    type_: Type::Instantiation(wrapper.clone(), vec![TYPE_INT]),
+                    type_: Type::from(TypeInstantiation{reference: wrapper.clone(), instances: vec![TYPE_INT]}),
                     parameters: Vec::new()
                 }));
                 [(Id::from("wrapper"), wrapper), (Id::from("generic_int"), generic_int)]
@@ -1735,7 +1832,10 @@ mod tests {
     #[test_case(
         vec![
             TransparentTypeDefinition{
-                variable: TypeVariable("generic_int"),
+                variable: GenericTypeVariable{
+                    id: Id::from("generic_int"),
+                    generic_variables: Vec::new()
+                },
                 type_: GenericType{
                     id: Id::from("wrapper"),
                     type_variables: vec![]
@@ -1788,9 +1888,9 @@ mod tests {
                     let right_parameter = Rc::new(RefCell::new(None));
                     ParametricType{
                         parameters: vec![left_parameter.clone(), right_parameter.clone()],
-                        type_: Type::Tuple(
-                            vec![Type::Variable(left_parameter), Type::Variable(right_parameter)]
-                        )
+                        type_: Type::from(TypeTuple(
+                            vec![Type::from(TypeVariable(left_parameter)), Type::from(TypeVariable(right_parameter))]
+                        ))
                     }
                 }
             )])
@@ -1818,10 +1918,10 @@ mod tests {
                     let return_parameter = Rc::new(RefCell::new(None));
                     ParametricType{
                         parameters: vec![argument_parameter.clone(), return_parameter.clone()],
-                        type_: Type::Function(
-                            vec![Type::Variable(argument_parameter)],
-                            Box::new(Type::Variable(return_parameter))
-                        )
+                        type_: Type::from(TypeFn(
+                            vec![Type::from(TypeVariable(argument_parameter))],
+                            Box::new(Type::from(TypeVariable(return_parameter)))
+                        ))
                     }
                 }
             )])
@@ -1862,20 +1962,20 @@ mod tests {
                 {
                     let parameter = Rc::new(RefCell::new(None));
                     let tree_type = Rc::new(RefCell::new(ParametricType{parameters: vec![parameter.clone()], type_: Type::new()}));
-                    tree_type.borrow_mut().type_ = Type::Union(
-                        Id::from("Tree"),
-                        vec![
-                            Some(Type::Tuple(vec![
-                                Type::Variable(parameter.clone()),
-                                Type::Instantiation(
-                                    tree_type.clone(),
-                                    vec![Type::Variable(parameter.clone())]
-                                ),
-                                Type::Variable(parameter.clone()),
-                            ])),
+                    tree_type.borrow_mut().type_ = Type::from(TypeUnion{
+                        id: Id::from("Tree"),
+                        variants: vec![
+                            Some(Type::from(TypeTuple(vec![
+                                Type::from(TypeVariable(parameter.clone())),
+                                Type::from(TypeInstantiation{
+                                    reference: tree_type.clone(),
+                                    instances: vec![Type::from(TypeVariable(parameter.clone()))]
+                                }),
+                                Type::from(TypeVariable(parameter.clone())),
+                            ]))),
                             None
                         ]
-                    );
+                    });
                     tree_type
                 }
             )])
@@ -1885,7 +1985,10 @@ mod tests {
     #[test_case(
         vec![
             TransparentTypeDefinition{
-                variable: TypeVariable("recursive"),
+                variable: GenericTypeVariable{
+                    id: Id::from("recursive"),
+                    generic_variables: Vec::new()
+                },
                 type_: Typename("recursive").into(),
             }.into(),
         ],
@@ -1905,7 +2008,10 @@ mod tests {
                 }.into(),
             }.into(),
             TransparentTypeDefinition{
-                variable: TypeVariable("recursive_alias"),
+                variable: GenericTypeVariable{
+                    id: Id::from("recursive_alias"),
+                    generic_variables: Vec::new()
+                },
                 type_: GenericType{
                     id: Id::from("Recursive"),
                     type_variables: vec![Typename("recursive_alias").into()]
@@ -1918,11 +2024,17 @@ mod tests {
     #[test_case(
         vec![
             TransparentTypeDefinition{
-                variable: TypeVariable("recursive1"),
+                variable: GenericTypeVariable{
+                    id: Id::from("recursive1"),
+                    generic_variables: Vec::new()
+                },
                 type_: Typename("recursive2").into(),
             }.into(),
             TransparentTypeDefinition{
-                variable: TypeVariable("recursive2"),
+                variable: GenericTypeVariable{
+                    id: Id::from("recursive2"),
+                    generic_variables: Vec::new()
+                },
                 type_: Typename("recursive1").into(),
             }.into(),
         ],
@@ -1932,7 +2044,10 @@ mod tests {
     #[test_case(
         vec![
             UnionTypeDefinition {
-                variable: TypeVariable("int_list"),
+                variable: GenericTypeVariable{
+                    id: Id::from("int_list"),
+                    generic_variables: Vec::new()
+                },
                 items: vec![
                     TypeItem{
                         id: Id::from("Cons"),
@@ -1945,19 +2060,22 @@ mod tests {
                 ]
             }.into(),
             TransparentTypeDefinition {
-                variable: TypeVariable("int_list2"),
+                variable: GenericTypeVariable{
+                    id: Id::from("int_list2"),
+                    generic_variables: Vec::new()
+                },
                 type_: Typename("int_list").into()
             }.into()
         ],
         Some(TypeDefinitions::from(
             {
                 let reference = Rc::new(RefCell::new(ParametricType::new()));
-                let union_type = Type::Union(Id::from("int_list"), vec![
-                    Some(Type::Instantiation(Rc::clone(&reference), Vec::new())),
+                let union_type = Type::from(TypeUnion{id: Id::from("int_list"), variants: vec![
+                    Some(Type::from(TypeInstantiation{reference: Rc::clone(&reference), instances: Vec::new()})),
                     None,
-                ]);
+                ]});
                 *reference.borrow_mut() = union_type.into();
-                let instantiation = Rc::new(RefCell::new(Type::Instantiation(reference.clone(), Vec::new()).into()));
+                let instantiation = Rc::new(RefCell::new(Type::from(TypeInstantiation{reference: reference.clone(), instances: Vec::new()}).into()));
                 [
                     (Id::from("int_list"),reference),
                     (Id::from("int_list2"), instantiation)
@@ -1990,7 +2108,7 @@ mod tests {
     const ALPHA_TYPE: Lazy<Rc<RefCell<ParametricType>>> = Lazy::new(|| {
         let parameter = Rc::new(RefCell::new(None));
         Rc::new(RefCell::new(ParametricType {
-            type_: Type::Variable(parameter.clone()),
+            type_: Type::from(TypeVariable(parameter.clone())),
             parameters: vec![parameter],
         }))
     });
@@ -1999,13 +2117,13 @@ mod tests {
             (
                 Id::from("opaque_int"),
                 Rc::new(RefCell::new(
-                    Type::Union(Id::from("opaque_int"), vec![Some(TYPE_INT)]).into(),
+                    Type::from(TypeUnion{id: Id::from("opaque_int"), variants: vec![Some(TYPE_INT)]}).into(),
                 )),
             ),
             (
                 Id::from("opaque_int_2"),
                 Rc::new(RefCell::new(
-                    Type::Union(Id::from("opaque_int_2"), vec![Some(TYPE_INT)]).into(),
+                    Type::from(TypeUnion{id: Id::from("opaque_int_2"), variants: vec![Some(TYPE_INT)]}).into(),
                 )),
             ),
             (
@@ -2018,14 +2136,14 @@ mod tests {
             ),
             (
                 Id::from("ii"),
-                Rc::new(RefCell::new(Type::Tuple(vec![TYPE_INT, TYPE_INT]).into())),
+                Rc::new(RefCell::new(Type::from(TypeTuple(vec![TYPE_INT, TYPE_INT])).into())),
             ),
             (Id::from("recursive"), {
                 let reference = Rc::new(RefCell::new(ParametricType::new()));
-                *reference.borrow_mut() = Type::Union(
-                    Id::from("recursive"),
-                    vec![Some(Type::Instantiation(Rc::clone(&reference), Vec::new()))],
-                )
+                *reference.borrow_mut() = Type::from(TypeUnion{
+                    id: Id::from("recursive"),
+                    variants: vec![Some(Type::from(TypeInstantiation{reference: Rc::clone(&reference), instances: Vec::new()}))],
+                })
                 .into();
                 reference
             }),
@@ -2035,41 +2153,41 @@ mod tests {
                     parameters: vec![parameter.clone()],
                     type_: Type::new(),
                 }));
-                list_type.borrow_mut().type_ = Type::Union(
-                    Id::from("List"),
-                    vec![
-                        Some(Type::Tuple(vec![
-                            Type::Variable(parameter.clone()),
-                            Type::Instantiation(
-                                list_type.clone(),
-                                vec![Type::Variable(parameter.clone())],
-                            ),
-                        ])),
+                list_type.borrow_mut().type_ = Type::from(TypeUnion{
+                    id: Id::from("List"),
+                    variants: vec![
+                        Some(Type::from(TypeTuple(vec![
+                            Type::from(TypeVariable(parameter.clone())),
+                            Type::from(TypeInstantiation{
+                                reference: list_type.clone(),
+                                instances: vec![Type::from(TypeVariable(parameter.clone()))],
+                            }),
+                        ]))),
                         None,
                     ],
-                );
+                });
                 list_type
             }),
             (
                 Id::from("Bull"),
                 Rc::new(RefCell::new(
-                    Type::Union(Id::from("Bull"), vec![None, None]).into(),
+                    Type::from(TypeUnion{id: Id::from("Bull"), variants: vec![None, None]}).into(),
                 )),
             ),
             (
                 Id::from("Bul"),
                 Rc::new(RefCell::new(
-                    Type::Union(Id::from("Bul"), vec![None, None]).into(),
+                    Type::from(TypeUnion{id: Id::from("Bul"), variants: vec![None, None]}).into(),
                 )),
             ),
             (Id::from("Option"), {
                 let parameter = Rc::new(RefCell::new(None));
                 Rc::new(RefCell::new(ParametricType {
                     parameters: vec![parameter.clone()],
-                    type_: Type::Union(
-                        Id::from("Option"),
-                        vec![Some(Type::Variable(parameter)), None],
-                    ),
+                    type_: Type::from(TypeUnion{
+                        id: Id::from("Option"),
+                        variants: vec![Some(Type::from(TypeVariable(parameter))), None],
+                    }),
                 }))
             }),
             (Id::from("Either"), {
@@ -2077,13 +2195,13 @@ mod tests {
                 let right_parameter = Rc::new(RefCell::new(None));
                 Rc::new(RefCell::new(ParametricType {
                     parameters: vec![left_parameter.clone(), right_parameter.clone()],
-                    type_: Type::Union(
-                        Id::from("Either"),
-                        vec![
-                            Some(Type::Variable(left_parameter)),
-                            Some(Type::Variable(right_parameter)),
+                    type_: Type::from(TypeUnion{
+                        id: Id::from("Either"),
+                        variants: vec![
+                            Some(Type::from(TypeVariable(left_parameter))),
+                            Some(Type::from(TypeVariable(right_parameter))),
                         ],
-                    ),
+                    }),
                 }))
             }),
         ])
@@ -2212,7 +2330,7 @@ mod tests {
         TupleExpression{
             expressions: Vec::new()
         }.into(),
-        Some(Type::Tuple(Vec::new())),
+        Some(Type::from(TypeTuple(Vec::new()))),
         TypeContext::new();
         "type check empty tuple"
     )]
@@ -2227,10 +2345,10 @@ mod tests {
                 }.into(),
             ]
         }.into(),
-        Some(Type::Tuple(vec![
+        Some(Type::from(TypeTuple(vec![
             TYPE_BOOL.into(),
             TYPE_INT.into(),
-        ])),
+        ]))),
         TypeContext::new();
         "type check flat tuple"
     )]
@@ -2252,13 +2370,13 @@ mod tests {
                 }.into()
             ]
         }.into(),
-        Some(Type::Tuple(vec![
-            Type::Tuple(Vec::new()),
-            Type::Tuple(vec![
+        Some(TypeTuple(vec![
+            Type::from(TypeTuple(Vec::new())),
+            Type::from(TypeTuple(vec![
                 TYPE_BOOL.into(),
                 TYPE_INT.into(),
-            ])
-        ])),
+            ]))
+        ]).into()),
         TypeContext::new();
         "type check nested tuple"
     )]
@@ -2292,11 +2410,11 @@ mod tests {
                 Var("a").into(),
             ]
         }.into(),
-        Some(Type::Tuple(vec![
+        Some(Type::from(TypeTuple(vec![
             TYPE_BOOL.into(),
             TYPE_INT.into(),
             TYPE_INT.into(),
-        ])),
+        ]))),
         TypeContext::from([
             (
                 Id::from("a"),
@@ -2318,7 +2436,7 @@ mod tests {
                 {
                     let parameter = Rc::new(RefCell::new(None));
                     ParametricType{
-                        type_: Type::Variable(parameter.clone()),
+                        type_: Type::from(TypeVariable(parameter.clone())),
                         parameters: vec![parameter]
                     }.into()
                 }
@@ -2331,7 +2449,7 @@ mod tests {
             id: Id::from("f"),
             type_instances: vec![ATOMIC_TYPE_INT.into()]
         }.into(),
-        Some(Type::Instantiation(ALPHA_TYPE.clone(), vec![TYPE_INT.into()])),
+        Some(Type::from(TypeInstantiation{reference: ALPHA_TYPE.clone(), instances: vec![TYPE_INT.into()]})),
         TypeContext::from([
             (
                 Id::from("f"),
@@ -2388,26 +2506,26 @@ mod tests {
         Some(TYPE_UNIT.into()),
         TypeContext::from([(
             Id::from("a"),
-            Type::Tuple(
-                vec![Type::Tuple(
+            Type::from(TypeTuple(
+                vec![Type::from(TypeTuple(
                     vec![
                         TYPE_UNIT
                     ]
-                )]
-            ).into()
+                ))]
+            )).into()
         )]);
         "nested element access"
     )]
     #[test_case(
         Var("empty").into(),
-        Some(Type::Union(Id::from("Empty"),[(
-            None
-        )].into())),
+        Some(Type::TypeUnion(
+            TypeUnion{id: Id::from("Empty"),variants: vec![None].into()}
+        )),
         TypeContext::from([(
             Id::from("empty"),
-            Type::Union(Id::from("Empty"),[(
+            Type::from(TypeUnion{id: Id::from("Empty"),variants: [(
                 None
-            )].into()).into()
+            )].into()}).into()
         )]);
         "variable with empty type"
     )]
@@ -2533,12 +2651,12 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("x"),
-            Type::Tuple(
+            Type::from(TypeTuple(
                 vec![
                     TYPE_BOOL,
                     TYPE_INT,
                 ]
-            ).into()
+            )).into()
         )]);
         "if expression variable shadowed then accessed"
     )]
@@ -2548,7 +2666,7 @@ mod tests {
             return_type: TupleType{types: Vec::new()}.into(),
             body: ExpressionBlock(TupleExpression{expressions: Vec::new()}.into())
         }.into(),
-        Some(Type::Function(vec![], Box::new(TYPE_UNIT))),
+        Some(Type::from(TypeFn(Vec::new(), Box::new(TYPE_UNIT)))),
         TypeContext::new();
         "unit function def"
     )]
@@ -2567,7 +2685,7 @@ mod tests {
             return_type: ATOMIC_TYPE_INT.into(),
             body: ExpressionBlock(Var("x").into())
         }.into(),
-        Some(Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT))),
+        Some(Type::from(TypeFn(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT)))),
         TypeContext::new();
         "arguments function def"
     )]
@@ -2582,10 +2700,10 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("+"),
-            Type::Function(
+            Type::from(TypeFn(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            ).into()
+            )).into()
         )]);
         "addition function call"
     )]
@@ -2600,10 +2718,10 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("+"),
-            Type::Function(
+            Type::from(TypeFn(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            ).into()
+            )).into()
         )]);
         "addition function call wrong type"
     )]
@@ -2618,12 +2736,12 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("+"),
-            Type::Function(
+            Type::from(TypeFn(
                 vec![
-                    Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new()),
-                    Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new())
+                    Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), instances: Vec::new()}),
+                    Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), instances: Vec::new()})
                 ],
-                Box::new(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new()))
+                Box::new(Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), instances: Vec::new()})))
             ).into()
         )]);
         "addition function call with aliases"
@@ -2635,7 +2753,7 @@ mod tests {
                 Integer{ value: 5}.into(),
             ],
         }.into(),
-        Some(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), Vec::new())),
+        Some(Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), instances: Vec::new()})),
         TypeContext::new();
         "constructor call"
     )]
@@ -2939,7 +3057,7 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),instances: vec![TYPE_INT]}).into()
         )]);
         "valid match assignment"
     )]
@@ -2970,7 +3088,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),instances: vec![TYPE_INT]}).into()
         )]);
         "missing variant assignee"
     )]
@@ -3003,7 +3121,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),instances: vec![TYPE_INT]}).into()
         )]);
         "match out-of-scope variable"
     )]
@@ -3031,7 +3149,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![TYPE_INT]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),instances: vec![TYPE_INT]}).into()
         )]);
         "match partially-used variable"
     )]
@@ -3061,7 +3179,7 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("transparent_int")].clone()),Vec::new())]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),instances: vec![TYPE_INT,Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("transparent_int")].clone()),instances: Vec::new()})]}).into()
         )]);
         "match same type variable"
     )]
@@ -3091,7 +3209,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("opaque_int")].clone()),Vec::new())]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),instances: vec![TYPE_INT,Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("opaque_int")].clone()),instances: Vec::new()})]}).into()
         )]);
         "match different type variables"
     )]
@@ -3121,7 +3239,7 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("x"),
-            Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("transparent_int")].clone()),Vec::new())]).into()
+            Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),instances: vec![TYPE_INT,Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("transparent_int")].clone()),instances: Vec::new()})]}).into()
         )]);
         "different variable names"
     )]
@@ -3188,11 +3306,11 @@ mod tests {
         TypeContext::from([
             (
                 Id::from("x"),
-                Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,TYPE_BOOL]).into()]).into()
+                Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Option")].clone()),instances: vec![Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),instances: vec![TYPE_INT,TYPE_BOOL]}).into()]}).into()
             ),
             (
                 Id::from("*"),
-                Type::Function(vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),vec![TYPE_INT,TYPE_BOOL]).into(),TYPE_BOOL], Box::new(TYPE_INT)).into()
+                Type::from(TypeFn(vec![Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&String::from("Either")].clone()),instances: vec![TYPE_INT,TYPE_BOOL]}).into(),TYPE_BOOL], Box::new(TYPE_INT))).into()
             ),
         ]);
         "nested match"
@@ -3429,13 +3547,13 @@ mod tests {
                 ]
             }.into())
         },
-        Some(Type::Function(
+        Some(Type::from(TypeFn(
             vec![
-                Type::Function(vec![TYPE_INT],Box::new(TYPE_BOOL)),
+                Type::from(TypeFn(vec![TYPE_INT],Box::new(TYPE_BOOL))),
                 TYPE_INT
             ],
             Box::new(TYPE_BOOL),
-        )),
+        ))),
         TypeContext::new();
         "function matched generics"
     )]
@@ -3507,10 +3625,10 @@ mod tests {
             return_type: Typename("opaque_int").into(),
             body: ExpressionBlock(Var("x").into()),
         }.into()),
-        Some(Type::Function(
-            vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), Vec::new())],
-            Box::new(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), Vec::new()))
-        )),
+        Some(Type::from(TypeFn(
+            vec![Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), instances: Vec::new()})],
+            Box::new(Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("opaque_int")].clone()), instances: Vec::new()}))
+        ))),
         TypeContext::new();
         "opaque type reference"
     )]
@@ -3525,10 +3643,10 @@ mod tests {
             return_type: ATOMIC_TYPE_INT.into(),
             body: ExpressionBlock(Var("x").into()),
         }.into()),
-        Some(Type::Function(
-            vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new())],
+        Some(Type::from(TypeFn(
+            vec![Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), instances: Vec::new()})],
             Box::new(TYPE_INT)
-        )),
+        ))),
         TypeContext::new();
         "transparent type reference"
     )]
@@ -3543,10 +3661,10 @@ mod tests {
             return_type: ATOMIC_TYPE_INT.into(),
             body: ExpressionBlock(Var("x").into()),
         }.into()),
-        Some(Type::Function(
-            vec![Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), Vec::new())],
-            Box::new(Type::Instantiation(TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int_2")].clone()), Vec::new()))
-        )),
+        Some(Type::from(TypeFn(
+            vec![Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int")].clone()), instances: Vec::new()})],
+            Box::new(Type::from(TypeInstantiation{reference: TYPE_DEFINITIONS.with(|definitions| definitions[&Id::from("transparent_int_2")].clone()), instances: Vec::new()}))
+        ))),
         TypeContext::new();
         "double transparent type reference"
     )]
@@ -3564,10 +3682,10 @@ mod tests {
                 index: 0
             }.into()),
         }.into()),
-        Some(Type::Function(
-            vec![Type::Tuple(vec![TYPE_INT, TYPE_INT])],
+        Some(Type::from(TypeFn(
+            vec![Type::from(TypeTuple(vec![TYPE_INT, TYPE_INT]))],
             Box::new(TYPE_INT)
-        )),
+        ))),
         TypeContext::new();
         "transparent type usage"
     )]
@@ -3610,16 +3728,16 @@ mod tests {
                 ],
             }.into())
         }.into()),
-        Some(Type::Function(
+        Some(Type::from(TypeFn(
             vec![TYPE_INT, TYPE_INT],
             Box::new(TYPE_INT)
-        )),
+        ))),
         TypeContext::from([(
             Id::from("+"),
-            Type::Function(
+            Type::from(TypeFn(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            ).into()
+            )).into()
         )]);
         "add function definition"
     )]
@@ -3647,10 +3765,10 @@ mod tests {
         None,
         TypeContext::from([(
             Id::from("+"),
-            Type::Function(
+            Type::from(TypeFn(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            ).into()
+            )).into()
         )]);
         "add invalid function definition"
     )]
@@ -3915,7 +4033,7 @@ mod tests {
         Some(TYPE_INT),
         TypeContext::from([(
             Id::from("&"),
-            Type::Function(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT)).into()
+            Type::from(TypeFn(vec![TYPE_INT, TYPE_BOOL], Box::new(TYPE_INT))).into()
         )]);
         "reused generic function"
     )]
@@ -3956,13 +4074,13 @@ mod tests {
                 }.into()
             )
         },
-        Some(Type::Function(
+        Some(Type::from(TypeFn(
             vec![
-                Type::Function(vec![TYPE_INT], Box::new(TYPE_BOOL)),
+                Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_BOOL))),
                 TYPE_INT
             ],
             Box::new(TYPE_BOOL)
-        )),
+        ))),
         TypeContext::new();
         "compound generic function"
     )]
@@ -3993,12 +4111,12 @@ mod tests {
                 }.into()
             )
         },
-        Some(Type::Function(
+        Some(Type::from(TypeFn(
             vec![
                 TYPE_INT
             ],
             Box::new(TYPE_INT)
-        )),
+        ))),
         TypeContext::new();
         "dual generic function"
     )]
@@ -4034,12 +4152,12 @@ mod tests {
                 }.into()
             )
         },
-        Some(Type::Function(
+        Some(Type::from(TypeFn(
             vec![
-                Type::Tuple(vec![TYPE_INT, TYPE_BOOL]),
+                Type::from(TypeTuple(vec![TYPE_INT, TYPE_BOOL])),
             ],
             Box::new(TYPE_INT)
-        )),
+        ))),
         TypeContext::new();
         "tuple generic function"
     )]
@@ -4261,10 +4379,10 @@ mod tests {
         Ok(()),
         TypeContext::from([(
             Id::from("+"),
-            Type::Function(
+            Type::from(TypeFn(
                 vec![TYPE_INT, TYPE_INT],
                 Box::new(TYPE_INT)
-            ).into()
+            )).into()
         )]);
         "basic using context"
     )]
