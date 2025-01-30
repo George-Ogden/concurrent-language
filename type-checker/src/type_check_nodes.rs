@@ -480,7 +480,7 @@ pub const TYPE_UNIT: Type = Type::TypeTuple(TypeTuple(Vec::new()));
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::TypeAtomic(TypeAtomic(atomic_type)) => write!(f, "AtomicType({:?})", atomic_type),
+            Type::TypeAtomic(TypeAtomic(atomic_type)) => write!(f, "TypeAtomic({:?})", atomic_type),
             Type::TypeUnion(TypeUnion { id, variants }) => {
                 write!(f, "TypeUnion({:?},{:?})", id, variants.iter().collect_vec())
             }
@@ -638,7 +638,7 @@ impl TypedExpression {
             Self::Integer(_) => TYPE_INT,
             Self::Boolean(_) => TYPE_BOOL,
             Self::TypedTuple(TypedTuple { expressions }) => {
-                TypeTuple(expressions.iter().map(Self::type_).collect_vec()).into()
+                TypeTuple(Self::types(expressions)).into()
             }
             Self::TypedAccess(TypedAccess {
                 variable: TypedVariable { variable: _, type_ },
@@ -699,6 +699,9 @@ impl TypedExpression {
             type_
         };
         type_
+    }
+    pub fn types(expressions: &Vec<Self>) -> Vec<Type> {
+        expressions.iter().map(Self::type_).collect_vec()
     }
     fn instantiate(&self) -> TypedExpression {
         match &self {
