@@ -1,7 +1,7 @@
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
 
-PARSER := parser
-GRAMMAR := parser/grammar
+PARSER := parsing
+GRAMMAR := parsing/grammar
 TYPE_CHECKER := type-checker/target/debug/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
 TRANSLATOR := translation/target/debug/libtranslation.d
@@ -10,6 +10,8 @@ LOWERER := lowering/target/debug/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
 COMPILER := compilation/target/debug/libcompilation.d
 COMPILER_MANIFEST := compilation/Cargo.toml
+OPTIMIZER := optimization/target/debug/optimization
+OPTIMIZER_MANIFEST := optimization/Cargo.toml
 PIPELINE := pipeline/target/debug/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
@@ -48,7 +50,10 @@ $(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
 $(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
 	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
 
-$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR)
+$(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
+	cargo build --manifest-path $(OPTIMIZER_MANIFEST)
+
+$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST)
 
 $(BACKEND):
@@ -68,6 +73,7 @@ test: build
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
+	cargo test --manifest-path $(OPTIMIZER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
 	ASAN_OPTIONS=detect_stack_use_after_return=1 ASAN_OPTIONS=detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1

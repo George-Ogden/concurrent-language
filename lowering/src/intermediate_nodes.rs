@@ -142,6 +142,18 @@ impl PartialEq for Location {
     }
 }
 
+impl PartialOrd for Location {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Location {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.as_ptr().cmp(&other.0.as_ptr())
+    }
+}
+
 impl Hash for Location {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.as_ptr().hash(state);
@@ -154,10 +166,12 @@ impl fmt::Debug for Location {
     }
 }
 
-#[derive(Clone, FromVariants, PartialEq, Eq, Debug)]
+type IntermediateMemory = Location;
+
+#[derive(Clone, FromVariants, PartialEq, Eq, Debug, Hash)]
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
-    IntermediateMemory(Location),
+    IntermediateMemory(IntermediateMemory),
     IntermediateArg(IntermediateArg),
 }
 
@@ -172,31 +186,6 @@ impl IntermediateValue {
     }
 }
 
-impl Hash for IntermediateValue {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            IntermediateValue::IntermediateBuiltIn(built_in) => {
-                0.hash(state);
-                built_in.hash(state);
-            }
-            IntermediateValue::IntermediateMemory(location) => {
-                1.hash(state);
-                location.hash(state);
-            }
-            IntermediateValue::IntermediateArg(arg) => {
-                2.hash(state);
-                arg.hash(state);
-            }
-        }
-    }
-}
-
-impl From<Location> for IntermediateValue {
-    fn from(value: Location) -> Self {
-        Self::IntermediateMemory(value)
-    }
-}
-
 #[derive(Clone, Debug, FromVariants, PartialEq, Eq, Hash)]
 pub enum IntermediateBuiltIn {
     Integer(Integer),
@@ -205,30 +194,30 @@ pub enum IntermediateBuiltIn {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntermediateMemory {
+pub struct IntermediateAssignment {
     pub expression: Rc<RefCell<IntermediateExpression>>,
     pub location: Location,
 }
 
-impl Hash for IntermediateMemory {
+impl Hash for IntermediateAssignment {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.expression.as_ptr().hash(state);
         self.location.hash(state);
     }
 }
 
-impl From<IntermediateExpression> for IntermediateMemory {
+impl From<IntermediateExpression> for IntermediateAssignment {
     fn from(value: IntermediateExpression) -> Self {
-        IntermediateMemory {
+        IntermediateAssignment {
             expression: Rc::new(RefCell::new(value)),
             location: Location::new(),
         }
     }
 }
 
-impl From<IntermediateArg> for IntermediateMemory {
+impl From<IntermediateArg> for IntermediateAssignment {
     fn from(value: IntermediateArg) -> Self {
-        IntermediateMemory {
+        IntermediateAssignment {
             expression: Rc::new(RefCell::new(value.into())),
             location: Location::new(),
         }
@@ -344,7 +333,6 @@ impl From<IntermediateBuiltIn> for IntermediateExpression {
 pub struct ExpressionEqualityChecker {
     true_history: HashMap<Location, Location>,
     history: HashMap<Location, Location>,
-    args: HashMap<*mut IntermediateType, *mut IntermediateType>,
 }
 
 impl ExpressionEqualityChecker {
@@ -356,24 +344,18 @@ impl ExpressionEqualityChecker {
         ExpressionEqualityChecker {
             true_history: HashMap::new(),
             history: HashMap::new(),
-            args: HashMap::new(),
         }
     }
     fn equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) -> bool {
-        let IntermediateArg(t1) = a1;
-        let IntermediateArg(t2) = a2;
-        if self.args.get(&t1.as_ptr()) == Some(&t2.as_ptr()) {
-            true
-        } else if matches!(self.args.get(&t1.as_ptr()), Some(_))
-            || matches!(self.args.get(&t2.as_ptr()), Some(_))
-            || t1 != t2
-        {
-            false
-        } else {
-            self.args.insert(t1.as_ptr(), t2.as_ptr());
-            self.args.insert(t2.as_ptr(), t1.as_ptr());
-            true
-        }
+        let IntermediateArg {
+            location: l1,
+            type_: _,
+        } = a1;
+        let IntermediateArg {
+            location: l2,
+            type_: _,
+        } = a2;
+        self.equal_locations(l1, l2)
     }
     fn equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) -> bool {
         a1.len() == a2.len()
@@ -395,12 +377,16 @@ impl ExpressionEqualityChecker {
             true
         }
     }
-    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
-        let IntermediateMemory {
+    fn equal_assignment(
+        &mut self,
+        m1: &IntermediateAssignment,
+        m2: &IntermediateAssignment,
+    ) -> bool {
+        let IntermediateAssignment {
             expression: e1,
             location: l1,
         } = m1;
-        let IntermediateMemory {
+        let IntermediateAssignment {
             expression: e2,
             location: l2,
         } = m2;
@@ -542,9 +528,10 @@ impl ExpressionEqualityChecker {
     }
     fn equal_statement(&mut self, s1: &IntermediateStatement, s2: &IntermediateStatement) -> bool {
         match (s1, s2) {
-            (IntermediateStatement::Assignment(m1), IntermediateStatement::Assignment(m2)) => {
-                self.equal_memory(m1, m2)
-            }
+            (
+                IntermediateStatement::IntermediateAssignment(m1),
+                IntermediateStatement::IntermediateAssignment(m2),
+            ) => self.equal_assignment(m1, m2),
             (
                 IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
                     condition: c1,
@@ -604,32 +591,30 @@ impl ExpressionEqualityChecker {
     }
 }
 
-#[derive(Clone, Eq)]
-pub struct IntermediateArg(pub Rc<RefCell<IntermediateType>>);
-
-impl fmt::Debug for IntermediateArg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("IntermediateArg")
-            .field(&self.0.as_ptr())
-            .finish()
-    }
+#[derive(Clone, Eq, Debug)]
+pub struct IntermediateArg {
+    pub type_: IntermediateType,
+    pub location: Location,
 }
 
 impl PartialEq for IntermediateArg {
     fn eq(&self, other: &Self) -> bool {
-        self.0.as_ptr() == other.0.as_ptr()
+        self.location == other.location
     }
 }
 
 impl From<IntermediateType> for IntermediateArg {
     fn from(value: IntermediateType) -> Self {
-        IntermediateArg(Rc::new(RefCell::new(value)))
+        IntermediateArg {
+            type_: value,
+            location: Location::new(),
+        }
     }
 }
 
 impl Hash for IntermediateArg {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.borrow().hash(state);
+        self.location.hash(state);
     }
 }
 
@@ -687,7 +672,7 @@ impl IntermediateFnDef {
 
 #[derive(Clone, PartialEq, FromVariants, Eq, Hash)]
 pub enum IntermediateStatement {
-    Assignment(IntermediateMemory),
+    IntermediateAssignment(IntermediateAssignment),
     IntermediateIfStatement(IntermediateIfStatement),
     IntermediateMatchStatement(IntermediateMatchStatement),
 }
@@ -695,7 +680,7 @@ pub enum IntermediateStatement {
 impl IntermediateStatement {
     fn values(&self) -> Vec<IntermediateValue> {
         match self {
-            IntermediateStatement::Assignment(IntermediateMemory {
+            IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location: _,
             }) => expression.borrow().clone().values(),
@@ -715,7 +700,7 @@ impl IntermediateStatement {
                 let mut values = branches
                     .iter()
                     .flat_map(|IntermediateMatchBranch { target, statements }| {
-                        IntermediateStatement::all_values(statements)
+                        IntermediateStatement::all_values(&statements)
                             .into_iter()
                             .filter(|value| match value {
                                 IntermediateValue::IntermediateArg(arg) => {
@@ -738,7 +723,7 @@ impl IntermediateStatement {
     }
     fn targets(&self) -> Vec<Location> {
         match self {
-            IntermediateStatement::Assignment(IntermediateMemory {
+            IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location,
             }) => {
@@ -763,7 +748,7 @@ impl IntermediateStatement {
                 .collect(),
         }
     }
-    fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
+    pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
         statements
             .iter()
             .flat_map(|statement| statement.targets())
@@ -771,7 +756,7 @@ impl IntermediateStatement {
     }
     fn substitute(&mut self, substitution: &Substitution) {
         match self {
-            IntermediateStatement::Assignment(IntermediateMemory {
+            IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location: _,
             }) => expression.borrow_mut().substitute(substitution),
@@ -804,7 +789,7 @@ impl IntermediateStatement {
 impl fmt::Debug for IntermediateStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Assignment(IntermediateMemory {
+            Self::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location,
             }) => write!(f, "{:?} = {:?}", location, expression.borrow().clone()),
@@ -817,12 +802,6 @@ impl fmt::Debug for IntermediateStatement {
                 .field(arg0)
                 .finish(),
         }
-    }
-}
-
-impl From<IntermediateMemory> for IntermediateStatement {
-    fn from(value: IntermediateMemory) -> Self {
-        IntermediateStatement::Assignment(value)
     }
 }
 
