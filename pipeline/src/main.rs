@@ -2,7 +2,7 @@ use std::io::{self, Read};
 
 use compilation::Compiler;
 use lowering::Lowerer;
-use optimisation::Optimizer;
+use optimization::DeadCodeAnalyzer;
 use translation::Translator;
 use type_checker::{Program, TypeChecker};
 
@@ -15,7 +15,7 @@ fn main() {
         Ok(program) => match TypeChecker::type_check(program) {
             Ok(type_checked_program) => {
                 let lowered_program = Lowerer::lower(type_checked_program);
-                let optimized_lowered_program = Optimizer::remove_dead_code(lowered_program);
+                let optimized_lowered_program = DeadCodeAnalyzer::remove_dead_code(lowered_program);
                 let compiled_program = Compiler::compile(optimized_lowered_program);
                 let code = Translator::translate(compiled_program);
                 println!("{}", code)

@@ -1,5 +1,5 @@
 #![feature(cmp_minmax)]
 
-mod optimizer;
+mod dead_code_analysis;
 
-pub use optimizer::Optimizer;
+pub use dead_code_analysis::DeadCodeAnalyzer;

@@ -13,7 +13,7 @@ use lowering::{
     IntermediateTupleExpression, IntermediateValue, Location,
 };
 
-pub struct Optimizer {
+pub struct DeadCodeAnalyzer {
     single_constraints: HashMap<Location, HashSet<Location>>,
     double_constraints: HashMap<(Location, Location), HashSet<Location>>,
     fn_args: HashMap<Location, Vec<Location>>,
@@ -21,9 +21,9 @@ pub struct Optimizer {
     fn_updates: HashMap<Location, Location>,
 }
 
-impl Optimizer {
+impl DeadCodeAnalyzer {
     pub fn new() -> Self {
-        Optimizer {
+        DeadCodeAnalyzer {
             single_constraints: HashMap::new(),
             double_constraints: HashMap::new(),
             fn_args: HashMap::new(),
@@ -462,7 +462,7 @@ impl Optimizer {
             .collect_vec()
     }
     pub fn remove_dead_code(program: IntermediateProgram) -> IntermediateProgram {
-        let mut optimizer = Optimizer::new();
+        let mut optimizer = DeadCodeAnalyzer::new();
         optimizer.generate_constraints(&program.statements);
         let IntermediateValue::IntermediateMemory(location) = &program.main else {
             return program;
@@ -583,7 +583,7 @@ mod tests {
     )]
     fn test_find_used_values(expression_locations: (IntermediateExpression, Vec<Location>)) {
         let (expression, expected_locations) = expression_locations;
-        let mut optimizer = Optimizer::new();
+        let mut optimizer = DeadCodeAnalyzer::new();
 
         let expected: HashSet<_> = expected_locations.into_iter().collect();
         let locations = optimizer.find_used_values(&expression);
@@ -1030,7 +1030,7 @@ mod tests {
     ) {
         let (statements, expected_single_constraints, expected_double_constraints) =
             statements_singles_doubles;
-        let mut optimizer = Optimizer::new();
+        let mut optimizer = DeadCodeAnalyzer::new();
 
         optimizer.generate_constraints(&statements);
 
@@ -1129,7 +1129,7 @@ mod tests {
     ) {
         let (initial_solution, (single_constraints, double_constraints), expected_solution) =
             initial_constraints_solution;
-        let mut optimizer = Optimizer::new();
+        let mut optimizer = DeadCodeAnalyzer::new();
         for (k, v) in single_constraints {
             optimizer.add_single_constraint(k, v);
         }
@@ -2163,7 +2163,7 @@ mod tests {
     )]
     fn test_remove_program_dead_code(program_expected: (IntermediateProgram, IntermediateProgram)) {
         let (program, expected_program) = program_expected;
-        let optimized_program = Optimizer::remove_dead_code(program);
+        let optimized_program = DeadCodeAnalyzer::remove_dead_code(program);
         dbg!(&optimized_program);
         dbg!(&expected_program);
         let optimized_fn = IntermediateFnDef {
