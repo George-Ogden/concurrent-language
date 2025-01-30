@@ -1053,7 +1053,7 @@ pub enum TypeCheckError {
         arguments: Vec<TypedExpression>,
     },
     DifferingMatchBlockTypes(TypedMatchBlock, TypedMatchBlock),
-    NonTypeUnionMatchSubject(TypedExpression),
+    NonUnionTypeMatchSubject(TypedExpression),
     IncorrectVariants {
         blocks: Vec<MatchBlock>,
     },

@@ -74,14 +74,6 @@ pub struct GenericTypeVariable {
     pub generic_variables: Vec<Id>,
 }
 
-#[allow(non_snake_case)]
-pub fn TypeVariable(id: &str) -> GenericTypeVariable {
-    return GenericTypeVariable {
-        id: String::from(id),
-        generic_variables: Vec::new(),
-    };
-}
-
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct UnionTypeDefinition {
     pub variable: GenericTypeVariable,
