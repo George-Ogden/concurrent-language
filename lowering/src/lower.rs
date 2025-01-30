@@ -84,11 +84,11 @@ impl Lowerer {
             }
             TypedExpression::TypedAccess(access) => self.lower_access(access),
             TypedExpression::TypedFunctionCall(fn_call) => self.lower_fn_call(fn_call),
-            TypedExpression::TypedFunctionDefinition(fn_def) => self.lower_fn_def(fn_def),
+            TypedExpression::TypedLambdaDef(fn_def) => self.lower_fn_def(fn_def),
             TypedExpression::TypedConstructorCall(ctor_call) => self.lower_ctor_call(ctor_call),
             TypedExpression::TypedIf(if_) => self.lower_if(if_),
             TypedExpression::TypedMatch(match_) => self.lower_match(match_),
-            TypedExpression::PartiallyTypedFunctionDefinition(_) => {
+            TypedExpression::PartiallyTypedLambdaDef(_) => {
                 panic!("All function definitions should be fully typed.")
             }
         }
@@ -158,11 +158,11 @@ impl Lowerer {
     }
     fn lower_fn_def(
         &mut self,
-        TypedFunctionDefinition {
+        TypedLambdaDef {
             parameters,
             body,
             return_type,
-        }: TypedFunctionDefinition,
+        }: TypedLambdaDef,
     ) -> IntermediateValue {
         let variables = parameters
             .iter()
@@ -797,7 +797,7 @@ mod tests {
                 TYPE_INT.into(),
                 TYPE_BOOL.into()
             ];
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: parameters.clone(),
                 return_type: Box::new(TYPE_INT),
                 body: TypedBlock{
@@ -826,7 +826,7 @@ mod tests {
     #[test_case(
         {
             let arg: TypedVariable = Type::from(TypeTuple(vec![TYPE_INT, TYPE_BOOL])).into();
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 return_type: Box::new(TYPE_BOOL),
                 body: TypedBlock{
@@ -877,7 +877,7 @@ mod tests {
             ];
             let y: TypedVariable = TYPE_INT.into();
             let z: TypedVariable = TYPE_INT.into();
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: parameters.clone(),
                 return_type: Box::new(TYPE_INT),
                 body: TypedBlock{
@@ -1092,7 +1092,7 @@ mod tests {
     #[test_case(
         {
             let arg = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
                     statements: Vec::new(),
@@ -1161,7 +1161,7 @@ mod tests {
         {
             let arg = TypedVariable::from(TYPE_INT);
             let y = TypedVariable::from(TYPE_INT);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
                     statements: vec![
@@ -1334,7 +1334,7 @@ mod tests {
     #[test_case(
         {
             let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Bull"),variants: vec![None,None]}));
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
                     statements: Vec::new(),
@@ -1427,7 +1427,7 @@ mod tests {
         {
             let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Either"),variants: vec![Some(TYPE_INT),Some(TYPE_INT)]}));
             let var = TypedVariable::from(TYPE_INT);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
                     statements: Vec::new(),
@@ -1510,7 +1510,7 @@ mod tests {
         {
             let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Option"),variants: vec![Some(TYPE_INT),None]}));
             let var = TypedVariable::from(TYPE_INT);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
                     statements: Vec::new(),
@@ -2185,7 +2185,7 @@ mod tests {
                 vec![
                     TypedAssignment {
                         variable: f.clone(),
-                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                        expression: TypedExpression::TypedLambdaDef(TypedLambdaDef{
                             parameters: vec![parameter.clone()],
                             return_type: Box::new(TYPE_INT),
                             body: TypedBlock{
@@ -2254,7 +2254,7 @@ mod tests {
                 vec![
                     TypedAssignment {
                         variable: foo.clone(),
-                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                        expression: TypedExpression::TypedLambdaDef(TypedLambdaDef{
                             parameters: Vec::new(),
                             return_type: Box::new(TYPE_INT),
                             body: TypedBlock{
@@ -2338,7 +2338,7 @@ mod tests {
                 vec![
                     TypedAssignment {
                         variable: a.clone(),
-                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                        expression: TypedExpression::TypedLambdaDef(TypedLambdaDef{
                             parameters: Vec::new(),
                             return_type: Box::new(TYPE_BOOL),
                             body: TypedBlock{
@@ -2357,7 +2357,7 @@ mod tests {
                     }.into(),
                     TypedAssignment {
                         variable: b.clone(),
-                        expression: TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition{
+                        expression: TypedExpression::TypedLambdaDef(TypedLambdaDef{
                             parameters: Vec::new(),
                             return_type: Box::new(TYPE_BOOL),
                             body: TypedBlock{
@@ -2426,7 +2426,7 @@ mod tests {
                 TypedAssignment{
                     variable: id.clone(),
                     expression: ParametricExpression {
-                        expression: TypedFunctionDefinition{
+                        expression: TypedLambdaDef{
                             parameters: vec![x.clone()],
                             return_type: Box::new(TYPE_INT),
                             body: TypedBlock{
@@ -2522,7 +2522,7 @@ mod tests {
                 statements: vec![
                     TypedAssignment{
                         variable: main.clone(),
-                        expression: TypedExpression::from(TypedFunctionDefinition{
+                        expression: TypedExpression::from(TypedLambdaDef{
                             parameters: Vec::new(),
                             return_type: Box::new(TYPE_INT),
                             body: TypedBlock {
@@ -2632,7 +2632,7 @@ mod tests {
                     }.into(),
                     TypedAssignment{
                         variable: main.clone(),
-                        expression: TypedExpression::from(TypedFunctionDefinition{
+                        expression: TypedExpression::from(TypedLambdaDef{
                             parameters: Vec::new(),
                             return_type: Box::new(TYPE_INT),
                             body: TypedBlock {
@@ -2719,7 +2719,7 @@ mod tests {
                     TypedAssignment {
                         expression: ParametricExpression{
                             parameters: vec![(Id::from("T"), parameter.clone())],
-                            expression: TypedFunctionDefinition{
+                            expression: TypedLambdaDef{
                                 parameters: vec![
                                     arg.clone()
                                 ],
@@ -2737,7 +2737,7 @@ mod tests {
                     }.into(),
                     TypedAssignment{
                         variable: main.clone(),
-                        expression: TypedExpression::from(TypedFunctionDefinition{
+                        expression: TypedExpression::from(TypedLambdaDef{
                             parameters: Vec::new(),
                             return_type: Box::new(TYPE_INT),
                             body: TypedBlock {

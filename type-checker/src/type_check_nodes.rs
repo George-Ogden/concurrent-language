@@ -1,4 +1,4 @@
-use crate::{Assignee, AtomicTypeEnum, Block, Boolean, Id, Integer, MatchBlock, TypeInstance};
+use crate::{Assignee, AtomicTypeEnum, Boolean, Id, Integer, MatchBlock, TypeInstance};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -599,14 +599,7 @@ pub struct TypedMatch {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct PartiallyTypedFunctionDefinition {
-    pub parameters: Vec<(Id, TypedVariable)>,
-    pub return_type: Box<Type>,
-    pub body: Block,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypedFunctionDefinition {
+pub struct TypedLambdaDef {
     pub parameters: Vec<TypedVariable>,
     pub return_type: Box<Type>,
     pub body: TypedBlock,
@@ -634,8 +627,7 @@ pub enum TypedExpression {
     TypedElementAccess(TypedElementAccess),
     TypedIf(TypedIf),
     TypedMatch(TypedMatch),
-    PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition),
-    TypedFunctionDefinition(TypedFunctionDefinition),
+    TypedLambdaDef(TypedLambdaDef),
     TypedFunctionCall(TypedFunctionCall),
     TypedConstructorCall(TypedConstructorCall),
 }
@@ -664,19 +656,7 @@ impl TypedExpression {
                 true_block,
                 false_block: _,
             }) => true_block.type_(),
-            Self::PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition {
-                parameters,
-                return_type,
-                body: _,
-            }) => TypeFn(
-                parameters
-                    .iter()
-                    .map(|(_, parameter)| parameter.type_.type_.clone())
-                    .collect_vec(),
-                return_type.clone(),
-            )
-            .into(),
-            Self::TypedFunctionDefinition(TypedFunctionDefinition {
+            Self::TypedLambdaDef(TypedLambdaDef {
                 parameters,
                 return_type,
                 body: _,
@@ -757,11 +737,11 @@ impl TypedExpression {
                 blocks: blocks.iter().map(|block| block.instantiate()).collect(),
             }
             .into(),
-            Self::TypedFunctionDefinition(TypedFunctionDefinition {
+            Self::TypedLambdaDef(TypedLambdaDef {
                 parameters,
                 return_type,
                 body,
-            }) => TypedFunctionDefinition {
+            }) => TypedLambdaDef {
                 parameters: parameters
                     .iter()
                     .map(|parameter| parameter.instantiate())
@@ -788,7 +768,6 @@ impl TypedExpression {
                 arguments: Self::instantiate_expressions(arguments),
             }
             .into(),
-            Self::PartiallyTypedFunctionDefinition(_) => panic!(),
         }
     }
 
@@ -859,12 +838,12 @@ impl TypedExpression {
                     })
             }
             (
-                TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                TypedExpression::TypedLambdaDef(TypedLambdaDef {
                     parameters: p1,
                     return_type: r1,
                     body: b1,
                 }),
-                TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                TypedExpression::TypedLambdaDef(TypedLambdaDef {
                     parameters: p2,
                     return_type: r2,
                     body: b2,
@@ -925,6 +904,8 @@ impl TypedExpression {
                     expression: e2,
                 }),
             ) => v1.type_ == v2.type_ && Self::equal(&e1.expression, &e2.expression),
+            (TypedStatement::TypedFnDef(_), TypedStatement::TypedFnDef(_)) => todo!(),
+            _ => false,
         }
     }
 }
@@ -960,6 +941,7 @@ impl From<TypedExpression> for ParametricExpression {
 #[derive(Debug, PartialEq, Clone, FromVariants)]
 pub enum TypedStatement {
     TypedAssignment(TypedAssignment),
+    TypedFnDef(TypedFnDef),
 }
 
 impl TypedStatement {
@@ -974,6 +956,7 @@ impl TypedStatement {
             TypedStatement::TypedAssignment(typed_assignment) => {
                 typed_assignment.instantiate().into()
             }
+            TypedStatement::TypedFnDef(_) => todo!(),
         }
     }
 }
@@ -982,6 +965,13 @@ impl TypedStatement {
 pub struct TypedAssignment {
     pub variable: TypedVariable,
     pub expression: ParametricExpression,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedFnDef {
+    pub variable: TypedVariable,
+    pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
+    pub fn_: TypedLambdaDef,
 }
 
 impl TypedAssignment {
@@ -1514,7 +1504,7 @@ mod tests {
             let arg1 = TypedVariable::from(Type::TypeVariable(TypeVariable(right.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), left.clone()), (Id::from("U"), right.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg0.clone(), arg1.clone()],
                     body: TypedBlock{
                         statements: Vec::new(),
@@ -1539,7 +1529,7 @@ mod tests {
         {
             let arg0 = TypedVariable::from(TYPE_INT);
             let arg1 = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg0.clone(), arg1.clone()],
                 body: TypedBlock{
                     statements: Vec::new(),
@@ -1570,7 +1560,7 @@ mod tests {
             let variable = TypedVariable::from(Type::from(TypeVariable(b.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("F"), a.clone()), (Id::from("T"), b.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg0.clone(), arg1.clone()],
                     body: TypedBlock{
                         statements: vec![
@@ -1606,7 +1596,7 @@ mod tests {
             let arg0 = TypedVariable::from(Type::from(TypeFn(vec![TYPE_INT],Box::new(TYPE_BOOL))));
             let arg1 = TypedVariable::from(TYPE_INT);
             let variable = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg0.clone(), arg1.clone()],
                 body: TypedBlock{
                     statements: vec![
@@ -1646,7 +1636,7 @@ mod tests {
             let arg2 = TypedVariable::from(Type::from(TypeVariable(parameter.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), parameter.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
                     body: TypedBlock{
                         statements: Vec::new(),
@@ -1686,7 +1676,7 @@ mod tests {
             let arg0 = TypedVariable::from(TYPE_BOOL);
             let arg1 = TypedVariable::from(TYPE_BOOL);
             let arg2 = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
                 body: TypedBlock{
                     statements: Vec::new(),
@@ -1732,7 +1722,7 @@ mod tests {
             let subvariable = TypedVariable::from(Type::from(TypeVariable(left.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), left.clone()),(Id::from("U"), right.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg.clone()],
                     body: TypedBlock{
                         statements: vec![
@@ -1805,7 +1795,7 @@ mod tests {
             let arg = TypedVariable::from(TYPE_BOOL);
             let variable = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Either"), variants: vec![Some(TYPE_BOOL), Some(TYPE_UNIT)]}));
             let subvariable = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
                     statements: vec![
