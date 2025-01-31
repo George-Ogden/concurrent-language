@@ -175,9 +175,10 @@ impl Compiler {
             IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Boolean(_)) => {
                 AtomicTypeEnum::BOOL.into()
             }
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(_, type_)) => {
-                type_.clone()
-            }
+            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(BuiltInFn(
+                _,
+                type_,
+            ))) => type_.clone(),
             IntermediateValue::IntermediateMemory(location) => {
                 let expressions = &self.memory[&location];
                 let types = expressions
@@ -422,7 +423,7 @@ impl Compiler {
                         Value::from(match built_in {
                             IntermediateBuiltIn::Boolean(boolean) => BuiltIn::from(boolean.clone()),
                             IntermediateBuiltIn::Integer(integer) => BuiltIn::from(integer.clone()),
-                            IntermediateBuiltIn::BuiltInFn(name, _) => {
+                            IntermediateBuiltIn::BuiltInFn(BuiltInFn(name, _)) => {
                                 BuiltIn::BuiltInFn(OPERATOR_NAMES[name].clone()).into()
                             }
                         }),
@@ -992,7 +993,7 @@ mod tests {
     )]
     #[test_case(
         (
-            IntermediateBuiltIn::BuiltInFn(
+            BuiltInFn(
                 Name::from("+"),
                 IntermediateFnType(
                     vec![
@@ -1126,7 +1127,7 @@ mod tests {
     #[test_case(
         (
             IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                     Name::from(""),
                     IntermediateFnType(
                         vec![
@@ -1322,7 +1323,7 @@ mod tests {
         "boolean"
     )]
     #[test_case(
-        IntermediateBuiltIn::BuiltInFn(
+        BuiltInFn(
             Name::from("=="),
             IntermediateFnType(
                 vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -1520,7 +1521,7 @@ mod tests {
     )]
     #[test_case(
         IntermediateFnCall{
-            fn_: IntermediateBuiltIn::BuiltInFn(
+            fn_: BuiltInFn(
                 Name::from("++"),
                 IntermediateFnType(
                     vec![AtomicTypeEnum::INT.into()],
@@ -1561,7 +1562,7 @@ mod tests {
     )]
     #[test_case(
         IntermediateFnCall{
-            fn_: IntermediateBuiltIn::BuiltInFn(
+            fn_: BuiltInFn(
                 Name::from("*"),
                 IntermediateFnType(
                     vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -1819,7 +1820,7 @@ mod tests {
         vec![
             IntermediateAssignment{
                 expression: Rc::new(RefCell::new(IntermediateFnCall{
-                    fn_: IntermediateBuiltIn::BuiltInFn(
+                    fn_: BuiltInFn(
                         Name::from("--"),
                         IntermediateFnType(
                             vec![AtomicTypeEnum::INT.into()],
@@ -2139,7 +2140,7 @@ mod tests {
                                 location: location.clone(),
                                 expression: Rc::new(RefCell::new(
                                     IntermediateFnCall{
-                                        fn_: IntermediateBuiltIn::BuiltInFn(
+                                        fn_: BuiltInFn(
                                             Name::from("++"),
                                             IntermediateFnType(
                                                 vec![AtomicTypeEnum::INT.into()],
@@ -2241,7 +2242,7 @@ mod tests {
                                 location: location.clone(),
                                 expression: Rc::new(RefCell::new(
                                     IntermediateFnCall{
-                                        fn_: IntermediateBuiltIn::BuiltInFn(
+                                        fn_: BuiltInFn(
                                             Name::from("++"),
                                             IntermediateFnType(
                                                 vec![AtomicTypeEnum::INT.into()],
@@ -2500,7 +2501,7 @@ mod tests {
                                         location: location.clone(),
                                         expression: Rc::new(RefCell::new(
                                             IntermediateFnCall{
-                                                fn_: IntermediateBuiltIn::BuiltInFn(
+                                                fn_: BuiltInFn(
                                                     Name::from(">"),
                                                     IntermediateFnType(
                                                         vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -2649,7 +2650,7 @@ mod tests {
                                         location: location.clone(),
                                         expression: Rc::new(RefCell::new(
                                             IntermediateFnCall{
-                                                fn_: IntermediateBuiltIn::BuiltInFn(
+                                                fn_: BuiltInFn(
                                                     Name::from(">"),
                                                     IntermediateFnType(
                                                         vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -2849,7 +2850,7 @@ mod tests {
             let arg1: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let y = Location::new();
             let y_expression = Rc::new(RefCell::new(IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                     Name::from("+"),
                     IntermediateFnType(
                         vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -2932,7 +2933,7 @@ mod tests {
             let y = Location::new();
             let z = Location::new();
             let z_expression = Rc::new(RefCell::new(IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                     Name::from("+"),
                     IntermediateFnType(
                         vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
