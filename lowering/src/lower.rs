@@ -39,10 +39,8 @@ impl Lowerer {
                 let variable = var.variable.clone();
                 (
                     (variable, Vec::new()),
-                    IntermediateExpression::IntermediateValue(
-                        IntermediateBuiltIn::BuiltInFn(id.clone(), type_).into(),
-                    )
-                    .into(),
+                    IntermediateExpression::IntermediateValue(BuiltInFn(id.clone(), type_).into())
+                        .into(),
                 )
             }))
         });
@@ -88,9 +86,6 @@ impl Lowerer {
             TypedExpression::TypedConstructorCall(ctor_call) => self.lower_ctor_call(ctor_call),
             TypedExpression::TypedIf(if_) => self.lower_if(if_),
             TypedExpression::TypedMatch(match_) => self.lower_match(match_),
-            TypedExpression::PartiallyTypedLambdaDef(_) => {
-                panic!("All function definitions should be fully typed.")
-            }
         }
     }
     fn lower_tuple(&mut self, TypedTuple { expressions }: TypedTuple) -> IntermediateValue {
@@ -648,7 +643,10 @@ impl Lowerer {
     fn lower_statements(&mut self, statements: Vec<TypedStatement>) {
         let expressions = statements
             .into_iter()
-            .filter_map(|TypedStatement::TypedAssignment(assignment)| {
+            .filter_map(|statement| {
+                let TypedStatement::TypedAssignment(assignment) = statement else {
+                    todo!();
+                };
                 self.add_placeholder_assignment(assignment, None)
             })
             .collect::<Vec<_>>();
@@ -775,7 +773,7 @@ mod tests {
         }.into(),
         {
             let memory: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                         Id::from("+"),
                         IntermediateFnType(
                             vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
@@ -1262,7 +1260,7 @@ mod tests {
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let return_address: IntermediateAssignment = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)).into();
             let y: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                         Id::from("++"),
                         IntermediateFnType(
                             vec![AtomicTypeEnum::INT.into()],
@@ -1274,7 +1272,7 @@ mod tests {
                 ]
             }).into();
             let c: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                         Id::from(">"),
                         IntermediateFnType(
                             vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -1287,7 +1285,7 @@ mod tests {
                 ]
             }).into();
             let z: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall{
-                fn_: IntermediateBuiltIn::BuiltInFn(
+                fn_: BuiltInFn(
                         Id::from("++"),
                         IntermediateFnType(
                             vec![AtomicTypeEnum::INT.into()],

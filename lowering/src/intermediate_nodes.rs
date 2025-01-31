@@ -186,12 +186,33 @@ impl IntermediateValue {
     }
 }
 
+impl From<Integer> for IntermediateValue {
+    fn from(value: Integer) -> IntermediateValue {
+        IntermediateBuiltIn::from(value).into()
+    }
+}
+
+impl From<Boolean> for IntermediateValue {
+    fn from(value: Boolean) -> IntermediateValue {
+        IntermediateBuiltIn::from(value).into()
+    }
+}
+
+impl From<BuiltInFn> for IntermediateValue {
+    fn from(value: BuiltInFn) -> IntermediateValue {
+        IntermediateBuiltIn::from(value).into()
+    }
+}
+
 #[derive(Clone, Debug, FromVariants, PartialEq, Eq, Hash)]
 pub enum IntermediateBuiltIn {
     Integer(Integer),
     Boolean(Boolean),
-    BuiltInFn(Id, IntermediateType),
+    BuiltInFn(BuiltInFn),
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BuiltInFn(pub Id, pub IntermediateType);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntermediateAssignment {
