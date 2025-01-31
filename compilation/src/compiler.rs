@@ -40,7 +40,7 @@ const OPERATOR_NAMES: Lazy<HashMap<Id, Id>> = Lazy::new(|| {
     )
 });
 
-type MemoryMap = HashMap<Location, Vec<Rc<RefCell<IntermediateExpression>>>>;
+type MemoryMap = HashMap<Location, Vec<IntermediateExpression>>;
 type ReferenceNames = HashMap<*mut IntermediateType, MachineType>;
 type MemoryIds = HashMap<Location, Memory>;
 type ValueScope = HashMap<IntermediateValue, Value>;
@@ -84,7 +84,7 @@ impl Compiler {
                     expression,
                     location,
                 }) => {
-                    match &expression.borrow().clone() {
+                    match &expression {
                         IntermediateExpression::IntermediateLambda(IntermediateLambda {
                             args: _,
                             statements,
@@ -165,6 +165,9 @@ impl Compiler {
                 };
                 types[*idx].clone()
             }
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
+                self.expression_type(&lambda.clone().into())
+            }
         }
     }
     fn value_type(&self, value: &IntermediateValue) -> IntermediateType {
@@ -183,7 +186,7 @@ impl Compiler {
                 let expressions = &self.memory[&location];
                 let types = expressions
                     .iter()
-                    .map(|expression| self.expression_type(&expression.borrow().clone()));
+                    .map(|expression| self.expression_type(&expression));
                 if !types.clone().all_equal() {
                     panic!("Expressions have different types.");
                 }
@@ -522,8 +525,12 @@ impl Compiler {
                 let (statements, value) = self.compile_value(value, false);
                 (statements, value.into())
             }
-            IntermediateExpression::IntermediateLambda(fn_def) => {
-                let (statements, closure_inst) = self.compile_fn_def(fn_def);
+            IntermediateExpression::IntermediateLambda(lambda) => {
+                let (statements, closure_inst) = self.compile_lambda(lambda);
+                (statements, closure_inst.into())
+            }
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
+                let (statements, closure_inst) = self.compile_lambda(lambda);
                 (statements, closure_inst.into())
             }
         }
@@ -733,8 +740,8 @@ impl Compiler {
             expression,
             location,
         } = assignment;
-        let type_ = self.compile_type(&self.expression_type(&expression.borrow().clone()));
-        let (mut statements, value) = self.compile_expression(expression.borrow().clone());
+        let type_ = self.compile_type(&self.expression_type(&expression));
+        let (mut statements, value) = self.compile_expression(expression);
         let memory = self.compile_location(&location);
         if matches!(&value, Expression::FnCall(_)) {
             self.lazy_vals
@@ -792,7 +799,7 @@ impl Compiler {
             .map(|(val, loc)| {
                 self.update_memory(&IntermediateAssignment {
                     location: loc.clone(),
-                    expression: Rc::new(RefCell::new(val.clone().into())),
+                    expression: val.clone().into(),
                 });
                 (val.clone(), loc.clone())
             })
@@ -826,11 +833,11 @@ impl Compiler {
             })
             .collect_vec()
     }
-    fn compile_fn_def(
+    fn compile_lambda(
         &mut self,
-        mut fn_def: IntermediateLambda,
+        mut lambda: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
-        let env_mapping = self.replace_open_vars(&mut fn_def);
+        let env_mapping = self.replace_open_vars(&mut lambda);
         let env_types = env_mapping
             .iter()
             .map(|(value, location)| {
@@ -848,7 +855,7 @@ impl Compiler {
             args,
             statements,
             ret: (return_value, return_type),
-        } = fn_def;
+        } = lambda;
         let args = args
             .into_iter()
             .map(|arg| {
@@ -932,13 +939,11 @@ impl Compiler {
         let type_defs = self.compile_type_defs(types);
         let call = Location::new();
         let assignment = IntermediateAssignment {
-            expression: Rc::new(RefCell::new(
-                IntermediateFnCall {
-                    fn_: main.clone().into(),
-                    args: Vec::new(),
-                }
-                .into(),
-            )),
+            expression: IntermediateFnCall {
+                fn_: main.clone().into(),
+                args: Vec::new(),
+            }
+            .into(),
             location: call.clone(),
         };
         self.update_memory(&assignment);
@@ -948,7 +953,7 @@ impl Compiler {
             panic!("Main has non-fn type")
         };
         statements.push(IntermediateStatement::IntermediateAssignment(assignment));
-        let (statements, _) = self.compile_fn_def(IntermediateLambda {
+        let (statements, _) = self.compile_lambda(IntermediateLambda {
             args: Vec::new(),
             ret: (call.clone().into(), *return_type),
             statements: statements,
@@ -1021,7 +1026,7 @@ mod tests {
                 IntermediateValue::IntermediateMemory(location.clone()),
                 MemoryMap::from([(
                     location,
-                    vec![Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: 8}).into()))]
+                    vec![IntermediateBuiltIn::from(Integer{value: 8}).into()]
                 )])
             )
         },
@@ -1036,8 +1041,8 @@ mod tests {
                 MemoryMap::from([(
                     location,
                     vec![
-                        Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: 8}).into())),
-                        Rc::new(RefCell::new(IntermediateBuiltIn::from(Integer{value: -8}).into())),
+                        IntermediateBuiltIn::from(Integer{value: 8}).into(),
+                        IntermediateBuiltIn::from(Integer{value: -8}).into(),
                     ]
                 )])
             )
@@ -1178,14 +1183,14 @@ mod tests {
                 }.into(),
                 MemoryMap::from([(
                     location,
-                    vec![Rc::new(RefCell::new(
+                    vec![
                         IntermediateTupleExpression(
                             vec![
                                 IntermediateBuiltIn::from(Integer{value: 4}).into(),
                                 IntermediateBuiltIn::from(Boolean{value: false}).into(),
                             ]
                         ).into(),
-                    ))]
+                    ]
                 )])
             )
         },
@@ -1740,12 +1745,12 @@ mod tests {
     #[test_case(
         vec![
             IntermediateAssignment{
-                expression: Rc::new(RefCell::new(
+                expression:
                     IntermediateTupleExpression(vec![
                         IntermediateBuiltIn::from(Integer{value: 5}).into(),
                         IntermediateBuiltIn::from(Boolean{value: false}).into(),
                     ]).into()
-                )),
+                ,
                 location: Location::new()
             }.into()
         ],
@@ -1771,7 +1776,7 @@ mod tests {
     #[test_case(
         vec![
             IntermediateAssignment{
-                expression: Rc::new(RefCell::new(
+                expression:
                     IntermediateElementAccess{
                         idx: 1,
                         value: IntermediateArg::from(
@@ -1783,7 +1788,7 @@ mod tests {
                             )
                         ).into()
                     }.into()
-                )),
+                ,
                 location: Location::new()
             }.into()
         ],
@@ -1819,7 +1824,7 @@ mod tests {
     #[test_case(
         vec![
             IntermediateAssignment{
-                expression: Rc::new(RefCell::new(IntermediateFnCall{
+                expression: IntermediateFnCall{
                     fn_: BuiltInFn(
                         Name::from("--"),
                         IntermediateFnType(
@@ -1830,7 +1835,7 @@ mod tests {
                     args: vec![
                         IntermediateBuiltIn::from(Integer{value: 11}).into()
                     ]
-                }.into())),
+                }.into(),
                 location: Location::new()
             }.into()
         ],
@@ -1881,25 +1886,25 @@ mod tests {
             let tuple = Location::new();
             vec![
                 IntermediateAssignment{
-                    expression: Rc::new(RefCell::new(
+                    expression:
                         IntermediateTupleExpression(vec![
                             IntermediateBuiltIn::from(Integer{value: 5}).into(),
                         ]).into()
-                    )),
+                    ,
                     location: tuple.clone()
                 }.into(),
                 IntermediateAssignment{
-                    expression: Rc::new(RefCell::new(IntermediateFnCall{
+                    expression: IntermediateFnCall{
                         fn_: arg_0.into(),
                         args: vec![tuple.clone().into()]
-                    }.into())),
+                    }.into(),
                     location: Location::new()
                 }.into(),
                 IntermediateAssignment{
-                    expression: Rc::new(RefCell::new(IntermediateFnCall{
+                    expression: IntermediateFnCall{
                         fn_: arg_1.into(),
                         args: vec![tuple.clone().into()]
-                    }.into())),
+                    }.into(),
                     location: Location::new()
                 }.into()
             ]
@@ -2010,17 +2015,17 @@ mod tests {
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                                ))
+
                             }.into()
                         ],
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                ))
+
                             }.into()
                         ]
                     )
@@ -2080,17 +2085,17 @@ mod tests {
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
-                                ))
+
                             }.into()
                         ],
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: false})).into()
-                                ))
+
                             }.into()
                         ]
                     )
@@ -2138,7 +2143,7 @@ mod tests {
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateFnCall{
                                         fn_: BuiltInFn(
                                             Name::from("++"),
@@ -2149,15 +2154,15 @@ mod tests {
                                         ).into(),
                                         args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
                                     }.into()
-                                ))
+
                             }.into()
                         ],
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                ))
+
                             }.into()
                         ]
                     )
@@ -2232,15 +2237,15 @@ mod tests {
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                ))
+
                             }.into()
                         ],
                         vec![
                             IntermediateAssignment {
                                 location: location.clone(),
-                                expression: Rc::new(RefCell::new(
+                                expression:
                                     IntermediateFnCall{
                                         fn_: BuiltInFn(
                                             Name::from("++"),
@@ -2251,18 +2256,18 @@ mod tests {
                                         ).into(),
                                         args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
                                     }.into()
-                                ))
+
                             }.into()
                         ],
                     )
                 }.into(),
                 IntermediateAssignment {
                     location: Location::new(),
-                    expression: Rc::new(RefCell::new(
+                    expression:
                         IntermediateTupleExpression(
                             vec![location.clone().into()]
                         ).into()
-                    ))
+
                 }.into()
             ]
         },
@@ -2350,15 +2355,16 @@ mod tests {
     #[test_case(
         {
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
+            let location = Location::new();
             vec![
                 IntermediateAssignment{
-                    location: Location::new(),
-                    expression: Rc::new(RefCell::new(IntermediateLambda {
+                    location: location,
+                    expression: IntermediateFnDef(IntermediateLambda {
                         args: vec![arg.clone()],
                         statements: Vec::new(),
                         ret: (arg.clone().into(),AtomicTypeEnum::BOOL.into())
-                    }.into()))
-                }.into()
+                    }).into()
+                }.into(),
             ]
         },
         vec![
@@ -2407,9 +2413,9 @@ mod tests {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: location.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                                        ))
+
                                     }.into()
                                 ],
                             },
@@ -2418,9 +2424,9 @@ mod tests {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: location.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                        ))
+
                                     }.into()
                                 ]
                             }
@@ -2499,7 +2505,7 @@ mod tests {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: location.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateFnCall{
                                                 fn_: BuiltInFn(
                                                     Name::from(">"),
@@ -2513,7 +2519,7 @@ mod tests {
                                                     IntermediateBuiltIn::from(Integer{value: 0}).into()
                                                 ]
                                             }.into()
-                                        ))
+
                                     }.into()
                                 ],
                             },
@@ -2522,9 +2528,9 @@ mod tests {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: location.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateValue::from(target1).into()
-                                        ))
+
                                     }.into()
                                 ]
                             }
@@ -2648,7 +2654,7 @@ mod tests {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: location.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateFnCall{
                                                 fn_: BuiltInFn(
                                                     Name::from(">"),
@@ -2662,7 +2668,7 @@ mod tests {
                                                     IntermediateBuiltIn::from(Integer{value: 0}).into()
                                                 ]
                                             }.into()
-                                        ))
+
                                     }.into()
                                 ],
                             },
@@ -2671,9 +2677,9 @@ mod tests {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: location.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateValue::from(target1).into()
-                                        ))
+
                                     }.into()
                                 ]
                             }
@@ -2681,19 +2687,19 @@ mod tests {
                     }.into(),
                     IntermediateAssignment {
                         location: Location::new(),
-                        expression: Rc::new(RefCell::new(
+                        expression:
                             IntermediateTupleExpression(
                                 vec![location.clone().into(), IntermediateBuiltIn::from(Integer{value: 0}).into()]
                             ).into()
-                        ))
+
                     }.into(),
                     IntermediateAssignment {
                         location: Location::new(),
-                        expression: Rc::new(RefCell::new(
+                        expression:
                             IntermediateTupleExpression(
                                 vec![location.clone().into(), IntermediateBuiltIn::from(Integer{value: 1}).into()]
                             ).into()
-                        ))
+
                     }.into()
                 ]
             )
@@ -2849,7 +2855,7 @@ mod tests {
             let arg0: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let arg1: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let y = Location::new();
-            let y_expression = Rc::new(RefCell::new(IntermediateFnCall{
+            let y_expression: IntermediateExpression = IntermediateFnCall{
                 fn_: BuiltInFn(
                     Name::from("+"),
                     IntermediateFnType(
@@ -2861,7 +2867,7 @@ mod tests {
                     arg0.clone().into(),
                     arg1.clone().into(),
                 ]
-            }.into()));
+            }.into();
             (
                 vec![
                     (y.clone(), y_expression.clone())
@@ -2932,7 +2938,7 @@ mod tests {
             let x = Location::new();
             let y = Location::new();
             let z = Location::new();
-            let z_expression = Rc::new(RefCell::new(IntermediateFnCall{
+            let z_expression: IntermediateExpression = IntermediateFnCall{
                 fn_: BuiltInFn(
                     Name::from("+"),
                     IntermediateFnType(
@@ -2944,11 +2950,11 @@ mod tests {
                     x.clone().into(),
                     y.clone().into()
                 ]
-            }.into()));
+            }.into();
             (
                 vec![
-                    (x.clone(), Rc::new(RefCell::new(IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 3})).into()))),
-                    (y.clone(), Rc::new(RefCell::new(IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()))),
+                    (x.clone(), IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 3})).into()),
+                    (y.clone(), IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()),
                     (z.clone(), z_expression.clone()),
                 ],
                 IntermediateLambda {
@@ -3077,10 +3083,7 @@ mod tests {
         "env closure"
     )]
     fn test_compile_fn_defs(
-        locations_fn_defs: (
-            Vec<(Location, Rc<RefCell<IntermediateExpression>>)>,
-            IntermediateLambda,
-        ),
+        locations_fn_defs: (Vec<(Location, IntermediateExpression)>, IntermediateLambda),
         expected: (Vec<Statement>, ClosureInstantiation, FnDef),
     ) {
         let (locations, fn_def) = locations_fn_defs;
@@ -3102,7 +3105,7 @@ mod tests {
             .collect();
         compiler.register_memory(&extra_statements);
 
-        let compiled = compiler.compile_fn_def(fn_def);
+        let compiled = compiler.compile_lambda(fn_def);
         assert_eq!(compiled, (expected_statements, expected_value));
         let compiled_fn_def = &compiler.fn_defs[0];
         assert_eq!(compiled_fn_def, &expected_fn_def);
@@ -3112,33 +3115,29 @@ mod tests {
     fn test_memory_sharing_across_fn_defs() {
         let f0 = IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             location: Location::new(),
-            expression: Rc::new(RefCell::new(
-                IntermediateLambda {
-                    args: Vec::new(),
-                    statements: Vec::new(),
-                    ret: (
-                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
-                            .into(),
-                        AtomicTypeEnum::BOOL.into(),
-                    ),
-                }
-                .into(),
-            )),
+            expression: IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: (
+                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
+                        .into(),
+                    AtomicTypeEnum::BOOL.into(),
+                ),
+            }
+            .into(),
         });
         let f1 = IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             location: Location::new(),
-            expression: Rc::new(RefCell::new(
-                IntermediateLambda {
-                    args: Vec::new(),
-                    statements: Vec::new(),
-                    ret: (
-                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
-                            .into(),
-                        AtomicTypeEnum::BOOL.into(),
-                    ),
-                }
-                .into(),
-            )),
+            expression: IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: (
+                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean { value: true }))
+                        .into(),
+                    AtomicTypeEnum::BOOL.into(),
+                ),
+            }
+            .into(),
         });
         let statements = vec![f0, f1];
 
@@ -3161,33 +3160,33 @@ mod tests {
                 statements: vec![
                     IntermediateAssignment{
                         location: identity.clone(),
-                        expression: Rc::new(RefCell::new(
+                        expression:
                             IntermediateLambda{
                                 args: vec![arg.clone()],
                                 statements: Vec::new(),
                                 ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
-                        ))
+
                     }.into(),
                     IntermediateAssignment{
                         location: main.clone(),
-                        expression: Rc::new(RefCell::new(
+                        expression:
                             IntermediateLambda{
                                 args: Vec::new(),
                                 statements: vec![
                                     IntermediateAssignment{
                                         location: y.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateFnCall{
                                                 fn_: identity.clone().into(),
                                                 args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
                                             }.into()
-                                        ))
+
                                     }.into()
                                 ],
                                 ret: (y.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
-                        ))
+
                     }.into(),
                 ],
                 main: main.clone().into(),
@@ -3374,19 +3373,19 @@ mod tests {
                 statements: vec![
                     IntermediateAssignment{
                         location: main.clone(),
-                        expression: Rc::new(RefCell::new(
+                        expression:
                             IntermediateLambda{
                                 args: Vec::new(),
                                 statements: vec![
                                     IntermediateAssignment{
                                         location: c.clone(),
-                                        expression: Rc::new(RefCell::new(
+                                        expression:
                                             IntermediateCtorCall {
                                                 idx: 0,
                                                 data: None,
                                                 type_: IntermediateUnionType(vec![None,None])
                                             }.into()
-                                        ))
+
                                     }.into(),
                                     IntermediateMatchStatement {
                                         subject: c.clone().into(),
@@ -3396,9 +3395,9 @@ mod tests {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: r.clone(),
-                                                        expression: Rc::new(RefCell::new(
+                                                        expression:
                                                             IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                                        ))
+
                                                     }.into()
                                                 ]
                                             },
@@ -3407,9 +3406,9 @@ mod tests {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: r.clone(),
-                                                        expression: Rc::new(RefCell::new(
+                                                        expression:
                                                             IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                                                        ))
+
                                                     }.into()
                                                 ]
                                             }
@@ -3418,7 +3417,7 @@ mod tests {
                                 ],
                                 ret: (r.clone().into(), AtomicTypeEnum::INT.into())
                             }.into()
-                        ))
+
                     }.into(),
                 ],
                 main: main.clone().into(),

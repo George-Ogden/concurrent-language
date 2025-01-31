@@ -5,7 +5,11 @@ use std::{
 };
 
 use crate::intermediate_nodes::*;
-use itertools::{zip_eq, Itertools};
+use itertools::{
+    zip_eq,
+    Either::{self, Left, Right},
+    Itertools,
+};
 use type_checker::*;
 
 type Scope = HashMap<(Variable, Vec<Type>), IntermediateValue>;
@@ -66,34 +70,47 @@ impl Lowerer {
         match expression {
             TypedExpression::Integer(integer) => IntermediateBuiltIn::Integer(integer).into(),
             TypedExpression::Boolean(boolean) => IntermediateBuiltIn::Boolean(boolean).into(),
-            TypedExpression::TypedTuple(tuple) => self.lower_tuple(tuple),
+            TypedExpression::TypedTuple(tuple) => {
+                let tuple = self.lower_tuple(tuple).into();
+                self.get_cached_value(tuple)
+            }
             TypedExpression::TypedElementAccess(element_access) => {
-                self.lower_element_access(element_access)
+                let element_access = self.lower_element_access(element_access).into();
+                self.get_cached_value(element_access)
             }
             TypedExpression::TypedAccess(access) => self.lower_access(access),
-            TypedExpression::TypedFunctionCall(fn_call) => self.lower_fn_call(fn_call),
-            TypedExpression::TypedLambdaDef(fn_def) => self.lower_fn_def(fn_def),
-            TypedExpression::TypedConstructorCall(ctor_call) => self.lower_ctor_call(ctor_call),
+            TypedExpression::TypedFunctionCall(fn_call) => {
+                let fn_call = self.lower_fn_call(fn_call).into();
+                self.get_cached_value(fn_call)
+            }
+            TypedExpression::TypedLambdaDef(fn_def) => {
+                let lambda_def = self.lower_lambda_def(fn_def).into();
+                self.get_cached_value(lambda_def)
+            }
+            TypedExpression::TypedConstructorCall(ctor_call) => {
+                let ctor_call = self.lower_ctor_call(ctor_call).into();
+                self.get_cached_value(ctor_call)
+            }
             TypedExpression::TypedIf(if_) => self.lower_if(if_),
             TypedExpression::TypedMatch(match_) => self.lower_match(match_),
         }
     }
-    fn lower_tuple(&mut self, TypedTuple { expressions }: TypedTuple) -> IntermediateValue {
+    fn lower_tuple(
+        &mut self,
+        TypedTuple { expressions }: TypedTuple,
+    ) -> IntermediateTupleExpression {
         let intermediate_expressions = self.lower_expressions(expressions);
-        let intermediate_expression = IntermediateTupleExpression(intermediate_expressions).into();
-        self.get_cached_value(intermediate_expression)
+        IntermediateTupleExpression(intermediate_expressions)
     }
     fn lower_element_access(
         &mut self,
         TypedElementAccess { expression, index }: TypedElementAccess,
-    ) -> IntermediateValue {
+    ) -> IntermediateElementAccess {
         let intermediate_value = self.lower_expression(*expression);
-        let intermediate_expression = IntermediateElementAccess {
+        IntermediateElementAccess {
             value: intermediate_value,
             idx: index,
         }
-        .into();
-        self.get_cached_value(intermediate_expression)
     }
     fn lower_access(
         &mut self,
@@ -121,23 +138,22 @@ impl Lowerer {
             function,
             arguments,
         }: TypedFunctionCall,
-    ) -> IntermediateValue {
+    ) -> IntermediateFnCall {
         let intermediate_function = self.lower_expression(*function);
         let intermediate_args = self.lower_expressions(arguments);
-        let intermediate_expression = IntermediateFnCall {
+        IntermediateFnCall {
             fn_: intermediate_function,
             args: intermediate_args,
-        };
-        self.get_cached_value(intermediate_expression.into())
+        }
     }
-    fn lower_fn_def(
+    fn lower_lambda_def(
         &mut self,
         TypedLambdaDef {
             parameters,
             body,
             return_type,
         }: TypedLambdaDef,
-    ) -> IntermediateValue {
+    ) -> IntermediateLambda {
         let variables = parameters
             .iter()
             .map(|variable| variable.variable.clone())
@@ -152,13 +168,11 @@ impl Lowerer {
                 .insert((variable.clone(), Vec::new()), arg.clone().into());
         }
         let (statements, return_value) = self.lower_block(body, false);
-        let intermediate_expression = IntermediateLambda {
+        IntermediateLambda {
             args,
             statements,
             ret: (return_value, self.lower_type(&return_type)),
         }
-        .into();
-        self.get_cached_value(intermediate_expression)
     }
     fn lower_ctor_call(
         &mut self,
@@ -167,7 +181,7 @@ impl Lowerer {
             output_type,
             arguments,
         }: TypedConstructorCall,
-    ) -> IntermediateValue {
+    ) -> IntermediateCtorCall {
         let IntermediateType::IntermediateUnionType(lower_type) = self.lower_type(&output_type)
         else {
             panic!("Expected constructor call to have union type.")
@@ -177,13 +191,11 @@ impl Lowerer {
             [argument] => Some(self.lower_expression(argument.clone())),
             _ => panic!("Multiple arguments in constructor call."),
         };
-        let intermediate_expression = IntermediateCtorCall {
+        IntermediateCtorCall {
             idx,
             data: lower_data,
             type_: lower_type,
         }
-        .into();
-        self.get_cached_value(intermediate_expression)
     }
     fn lower_if(
         &mut self,
@@ -387,6 +399,14 @@ impl Lowerer {
                 ret: (self.remove_wasted_allocations_from_value(ret.0), ret.1),
             }
             .into(),
+            IntermediateExpression::IntermediateFnDef(IntermediateFnDef(fn_)) => {
+                let IntermediateExpression::IntermediateLambda(lambda) =
+                    self.remove_wasted_allocations_from_expression(fn_.into())
+                else {
+                    panic!("Lambda def canged form.");
+                };
+                IntermediateFnDef(lambda).into()
+            }
         }
     }
     fn remove_wasted_allocations_from_value(
@@ -480,9 +500,6 @@ impl Lowerer {
                 }
                 .into(),
             ),
-            IntermediateStatement::IntermediateFnDef(IntermediateFnDef(value)) => {
-                Some(IntermediateFnDef(self.remove_wasted_allocations_from_value(value)).into())
-            }
         }
     }
     fn remove_wasted_allocations_from_statements(
@@ -592,7 +609,7 @@ impl Lowerer {
         &mut self,
         statement: TypedStatement,
         parameters: Option<Vec<Type>>,
-    ) -> Option<(Location, TypedExpression)> {
+    ) -> Option<(Location, Either<TypedExpression, TypedLambdaDef>)> {
         let variable = statement.variable();
         if parameters.is_none() && variable.type_.parameters.len() > 0 {
             self.uninstantiated.insert(variable.variable, statement);
@@ -608,7 +625,7 @@ impl Lowerer {
             TypedStatement::TypedAssignment(TypedAssignment {
                 variable: _,
                 expression,
-            }) => expression.instantiate(&parameters),
+            }) => Left(expression.instantiate(&parameters)),
             TypedStatement::TypedFnDef(TypedFnDef {
                 variable: _,
                 parameters: params,
@@ -618,16 +635,28 @@ impl Lowerer {
                     expression: fn_.into(),
                     parameters: params,
                 };
-                self.statements
-                    .push(IntermediateFnDef(placeholder.clone().into()).into());
-                expression.instantiate(&parameters)
+                let TypedExpression::TypedLambdaDef(lambda_def) =
+                    expression.instantiate(&parameters)
+                else {
+                    panic!("Lambda expression changed form.")
+                };
+                Right(lambda_def)
             }
         };
-        dbg!(&expression);
         Some((placeholder, expression))
     }
-    fn perform_assignment(&mut self, placeholder: Location, expression: TypedExpression) {
-        let value = self.lower_expression(expression);
+    fn perform_assignment(
+        &mut self,
+        placeholder: Location,
+        expression: Either<TypedExpression, TypedLambdaDef>,
+    ) {
+        let value = match expression {
+            Either::Left(expression) => self.lower_expression(expression),
+            Either::Right(lambda_def) => {
+                let lambda_def = self.lower_lambda_def(lambda_def);
+                self.get_cached_value(IntermediateFnDef(lambda_def).into())
+            }
+        };
         self.update_memory(placeholder, value.into());
     }
     fn lower_statements(&mut self, statements: Vec<TypedStatement>) {
@@ -2151,11 +2180,11 @@ mod tests {
             let f: TypedVariable = Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_INT))).into();
             let argument: TypedVariable = TYPE_INT.into();
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
-            let fn_ = IntermediateLambda{
+            let fn_ = IntermediateFnDef::from(IntermediateLambda{
                 args: vec![arg.clone()],
                 statements: Vec::new(),
                 ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
-            }.into();
+            }).into();
             (
                 vec![
                     TypedFnDef {
@@ -2189,11 +2218,11 @@ mod tests {
             let f: TypedVariable = Type::from(TypeFn(Vec::new(), Box::new(TYPE_INT))).into();
             let y: TypedVariable = TYPE_INT.into();
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
-            let fn_: IntermediateAssignment = IntermediateExpression::from(IntermediateLambda{
+            let fn_: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda{
                 args: vec![arg.clone()],
                 statements: Vec::new(),
                 ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
-            }).into();
+            }.into()).into();
             let value = IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
                 args: vec![IntermediateBuiltIn::Integer(Integer { value: 11 }).into()]
@@ -2258,13 +2287,13 @@ mod tests {
                     args: Vec::new()
                 }
             ).into();
-            fn_.expression = IntermediateExpression::from(IntermediateLambda{
+            fn_.expression = IntermediateExpression::from(IntermediateFnDef(IntermediateLambda{
                 args: Vec::new(),
                 statements: vec![
                     recursive_call.clone().into()
                 ],
                 ret: (recursive_call.location.into(), AtomicTypeEnum::INT.into())
-            }).into();
+            })).into();
             let value = IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
                 args: Vec::new()
@@ -2340,20 +2369,20 @@ mod tests {
                     args: Vec::new()
                 }
             ).into();
-            a_fn.expression = IntermediateExpression::IntermediateLambda(IntermediateLambda{
+            a_fn.expression = IntermediateExpression::IntermediateFnDef(IntermediateLambda{
                 args: Vec::new(),
                 statements: vec![
                     b_call.clone().into()
                 ],
                 ret: (b_call.location.into(), AtomicTypeEnum::BOOL.into())
-            }).into();
-            b_fn.expression = IntermediateExpression::IntermediateLambda(IntermediateLambda{
+            }.into()).into();
+            b_fn.expression = IntermediateExpression::IntermediateFnDef(IntermediateLambda{
                 args: Vec::new(),
                 statements: vec![
                     a_call.clone().into()
                 ],
                 ret: (a_call.location.into(), AtomicTypeEnum::BOOL.into())
-            }).into();
+            }.into()).into();
             (
                 vec![
                     TypedFnDef {
@@ -2433,34 +2462,32 @@ mod tests {
         };
         let int_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
         let bool_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
-        let id_int_fn: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+        let id_int_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
             args: vec![int_arg.clone()],
             statements: Vec::new(),
             ret: (int_arg.into(), AtomicTypeEnum::INT.into())
-        }).into();
-        let id_bool_fn: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+        }.into()).into();
+        let id_bool_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
             args: vec![bool_arg.clone()],
             statements: Vec::new(),
             ret: (bool_arg.into(), AtomicTypeEnum::BOOL.into())
-        }).into();
+        }.into()).into();
         (
             vec![
-                TypedAssignment{
+                TypedFnDef{
                     variable: id.clone(),
-                    expression: ParametricExpression {
-                        expression: TypedLambdaDef{
-                            parameters: vec![x.clone()],
-                            return_type: Box::new(TypeVariable(parameter.clone()).into()),
-                            body: TypedBlock{
-                                statements: Vec::new(),
-                                expression: Box::new(TypedAccess{
-                                    variable: x.clone(),
-                                    parameters: Vec::new()
-                                }.into())
-                            }
-                        }.into(),
-                        parameters: vec![(String::from("T"),parameter.clone())]
-                    },
+                    fn_: TypedLambdaDef{
+                        parameters: vec![x.clone()],
+                        return_type: Box::new(TypeVariable(parameter.clone()).into()),
+                        body: TypedBlock{
+                            statements: Vec::new(),
+                            expression: Box::new(TypedAccess{
+                                variable: x.clone(),
+                                parameters: Vec::new()
+                            }.into())
+                        }
+                    }.into(),
+                    parameters: vec![(String::from("T"),parameter.clone())]
                 }.into(),
                 TypedAssignment{
                     variable: id_int.clone(),
@@ -2533,16 +2560,16 @@ mod tests {
         };
         let int_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
         let bool_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
-        let id_int_fn: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+        let id_int_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
             args: vec![int_arg.clone()],
             statements: Vec::new(),
             ret: (int_arg.into(), AtomicTypeEnum::INT.into())
-        }).into();
-        let id_bool_fn: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+        }.into()).into();
+        let id_bool_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
             args: vec![bool_arg.clone()],
             statements: Vec::new(),
             ret: (bool_arg.into(), AtomicTypeEnum::BOOL.into())
-        }).into();
+        }.into()).into();
         (
             vec![
                 TypedFnDef{

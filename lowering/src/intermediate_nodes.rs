@@ -215,9 +215,6 @@ pub enum IntermediateBuiltIn {
 pub struct BuiltInFn(pub Id, pub IntermediateType);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IntermediateFnDef(pub IntermediateValue);
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateAssignment {
     pub expression: IntermediateExpression,
     pub location: Location,
@@ -249,6 +246,7 @@ pub enum IntermediateExpression {
     IntermediateFnCall(IntermediateFnCall),
     IntermediateCtorCall(IntermediateCtorCall),
     IntermediateLambda(IntermediateLambda),
+    IntermediateFnDef(IntermediateFnDef),
 }
 
 impl IntermediateExpression {
@@ -285,11 +283,13 @@ impl IntermediateExpression {
                 None => Vec::new(),
                 Some(v) => vec![v.clone()],
             },
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                args,
-                statements,
-                ret: (return_value, _),
-            }) => {
+            IntermediateExpression::IntermediateLambda(lambda)
+            | IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
+                let IntermediateLambda {
+                    args,
+                    statements,
+                    ret: (return_value, _),
+                } = lambda;
                 let mut values: Vec<_> = IntermediateStatement::all_values(statements);
                 values.push(return_value.clone());
                 values
@@ -330,7 +330,10 @@ impl IntermediateExpression {
                 None => (),
                 Some(data) => *data = data.substitute(substitution),
             },
-            IntermediateExpression::IntermediateLambda(fn_def) => fn_def.substitute(substitution),
+            IntermediateExpression::IntermediateLambda(lambda)
+            | IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
+                lambda.substitute(substitution)
+            }
         }
     }
 }
@@ -502,6 +505,10 @@ impl ExpressionEqualityChecker {
                     && r1.1 == r2.1
                     && self.equal_value(&r1.0, &r2.0)
             }
+            (
+                IntermediateExpression::IntermediateFnDef(IntermediateFnDef(f1)),
+                IntermediateExpression::IntermediateFnDef(IntermediateFnDef(f2)),
+            ) => self.equal_expression(&f1.clone().into(), &f2.clone().into()),
             _ => false,
         }
     }
@@ -687,10 +694,18 @@ impl IntermediateLambda {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct IntermediateFnDef(pub IntermediateLambda);
+
+impl From<IntermediateLambda> for IntermediateFnDef {
+    fn from(value: IntermediateLambda) -> Self {
+        IntermediateFnDef(value)
+    }
+}
+
 #[derive(Clone, PartialEq, FromVariants, Eq, Hash, Debug)]
 pub enum IntermediateStatement {
     IntermediateAssignment(IntermediateAssignment),
-    IntermediateFnDef(IntermediateFnDef),
     IntermediateIfStatement(IntermediateIfStatement),
     IntermediateMatchStatement(IntermediateMatchStatement),
 }
@@ -731,7 +746,6 @@ impl IntermediateStatement {
                 values.push(subject.clone());
                 values
             }
-            IntermediateStatement::IntermediateFnDef(intermediate_fn_def) => todo!(),
         }
     }
     fn all_values(statements: &Vec<Self>) -> Vec<IntermediateValue> {
@@ -765,7 +779,6 @@ impl IntermediateStatement {
                 .iter()
                 .flat_map(|branch| IntermediateStatement::all_targets(&branch.statements))
                 .collect(),
-            IntermediateStatement::IntermediateFnDef(intermediate_fn_def) => todo!(),
         }
     }
     pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
@@ -797,7 +810,6 @@ impl IntermediateStatement {
                     IntermediateStatement::substitute_all(&mut branch.statements, substitution);
                 }
             }
-            IntermediateStatement::IntermediateFnDef(intermediate_fn_def) => todo!(),
         }
     }
     fn substitute_all(statements: &mut Vec<Self>, substitution: &Substitution) {

@@ -907,7 +907,18 @@ impl TypedExpression {
                     expression: e2,
                 }),
             ) => v1.type_ == v2.type_ && Self::equal(&e1.expression, &e2.expression),
-            (TypedStatement::TypedFnDef(_), TypedStatement::TypedFnDef(_)) => todo!(),
+            (
+                TypedStatement::TypedFnDef(TypedFnDef {
+                    variable: v1,
+                    parameters: _,
+                    fn_: f1,
+                }),
+                TypedStatement::TypedFnDef(TypedFnDef {
+                    variable: v2,
+                    parameters: _,
+                    fn_: f2,
+                }),
+            ) => v1.type_ == v2.type_ && Self::equal(&f1.clone().into(), &f2.clone().into()),
             _ => false,
         }
     }
@@ -959,7 +970,7 @@ impl TypedStatement {
             TypedStatement::TypedAssignment(typed_assignment) => {
                 typed_assignment.instantiate().into()
             }
-            TypedStatement::TypedFnDef(_) => todo!(),
+            TypedStatement::TypedFnDef(fn_def) => fn_def.instantiate().into(),
         }
     }
     pub fn variable(&self) -> TypedVariable {
