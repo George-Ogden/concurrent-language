@@ -485,12 +485,12 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AtomicTypeEnum, Boolean, ExpressionEqualityChecker, Id, Integer, IntermediateArg,
-        IntermediateBuiltIn, IntermediateCtorCall, IntermediateElementAccess, IntermediateFnCall,
-        IntermediateFnDef, IntermediateFnType, IntermediateIfStatement, IntermediateMatchBranch,
-        IntermediateMatchStatement, IntermediateProgram, IntermediateStatement,
-        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
-        IntermediateUnionType, IntermediateValue,
+        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
+        IntermediateArg, IntermediateBuiltIn, IntermediateCtorCall, IntermediateElementAccess,
+        IntermediateFnCall, IntermediateFnDef, IntermediateFnType, IntermediateIfStatement,
+        IntermediateMatchBranch, IntermediateMatchStatement, IntermediateProgram,
+        IntermediateStatement, IntermediateTupleExpression, IntermediateTupleType,
+        IntermediateType, IntermediateUnionType, IntermediateValue,
     };
     use test_case::test_case;
 
@@ -519,7 +519,7 @@ mod tests {
     #[test_case(
         (
             IntermediateValue::from(
-                IntermediateBuiltIn::BuiltInFn(
+                BuiltInFn(
                     Id::from("+"),
                     IntermediateFnType(
                         vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -687,7 +687,7 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         expression: Rc::new(RefCell::new(IntermediateFnCall{
-                            fn_: IntermediateBuiltIn::BuiltInFn(
+                            fn_: BuiltInFn(
                                 Id::from("*"),
                                 IntermediateFnType(
                                     vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -756,7 +756,7 @@ mod tests {
                                     location: z.clone(),
                                     expression: Rc::new(RefCell::new(IntermediateFnCall{
                                         fn_: IntermediateValue::from(
-                                            IntermediateBuiltIn::BuiltInFn(
+                                            BuiltInFn(
                                                 Id::from("+"),
                                                 IntermediateFnType(
                                                     vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
@@ -1180,7 +1180,7 @@ mod tests {
                                             location: y.clone(),
                                             expression: Rc::new(RefCell::new(
                                                 IntermediateFnCall{
-                                                    fn_: IntermediateBuiltIn::BuiltInFn(
+                                                    fn_: BuiltInFn(
                                                         Id::from("--"),
                                                         IntermediateFnType(
                                                             vec![AtomicTypeEnum::INT.into()],
@@ -1197,7 +1197,7 @@ mod tests {
                                             location: z.clone(),
                                             expression: Rc::new(RefCell::new(
                                                 IntermediateFnCall{
-                                                    fn_: IntermediateBuiltIn::BuiltInFn(
+                                                    fn_: BuiltInFn(
                                                         Id::from("++"),
                                                         IntermediateFnType(
                                                             vec![AtomicTypeEnum::INT.into()],
@@ -1240,7 +1240,7 @@ mod tests {
                                             location: y.clone(),
                                             expression: Rc::new(RefCell::new(
                                                 IntermediateFnCall{
-                                                    fn_: IntermediateBuiltIn::BuiltInFn(
+                                                    fn_: BuiltInFn(
                                                         Id::from("--"),
                                                         IntermediateFnType(
                                                             vec![AtomicTypeEnum::INT.into()],
