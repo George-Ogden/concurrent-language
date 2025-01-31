@@ -962,19 +962,38 @@ impl TypedStatement {
             TypedStatement::TypedFnDef(_) => todo!(),
         }
     }
+    pub fn variable(&self) -> TypedVariable {
+        match self {
+            TypedStatement::TypedAssignment(TypedAssignment {
+                variable,
+                expression: _,
+            })
+            | TypedStatement::TypedFnDef(TypedFnDef {
+                variable,
+                parameters: _,
+                fn_: _,
+            }) => variable.clone(),
+        }
+    }
+    pub fn parameters(&self) -> Vec<Rc<RefCell<Option<Type>>>> {
+        match self {
+            TypedStatement::TypedAssignment(TypedAssignment {
+                variable,
+                expression: _,
+            })
+            | TypedStatement::TypedFnDef(TypedFnDef {
+                variable,
+                parameters: _,
+                fn_: _,
+            }) => variable.type_.parameters.clone(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedAssignment {
     pub variable: TypedVariable,
     pub expression: ParametricExpression,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypedFnDef {
-    pub variable: TypedVariable,
-    pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
-    pub fn_: TypedLambdaDef,
 }
 
 impl TypedAssignment {
@@ -993,11 +1012,35 @@ impl TypedAssignment {
             },
         }
     }
-    pub fn instantiate_assignments(assignments: &Vec<Self>) -> Vec<Self> {
-        assignments
-            .iter()
-            .map(|assignment| assignment.instantiate())
-            .collect()
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedFnDef {
+    pub variable: TypedVariable,
+    pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
+    pub fn_: TypedLambdaDef,
+}
+
+impl TypedFnDef {
+    pub fn instantiate(&self) -> Self {
+        TypedFnDef {
+            fn_: {
+                let TypedExpression::TypedLambdaDef(fn_) =
+                    TypedExpression::from(self.fn_.clone()).instantiate()
+                else {
+                    panic!("Typed function changed form")
+                };
+                fn_
+            },
+            variable: TypedVariable {
+                variable: self.variable.variable.clone(),
+                type_: ParametricType {
+                    type_: self.variable.type_.type_.instantiate(),
+                    parameters: self.variable.type_.parameters.clone(),
+                },
+            },
+            parameters: self.parameters.clone(),
+        }
     }
 }
 

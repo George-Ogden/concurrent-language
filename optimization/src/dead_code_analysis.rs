@@ -8,7 +8,7 @@ use std::{
 use itertools::{zip_eq, Itertools};
 use lowering::{
     IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
-    IntermediateFnDef, IntermediateIfStatement, IntermediateMatchBranch,
+    IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
     IntermediateMatchStatement, IntermediateProgram, IntermediateStatement,
     IntermediateTupleExpression, IntermediateValue, Location,
 };
@@ -77,7 +77,7 @@ impl DeadCodeAnalyzer {
                     expression,
                     location,
                 }) => match &expression.borrow().clone() {
-                    IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
                         args,
                         statements: _,
                         ret: _,
@@ -96,7 +96,7 @@ impl DeadCodeAnalyzer {
                     expression,
                     location,
                 }) => match &expression.borrow().clone() {
-                    IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
                         args: _,
                         statements,
                         ret,
@@ -272,7 +272,7 @@ impl DeadCodeAnalyzer {
                     location,
                 }) => {
                     if self.variables.contains(&location) {
-                        if let IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                        if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
                             args,
                             ret,
                             statements,
@@ -289,7 +289,7 @@ impl DeadCodeAnalyzer {
                                 self.variables.insert(fn_loc.clone());
                                 self.variables.insert(ret_loc.clone());
                                 self.fn_updates.insert(location.clone(), fn_loc.clone());
-                                let unoptimized_fn = IntermediateFnDef {
+                                let unoptimized_fn = IntermediateLambda {
                                     args: fresh_args.clone(),
                                     statements: vec![IntermediateAssignment {
                                         location: ret_loc.clone(),
@@ -314,7 +314,7 @@ impl DeadCodeAnalyzer {
                                 return vec![
                                     IntermediateAssignment {
                                         expression: Rc::new(RefCell::new(
-                                            IntermediateFnDef {
+                                            IntermediateLambda {
                                                 args: used_args,
                                                 ret,
                                                 statements,
@@ -351,14 +351,14 @@ impl DeadCodeAnalyzer {
                 }) => {
                     if self.variables.contains(&location) {
                         match expression.clone().borrow().clone() {
-                            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                            IntermediateExpression::IntermediateLambda(IntermediateLambda {
                                 args,
                                 statements,
                                 ret,
                             }) => Some(
                                 IntermediateAssignment {
                                     expression: Rc::new(RefCell::new(
-                                        IntermediateFnDef {
+                                        IntermediateLambda {
                                             args,
                                             statements: self.remove_redundancy(statements),
                                             ret,
@@ -487,7 +487,7 @@ mod tests {
     use lowering::{
         AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
         IntermediateArg, IntermediateBuiltIn, IntermediateCtorCall, IntermediateElementAccess,
-        IntermediateFnCall, IntermediateFnDef, IntermediateFnType, IntermediateIfStatement,
+        IntermediateFnCall, IntermediateFnType, IntermediateIfStatement, IntermediateLambda,
         IntermediateMatchBranch, IntermediateMatchStatement, IntermediateProgram,
         IntermediateStatement, IntermediateTupleExpression, IntermediateTupleType,
         IntermediateType, IntermediateUnionType, IntermediateValue,
@@ -647,7 +647,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                        expression: Rc::new(RefCell::new(IntermediateLambda{
                             args: vec![arg.clone()],
                             statements: Vec::new(),
                             ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
@@ -749,7 +749,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                        expression: Rc::new(RefCell::new(IntermediateLambda{
                             args: vec![x.clone(), y.clone()],
                             statements: vec![
                                 IntermediateAssignment{
@@ -793,7 +793,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                        expression: Rc::new(RefCell::new(IntermediateLambda{
                             args: vec![x.clone()],
                             statements: vec![
                                 IntermediateAssignment{
@@ -809,7 +809,7 @@ mod tests {
                         location: foo.clone()
                     }.into(),
                     IntermediateAssignment{
-                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                        expression: Rc::new(RefCell::new(IntermediateLambda{
                             args: vec![y.clone()],
                             statements: vec![
                                 IntermediateAssignment{
@@ -849,7 +849,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: Rc::new(RefCell::new(IntermediateFnDef{
+                        expression: Rc::new(RefCell::new(IntermediateLambda{
                             args: vec![arg.clone()],
                             statements: Vec::new(),
                             ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
@@ -1167,7 +1167,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1233,7 +1233,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1328,7 +1328,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1380,7 +1380,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1443,7 +1443,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1468,7 +1468,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1560,7 +1560,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1619,7 +1619,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1698,7 +1698,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1717,7 +1717,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: Vec::new(),
                                     ret: (
@@ -1759,7 +1759,7 @@ mod tests {
                         IntermediateAssignment{
                             location: foo.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![arg.clone()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1779,7 +1779,7 @@ mod tests {
                         IntermediateAssignment{
                             location: apply.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![f.clone(), x.clone()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1799,7 +1799,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1852,7 +1852,7 @@ mod tests {
                         IntermediateAssignment{
                             location: foo_opt.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1872,7 +1872,7 @@ mod tests {
                         IntermediateAssignment{
                             location: foo.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![arg.clone().into()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1892,7 +1892,7 @@ mod tests {
                         IntermediateAssignment{
                             location: apply.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![f.clone(), x.clone()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1912,7 +1912,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -1984,7 +1984,7 @@ mod tests {
                         IntermediateAssignment{
                             location: foo.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![foo_arg.clone()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2004,7 +2004,7 @@ mod tests {
                         IntermediateAssignment{
                             location: bar.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![bar_arg.clone()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2024,7 +2024,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2053,7 +2053,7 @@ mod tests {
                         IntermediateAssignment{
                             location: foo_opt.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2073,7 +2073,7 @@ mod tests {
                         IntermediateAssignment{
                             location: foo.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![foo_arg.clone().into()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2093,7 +2093,7 @@ mod tests {
                         IntermediateAssignment{
                             location: bar_opt.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2113,7 +2113,7 @@ mod tests {
                         IntermediateAssignment{
                             location: bar.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: vec![bar_arg.clone().into()],
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2133,7 +2133,7 @@ mod tests {
                         IntermediateAssignment{
                             location: main.clone(),
                             expression: Rc::new(RefCell::new(
-                                IntermediateFnDef{
+                                IntermediateLambda{
                                     args: Vec::new(),
                                     statements: vec![
                                         IntermediateAssignment{
@@ -2166,7 +2166,7 @@ mod tests {
         let optimized_program = DeadCodeAnalyzer::remove_dead_code(program);
         dbg!(&optimized_program);
         dbg!(&expected_program);
-        let optimized_fn = IntermediateFnDef {
+        let optimized_fn = IntermediateLambda {
             args: Vec::new(),
             statements: optimized_program.statements,
             ret: (
@@ -2175,7 +2175,7 @@ mod tests {
             ),
         }
         .into();
-        let expected_fn = IntermediateFnDef {
+        let expected_fn = IntermediateLambda {
             args: Vec::new(),
             statements: expected_program.statements,
             ret: (

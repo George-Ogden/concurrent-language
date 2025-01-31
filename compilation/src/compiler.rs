@@ -85,7 +85,7 @@ impl Compiler {
                     location,
                 }) => {
                     match &expression.borrow().clone() {
-                        IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+                        IntermediateExpression::IntermediateLambda(IntermediateLambda {
                             args: _,
                             statements,
                             ret: _,
@@ -129,7 +129,7 @@ impl Compiler {
                 data: _,
                 type_,
             }) => type_.clone().into(),
-            IntermediateExpression::IntermediateFnDef(IntermediateFnDef {
+            IntermediateExpression::IntermediateLambda(IntermediateLambda {
                 args,
                 statements: _,
                 ret: (_, return_type),
@@ -522,7 +522,7 @@ impl Compiler {
                 let (statements, value) = self.compile_value(value, false);
                 (statements, value.into())
             }
-            IntermediateExpression::IntermediateFnDef(fn_def) => {
+            IntermediateExpression::IntermediateLambda(fn_def) => {
                 let (statements, closure_inst) = self.compile_fn_def(fn_def);
                 (statements, closure_inst.into())
             }
@@ -776,7 +776,7 @@ impl Compiler {
     }
     fn replace_open_vars(
         &mut self,
-        fn_def: &mut IntermediateFnDef,
+        fn_def: &mut IntermediateLambda,
     ) -> Vec<(IntermediateValue, Location)> {
         let open_vars = fn_def.find_open_vars();
         let new_locations = open_vars.iter().map(|_| Location::new()).collect_vec();
@@ -828,7 +828,7 @@ impl Compiler {
     }
     fn compile_fn_def(
         &mut self,
-        mut fn_def: IntermediateFnDef,
+        mut fn_def: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
         let env_mapping = self.replace_open_vars(&mut fn_def);
         let env_types = env_mapping
@@ -844,7 +844,7 @@ impl Compiler {
         let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
         self.lazy_vals = HashMap::new();
         self.non_lazy_vals = HashMap::new();
-        let IntermediateFnDef {
+        let IntermediateLambda {
             args,
             statements,
             ret: (return_value, return_type),
@@ -948,7 +948,7 @@ impl Compiler {
             panic!("Main has non-fn type")
         };
         statements.push(IntermediateStatement::IntermediateAssignment(assignment));
-        let (statements, _) = self.compile_fn_def(IntermediateFnDef {
+        let (statements, _) = self.compile_fn_def(IntermediateLambda {
             args: Vec::new(),
             ret: (call.clone().into(), *return_type),
             statements: statements,
@@ -1096,7 +1096,7 @@ mod tests {
     )]
     #[test_case(
         (
-            IntermediateFnDef{
+            IntermediateLambda{
                 args: Vec::new(),
                 statements: Vec::new(),
                 ret: (IntermediateBuiltIn::from(Integer{value: 5}).into(), AtomicTypeEnum::INT.into())
@@ -1113,7 +1113,7 @@ mod tests {
                     IntermediateType::from(AtomicTypeEnum::INT).into(),
                     IntermediateType::from(AtomicTypeEnum::BOOL).into(),
                 ];
-                IntermediateFnDef{
+                IntermediateLambda{
                     args: args.clone(),
                     statements: Vec::new(),
                     ret: (args[1].clone().into(), args[1].type_.clone())
@@ -2353,7 +2353,7 @@ mod tests {
             vec![
                 IntermediateAssignment{
                     location: Location::new(),
-                    expression: Rc::new(RefCell::new(IntermediateFnDef {
+                    expression: Rc::new(RefCell::new(IntermediateLambda {
                         args: vec![arg.clone()],
                         statements: Vec::new(),
                         ret: (arg.clone().into(),AtomicTypeEnum::BOOL.into())
@@ -2866,7 +2866,7 @@ mod tests {
                 vec![
                     (y.clone(), y_expression.clone())
                 ],
-                IntermediateFnDef {
+                IntermediateLambda {
                     args: vec![arg0.clone(), arg1.clone()],
                     statements: vec![
                         IntermediateAssignment{
@@ -2951,7 +2951,7 @@ mod tests {
                     (y.clone(), Rc::new(RefCell::new(IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()))),
                     (z.clone(), z_expression.clone()),
                 ],
-                IntermediateFnDef {
+                IntermediateLambda {
                     args: Vec::new(),
                     statements: vec![
                         IntermediateAssignment{
@@ -3079,7 +3079,7 @@ mod tests {
     fn test_compile_fn_defs(
         locations_fn_defs: (
             Vec<(Location, Rc<RefCell<IntermediateExpression>>)>,
-            IntermediateFnDef,
+            IntermediateLambda,
         ),
         expected: (Vec<Statement>, ClosureInstantiation, FnDef),
     ) {
@@ -3113,7 +3113,7 @@ mod tests {
         let f0 = IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             location: Location::new(),
             expression: Rc::new(RefCell::new(
-                IntermediateFnDef {
+                IntermediateLambda {
                     args: Vec::new(),
                     statements: Vec::new(),
                     ret: (
@@ -3128,7 +3128,7 @@ mod tests {
         let f1 = IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             location: Location::new(),
             expression: Rc::new(RefCell::new(
-                IntermediateFnDef {
+                IntermediateLambda {
                     args: Vec::new(),
                     statements: Vec::new(),
                     ret: (
@@ -3162,7 +3162,7 @@ mod tests {
                     IntermediateAssignment{
                         location: identity.clone(),
                         expression: Rc::new(RefCell::new(
-                            IntermediateFnDef{
+                            IntermediateLambda{
                                 args: vec![arg.clone()],
                                 statements: Vec::new(),
                                 ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
@@ -3172,7 +3172,7 @@ mod tests {
                     IntermediateAssignment{
                         location: main.clone(),
                         expression: Rc::new(RefCell::new(
-                            IntermediateFnDef{
+                            IntermediateLambda{
                                 args: Vec::new(),
                                 statements: vec![
                                     IntermediateAssignment{
@@ -3375,7 +3375,7 @@ mod tests {
                     IntermediateAssignment{
                         location: main.clone(),
                         expression: Rc::new(RefCell::new(
-                            IntermediateFnDef{
+                            IntermediateLambda{
                                 args: Vec::new(),
                                 statements: vec![
                                     IntermediateAssignment{
