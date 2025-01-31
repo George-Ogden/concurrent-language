@@ -246,7 +246,6 @@ pub enum IntermediateExpression {
     IntermediateFnCall(IntermediateFnCall),
     IntermediateCtorCall(IntermediateCtorCall),
     IntermediateLambda(IntermediateLambda),
-    IntermediateFnDef(IntermediateFnDef),
 }
 
 impl IntermediateExpression {
@@ -283,8 +282,7 @@ impl IntermediateExpression {
                 None => Vec::new(),
                 Some(v) => vec![v.clone()],
             },
-            IntermediateExpression::IntermediateLambda(lambda)
-            | IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
+            IntermediateExpression::IntermediateLambda(lambda) => {
                 let IntermediateLambda {
                     args,
                     statements,
@@ -330,10 +328,7 @@ impl IntermediateExpression {
                 None => (),
                 Some(data) => *data = data.substitute(substitution),
             },
-            IntermediateExpression::IntermediateLambda(lambda)
-            | IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
-                lambda.substitute(substitution)
-            }
+            IntermediateExpression::IntermediateLambda(lambda) => lambda.substitute(substitution),
         }
     }
 }
@@ -505,10 +500,6 @@ impl ExpressionEqualityChecker {
                     && r1.1 == r2.1
                     && self.equal_value(&r1.0, &r2.0)
             }
-            (
-                IntermediateExpression::IntermediateFnDef(IntermediateFnDef(f1)),
-                IntermediateExpression::IntermediateFnDef(IntermediateFnDef(f2)),
-            ) => self.equal_expression(&f1.clone().into(), &f2.clone().into()),
             _ => false,
         }
     }
@@ -691,15 +682,6 @@ impl IntermediateLambda {
     }
     pub fn substitute(&mut self, substitution: &Substitution) {
         IntermediateStatement::substitute_all(&mut self.statements, substitution);
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct IntermediateFnDef(pub IntermediateLambda);
-
-impl From<IntermediateLambda> for IntermediateFnDef {
-    fn from(value: IntermediateLambda) -> Self {
-        IntermediateFnDef(value)
     }
 }
 

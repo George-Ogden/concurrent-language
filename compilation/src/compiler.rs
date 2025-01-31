@@ -165,9 +165,6 @@ impl Compiler {
                 };
                 types[*idx].clone()
             }
-            IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
-                self.expression_type(&lambda.clone().into())
-            }
         }
     }
     fn value_type(&self, value: &IntermediateValue) -> IntermediateType {
@@ -526,10 +523,6 @@ impl Compiler {
                 (statements, value.into())
             }
             IntermediateExpression::IntermediateLambda(lambda) => {
-                let (statements, closure_inst) = self.compile_lambda(lambda);
-                (statements, closure_inst.into())
-            }
-            IntermediateExpression::IntermediateFnDef(IntermediateFnDef(lambda)) => {
                 let (statements, closure_inst) = self.compile_lambda(lambda);
                 (statements, closure_inst.into())
             }
@@ -2359,11 +2352,11 @@ mod tests {
             vec![
                 IntermediateAssignment{
                     location: location,
-                    expression: IntermediateFnDef(IntermediateLambda {
+                    expression: IntermediateLambda {
                         args: vec![arg.clone()],
                         statements: Vec::new(),
                         ret: (arg.clone().into(),AtomicTypeEnum::BOOL.into())
-                    }).into()
+                    }.into()
                 }.into(),
             ]
         },

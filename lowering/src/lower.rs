@@ -5,11 +5,7 @@ use std::{
 };
 
 use crate::intermediate_nodes::*;
-use itertools::{
-    zip_eq,
-    Either::{self, Left, Right},
-    Itertools,
-};
+use itertools::{zip_eq, Itertools};
 use type_checker::*;
 
 type Scope = HashMap<(Variable, Vec<Type>), IntermediateValue>;
@@ -399,14 +395,6 @@ impl Lowerer {
                 ret: (self.remove_wasted_allocations_from_value(ret.0), ret.1),
             }
             .into(),
-            IntermediateExpression::IntermediateFnDef(IntermediateFnDef(fn_)) => {
-                let IntermediateExpression::IntermediateLambda(lambda) =
-                    self.remove_wasted_allocations_from_expression(fn_.into())
-                else {
-                    panic!("Lambda def canged form.");
-                };
-                IntermediateFnDef(lambda).into()
-            }
         }
     }
     fn remove_wasted_allocations_from_value(
@@ -609,7 +597,7 @@ impl Lowerer {
         &mut self,
         statement: TypedStatement,
         parameters: Option<Vec<Type>>,
-    ) -> Option<(Location, Either<TypedExpression, TypedLambdaDef>)> {
+    ) -> Option<(Location, TypedExpression)> {
         let variable = statement.variable();
         if parameters.is_none() && variable.type_.parameters.len() > 0 {
             self.uninstantiated.insert(variable.variable, statement);
@@ -625,7 +613,7 @@ impl Lowerer {
             TypedStatement::TypedAssignment(TypedAssignment {
                 variable: _,
                 expression,
-            }) => Left(expression.instantiate(&parameters)),
+            }) => expression.instantiate(&parameters),
             TypedStatement::TypedFnDef(TypedFnDef {
                 variable: _,
                 parameters: params,
@@ -635,28 +623,13 @@ impl Lowerer {
                     expression: fn_.into(),
                     parameters: params,
                 };
-                let TypedExpression::TypedLambdaDef(lambda_def) =
-                    expression.instantiate(&parameters)
-                else {
-                    panic!("Lambda expression changed form.")
-                };
-                Right(lambda_def)
+                expression.instantiate(&parameters)
             }
         };
         Some((placeholder, expression))
     }
-    fn perform_assignment(
-        &mut self,
-        placeholder: Location,
-        expression: Either<TypedExpression, TypedLambdaDef>,
-    ) {
-        let value = match expression {
-            Either::Left(expression) => self.lower_expression(expression),
-            Either::Right(lambda_def) => {
-                let lambda_def = self.lower_lambda_def(lambda_def);
-                self.get_cached_value(IntermediateFnDef(lambda_def).into())
-            }
-        };
+    fn perform_assignment(&mut self, placeholder: Location, expression: TypedExpression) {
+        let value = self.lower_expression(expression);
         self.update_memory(placeholder, value.into());
     }
     fn lower_statements(&mut self, statements: Vec<TypedStatement>) {
@@ -2180,11 +2153,11 @@ mod tests {
             let f: TypedVariable = Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_INT))).into();
             let argument: TypedVariable = TYPE_INT.into();
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
-            let fn_ = IntermediateFnDef::from(IntermediateLambda{
+            let fn_ = IntermediateLambda{
                 args: vec![arg.clone()],
                 statements: Vec::new(),
                 ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
-            }).into();
+            }.into();
             (
                 vec![
                     TypedFnDef {
@@ -2218,11 +2191,11 @@ mod tests {
             let f: TypedVariable = Type::from(TypeFn(Vec::new(), Box::new(TYPE_INT))).into();
             let y: TypedVariable = TYPE_INT.into();
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
-            let fn_: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda{
+            let fn_: IntermediateAssignment = IntermediateExpression::from(IntermediateLambda{
                 args: vec![arg.clone()],
                 statements: Vec::new(),
                 ret: (arg.clone().into(), AtomicTypeEnum::INT.into())
-            }.into()).into();
+            }).into();
             let value = IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
                 args: vec![IntermediateBuiltIn::Integer(Integer { value: 11 }).into()]
@@ -2287,13 +2260,13 @@ mod tests {
                     args: Vec::new()
                 }
             ).into();
-            fn_.expression = IntermediateExpression::from(IntermediateFnDef(IntermediateLambda{
+            fn_.expression = IntermediateExpression::from(IntermediateLambda{
                 args: Vec::new(),
                 statements: vec![
                     recursive_call.clone().into()
                 ],
                 ret: (recursive_call.location.into(), AtomicTypeEnum::INT.into())
-            })).into();
+            }).into();
             let value = IntermediateFnCall{
                 fn_: fn_.location.clone().into(),
                 args: Vec::new()
@@ -2369,20 +2342,20 @@ mod tests {
                     args: Vec::new()
                 }
             ).into();
-            a_fn.expression = IntermediateExpression::IntermediateFnDef(IntermediateLambda{
+            a_fn.expression = IntermediateLambda{
                 args: Vec::new(),
                 statements: vec![
                     b_call.clone().into()
                 ],
                 ret: (b_call.location.into(), AtomicTypeEnum::BOOL.into())
-            }.into()).into();
-            b_fn.expression = IntermediateExpression::IntermediateFnDef(IntermediateLambda{
+            }.into();
+            b_fn.expression = IntermediateLambda{
                 args: Vec::new(),
                 statements: vec![
                     a_call.clone().into()
                 ],
                 ret: (a_call.location.into(), AtomicTypeEnum::BOOL.into())
-            }.into()).into();
+            }.into();
             (
                 vec![
                     TypedFnDef {
@@ -2462,16 +2435,16 @@ mod tests {
         };
         let int_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
         let bool_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
-        let id_int_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
+        let id_int_fn: IntermediateAssignment = IntermediateExpression::from(IntermediateLambda {
             args: vec![int_arg.clone()],
             statements: Vec::new(),
             ret: (int_arg.into(), AtomicTypeEnum::INT.into())
-        }.into()).into();
-        let id_bool_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
+        }).into();
+        let id_bool_fn: IntermediateAssignment = IntermediateExpression::from(IntermediateLambda {
             args: vec![bool_arg.clone()],
             statements: Vec::new(),
             ret: (bool_arg.into(), AtomicTypeEnum::BOOL.into())
-        }.into()).into();
+        }).into();
         (
             vec![
                 TypedFnDef{
@@ -2560,16 +2533,16 @@ mod tests {
         };
         let int_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
         let bool_arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
-        let id_int_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
+        let id_int_fn: IntermediateAssignment = IntermediateExpression::from(IntermediateLambda {
             args: vec![int_arg.clone()],
             statements: Vec::new(),
             ret: (int_arg.into(), AtomicTypeEnum::INT.into())
-        }.into()).into();
-        let id_bool_fn: IntermediateAssignment = IntermediateExpression::IntermediateFnDef(IntermediateLambda {
+        }).into();
+        let id_bool_fn: IntermediateAssignment = IntermediateExpression::from(IntermediateLambda {
             args: vec![bool_arg.clone()],
             statements: Vec::new(),
             ret: (bool_arg.into(), AtomicTypeEnum::BOOL.into())
-        }.into()).into();
+        }).into();
         (
             vec![
                 TypedFnDef{
