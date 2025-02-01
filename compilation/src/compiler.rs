@@ -121,80 +121,6 @@ impl Compiler {
         }
     }
 
-    fn expression_type(&self, expression: &IntermediateExpression) -> IntermediateType {
-        match expression {
-            IntermediateExpression::IntermediateValue(value) => self.value_type(value),
-            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
-                idx: _,
-                data: _,
-                type_,
-            }) => type_.clone().into(),
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                args,
-                statements: _,
-                ret: (_, return_type),
-            }) => IntermediateFnType(
-                args.iter()
-                    .map(|arg| self.value_type(&arg.clone().into()))
-                    .collect(),
-                Box::new(return_type.clone()),
-            )
-            .into(),
-            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args: _ }) => {
-                let IntermediateType::IntermediateFnType(IntermediateFnType(_, return_type)) =
-                    self.value_type(fn_)
-                else {
-                    panic!("Calling function with non-function type.")
-                };
-                *return_type
-            }
-            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-                values,
-            )) => {
-                IntermediateTupleType(values.iter().map(|value| self.value_type(value)).collect())
-                    .into()
-            }
-            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
-                value,
-                idx,
-            }) => {
-                let IntermediateType::IntermediateTupleType(IntermediateTupleType(types)) =
-                    self.value_type(value)
-                else {
-                    panic!("Accessing tuple with non-tuple type.")
-                };
-                types[*idx].clone()
-            }
-        }
-    }
-    fn value_type(&self, value: &IntermediateValue) -> IntermediateType {
-        match value {
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Integer(_)) => {
-                AtomicTypeEnum::INT.into()
-            }
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::Boolean(_)) => {
-                AtomicTypeEnum::BOOL.into()
-            }
-            IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(BuiltInFn(
-                _,
-                type_,
-            ))) => type_.clone(),
-            IntermediateValue::IntermediateMemory(location) => {
-                let expressions = &self.memory[&location];
-                let types = expressions
-                    .iter()
-                    .map(|expression| self.expression_type(&expression));
-                if !types.clone().all_equal() {
-                    panic!("Expressions have different types.");
-                }
-                types.collect_vec().first().unwrap().clone()
-            }
-            IntermediateValue::IntermediateArg(IntermediateArg { type_, location: _ }) => {
-                type_.clone()
-            }
-        }
-    }
-
     fn compile_type(&self, type_: &IntermediateType) -> MachineType {
         match type_ {
             IntermediateType::AtomicType(atomic_type) => {
@@ -315,7 +241,7 @@ impl Compiler {
         match self.lazy_vals.get(&value) {
             Some(value) => (Vec::new(), value.clone()),
             None => {
-                let type_ = self.compile_type(&self.value_type(&value));
+                let type_ = self.compile_type(&value.type_());
                 let (mut statements, non_lazy_val) = self.compile_value(value.clone(), false);
                 let memory = self.new_memory_location();
                 statements.push(
@@ -847,7 +773,7 @@ impl Compiler {
         let IntermediateLambda {
             args,
             statements,
-            ret: (return_value, return_type),
+            ret: return_value,
         } = lambda;
         let args = args
             .into_iter()
@@ -2951,7 +2877,7 @@ mod tests {
                     (z.clone(), z_expression.clone()),
                 ],
                 IntermediateLambda {
-                    args: Vec::new(),
+                    args: ...,
                     statements: vec![
                         IntermediateAssignment{
                             location: z.clone(),
