@@ -1,4 +1,4 @@
-use crate::{Assignee, AtomicTypeEnum, Block, Boolean, Id, Integer, MatchBlock, TypeInstance};
+use crate::{Assignee, AtomicTypeEnum, Boolean, Id, Integer, MatchBlock, TypeInstance};
 use from_variants::FromVariants;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -480,7 +480,7 @@ pub const TYPE_UNIT: Type = Type::TypeTuple(TypeTuple(Vec::new()));
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::TypeAtomic(TypeAtomic(atomic_type)) => write!(f, "AtomicType({:?})", atomic_type),
+            Type::TypeAtomic(TypeAtomic(atomic_type)) => write!(f, "TypeAtomic({:?})", atomic_type),
             Type::TypeUnion(TypeUnion { id, variants }) => {
                 write!(f, "TypeUnion({:?},{:?})", id, variants.iter().collect_vec())
             }
@@ -599,14 +599,7 @@ pub struct TypedMatch {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct PartiallyTypedFunctionDefinition {
-    pub parameters: Vec<(Id, TypedVariable)>,
-    pub return_type: Box<Type>,
-    pub body: Block,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypedFunctionDefinition {
+pub struct TypedLambdaDef {
     pub parameters: Vec<TypedVariable>,
     pub return_type: Box<Type>,
     pub body: TypedBlock,
@@ -634,8 +627,7 @@ pub enum TypedExpression {
     TypedElementAccess(TypedElementAccess),
     TypedIf(TypedIf),
     TypedMatch(TypedMatch),
-    PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition),
-    TypedFunctionDefinition(TypedFunctionDefinition),
+    TypedLambdaDef(TypedLambdaDef),
     TypedFunctionCall(TypedFunctionCall),
     TypedConstructorCall(TypedConstructorCall),
 }
@@ -646,7 +638,7 @@ impl TypedExpression {
             Self::Integer(_) => TYPE_INT,
             Self::Boolean(_) => TYPE_BOOL,
             Self::TypedTuple(TypedTuple { expressions }) => {
-                TypeTuple(expressions.iter().map(Self::type_).collect_vec()).into()
+                TypeTuple(Self::types(expressions)).into()
             }
             Self::TypedAccess(TypedAccess {
                 variable: TypedVariable { variable: _, type_ },
@@ -664,19 +656,7 @@ impl TypedExpression {
                 true_block,
                 false_block: _,
             }) => true_block.type_(),
-            Self::PartiallyTypedFunctionDefinition(PartiallyTypedFunctionDefinition {
-                parameters,
-                return_type,
-                body: _,
-            }) => TypeFn(
-                parameters
-                    .iter()
-                    .map(|(_, parameter)| parameter.type_.type_.clone())
-                    .collect_vec(),
-                return_type.clone(),
-            )
-            .into(),
-            Self::TypedFunctionDefinition(TypedFunctionDefinition {
+            Self::TypedLambdaDef(TypedLambdaDef {
                 parameters,
                 return_type,
                 body: _,
@@ -720,6 +700,9 @@ impl TypedExpression {
         };
         type_
     }
+    pub fn types(expressions: &Vec<Self>) -> Vec<Type> {
+        expressions.iter().map(Self::type_).collect_vec()
+    }
     fn instantiate(&self) -> TypedExpression {
         match &self {
             Self::Boolean(_) | Self::Integer(_) => self.clone(),
@@ -757,11 +740,11 @@ impl TypedExpression {
                 blocks: blocks.iter().map(|block| block.instantiate()).collect(),
             }
             .into(),
-            Self::TypedFunctionDefinition(TypedFunctionDefinition {
+            Self::TypedLambdaDef(TypedLambdaDef {
                 parameters,
                 return_type,
                 body,
-            }) => TypedFunctionDefinition {
+            }) => TypedLambdaDef {
                 parameters: parameters
                     .iter()
                     .map(|parameter| parameter.instantiate())
@@ -788,7 +771,6 @@ impl TypedExpression {
                 arguments: Self::instantiate_expressions(arguments),
             }
             .into(),
-            Self::PartiallyTypedFunctionDefinition(_) => panic!(),
         }
     }
 
@@ -859,12 +841,12 @@ impl TypedExpression {
                     })
             }
             (
-                TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                TypedExpression::TypedLambdaDef(TypedLambdaDef {
                     parameters: p1,
                     return_type: r1,
                     body: b1,
                 }),
-                TypedExpression::TypedFunctionDefinition(TypedFunctionDefinition {
+                TypedExpression::TypedLambdaDef(TypedLambdaDef {
                     parameters: p2,
                     return_type: r2,
                     body: b2,
@@ -903,16 +885,42 @@ impl TypedExpression {
                 .all(|(e1, e2)| Self::equal(e1, e2))
     }
     pub fn equal_blocks(b1: &TypedBlock, b2: &TypedBlock) -> bool {
-        b1.assignments.len() == b2.assignments.len()
-            && b1
-                .assignments
-                .iter()
-                .zip_eq(b2.assignments.iter())
-                .all(|(a1, a2)| {
-                    a1.variable.type_ == a2.variable.type_
-                        && Self::equal(&a1.expression.expression, &a2.expression.expression)
-                })
+        Self::equal_statements(&b1.statements, &b2.statements)
             && Self::equal(&b1.expression, &b2.expression)
+    }
+    pub fn equal_statements(s1: &Vec<TypedStatement>, s2: &Vec<TypedStatement>) -> bool {
+        s1.len() == s2.len()
+            && s1
+                .iter()
+                .zip_eq(s2.iter())
+                .all(|(s1, s2)| Self::equal_statement(s1, s2))
+    }
+    pub fn equal_statement(s1: &TypedStatement, s2: &TypedStatement) -> bool {
+        match (s1, s2) {
+            (
+                TypedStatement::TypedAssignment(TypedAssignment {
+                    variable: v1,
+                    expression: e1,
+                }),
+                TypedStatement::TypedAssignment(TypedAssignment {
+                    variable: v2,
+                    expression: e2,
+                }),
+            ) => v1.type_ == v2.type_ && Self::equal(&e1.expression, &e2.expression),
+            (
+                TypedStatement::TypedFnDef(TypedFnDef {
+                    variable: v1,
+                    parameters: _,
+                    fn_: f1,
+                }),
+                TypedStatement::TypedFnDef(TypedFnDef {
+                    variable: v2,
+                    parameters: _,
+                    fn_: f2,
+                }),
+            ) => v1.type_ == v2.type_ && Self::equal(&f1.clone().into(), &f2.clone().into()),
+            _ => false,
+        }
     }
 }
 
@@ -944,6 +952,55 @@ impl From<TypedExpression> for ParametricExpression {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, FromVariants)]
+pub enum TypedStatement {
+    TypedAssignment(TypedAssignment),
+    TypedFnDef(TypedFnDef),
+}
+
+impl TypedStatement {
+    pub fn instantiate_statements(statements: &Vec<Self>) -> Vec<Self> {
+        statements
+            .iter()
+            .map(|statement| statement.instantiate())
+            .collect()
+    }
+    pub fn instantiate(&self) -> Self {
+        match self {
+            TypedStatement::TypedAssignment(typed_assignment) => {
+                typed_assignment.instantiate().into()
+            }
+            TypedStatement::TypedFnDef(fn_def) => fn_def.instantiate().into(),
+        }
+    }
+    pub fn variable(&self) -> TypedVariable {
+        match self {
+            TypedStatement::TypedAssignment(TypedAssignment {
+                variable,
+                expression: _,
+            })
+            | TypedStatement::TypedFnDef(TypedFnDef {
+                variable,
+                parameters: _,
+                fn_: _,
+            }) => variable.clone(),
+        }
+    }
+    pub fn parameters(&self) -> Vec<Rc<RefCell<Option<Type>>>> {
+        match self {
+            TypedStatement::TypedAssignment(TypedAssignment {
+                variable,
+                expression: _,
+            })
+            | TypedStatement::TypedFnDef(TypedFnDef {
+                variable,
+                parameters: _,
+                fn_: _,
+            }) => variable.type_.parameters.clone(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedAssignment {
     pub variable: TypedVariable,
@@ -966,17 +1023,41 @@ impl TypedAssignment {
             },
         }
     }
-    pub fn instantiate_assignments(assignments: &Vec<Self>) -> Vec<Self> {
-        assignments
-            .iter()
-            .map(|assignment| assignment.instantiate())
-            .collect()
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedFnDef {
+    pub variable: TypedVariable,
+    pub parameters: Vec<(Id, Rc<RefCell<Option<Type>>>)>,
+    pub fn_: TypedLambdaDef,
+}
+
+impl TypedFnDef {
+    pub fn instantiate(&self) -> Self {
+        TypedFnDef {
+            fn_: {
+                let TypedExpression::TypedLambdaDef(fn_) =
+                    TypedExpression::from(self.fn_.clone()).instantiate()
+                else {
+                    panic!("Typed function changed form")
+                };
+                fn_
+            },
+            variable: TypedVariable {
+                variable: self.variable.variable.clone(),
+                type_: ParametricType {
+                    type_: self.variable.type_.type_.instantiate(),
+                    parameters: self.variable.type_.parameters.clone(),
+                },
+            },
+            parameters: self.parameters.clone(),
+        }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypedBlock {
-    pub assignments: Vec<TypedAssignment>,
+    pub statements: Vec<TypedStatement>,
     pub expression: Box<TypedExpression>,
 }
 
@@ -986,7 +1067,7 @@ impl TypedBlock {
     }
     pub fn instantiate(&self) -> TypedBlock {
         TypedBlock {
-            assignments: TypedAssignment::instantiate_assignments(&self.assignments),
+            statements: TypedStatement::instantiate_statements(&self.statements),
             expression: Box::new((*self.expression).instantiate()),
         }
     }
@@ -996,7 +1077,7 @@ impl TypedBlock {
 pub struct TypedProgram {
     pub type_definitions: TypeDefinitions,
     pub main: TypedVariable,
-    pub assignments: Vec<TypedAssignment>,
+    pub statements: Vec<TypedStatement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1480,10 +1561,10 @@ mod tests {
             let arg1 = TypedVariable::from(Type::TypeVariable(TypeVariable(right.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), left.clone()), (Id::from("U"), right.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg0.clone(), arg1.clone()],
                     body: TypedBlock{
-                        assignments: Vec::new(),
+                        statements: Vec::new(),
                         expression: Box::new(TypedTuple{
                             expressions: vec![
                                 TypedAccess{
@@ -1505,10 +1586,10 @@ mod tests {
         {
             let arg0 = TypedVariable::from(TYPE_INT);
             let arg1 = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg0.clone(), arg1.clone()],
                 body: TypedBlock{
-                    assignments: Vec::new(),
+                    statements: Vec::new(),
                     expression: Box::new(TypedTuple{
                         expressions: vec![
                             TypedAccess{
@@ -1536,10 +1617,10 @@ mod tests {
             let variable = TypedVariable::from(Type::from(TypeVariable(b.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("F"), a.clone()), (Id::from("T"), b.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg0.clone(), arg1.clone()],
                     body: TypedBlock{
-                        assignments: vec![
+                        statements: vec![
                             TypedAssignment{
                                 variable: variable.clone(),
                                 expression: TypedExpression::from(TypedFunctionCall{
@@ -1572,10 +1653,10 @@ mod tests {
             let arg0 = TypedVariable::from(Type::from(TypeFn(vec![TYPE_INT],Box::new(TYPE_BOOL))));
             let arg1 = TypedVariable::from(TYPE_INT);
             let variable = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg0.clone(), arg1.clone()],
                 body: TypedBlock{
-                    assignments: vec![
+                    statements: vec![
                         TypedAssignment{
                             variable: variable.clone(),
                             expression: TypedExpression::from(TypedFunctionCall{
@@ -1612,10 +1693,10 @@ mod tests {
             let arg2 = TypedVariable::from(Type::from(TypeVariable(parameter.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), parameter.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
                     body: TypedBlock{
-                        assignments: Vec::new(),
+                        statements: Vec::new(),
                         expression: Box::new(TypedIf{
                             condition: Box::new(
                                 TypedAccess{
@@ -1624,7 +1705,7 @@ mod tests {
                                 }.into(),
                             ),
                             true_block: TypedBlock {
-                                assignments: Vec::new(),
+                                statements: Vec::new(),
                                 expression: Box::new(
                                     TypedAccess{
                                         variable: arg1.into(),
@@ -1633,7 +1714,7 @@ mod tests {
                                 )
                             },
                             false_block: TypedBlock {
-                                assignments: Vec::new(),
+                                statements: Vec::new(),
                                 expression: Box::new(
                                     TypedAccess{
                                         variable: arg2.into(),
@@ -1652,10 +1733,10 @@ mod tests {
             let arg0 = TypedVariable::from(TYPE_BOOL);
             let arg1 = TypedVariable::from(TYPE_BOOL);
             let arg2 = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg0.clone(), arg1.clone(), arg2.clone()],
                 body: TypedBlock{
-                    assignments: Vec::new(),
+                    statements: Vec::new(),
                     expression: Box::new(TypedIf{
                         condition: Box::new(
                             TypedAccess{
@@ -1664,7 +1745,7 @@ mod tests {
                             }.into(),
                         ),
                         true_block: TypedBlock {
-                            assignments: Vec::new(),
+                            statements: Vec::new(),
                             expression: Box::new(
                                 TypedAccess{
                                     variable: arg1.into(),
@@ -1673,7 +1754,7 @@ mod tests {
                             )
                         },
                         false_block: TypedBlock {
-                            assignments: Vec::new(),
+                            statements: Vec::new(),
                             expression: Box::new(
                                 TypedAccess{
                                     variable: arg2.into(),
@@ -1698,10 +1779,10 @@ mod tests {
             let subvariable = TypedVariable::from(Type::from(TypeVariable(left.clone())));
             ParametricExpression{
                 parameters: vec![(Id::from("T"), left.clone()),(Id::from("U"), right.clone())],
-                expression: TypedFunctionDefinition{
+                expression: TypedLambdaDef{
                     parameters: vec![arg.clone()],
                     body: TypedBlock{
-                        assignments: vec![
+                        statements: vec![
                             TypedAssignment{
                                 variable: variable.clone(),
                                 expression: TypedExpression::from(TypedConstructorCall{
@@ -1732,7 +1813,7 @@ mod tests {
                                         }
                                     ],
                                     block: TypedBlock {
-                                        assignments: Vec::new(),
+                                        statements: Vec::new(),
                                         expression: Box::new(
                                             TypedAccess{
                                                 variable: subvariable.into(),
@@ -1749,7 +1830,7 @@ mod tests {
                                         }
                                     ],
                                     block: TypedBlock {
-                                        assignments: Vec::new(),
+                                        statements: Vec::new(),
                                         expression: Box::new(
                                             TypedAccess{
                                                 variable: arg.into(),
@@ -1771,10 +1852,10 @@ mod tests {
             let arg = TypedVariable::from(TYPE_BOOL);
             let variable = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Either"), variants: vec![Some(TYPE_BOOL), Some(TYPE_UNIT)]}));
             let subvariable = TypedVariable::from(TYPE_BOOL);
-            TypedFunctionDefinition{
+            TypedLambdaDef{
                 parameters: vec![arg.clone()],
                 body: TypedBlock{
-                    assignments: vec![
+                    statements: vec![
                         TypedAssignment{
                             variable: variable.clone(),
                             expression: TypedExpression::from(TypedConstructorCall{
@@ -1805,7 +1886,7 @@ mod tests {
                                     }
                                 ],
                                 block: TypedBlock {
-                                    assignments: Vec::new(),
+                                    statements: Vec::new(),
                                     expression: Box::new(
                                         TypedAccess{
                                             variable: subvariable.into(),
@@ -1822,7 +1903,7 @@ mod tests {
                                     }
                                 ],
                                 block: TypedBlock {
-                                    assignments: Vec::new(),
+                                    statements: Vec::new(),
                                     expression: Box::new(
                                         TypedAccess{
                                             variable: arg.into(),

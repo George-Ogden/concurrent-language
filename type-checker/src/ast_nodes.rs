@@ -313,6 +313,12 @@ pub struct ParametricAssignee {
     pub generic_variables: Vec<Id>,
 }
 
+impl ParametricAssignee {
+    pub fn id(&self) -> Id {
+        self.assignee.id.clone()
+    }
+}
+
 #[allow(non_snake_case)]
 pub fn VariableAssignee(id: &str) -> ParametricAssignee {
     ParametricAssignee {

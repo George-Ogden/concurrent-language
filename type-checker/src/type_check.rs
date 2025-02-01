@@ -1,9 +1,8 @@
 use crate::type_check_nodes::{
-    ConstructorType, GenericVariables, ParametricType, PartiallyTypedFunctionDefinition, Type,
-    TypeCheckError, TypeContext, TypeDefinitions, TypedAccess, TypedAssignment, TypedBlock,
-    TypedConstructorCall, TypedElementAccess, TypedExpression, TypedFunctionCall,
-    TypedFunctionDefinition, TypedIf, TypedMatch, TypedMatchBlock, TypedMatchItem, TypedProgram,
-    TypedTuple, TypedVariable, TYPE_BOOL, TYPE_INT,
+    ConstructorType, GenericVariables, ParametricType, Type, TypeCheckError, TypeContext,
+    TypeDefinitions, TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall,
+    TypedElementAccess, TypedExpression, TypedFunctionCall, TypedIf, TypedLambdaDef, TypedMatch,
+    TypedMatchBlock, TypedMatchItem, TypedProgram, TypedTuple, TypedVariable, TYPE_BOOL, TYPE_INT,
 };
 use crate::utils::UniqueError;
 use crate::{
@@ -12,8 +11,9 @@ use crate::{
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     ParametricExpression, Program, TransparentTypeDefinition, TupleExpression, TupleType,
     TypeAtomic, TypeFn, TypeInstance, TypeInstantiation, TypeTuple, TypeUnion, TypeVariable,
-    UnionTypeDefinition, Variable,
+    TypedFnDef, UnionTypeDefinition, Variable,
 };
+use itertools::Either::*;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
@@ -104,16 +104,11 @@ impl TypeChecker {
                     }
                     TypeInstantiation {
                         reference: reference.clone(),
-                        instances: type_variables
-                            .into_iter()
-                            .map(|type_instance| {
-                                TypeChecker::convert_ast_type(
-                                    type_instance,
-                                    type_definitions,
-                                    generic_variables,
-                                )
-                            })
-                            .collect::<Result<_, _>>()?,
+                        instances: TypeChecker::convert_ast_types(
+                            type_variables,
+                            type_definitions,
+                            generic_variables,
+                        )?,
                     }
                     .into()
                 } else {
@@ -129,22 +124,18 @@ impl TypeChecker {
                 }
             }
             TypeInstance::TupleType(TupleType { types }) => TypeTuple(
-                types
-                    .into_iter()
-                    .map(|t| TypeChecker::convert_ast_type(t, type_definitions, generic_variables))
-                    .collect::<Result<_, _>>()?,
+                TypeChecker::convert_ast_types(types, type_definitions, generic_variables)?,
             )
             .into(),
             TypeInstance::FunctionType(FunctionType {
                 argument_types,
                 return_type,
             }) => TypeFn(
-                argument_types
-                    .into_iter()
-                    .map(|type_| {
-                        TypeChecker::convert_ast_type(type_, type_definitions, generic_variables)
-                    })
-                    .collect::<Result<_, _>>()?,
+                TypeChecker::convert_ast_types(
+                    argument_types,
+                    type_definitions,
+                    generic_variables,
+                )?,
                 Box::new(TypeChecker::convert_ast_type(
                     *return_type,
                     type_definitions,
@@ -153,6 +144,18 @@ impl TypeChecker {
             )
             .into(),
         })
+    }
+    fn convert_ast_types(
+        type_instances: Vec<TypeInstance>,
+        type_definitions: &TypeDefinitions,
+        generic_variables: &GenericVariables,
+    ) -> Result<Vec<Type>, TypeCheckError> {
+        type_instances
+            .into_iter()
+            .map(|type_instance| {
+                TypeChecker::convert_ast_type(type_instance, type_definitions, generic_variables)
+            })
+            .collect::<Result<_, _>>()
     }
     fn check_type_definitions(definitions: Vec<Definition>) -> Result<Self, TypeCheckError> {
         let type_names = definitions.iter().map(|definition| definition.get_id());
@@ -437,636 +440,580 @@ impl TypeChecker {
             Expression::Integer(i) => i.into(),
             Expression::Boolean(b) => b.into(),
             Expression::TupleExpression(TupleExpression { expressions }) => TypedTuple {
-                expressions: expressions
-                    .into_iter()
-                    .map(|expression| self.check_expression(expression, context, generic_variables))
-                    .collect::<Result<_, _>>()?,
+                expressions: self.check_expressions(expressions, context, generic_variables)?,
             }
             .into(),
-            Expression::GenericVariable(GenericVariable { id, type_instances }) => {
-                let variable = context.get(&id);
-                match variable {
-                    Some(typed_variable) => {
-                        let type_ = &typed_variable.type_;
-                        if type_instances.len() != type_.parameters.len() {
-                            return Err(TypeCheckError::WrongNumberOfTypeParameters {
-                                type_: type_.clone(),
-                                type_instances,
-                            });
-                        }
-                        let types = type_instances
-                            .into_iter()
-                            .map(|type_instance| {
-                                TypeChecker::convert_ast_type(
-                                    type_instance,
-                                    &self.type_definitions,
-                                    generic_variables,
-                                )
-                            })
-                            .collect::<Result<_, _>>()?;
-                        TypedAccess {
-                            variable: typed_variable.clone(),
-                            parameters: types,
-                        }
-                        .into()
-                    }
-                    None => {
-                        return Err(TypeCheckError::UnknownError {
-                            place: String::from("variable"),
-                            id,
-                            options: context.keys().map(|id| id.clone()).collect_vec(),
-                        })
-                    }
-                }
-            }
-            Expression::ElementAccess(ElementAccess { expression, index }) => {
-                let typed_expression =
-                    self.check_expression(*expression, context, generic_variables)?;
-                let Type::TypeTuple(TypeTuple(types)) = typed_expression.type_() else {
-                    return Err(TypeCheckError::InvalidAccess {
-                        expression: typed_expression,
-                        index,
-                    });
-                };
-                if index as usize >= types.len() {
-                    return Err(TypeCheckError::InvalidAccess {
-                        index,
-                        expression: typed_expression,
-                    });
-                };
-                TypedElementAccess {
-                    expression: Box::new(typed_expression),
-                    index,
-                }
-                .into()
-            }
-            Expression::IfExpression(IfExpression {
-                condition,
-                true_block,
-                false_block,
-            }) => {
-                let condition = self.check_expression(*condition, context, generic_variables)?;
-                if condition.type_() != TYPE_BOOL {
-                    return Err(TypeCheckError::InvalidCondition { condition });
-                }
-                let typed_true_block = self.check_block(true_block, context, generic_variables)?;
-                let typed_false_block =
-                    self.check_block(false_block, context, generic_variables)?;
-                if typed_true_block.type_() != typed_false_block.type_() {
-                    return Err(TypeCheckError::NonMatchingIfBlocks {
-                        true_block: typed_true_block,
-                        false_block: typed_false_block,
-                    });
-                }
-                TypedIf {
-                    condition: Box::new(condition),
-                    true_block: typed_true_block,
-                    false_block: typed_false_block,
-                }
-                .into()
-            }
-            Expression::FunctionDefinition(FunctionDefinition {
-                parameters,
-                return_type,
-                body,
-            }) => {
-                let parameter_ids = parameters
-                    .iter()
-                    .map(|typed_assignee| typed_assignee.assignee.id.clone())
-                    .collect_vec();
-                if let Err(UniqueError { duplicate }) =
-                    utils::check_unique::<_, &String>(parameter_ids.iter())
-                {
-                    return Err(TypeCheckError::DuplicatedName {
-                        duplicate: duplicate.clone(),
-                        reason: String::from("function parameter"),
-                    });
-                }
-                let parameter_types = parameters
-                    .iter()
-                    .map(|typed_assignee| {
-                        TypeChecker::convert_ast_type(
-                            typed_assignee.type_.clone(),
-                            &self.type_definitions,
-                            generic_variables,
-                        )
-                    })
-                    .collect::<Result<Vec<Type>, _>>()?;
-                let parameters = parameter_ids
-                    .into_iter()
-                    .zip_eq(parameter_types.into_iter())
-                    .map(|(id, type_)| {
-                        (
-                            id,
-                            TypedVariable {
-                                variable: Variable::new(),
-                                type_: type_.into(),
-                            },
-                        )
-                    })
-                    .collect_vec();
-                PartiallyTypedFunctionDefinition {
-                    parameters,
-                    return_type: Box::new(TypeChecker::convert_ast_type(
-                        return_type,
-                        &self.type_definitions,
-                        generic_variables,
-                    )?),
-                    body,
-                }
-                .into()
-            }
-            Expression::FunctionCall(FunctionCall {
-                function,
-                arguments,
-            }) => {
-                let function = self.check_expression(*function, context, generic_variables)?;
-                let arguments_tuple = self.check_expression(
-                    TupleExpression {
-                        expressions: arguments,
-                    }
-                    .into(),
-                    context,
-                    generic_variables,
-                )?;
-                let Type::TypeTuple(TypeTuple(types)) = arguments_tuple.type_() else {
-                    panic!("Tuple expression has non-tuple type")
-                };
-                let TypedExpression::TypedTuple(TypedTuple {
-                    expressions: arguments,
-                }) = arguments_tuple
-                else {
-                    panic!("Tuple expression became non-tuple type.")
-                };
-                let Type::TypeFn(TypeFn(argument_types, _)) = function.type_() else {
-                    return Err(TypeCheckError::InvalidFunctionCall {
-                        expression: function,
-                        arguments,
-                    });
-                };
-                if argument_types != types {
-                    return Err(TypeCheckError::InvalidFunctionCall {
-                        expression: function,
-                        arguments,
-                    });
-                }
-                TypedFunctionCall {
-                    function: Box::new(function),
-                    arguments,
-                }
-                .into()
-            }
-            Expression::ConstructorCall(ConstructorCall {
-                constructor,
-                arguments,
-            }) => {
-                let Some(constructor_type) = self.constructors.get(&constructor.id) else {
-                    return Err(TypeCheckError::UnknownError {
-                        id: constructor.id.clone(),
-                        options: self.constructors.keys().map(|id| id.clone()).collect_vec(),
-                        place: String::from("type constructor"),
-                    });
-                };
-                if constructor.type_instances.len()
-                    != constructor_type.type_.borrow().parameters.len()
-                {
-                    return Err(TypeCheckError::WrongNumberOfTypeParameters {
-                        type_: constructor_type.type_.borrow().clone(),
-                        type_instances: constructor.type_instances,
-                    });
-                }
-                let arguments_tuple = self.check_expression(
-                    TupleExpression {
-                        expressions: arguments,
-                    }
-                    .into(),
-                    context,
-                    generic_variables,
-                )?;
-                let Type::TypeTuple(TypeTuple(types)) = arguments_tuple.type_() else {
-                    panic!("Tuple expression has non-tuple type")
-                };
-                let TypedExpression::TypedTuple(TypedTuple {
-                    expressions: arguments,
-                }) = arguments_tuple
-                else {
-                    panic!("Tuple expression became non-tuple type.")
-                };
-                let Type::TypeTuple(TypeTuple(type_variables)) = TypeChecker::convert_ast_type(
-                    TypeInstance::TupleType(TupleType {
-                        types: constructor.type_instances,
-                    }),
-                    &self.type_definitions,
-                    generic_variables,
-                )?
-                else {
-                    panic!("Tuple type converted to non-tuple type.");
-                };
-                let output_type = constructor_type.type_.borrow().instantiate(&type_variables);
-                let Type::TypeUnion(TypeUnion {
-                    id: _,
-                    variants: variant_types,
-                }) = &output_type
-                else {
-                    panic!("Constructor call for non-union type.")
-                };
-                let input_type = variant_types[constructor_type.index].clone();
-                match input_type {
-                    Some(type_) => {
-                        if vec![type_.clone()] != types {
-                            return Err(TypeCheckError::InvalidConstructorArguments {
-                                id: constructor.id.clone(),
-                                input_type: Some(type_),
-                                arguments,
-                            });
-                        }
-                    }
-                    None => {
-                        if !types.is_empty() {
-                            return Err(TypeCheckError::InvalidConstructorArguments {
-                                id: constructor.id.clone(),
-                                input_type,
-                                arguments,
-                            });
-                        }
-                    }
-                }
-                TypedConstructorCall {
-                    idx: constructor_type.index,
-                    arguments,
-                    output_type,
-                }
-                .into()
-            }
-            Expression::MatchExpression(MatchExpression { subject, blocks }) => {
-                let subject = self.check_expression(*subject, context, generic_variables)?;
-                let Type::TypeUnion(TypeUnion { id, variants }) = subject.type_() else {
-                    return Err(TypeCheckError::NonUnionTypeMatchSubject(subject));
-                };
-                let variant_names = blocks
-                    .iter()
-                    .map(|block| {
-                        block
-                            .matches
-                            .iter()
-                            .map(|item| item.type_name.clone())
-                            .collect_vec()
-                    })
-                    .concat();
-                if let Err(UniqueError { duplicate }) = utils::check_unique(variant_names.iter()) {
-                    return Err(TypeCheckError::DuplicatedName {
-                        duplicate: duplicate.clone(),
-                        reason: String::from("match block variant name"),
-                    });
-                }
-                let Some(variant_lookup) = variant_names
-                    .iter()
-                    .map(|variant_name| {
-                        self.constructors
-                            .get(variant_name)
-                            .map(|variant| (variant_name.clone(), variant))
-                    })
-                    .collect::<Option<HashMap<_, _>>>()
-                else {
-                    return Err(TypeCheckError::IncorrectVariants { blocks });
-                };
-                if variant_lookup.values().any(|variant| {
-                    let Type::TypeUnion(TypeUnion { id: ref name, .. }) =
-                        variant.type_.borrow().type_
-                    else {
-                        panic!("Constructor body has non union type.")
-                    };
-                    *name != id
-                }) {
-                    return Err(TypeCheckError::IncorrectVariants { blocks });
-                }
-                let constructor_indices = variant_lookup
-                    .values()
-                    .map(|constructor| constructor.index)
-                    .sorted()
-                    .collect_vec();
-                if constructor_indices != (0..variants.len() as usize).collect_vec() {
-                    return Err(TypeCheckError::IncorrectVariants { blocks });
-                }
-                let blocks = blocks
-                    .into_iter()
-                    .map(|block| {
-                        let assignments = block
-                            .matches
-                            .iter()
-                            .map(|item| {
-                                match (
-                                    &item.assignee,
-                                    &variants[variant_lookup[&item.type_name].index],
-                                ) {
-                                    (Some(assignee), Some(type_)) => {
-                                        Ok(Some((assignee.id.clone(), type_)))
-                                    }
-                                    (None, None) => Ok(None),
-                                    (assignee, _) => Err(TypeCheckError::MismatchedVariant {
-                                        type_: subject.type_(),
-                                        variant_id: item.type_name.clone(),
-                                        assignee: assignee.clone(),
-                                    }),
-                                }
-                            })
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let assignee = if assignments.iter().all_equal() {
-                            assignments.first().unwrap().clone()
-                        } else {
-                            None
-                        };
-                        let mut context = context.clone();
-                        let variable = assignee.map(|(id, type_)| {
-                            let typed_variable = TypedVariable::from(type_.clone());
-                            context.insert(id, typed_variable.clone());
-                            typed_variable
-                        });
-                        let match_items = block
-                            .matches
-                            .into_iter()
-                            .map(|item| TypedMatchItem {
-                                type_idx: variant_lookup[&item.type_name].index,
-                                assignee: variable.clone(),
-                            })
-                            .collect_vec();
-                        let block = self.check_block(block.block, &context, generic_variables)?;
-                        Ok(TypedMatchBlock {
-                            block,
-                            matches: match_items,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                if let Err(block_types) = blocks
-                    .iter()
-                    .map(|block| block.block.type_())
-                    .all_equal_value()
-                {
-                    match block_types {
-                        None => panic!("Match statement with no blocks."),
-                        Some(_) => {
-                            let mut blocks = blocks;
-                            let head = blocks.split_off(1);
-                            let head = head.first().unwrap();
-                            let head_type = head.block.type_();
-                            for block in blocks {
-                                if block.block.type_() != head_type {
-                                    return Err(TypeCheckError::DifferingMatchBlockTypes(
-                                        head.clone(),
-                                        block,
-                                    ));
-                                }
-                            }
-                            panic!("Match blocks have different types but they all match the first type.")
-                        }
-                    }
-                }
-                TypedMatch {
-                    subject: Box::new(subject),
-                    blocks,
-                }
-                .into()
-            }
+            Expression::GenericVariable(generic_variable) => self
+                .check_generic_variable(generic_variable, context, generic_variables)?
+                .into(),
+            Expression::ElementAccess(element_access) => self
+                .check_element_access(element_access, context, generic_variables)?
+                .into(),
+            Expression::IfExpression(if_expression) => self
+                .check_if_expression(if_expression, context, generic_variables)?
+                .into(),
+            Expression::FunctionDefinition(fn_def) => self
+                .check_fn_def(fn_def, context, generic_variables)?
+                .into(),
+            Expression::FunctionCall(fn_call) => self
+                .check_fn_call(fn_call, context, generic_variables)?
+                .into(),
+            Expression::ConstructorCall(constructor_call) => self
+                .check_constructor_call(constructor_call, context, generic_variables)?
+                .into(),
+            Expression::MatchExpression(match_expression) => self
+                .check_match_expression(match_expression, context, generic_variables)?
+                .into(),
         })
     }
-    fn check_block(
+    fn check_generic_variable(
         &self,
-        block: Block,
+        GenericVariable { id, type_instances }: GenericVariable,
         context: &TypeContext,
         generic_variables: &GenericVariables,
-    ) -> Result<TypedBlock, TypeCheckError> {
-        let mut new_context = context.clone();
-        let mut assignments = Vec::new();
-        let assignment_names = block
-            .assignments
-            .iter()
-            .map(|assignment| assignment.assignee.assignee.id.clone());
-        match utils::check_unique(assignment_names) {
-            Ok(()) => {}
-            Err(UniqueError { duplicate }) => {
-                return Err(TypeCheckError::DuplicatedName {
-                    duplicate,
-                    reason: String::from("assignment name"),
+    ) -> Result<TypedAccess, TypeCheckError> {
+        let variable = context.get(&id);
+        match variable {
+            Some(typed_variable) => {
+                let type_ = &typed_variable.type_;
+                if type_instances.len() != type_.parameters.len() {
+                    return Err(TypeCheckError::WrongNumberOfTypeParameters {
+                        type_: type_.clone(),
+                        type_instances,
+                    });
+                }
+                let types = type_instances
+                    .into_iter()
+                    .map(|type_instance| {
+                        TypeChecker::convert_ast_type(
+                            type_instance,
+                            &self.type_definitions,
+                            &generic_variables,
+                        )
+                    })
+                    .collect::<Result<_, _>>()?;
+                Ok(TypedAccess {
+                    variable: typed_variable.clone(),
+                    parameters: types,
+                })
+            }
+            None => {
+                return Err(TypeCheckError::UnknownError {
+                    place: String::from("variable"),
+                    id,
+                    options: context.keys().map(|id| id.clone()).collect_vec(),
                 })
             }
         }
-        for assignment in block.assignments {
-            let mut generic_variables = generic_variables.clone();
-            generic_variables
-                .extend(GenericVariables::from(&assignment.assignee.generic_variables).into_iter());
-            let typed_expression =
-                self.check_expression(*assignment.expression, &new_context, &generic_variables)?;
-            let id = assignment.assignee.assignee.id;
-            let assignment = TypedAssignment {
-                variable: TypedVariable {
-                    variable: Variable::new(),
-                    type_: ParametricType {
-                        parameters: assignment
-                            .assignee
-                            .generic_variables
-                            .iter()
-                            .map(|id| generic_variables[&id].clone())
-                            .collect(),
-                        type_: typed_expression.type_(),
-                    },
-                },
-                expression: ParametricExpression {
-                    expression: typed_expression,
-                    parameters: assignment
-                        .assignee
-                        .generic_variables
-                        .into_iter()
-                        .map(|id| (id.clone(), generic_variables[&id].clone()))
-                        .collect(),
-                },
-            };
-            new_context.insert(id, assignment.variable.clone());
-            assignments.push(assignment);
-        }
-        let typed_expression =
-            self.check_expression(*block.expression, &new_context, generic_variables)?;
-        let block = TypedBlock {
-            assignments,
-            expression: Box::new(typed_expression),
-        };
-        self.check_functions_in_block(block, &new_context, generic_variables)
     }
-    fn check_functions_in_expressions(
+    fn check_element_access(
         &self,
-        expressions: Vec<TypedExpression>,
+        ElementAccess { expression, index }: ElementAccess,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<TypedElementAccess, TypeCheckError> {
+        let typed_expression = self.check_expression(*expression, context, generic_variables)?;
+        let Type::TypeTuple(TypeTuple(types)) = typed_expression.type_() else {
+            return Err(TypeCheckError::InvalidAccess {
+                expression: typed_expression,
+                index,
+            });
+        };
+        if index as usize >= types.len() {
+            return Err(TypeCheckError::InvalidAccess {
+                index,
+                expression: typed_expression,
+            });
+        };
+        Ok(TypedElementAccess {
+            expression: Box::new(typed_expression),
+            index,
+        })
+    }
+    fn check_if_expression(
+        &self,
+        IfExpression {
+            condition,
+            true_block,
+            false_block,
+        }: IfExpression,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<TypedIf, TypeCheckError> {
+        let condition = self.check_expression(*condition, context, generic_variables)?;
+        if condition.type_() != TYPE_BOOL {
+            return Err(TypeCheckError::InvalidCondition { condition });
+        }
+        let typed_true_block =
+            self.check_block(true_block, context.clone(), generic_variables.clone())?;
+        let typed_false_block =
+            self.check_block(false_block, context.clone(), generic_variables.clone())?;
+        if typed_true_block.type_() != typed_false_block.type_() {
+            return Err(TypeCheckError::NonMatchingIfBlocks {
+                true_block: typed_true_block,
+                false_block: typed_false_block,
+            });
+        }
+        Ok(TypedIf {
+            condition: Box::new(condition),
+            true_block: typed_true_block,
+            false_block: typed_false_block,
+        })
+    }
+    fn check_fn_def(
+        &self,
+        FunctionDefinition {
+            parameters,
+            return_type,
+            body,
+        }: FunctionDefinition,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<TypedLambdaDef, TypeCheckError> {
+        let parameter_ids = parameters
+            .iter()
+            .map(|typed_assignee| typed_assignee.assignee.id.clone())
+            .collect_vec();
+        if let Err(UniqueError { duplicate }) =
+            utils::check_unique::<_, &String>(parameter_ids.iter())
+        {
+            return Err(TypeCheckError::DuplicatedName {
+                duplicate: duplicate.clone(),
+                reason: String::from("function parameter"),
+            });
+        }
+        let parameter_types = parameters
+            .iter()
+            .map(|typed_assignee| {
+                TypeChecker::convert_ast_type(
+                    typed_assignee.type_.clone(),
+                    &self.type_definitions,
+                    &generic_variables,
+                )
+            })
+            .collect::<Result<Vec<Type>, _>>()?;
+        let parameters = parameter_ids
+            .into_iter()
+            .zip_eq(parameter_types.into_iter())
+            .map(|(id, type_)| {
+                (
+                    id,
+                    TypedVariable {
+                        variable: Variable::new(),
+                        type_: type_.into(),
+                    },
+                )
+            })
+            .collect_vec();
+        let return_type =
+            TypeChecker::convert_ast_type(return_type, &self.type_definitions, generic_variables)?;
+        let mut new_context = context.clone();
+        for (id, variable) in &parameters {
+            new_context.insert(id.clone(), variable.clone().into());
+        }
+        let body = self.check_block(body, new_context, generic_variables.clone())?;
+        if return_type != body.type_() {
+            return Err(TypeCheckError::FunctionReturnTypeMismatch {
+                return_type: return_type.clone(),
+                body,
+            });
+        }
+        Ok(TypedLambdaDef {
+            parameters: parameters
+                .into_iter()
+                .map(|(_, variable)| variable)
+                .collect_vec(),
+            return_type: Box::new(return_type),
+            body,
+        })
+    }
+    fn check_fn_call(
+        &self,
+        FunctionCall {
+            function,
+            arguments,
+        }: FunctionCall,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<TypedFunctionCall, TypeCheckError> {
+        let function = self.check_expression(*function, context, generic_variables)?;
+        let arguments = self.check_expressions(arguments, context, generic_variables)?;
+        let types = TypedExpression::types(&arguments);
+        let Type::TypeFn(TypeFn(argument_types, _)) = function.type_() else {
+            return Err(TypeCheckError::InvalidFunctionCall {
+                expression: function,
+                arguments,
+            });
+        };
+        if argument_types != types {
+            return Err(TypeCheckError::InvalidFunctionCall {
+                expression: function,
+                arguments,
+            });
+        }
+        Ok(TypedFunctionCall {
+            function: Box::new(function),
+            arguments,
+        })
+    }
+    fn check_constructor_call(
+        &self,
+        ConstructorCall {
+            constructor,
+            arguments,
+        }: ConstructorCall,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<TypedConstructorCall, TypeCheckError> {
+        let Some(constructor_type) = self.constructors.get(&constructor.id) else {
+            return Err(TypeCheckError::UnknownError {
+                id: constructor.id.clone(),
+                options: self.constructors.keys().map(|id| id.clone()).collect_vec(),
+                place: String::from("type constructor"),
+            });
+        };
+        if constructor.type_instances.len() != constructor_type.type_.borrow().parameters.len() {
+            return Err(TypeCheckError::WrongNumberOfTypeParameters {
+                type_: constructor_type.type_.borrow().clone(),
+                type_instances: constructor.type_instances,
+            });
+        }
+        let arguments = self.check_expressions(arguments, context, generic_variables)?;
+        let types = TypedExpression::types(&arguments);
+        let type_variables = TypeChecker::convert_ast_types(
+            constructor.type_instances,
+            &self.type_definitions,
+            &generic_variables,
+        )?;
+        let output_type = constructor_type.type_.borrow().instantiate(&type_variables);
+        let Type::TypeUnion(TypeUnion {
+            id: _,
+            variants: variant_types,
+        }) = &output_type
+        else {
+            panic!("Constructor call for non-union type.")
+        };
+        let input_type = variant_types[constructor_type.index].clone();
+        match input_type {
+            Some(type_) => {
+                if vec![type_.clone()] != types {
+                    return Err(TypeCheckError::InvalidConstructorArguments {
+                        id: constructor.id.clone(),
+                        input_type: Some(type_),
+                        arguments,
+                    });
+                }
+            }
+            None => {
+                if !types.is_empty() {
+                    return Err(TypeCheckError::InvalidConstructorArguments {
+                        id: constructor.id.clone(),
+                        input_type,
+                        arguments,
+                    });
+                }
+            }
+        }
+        Ok(TypedConstructorCall {
+            idx: constructor_type.index,
+            arguments,
+            output_type,
+        })
+    }
+    fn check_match_expression(
+        &self,
+        MatchExpression { subject, blocks }: MatchExpression,
+        context: &TypeContext,
+        generic_variables: &GenericVariables,
+    ) -> Result<TypedMatch, TypeCheckError> {
+        let subject = self.check_expression(*subject, context, generic_variables)?;
+        let Type::TypeUnion(TypeUnion { id, variants }) = subject.type_() else {
+            return Err(TypeCheckError::NonUnionTypeMatchSubject(subject));
+        };
+        let variant_names = blocks
+            .iter()
+            .map(|block| {
+                block
+                    .matches
+                    .iter()
+                    .map(|item| item.type_name.clone())
+                    .collect_vec()
+            })
+            .concat();
+        if let Err(UniqueError { duplicate }) = utils::check_unique(variant_names.iter()) {
+            return Err(TypeCheckError::DuplicatedName {
+                duplicate: duplicate.clone(),
+                reason: String::from("match block variant name"),
+            });
+        }
+        let Some(variant_lookup) = variant_names
+            .iter()
+            .map(|variant_name| {
+                self.constructors
+                    .get(variant_name)
+                    .map(|variant| (variant_name.clone(), variant))
+            })
+            .collect::<Option<HashMap<_, _>>>()
+        else {
+            return Err(TypeCheckError::IncorrectVariants { blocks });
+        };
+        if variant_lookup.values().any(|variant| {
+            let Type::TypeUnion(TypeUnion { id: ref name, .. }) = variant.type_.borrow().type_
+            else {
+                panic!("Constructor body has non union type.")
+            };
+            *name != id
+        }) {
+            return Err(TypeCheckError::IncorrectVariants { blocks });
+        }
+        let constructor_indices = variant_lookup
+            .values()
+            .map(|constructor| constructor.index)
+            .sorted()
+            .collect_vec();
+        if constructor_indices != (0..variants.len() as usize).collect_vec() {
+            return Err(TypeCheckError::IncorrectVariants { blocks });
+        }
+        let blocks = blocks
+            .into_iter()
+            .map(|block| {
+                let assignments = block
+                    .matches
+                    .iter()
+                    .map(|item| {
+                        match (
+                            &item.assignee,
+                            &variants[variant_lookup[&item.type_name].index],
+                        ) {
+                            (Some(assignee), Some(type_)) => Ok(Some((assignee.id.clone(), type_))),
+                            (None, None) => Ok(None),
+                            (assignee, _) => Err(TypeCheckError::MismatchedVariant {
+                                type_: subject.type_(),
+                                variant_id: item.type_name.clone(),
+                                assignee: assignee.clone(),
+                            }),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let assignee = if assignments.iter().all_equal() {
+                    assignments.first().unwrap().clone()
+                } else {
+                    None
+                };
+                let mut context = context.clone();
+                let variable = assignee.map(|(id, type_)| {
+                    let typed_variable = TypedVariable::from(type_.clone());
+                    context.insert(id, typed_variable.clone());
+                    typed_variable
+                });
+                let match_items = block
+                    .matches
+                    .into_iter()
+                    .map(|item| TypedMatchItem {
+                        type_idx: variant_lookup[&item.type_name].index,
+                        assignee: variable.clone(),
+                    })
+                    .collect_vec();
+                let block = self.check_block(block.block, context, generic_variables.clone())?;
+                Ok(TypedMatchBlock {
+                    block,
+                    matches: match_items,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Err(block_types) = blocks
+            .iter()
+            .map(|block| block.block.type_())
+            .all_equal_value()
+        {
+            match block_types {
+                None => panic!("Match statement with no blocks."),
+                Some(_) => {
+                    let mut blocks = blocks;
+                    let head = blocks.split_off(1);
+                    let head = head.first().unwrap();
+                    let head_type = head.block.type_();
+                    for block in blocks {
+                        if block.block.type_() != head_type {
+                            return Err(TypeCheckError::DifferingMatchBlockTypes(
+                                head.clone(),
+                                block,
+                            ));
+                        }
+                    }
+                    panic!("Match blocks have different types but they all match the first type.")
+                }
+            }
+        }
+        Ok(TypedMatch {
+            subject: Box::new(subject),
+            blocks,
+        })
+    }
+    fn check_expressions(
+        &self,
+        expressions: Vec<Expression>,
         context: &TypeContext,
         generic_variables: &GenericVariables,
     ) -> Result<Vec<TypedExpression>, TypeCheckError> {
         expressions
             .into_iter()
-            .map(|expression| {
-                self.check_functions_in_expression(expression, context, generic_variables)
-            })
+            .map(|expression| self.check_expression(expression, context, generic_variables))
             .collect::<Result<_, _>>()
     }
-    fn check_functions_in_expression(
+    fn fn_signature(
         &self,
-        expression: TypedExpression,
-        context: &TypeContext,
+        fn_def: &FunctionDefinition,
         generic_variables: &GenericVariables,
-    ) -> Result<TypedExpression, TypeCheckError> {
-        Ok(match expression {
-            TypedExpression::Integer(_)
-            | TypedExpression::Boolean(_)
-            | TypedExpression::TypedAccess(_) => expression,
-            TypedExpression::TypedTuple(TypedTuple { expressions }) => {
-                TypedExpression::TypedTuple(TypedTuple {
-                    expressions: self.check_functions_in_expressions(
-                        expressions,
-                        context,
-                        generic_variables,
-                    )?,
-                })
-            }
-            TypedExpression::TypedElementAccess(TypedElementAccess { expression, index }) => {
-                TypedExpression::TypedElementAccess(TypedElementAccess {
-                    expression: Box::new(self.check_functions_in_expression(
-                        *expression,
-                        context,
-                        generic_variables,
-                    )?),
-                    index,
-                })
-            }
-            TypedExpression::TypedIf(TypedIf {
-                condition,
-                true_block,
-                false_block,
-            }) => TypedExpression::TypedIf(TypedIf {
-                condition: Box::new(self.check_functions_in_expression(
-                    *condition,
-                    context,
+    ) -> Result<TypeFn, TypeCheckError> {
+        let FunctionDefinition {
+            parameters,
+            return_type,
+            body: _,
+        } = fn_def;
+        let parameter_types = parameters
+            .iter()
+            .map(|typed_assignee| {
+                TypeChecker::convert_ast_type(
+                    typed_assignee.type_.clone(),
+                    &self.type_definitions,
                     generic_variables,
-                )?),
-                true_block: self.check_functions_in_block(
-                    true_block,
-                    context,
-                    generic_variables,
-                )?,
-                false_block: self.check_functions_in_block(
-                    false_block,
-                    context,
-                    generic_variables,
-                )?,
-            }),
-            TypedExpression::PartiallyTypedFunctionDefinition(
-                partially_typed_function_definition,
-            ) => TypedExpression::TypedFunctionDefinition(self.fully_type_function(
-                partially_typed_function_definition,
-                context,
-                generic_variables,
-            )?),
-            TypedExpression::TypedFunctionDefinition(_) => {
-                panic!("Typed function found when only partially typed functions are expected.")
-            }
-            TypedExpression::TypedFunctionCall(TypedFunctionCall {
-                function,
-                arguments,
-            }) => TypedFunctionCall {
-                function: Box::new(self.check_functions_in_expression(
-                    *function,
-                    context,
-                    generic_variables,
-                )?),
-                arguments: self.check_functions_in_expressions(
-                    arguments,
-                    context,
-                    generic_variables,
-                )?,
-            }
-            .into(),
-            TypedExpression::TypedConstructorCall(TypedConstructorCall {
-                idx,
-                output_type,
-                arguments,
-            }) => TypedConstructorCall {
-                idx,
-                output_type,
-                arguments: self.check_functions_in_expressions(
-                    arguments,
-                    context,
-                    generic_variables,
-                )?,
-            }
-            .into(),
-            TypedExpression::TypedMatch(TypedMatch { subject, blocks }) => {
-                let subject = Box::new(self.check_functions_in_expression(
-                    *subject,
-                    context,
-                    generic_variables,
-                )?);
-                TypedMatch { subject, blocks }.into()
-            }
-        })
+                )
+            })
+            .collect::<Result<Vec<Type>, _>>()?;
+        let return_type = TypeChecker::convert_ast_type(
+            return_type.clone(),
+            &self.type_definitions,
+            generic_variables,
+        )?;
+        Ok(TypeFn(parameter_types, Box::new(return_type)))
     }
-    fn check_functions_in_block(
+    fn check_block(
         &self,
-        block: TypedBlock,
-        context: &TypeContext,
-        generic_variables: &GenericVariables,
+        block: Block,
+        context: TypeContext,
+        generic_variables: GenericVariables,
     ) -> Result<TypedBlock, TypeCheckError> {
-        Ok(TypedBlock {
-            assignments: block
-                .assignments
-                .into_iter()
-                .map(|assignment| {
-                    let mut generic_variables = generic_variables.clone();
-                    generic_variables.extend(
-                        GenericVariables::from(assignment.expression.parameters.clone())
-                            .into_iter(),
-                    );
-                    self.check_functions_in_expression(
-                        assignment.expression.expression,
-                        context,
-                        &generic_variables,
-                    )
-                    .map(|expression| TypedAssignment {
-                        variable: assignment.variable,
-                        expression: ParametricExpression {
-                            expression,
-                            parameters: assignment.expression.parameters,
-                        },
-                    })
+        let assignments = block
+            .assignments
+            .into_iter()
+            .map(|assignment| match *assignment.expression {
+                Expression::FunctionDefinition(fn_def) => (assignment.assignee, Right(fn_def)),
+                expression => (assignment.assignee, Left(expression)),
+            })
+            .collect_vec();
+        let (var_names, fn_names): (Vec<_>, Vec<_>) =
+            assignments
+                .iter()
+                .partition_map(|(assignee, expression)| match expression {
+                    Left(_) => Left(assignee.id()),
+                    Right(_) => Right(assignee.id()),
+                });
+        match utils::check_unique(fn_names.iter()) {
+            Ok(()) => {}
+            Err(UniqueError { duplicate }) => {
+                return Err(TypeCheckError::DuplicatedName {
+                    duplicate: duplicate.clone(),
+                    reason: String::from("function names"),
                 })
-                .collect::<Result<_, _>>()?,
-            expression: Box::new(self.check_functions_in_expression(
-                *block.expression,
-                context,
-                generic_variables,
-            )?),
-        })
-    }
-    fn fully_type_function(
-        &self,
-        function_definition: PartiallyTypedFunctionDefinition,
-        context: &TypeContext,
-        generic_variables: &GenericVariables,
-    ) -> Result<TypedFunctionDefinition, TypeCheckError> {
+            }
+        }
+        match utils::check_unique(fn_names.iter().chain(var_names.iter().unique())) {
+            Ok(()) => {}
+            Err(UniqueError { duplicate }) => {
+                return Err(TypeCheckError::DuplicatedName {
+                    duplicate: duplicate.clone(),
+                    reason: String::from("assignment and function names"),
+                })
+            }
+        }
+
         let mut new_context = context.clone();
-        for (id, variable) in &function_definition.parameters {
-            new_context.insert(id.clone(), variable.clone().into());
+        let mut fn_context = context;
+        for assignment in &assignments {
+            if let (assignee, Right(fn_def)) = assignment {
+                let mut generic_variables = generic_variables.clone();
+                generic_variables
+                    .extend(GenericVariables::from(&assignee.generic_variables).into_iter());
+                let type_ = self.fn_signature(&fn_def, &generic_variables)?;
+                fn_context.insert(
+                    assignee.id(),
+                    TypedVariable {
+                        variable: Variable::new(),
+                        type_: ParametricType {
+                            parameters: assignee
+                                .generic_variables
+                                .iter()
+                                .map(|id| generic_variables[id].clone())
+                                .collect(),
+                            type_: type_.into(),
+                        },
+                    },
+                );
+            }
         }
-        let body = self.check_block(function_definition.body, &new_context, generic_variables)?;
-        if *function_definition.return_type != body.type_() {
-            return Err(TypeCheckError::FunctionReturnTypeMismatch {
-                return_type: *function_definition.return_type.clone(),
-                body,
-            });
-        }
-        Ok(TypedFunctionDefinition {
-            parameters: function_definition
-                .parameters
+
+        let mut statements = Vec::new();
+        for (assignee, expression) in assignments {
+            let mut generic_variables = generic_variables.clone();
+            generic_variables
+                .extend(GenericVariables::from(&assignee.generic_variables).into_iter());
+            let id = assignee.id();
+            let parameters = assignee
+                .generic_variables
                 .into_iter()
-                .map(|(_, variable)| variable)
-                .collect_vec(),
-            return_type: function_definition.return_type.clone(),
-            body,
-        })
+                .map(|id| (id.clone(), generic_variables[&id].clone()))
+                .collect_vec();
+            let statement = match expression {
+                Left(expression) => {
+                    let typed_expression =
+                        self.check_expression(expression, &new_context, &generic_variables)?;
+                    let assignment = TypedAssignment {
+                        variable: TypedVariable {
+                            variable: Variable::new(),
+                            type_: ParametricType {
+                                parameters: parameters
+                                    .iter()
+                                    .map(|(_, parameter)| parameter.clone())
+                                    .collect(),
+                                type_: typed_expression.type_(),
+                            },
+                        },
+                        expression: ParametricExpression {
+                            expression: typed_expression,
+                            parameters,
+                        },
+                    };
+                    new_context.insert(id.clone(), assignment.variable.clone());
+                    fn_context.insert(id, assignment.variable.clone());
+                    assignment.into()
+                }
+                Right(fn_def) => {
+                    let TypedExpression::TypedLambdaDef(lambda_def) =
+                        self.check_expression(fn_def.into(), &fn_context, &generic_variables)?
+                    else {
+                        panic!("Function def changed form");
+                    };
+                    let variable = &fn_context[&id];
+                    new_context.insert(id, variable.clone());
+                    TypedFnDef {
+                        variable: variable.clone(),
+                        parameters,
+                        fn_: lambda_def,
+                    }
+                    .into()
+                }
+            };
+            statements.push(statement);
+        }
+
+        let typed_expression =
+            self.check_expression(*block.expression, &new_context, &generic_variables)?;
+        let block = TypedBlock {
+            statements,
+            expression: Box::new(typed_expression),
+        };
+        Ok(block)
     }
     fn check_program(
         program: Program,
@@ -1104,8 +1051,8 @@ impl TypeChecker {
             ),
         };
         let typed_block =
-            type_checker.check_block(program_block, context, &GenericVariables::new())?;
-        if let Type::TypeFn(TypeFn(_, _)) = typed_block.type_() {
+            type_checker.check_block(program_block, context.clone(), GenericVariables::new())?;
+        if let Type::TypeFn(_) = typed_block.type_() {
             return Err(TypeCheckError::MainFunctionReturnsFunction {
                 type_: typed_block.type_(),
             });
@@ -1130,7 +1077,7 @@ impl TypeChecker {
         Ok(TypedProgram {
             type_definitions: type_checker.type_definitions,
             main: variable,
-            assignments: typed_block.assignments,
+            statements: typed_block.statements,
         })
     }
     pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {
@@ -3407,14 +3354,258 @@ mod tests {
                 },
                 Assignment{
                     assignee: VariableAssignee("x"),
-                    expression: Box::new(Integer{value: 5}.into())
+                    expression: Box::new(Boolean{value: true}.into())
                 },
             ],
-            expression: Box::new(Integer{value: 7}.into())
+            expression: Box::new(Var("x").into())
+        },
+        Some(TYPE_BOOL),
+        TypeContext::new();
+        "block duplicate assignments"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Integer{value: 3}.into())
+                    }.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Integer{value: -3}.into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("f").into())
         },
         None,
         TypeContext::new();
-        "block duplicate assignments"
+        "block duplicate fn assignments"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Integer{value: 3}.into())
+                    }.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(Integer{value: -3}.into())
+                },
+            ],
+            expression: Box::new(Var("f").into())
+        },
+        None,
+        TypeContext::new();
+        "block variable and fn assignments"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("x"),
+                    expression: Box::new(Integer{value: 3}.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Var("x").into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("f").into())
+        },
+        Some(TypeFn(
+            Vec::new(),
+            Box::new(TYPE_INT.into())
+        ).into()),
+        TypeContext::new();
+        "fn use closure"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Var("x").into())
+                    }.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("x"),
+                    expression: Box::new(Integer{value: 3}.into())
+                },
+            ],
+            expression: Box::new(Var("f").into())
+        },
+        None,
+        TypeContext::new();
+        "fn invalid closure"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("x"),
+                    expression: Box::new(Integer{value: 3}.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: vec![
+                            TypedAssignee{
+                                assignee: Id::from("x").into(),
+                                type_: ATOMIC_TYPE_BOOL.into()
+                            },
+                        ],
+                        return_type: ATOMIC_TYPE_BOOL.into(),
+                        body: ExpressionBlock(Var("x").into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("f").into())
+        },
+        Some(TypeFn(
+            vec![TYPE_BOOL.into()],
+            Box::new(TYPE_BOOL.into())
+        ).into()),
+        TypeContext::new();
+        "fn shadowed closure"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("foo"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_BOOL.into(),
+                        body: ExpressionBlock(FunctionCall{
+                            function: Box::new(Var("bar").into()),
+                            arguments: Vec::new()
+                        }.into())
+                    }.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("bar"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_BOOL.into(),
+                        body: ExpressionBlock(FunctionCall{
+                            function: Box::new(Var("foo").into()),
+                            arguments: Vec::new()
+                        }.into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("foo").into())
+        },
+        Some(TypeFn(
+            Vec::new(),
+            Box::new(TYPE_BOOL.into())
+        ).into()),
+        TypeContext::new();
+        "mutually recursive fns"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("foo"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_BOOL.into(),
+                        body: ExpressionBlock(Boolean{value:true}.into())
+                    }.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("x"),
+                    expression: Box::new(FunctionCall{
+                        function: Box::new(Var("foo").into()),
+                        arguments: Vec::new()
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("x").into())
+        },
+        Some(TYPE_BOOL.into()),
+        TypeContext::new();
+        "user defined fn call"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("x"),
+                    expression: Box::new(FunctionCall{
+                        function: Box::new(Var("foo").into()),
+                        arguments: Vec::new()
+                    }.into())
+                },
+                Assignment{
+                    assignee: VariableAssignee("foo"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_BOOL.into(),
+                        body: ExpressionBlock(Boolean{value:true}.into())
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("x").into())
+        },
+        None,
+        TypeContext::new();
+        "call before definition"
+    )]
+    #[test_case(
+        Block {
+            assignments: vec![
+                Assignment{
+                    assignee: VariableAssignee("f"),
+                    expression: Box::new(FunctionDefinition {
+                        parameters: vec![
+                            TypedAssignee{
+                                assignee: Id::from("x").into(),
+                                type_: ATOMIC_TYPE_BOOL.into()
+                            },
+                        ],
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: Block{
+                            assignments: vec![
+                                Assignment{
+                                    assignee: VariableAssignee("x"),
+                                    expression: Box::new(Integer{value: 3}.into())
+                                },
+                            ],
+                            expression: Box::new(Var("x").into())
+                        }
+                    }.into())
+                },
+            ],
+            expression: Box::new(Var("f").into())
+        },
+        Some(TypeFn(
+            vec![TYPE_BOOL.into()],
+            Box::new(TYPE_INT.into())
+        ).into()),
+        TypeContext::new();
+        "fn shadowed arg"
     )]
     #[test_case(
         Block {
@@ -4167,11 +4358,14 @@ mod tests {
                 .with(|definitions| TypeDefinitions::from(definitions.0.clone())),
             constructors: TYPE_CONSTRUCTORS.clone(),
         };
-        let type_check_result = type_checker.check_block(block, &context, &GenericVariables::new());
+        let type_check_result = type_checker.check_block(block, context, GenericVariables::new());
         match expected_type {
             Some(type_) => match &type_check_result {
-                Ok(typed_expression) => {
-                    assert!(Type::equality(&typed_expression.type_(), &type_))
+                Ok(typed_block) => {
+                    dbg!(&typed_block);
+                    dbg!(typed_block.type_());
+                    dbg!(&type_);
+                    assert!(Type::equality(&typed_block.type_(), &type_))
                 }
                 Err(msg) => {
                     dbg!(msg);
