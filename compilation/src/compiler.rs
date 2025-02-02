@@ -2699,6 +2699,121 @@ mod tests {
         );
         "env closure"
     )]
+    #[test_case(
+        {
+            let x = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let z = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let z_expression: IntermediateExpression = IntermediateFnCall{
+                fn_: BuiltInFn(
+                    Name::from("+"),
+                    IntermediateFnType(
+                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into())
+                    ).into()
+                ).into(),
+                args: vec![
+                    x.clone().into(),
+                    y.clone().into()
+                ]
+            }.into();
+            IntermediateLambda {
+                args: vec![y.clone()],
+                statements: vec![
+                    IntermediateAssignment{
+                        location: z.location.clone(),
+                        expression: z_expression,
+                    }.into()
+                ],
+                ret: z.into()
+            }
+        },
+        (
+            vec![
+                Declaration {
+                    memory: Memory(Id::from("m5")),
+                    type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                }.into(),
+                Assignment {
+                    target: Memory(Id::from("m5")),
+                    check_null: false,
+                    value: Expression::Wrap(
+                        Memory(Id::from("m4")).into(),
+                        AtomicTypeEnum::INT.into()
+                    )
+                }.into(),
+                Declaration {
+                    memory: Memory(Id::from("m3")),
+                    type_: TupleType(vec![
+                        MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                    ]).into()
+                }.into(),
+                Assignment {
+                    target: Memory(Id::from("m3")),
+                    check_null: false,
+                    value: TupleExpression(vec![
+                        Memory(Id::from("m5")).into(),
+                    ]).into()
+                }.into(),
+            ],
+            ClosureInstantiation{
+                name: Name::from("F0"),
+                env: Some(Memory(Id::from("m3")).into())
+            },
+            FnDef{
+                name: Name::from("F0"),
+                arguments: vec![(Memory(Id::from("m0")), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))],
+                env: Some(TupleType(vec![
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                ]).into()),
+                statements: vec![
+                    Declaration {
+                        memory: Memory(Id::from("m1")),
+                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    }.into(),
+                    Assignment {
+                        target: Memory(Id::from("m1")),
+                        check_null: false,
+                        value: ElementAccess{
+                            value: Memory(Id::from("env")).into(),
+                            idx: 0
+                        }.into()
+                    }.into(),
+                    Assignment{
+                        target: Memory(Id::from("m2")),
+                        value: FnCall{
+                            fn_: BuiltIn::BuiltInFn(
+                                Name::from("Plus__BuiltIn"),
+                            ).into(),
+                            fn_type: FnType(
+                                vec![
+                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                ],
+                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                            ),
+                            args: vec![
+                                Memory(Id::from("m1")).into(),
+                                Memory(Id::from("m0")).into(),
+                            ]
+                        }.into(),
+                        check_null: true
+                    }.into()
+                ],
+                ret: (
+                    Memory(Id::from("m2")).into(),
+                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                ),
+                allocations: vec![
+                    Declaration {
+                        memory: Memory(Id::from("m2")),
+                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    }.into(),
+                ]
+            }
+        );
+        "env and closure"
+    )]
     fn test_compile_fn_defs(
         fn_def: IntermediateLambda,
         expected: (Vec<Statement>, ClosureInstantiation, FnDef),
