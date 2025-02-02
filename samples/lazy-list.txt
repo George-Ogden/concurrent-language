@@ -1,0 +1,27 @@
+typedef Chain{T} (T, Chain{T});
+typedef List{T} {Cons(T, List{T}) | Nil};
+
+infinite_range = () -> Chain{int} {
+    range = (n: int) -> Chain{int} {
+        Chain{int}{(n, range(n+1))}
+    };
+    range(0)
+};
+
+take{T} = (c: Chain{T}, n: int) -> List{T}  {
+    if (n <= 0) {
+        Nil{T}{}
+    } else {
+        match (c) {
+            Chain x: {
+                h = x.0;
+                t = x.1;
+                Cons{T}{(h,take{T}(t, n-1))}
+            }
+        }
+    }
+};
+
+main = () -> List{int} {
+    take{int}(infinite_range(), 10)
+};
