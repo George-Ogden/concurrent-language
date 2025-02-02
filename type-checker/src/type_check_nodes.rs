@@ -1143,6 +1143,10 @@ pub enum TypeCheckError {
         variant_id: Id,
         assignee: Option<Assignee>,
     },
+    MainAsAssignment {
+        block: TypedBlock,
+        variable: TypedVariable,
+    },
     MainFunctionReturnsFunction {
         type_: Type,
     },

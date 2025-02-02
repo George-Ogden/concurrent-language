@@ -11,7 +11,7 @@ use crate::{
     GenericTypeVariable, GenericVariable, Id, IfExpression, MatchExpression, OpaqueTypeDefinition,
     ParametricExpression, Program, TransparentTypeDefinition, TupleExpression, TupleType,
     TypeAtomic, TypeFn, TypeInstance, TypeInstantiation, TypeTuple, TypeUnion, TypeVariable,
-    TypedFnDef, UnionTypeDefinition, Variable,
+    TypedFnDef, TypedStatement, UnionTypeDefinition, Variable,
 };
 use itertools::Either::*;
 use itertools::Itertools;
@@ -1022,17 +1022,11 @@ impl TypeChecker {
         let definitions = program.definitions;
         let (assignments, type_definitions): (Vec<_>, Vec<_>) = definitions
             .into_iter()
-            .partition(|definition| matches!(definition, Definition::Assignment(_)));
+            .partition_map(|definition| match definition {
+                Definition::Assignment(assignment) => Left(assignment),
+                def => Right(def),
+            });
 
-        let assignments = assignments
-            .into_iter()
-            .map(|definition| {
-                let Definition::Assignment(assignment) = definition else {
-                    panic!("Program filtered only assignments.")
-                };
-                assignment.clone()
-            })
-            .collect_vec();
         let type_checker = TypeChecker::check_type_definitions(type_definitions)?;
         let program_block = Block {
             assignments,
@@ -1060,7 +1054,7 @@ impl TypeChecker {
         let TypedExpression::TypedFunctionCall(TypedFunctionCall {
             function,
             arguments,
-        }) = *typed_block.expression
+        }) = &*typed_block.expression
         else {
             panic!("Main function call changed form.")
         };
@@ -1068,17 +1062,33 @@ impl TypeChecker {
             panic!("Main function call changed form.")
         }
         let TypedExpression::TypedAccess(TypedAccess {
-            variable,
+            variable: main,
             parameters: _,
-        }) = *function
+        }) = &**function
         else {
             panic!("Main function call changed form.")
         };
-        Ok(TypedProgram {
-            type_definitions: type_checker.type_definitions,
-            main: variable,
-            statements: typed_block.statements,
-        })
+        let main = main.clone();
+        for statement in &typed_block.statements {
+            if let TypedStatement::TypedFnDef(TypedFnDef {
+                variable,
+                parameters: _,
+                fn_: __,
+            }) = statement
+            {
+                if *variable == main {
+                    return Ok(TypedProgram {
+                        type_definitions: type_checker.type_definitions,
+                        main,
+                        statements: typed_block.statements,
+                    });
+                }
+            }
+        }
+        return Err(TypeCheckError::MainAsAssignment {
+            variable: main,
+            block: typed_block,
+        });
     }
     pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {
         DEFAULT_CONTEXT.with(|context| Self::check_program(program, context))
@@ -4548,6 +4558,27 @@ mod tests {
         Ok(()),
         TypeContext::new();
         "basic program"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("not_main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(Integer{value: 0}.into())
+                    }.into())
+                }.into(),
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(Var("not_main").into())
+                }.into()
+            ]
+        },
+        Err(()),
+        TypeContext::new();
+        "main reassignment"
     )]
     #[test_case(
         Program{
