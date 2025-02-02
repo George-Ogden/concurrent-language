@@ -150,3 +150,18 @@ TEST_F(LazyFunctionTest, NotDoneInvalidFinishedContinuationBehaviour) {
     lazy_fn->run();
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
 }
+
+TEST(LazyExtractionTest, Int) { ASSERT_EQ(Lazy<Int>::extract_value(8), 8); }
+
+TEST(LazyExtractionTest, LazyInt) {
+    LazyT<Int> ptr = std::make_shared<LazyConstant<Int>>(8);
+    ASSERT_EQ(Lazy<Int>::extract_value(ptr), 8);
+}
+
+TEST(LazyExtractionTest, LazyTuple) {
+    LazyT<TupleT<Int, TupleT<Int>>> ptr = std::make_tuple(
+        std::make_shared<LazyConstant<Int>>(6),
+        std::make_tuple(std::make_shared<LazyConstant<Int>>(10)));
+    ASSERT_EQ((Lazy<TupleT<Int, TupleT<Int>>>::extract_value(ptr)),
+              (std::make_tuple(6, std::make_tuple(10))));
+}

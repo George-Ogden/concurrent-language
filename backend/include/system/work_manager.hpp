@@ -65,6 +65,11 @@ std::shared_ptr<Fn> WorkManager::get_work() {
 }
 
 template <typename... Vs> void WorkManager::await(Vs &...vs) {
+    std::apply([](auto &&...args) { return WorkManager::await_all(args...); },
+               spill(std::make_tuple(vs...)));
+}
+
+template <typename... Vs> void WorkManager::await_all(Vs &...vs) {
     unsigned n = sizeof...(vs);
     if (n == 0) {
         return;

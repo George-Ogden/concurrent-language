@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data_structures/lazy.hpp"
 #include "fn/fn.hpp"
 
 #include <iostream>

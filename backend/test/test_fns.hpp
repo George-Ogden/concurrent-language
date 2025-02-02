@@ -27,9 +27,7 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
 
 struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> {
     using Closure<IdentityInt, Empty, Int, Int>::Closure;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
-        return x;
-    }
+    LazyT<Int> body(LazyT<Int> &x) override { return x; }
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
@@ -44,10 +42,8 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
 struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
     using Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int>::Closure;
     FnT<Int, Int, Int> call1 = nullptr, call2 = nullptr, call3 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &a,
-                                    std::shared_ptr<Lazy<Int>> &b,
-                                    std::shared_ptr<Lazy<Int>> &c,
-                                    std::shared_ptr<Lazy<Int>> &d) override {
+    LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
+                    LazyT<Int> &d) override {
         if (call1 == nullptr) {
             call1 = std::make_shared<Plus__BuiltIn>();
             call1->args = std::make_tuple(a, b);
@@ -71,10 +67,8 @@ struct FourWayPlusV2 : Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int> {
     using Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int>::Closure;
     std::shared_ptr<Plus__BuiltIn> call1 = nullptr, call2 = nullptr,
                                    call3 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &a,
-                                    std::shared_ptr<Lazy<Int>> &b,
-                                    std::shared_ptr<Lazy<Int>> &c,
-                                    std::shared_ptr<Lazy<Int>> &d) override {
+    LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
+                    LazyT<Int> &d) override {
         if (call1 == nullptr) {
             call1 = std::make_shared<Plus__BuiltIn>(a, b);
             WorkManager::call(call1);
@@ -120,16 +114,13 @@ struct BranchingExample : EasyCloneFn<BranchingExample, Int, Int, Int, Int> {
     std::shared_ptr<Comparison_GE__BuiltIn> call1 = nullptr;
     std::shared_ptr<Plus__BuiltIn> call2 = nullptr;
     std::shared_ptr<Minus__BuiltIn> call3 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x,
-                                    std::shared_ptr<Lazy<Int>> &y,
-                                    std::shared_ptr<Lazy<Int>> &z) override {
+    LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y, LazyT<Int> &z) override {
         if (call1 == nullptr) {
             call1 = std::make_shared<Comparison_GE__BuiltIn>(
                 x, std::make_shared<LazyConstant<Int>>(0));
             WorkManager::call(call1);
         }
         WorkManager::await(call1);
-        call1->run();
         if (call1->value()) {
             if (call2 == nullptr) {
                 call2 = std::make_shared<Plus__BuiltIn>(
@@ -174,7 +165,7 @@ struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
     using EasyCloneFn<FlatBlockExample, Int, Int>::EasyCloneFn;
     FnT<Int, Int> call1 = nullptr;
     FnT<Int> block1 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Int> body(LazyT<Int> &x) override {
         if (block1 == nullptr) {
             block1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call1 == nullptr) {
@@ -205,7 +196,7 @@ struct NestedBlockExample : EasyCloneFn<NestedBlockExample, Int, Int> {
     std::shared_ptr<Increment__BuiltIn> call1 = nullptr, call2 = nullptr,
                                         call3 = nullptr;
     FnT<Int> block1 = nullptr, block2 = nullptr, block3 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Int> body(LazyT<Int> &x) override {
         if (block1 == nullptr) {
             block1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call1 == nullptr) {
@@ -251,10 +242,10 @@ TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
     ASSERT_EQ(block->ret, 8);
 }
 
-struct Adder : Closure<Adder, std::shared_ptr<Lazy<Int>>, Int, Int> {
-    using Closure<Adder, std::shared_ptr<Lazy<Int>>, Int, Int>::Closure;
+struct Adder : Closure<Adder, LazyT<Int>, Int, Int> {
+    using Closure<Adder, LazyT<Int>, Int, Int>::Closure;
     FnT<Int, Int, Int> inner_res = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Int> body(LazyT<Int> &x) override {
         if (inner_res == nullptr) {
             inner_res = std::make_shared<Plus__BuiltIn>(x, env);
             WorkManager::call(inner_res);
@@ -267,7 +258,7 @@ struct NestedFnExample : EasyCloneFn<NestedFnExample, Int, Int> {
     using EasyCloneFn<NestedFnExample, Int, Int>::EasyCloneFn;
     FnT<Int, Int> closure = nullptr;
     FnT<Int, Int> res = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Int> body(LazyT<Int> &x) override {
         if (closure == nullptr) {
             closure = std::make_shared<Adder>();
             std::dynamic_pointer_cast<Adder>(closure)->env = x;
@@ -297,9 +288,7 @@ struct IfStatementExample
     FnT<Int> branch1 = nullptr, branch2 = nullptr, branch = nullptr;
     std::shared_ptr<Plus__BuiltIn> call2_1 = nullptr, call2_2 = nullptr;
     std::shared_ptr<Minus__BuiltIn> call3 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x,
-                                    std::shared_ptr<Lazy<Int>> &y,
-                                    std::shared_ptr<Lazy<Int>> &z) override {
+    LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y, LazyT<Int> &z) override {
         if (branch1 == nullptr) {
             branch1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call2_1 == nullptr) {
@@ -358,35 +347,42 @@ TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
 
 struct SharedRegisterExample : EasyCloneFn<SharedRegisterExample, Int, Bool> {
     using EasyCloneFn<SharedRegisterExample, Int, Bool>::EasyCloneFn;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Bool>> &b) override {
+    LazyT<Int> body(LazyT<Bool> &b) override {
         WorkManager::await(b);
-        Bool m0;
-        Int m1;
-        m0 = b->value();
-        if (m0) {
-            m1 = 1;
+        LazyT<Int> m1;
+        if (b->value()) {
+            m1 = std::make_shared<LazyConstant<Int>>(1);
         } else {
-            m1 = 0;
+            m1 = std::make_shared<LazyConstant<Int>>(0);
         }
-        std::shared_ptr<Lazy<Int>> m2 = std::make_shared<LazyConstant<Int>>(m1);
-        return m2;
+        return m1;
     }
 };
 
 TEST_P(FnCorrectnessTest, SharedRegisterExampleTest) {
-    Bool b = true;
-    std::shared_ptr<SharedRegisterExample> example =
-        std::make_shared<SharedRegisterExample>(b);
+    {
+        Bool b = true;
+        std::shared_ptr<SharedRegisterExample> example =
+            std::make_shared<SharedRegisterExample>(b);
 
-    WorkManager::run(example);
-    ASSERT_EQ(example->ret, 1);
+        WorkManager::run(example);
+        ASSERT_EQ(example->ret, 1);
+    }
+    {
+        Bool b = false;
+        std::shared_ptr<SharedRegisterExample> example =
+            std::make_shared<SharedRegisterExample>(b);
+
+        WorkManager::run(example);
+        ASSERT_EQ(example->ret, 0);
+    }
 }
 
 struct RecursiveDouble : EasyCloneFn<RecursiveDouble, Int, Int> {
     using EasyCloneFn<RecursiveDouble, Int, Int>::EasyCloneFn;
     std::shared_ptr<RecursiveDouble> call1 = nullptr, call3 = nullptr;
     std::shared_ptr<Plus__BuiltIn> call2 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Int> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
             if (call1 == nullptr) {
@@ -435,7 +431,7 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
 
 struct EvenOrOdd : EasyCloneFn<EvenOrOdd, Bool, Int> {
     using EasyCloneFn<EvenOrOdd, Bool, Int>::EasyCloneFn;
-    std::shared_ptr<Lazy<Bool>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Bool> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         return std::make_shared<LazyConstant<Bool>>(x->value() & 1);
     }
@@ -443,8 +439,7 @@ struct EvenOrOdd : EasyCloneFn<EvenOrOdd, Bool, Int> {
 
 struct ApplyIntBool : EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int> {
     using EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int>::EasyCloneFn;
-    std::shared_ptr<Lazy<Bool>> body(std::shared_ptr<Lazy<FnT<Bool, Int>>> &f,
-                                     std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Bool> body(LazyT<FnT<Bool, Int>> &f, LazyT<Int> &x) override {
         WorkManager::await(f);
         auto g = f->value();
         g->args = std::make_tuple(x);
@@ -462,16 +457,25 @@ TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
     ASSERT_TRUE(apply->ret);
 }
 
-struct PairIntBool : EasyCloneFn<PairIntBool, TupleT<Int, Bool>, Int, Bool> {
-    using EasyCloneFn<PairIntBool, TupleT<Int, Bool>, Int, Bool>::EasyCloneFn;
-    std::shared_ptr<Lazy<TupleT<Int, Bool>>>
-    body(std::shared_ptr<Lazy<Int>> &x,
-         std::shared_ptr<Lazy<Bool>> &y) override {
-        WorkManager::await(x, y);
-        return std::make_shared<LazyConstant<TupleT<Int, Bool>>>(
-            std::make_tuple(x->value(), y->value()));
+struct PairIntBool
+    : EasyCloneFn<PairIntBool, TupleT<Int, TupleT<Bool>>, Int, Bool> {
+    using EasyCloneFn<PairIntBool, TupleT<Int, TupleT<Bool>>, Int,
+                      Bool>::EasyCloneFn;
+    LazyT<TupleT<Int, TupleT<Bool>>> body(LazyT<Int> &x,
+                                          LazyT<Bool> &y) override {
+        return std::make_tuple(x, std::make_tuple(y));
     }
 };
+
+TEST_P(FnCorrectnessTest, TupleTest) {
+    Int x = 5;
+    Bool y = true;
+    std::shared_ptr<PairIntBool> pair = std::make_shared<PairIntBool>(x, y);
+
+    WorkManager::run(pair);
+    ASSERT_EQ(std::get<0>(pair->ret), 5);
+    ASSERT_EQ(std::get<0>(std::get<1>(pair->ret)), true);
+}
 
 struct HigherOrderReuse
     : EasyCloneFn<HigherOrderReuse, Int, FnT<Int, Int>, Int, Int> {
@@ -479,9 +483,8 @@ struct HigherOrderReuse
                       Int>::EasyCloneFn;
     FnT<Int, Int> call1 = nullptr, call2 = nullptr;
     std::shared_ptr<Plus__BuiltIn> call3 = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<FnT<Int, Int>>> &f,
-                                    std::shared_ptr<Lazy<Int>> &x,
-                                    std::shared_ptr<Lazy<Int>> &y) override {
+    LazyT<Int> body(LazyT<FnT<Int, Int>> &f, LazyT<Int> &x,
+                    LazyT<Int> &y) override {
         WorkManager::await(f);
         if (call1 == nullptr) {
             call1 = f->value();
@@ -511,15 +514,6 @@ TEST_P(FnCorrectnessTest, ReusedHigherOrderFunctionTest) {
     ASSERT_EQ(F->ret, 11);
 }
 
-TEST_P(FnCorrectnessTest, TupleTest) {
-    Int x = 5;
-    Bool y = true;
-    std::shared_ptr<PairIntBool> pair = std::make_shared<PairIntBool>(x, y);
-
-    WorkManager::run(pair);
-    ASSERT_EQ(pair->ret, std::make_tuple(5, true));
-}
-
 struct Twoo;
 struct Faws;
 typedef VariantT<Twoo, Faws> Bull;
@@ -528,7 +522,7 @@ struct Faws {};
 
 struct BoolUnion : EasyCloneFn<BoolUnion, Bool, Bull> {
     using EasyCloneFn<BoolUnion, Bool, Bull>::EasyCloneFn;
-    std::shared_ptr<Lazy<Bool>> body(std::shared_ptr<Lazy<Bull>> &x) override {
+    LazyT<Bool> body(LazyT<Bull> &x) override {
         WorkManager::await(x);
         return std::make_shared<LazyConstant<Bool>>(x->value().tag == 0);
     }
@@ -558,28 +552,31 @@ struct Left;
 struct Right;
 typedef VariantT<Left, Right> EitherIntBool;
 struct Left {
-    using type = Int;
+    using type = LazyT<Int>;
     type value;
 };
 struct Right {
-    using type = Bool;
+    using type = LazyT<Bool>;
     type value;
 };
 
 struct EitherIntBoolExtractor
     : EasyCloneFn<EitherIntBoolExtractor, Bool, EitherIntBool> {
     using EasyCloneFn<EitherIntBoolExtractor, Bool, EitherIntBool>::EasyCloneFn;
-    std::shared_ptr<Lazy<Bool>>
-    body(std::shared_ptr<Lazy<EitherIntBool>> &either) override {
+    LazyT<Bool> body(LazyT<EitherIntBool> &either) override {
         WorkManager::await(either);
         EitherIntBool x = either->value();
         switch (x.tag) {
-        case 0ULL:
-            return std::make_shared<LazyConstant<Bool>>(
-                reinterpret_cast<Left *>(&x.value)->value > 10);
-        case 1ULL:
-            return std::make_shared<LazyConstant<Bool>>(
-                reinterpret_cast<Right *>(&x.value)->value);
+        case 0ULL: {
+            auto left = reinterpret_cast<Left *>(&x.value)->value;
+            WorkManager::await(left);
+            return std::make_shared<LazyConstant<Bool>>(left->value() > 10);
+        }
+        case 1ULL: {
+            auto right = reinterpret_cast<Right *>(&x.value)->value;
+            WorkManager::await(right);
+            return std::make_shared<LazyConstant<Bool>>(right->value());
+        }
         }
         return 0;
     }
@@ -595,9 +592,11 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         EitherIntBool either{};
         either.tag = tag;
         if (tag == 0) {
-            new (&either.value) Left{value};
+            new (&either.value)
+                Left{std::make_shared<LazyConstant<Int>>(value)};
         } else {
-            new (&either.value) Right{static_cast<Bool>(value)};
+            new (&either.value)
+                Right{std::make_shared<LazyConstant<Bool>>(value)};
         }
 
         std::shared_ptr<EitherIntBoolExtractor> fn =
@@ -611,18 +610,14 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
 struct EitherIntBoolEdgeCase
     : EasyCloneFn<EitherIntBoolEdgeCase, Bool, EitherIntBool> {
     using EasyCloneFn<EitherIntBoolEdgeCase, Bool, EitherIntBool>::EasyCloneFn;
-    std::shared_ptr<Lazy<Bool>> y = nullptr;
-    std::shared_ptr<Lazy<Bool>>
-    body(std::shared_ptr<Lazy<EitherIntBool>> &either) override {
+    LazyT<Bool> y = nullptr;
+    LazyT<Bool> body(LazyT<EitherIntBool> &either) override {
         WorkManager::await(either);
         EitherIntBool x = either->value();
         switch (x.tag) {
         case 0ULL: {
-            std::shared_ptr<Lazy<Left::type>> i =
-                std::make_shared<LazyConstant<Left::type>>(
-                    reinterpret_cast<Left *>(&x.value)->value);
-            std::shared_ptr<Lazy<Int>> z =
-                std::make_shared<LazyConstant<Int>>(0);
+            LazyT<Left::type> i = reinterpret_cast<Left *>(&x.value)->value;
+            LazyT<Int> z = std::make_shared<LazyConstant<Int>>(0);
             if (y == nullptr) {
                 y = std::make_shared<Comparison_GT__BuiltIn>();
                 dynamic_fn_cast<FnT<Bool, Int, Int>>(y)->args =
@@ -632,9 +627,7 @@ struct EitherIntBoolEdgeCase
             break;
         }
         case 1ULL: {
-            std::shared_ptr<Lazy<Right::type>> b =
-                std::make_shared<LazyConstant<Right::type>>(
-                    reinterpret_cast<Right *>(&x.value)->value);
+            LazyT<Right::type> b = reinterpret_cast<Right *>(&x.value)->value;
             y = b;
             break;
         }
@@ -654,9 +647,11 @@ TEST_P(FnCorrectnessTest, EdgeCaseTest) {
         either.tag = tag;
         if (tag == 0) {
 
-            new (&either.value) Left{value};
+            new (&either.value)
+                Left{std::make_shared<LazyConstant<Int>>(value)};
         } else {
-            new (&either.value) Right{static_cast<Bool>(value)};
+            new (&either.value)
+                Right{std::make_shared<LazyConstant<Bool>>(value)};
         }
 
         std::shared_ptr<EitherIntBoolEdgeCase> fn =
@@ -671,7 +666,7 @@ struct Cons;
 struct Nil;
 typedef VariantT<Cons, Nil> ListInt;
 struct Cons {
-    using type = TupleT<Int, std::shared_ptr<ListInt>>;
+    using type = LazyT<TupleT<Int, ListInt>>;
     type value;
 };
 struct Nil {
@@ -682,32 +677,26 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
     using EasyCloneFn<ListIntSum, Int, ListInt>::EasyCloneFn;
     std::shared_ptr<ListIntSum> call1 = nullptr;
     std::shared_ptr<Plus__BuiltIn> call2 = nullptr;
-    std::shared_ptr<Lazy<Int>>
-    body(std::shared_ptr<Lazy<ListInt>> &lazy_list) override {
+    LazyT<Int> body(LazyT<ListInt> &lazy_list) override {
         WorkManager::await(lazy_list);
         ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            std::shared_ptr<Lazy<destroy_references_t<Cons::type>>> cons_lazy =
-                std::make_shared<
-                    LazyConstant<destroy_references_t<Cons::type>>>(
-                    destroy_references(
-                        reinterpret_cast<Cons *>(&list.value)->value));
-            WorkManager::await(cons_lazy);
-            destroy_references_t<Cons::type> cons = cons_lazy->value();
-            Int head = std::get<0ULL>(cons);
-            ListInt tail = std::get<1ULL>(cons);
+            LazyT<Cons::type> cons =
+                reinterpret_cast<Cons *>(&list.value)->value;
+            WorkManager::await(cons);
+            LazyT<Int> head = std::get<0ULL>(cons);
+            LazyT<ListInt> tail = std::get<1ULL>(cons);
 
             if (call1 == nullptr) {
                 call1 = std::make_shared<ListIntSum>();
-                call1->args = reference_all(tail);
+                call1->args = std::make_tuple(tail);
                 WorkManager::call(call1);
             }
 
             if (call2 == nullptr) {
                 call2 = std::make_shared<Plus__BuiltIn>();
-                call2->args =
-                    std::tuple_cat(std::make_tuple(call1), reference_all(head));
+                call2->args = std::make_tuple(call1, head);
                 WorkManager::call(call2);
             }
             return call2;
@@ -725,26 +714,28 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     ListInt third{};
     third.tag = 0ULL;
     new (&third.value)
-        Cons{create_references<Cons::type>(std::make_tuple(8, tail))};
+        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(8),
+                             std::make_shared<LazyConstant<ListInt>>(tail))};
     ListInt second{};
     second.tag = 0ULL;
     new (&second.value)
-        Cons{create_references<Cons::type>(std::make_tuple(4, third))};
+        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(4),
+                             std::make_shared<LazyConstant<ListInt>>(third))};
     ListInt first{};
     first.tag = 0ULL;
     new (&first.value)
-        Cons{create_references<Cons::type>(std::make_tuple(-9, second))};
+        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(-9),
+                             std::make_shared<LazyConstant<ListInt>>(second))};
 
-    std::shared_ptr<ListIntSum> adder = std::make_shared<ListIntSum>(first);
-
-    WorkManager::run(adder);
-    ASSERT_EQ(adder->ret, 3);
+    std::shared_ptr<ListIntSum> summer = std::make_shared<ListIntSum>(first);
+    WorkManager::run(summer);
+    ASSERT_EQ(summer->ret, 3);
 }
 
 struct Suc;
 typedef VariantT<Suc, Nil> Nat;
 struct Suc {
-    using type = std::shared_ptr<Nat>;
+    using type = LazyT<Nat>;
     type value;
 };
 
@@ -753,15 +744,13 @@ struct SimpleRecursiveTypeExample
                   VariantT<Suc, Nil>> {
     using EasyCloneFn<SimpleRecursiveTypeExample, VariantT<Suc, Nil>,
                       VariantT<Suc, Nil>>::EasyCloneFn;
-    std::shared_ptr<Lazy<VariantT<Suc, Nil>>>
-    body(std::shared_ptr<Lazy<VariantT<Suc, Nil>>> &nat_) override {
+    LazyT<VariantT<Suc, Nil>> body(LazyT<VariantT<Suc, Nil>> &nat_) override {
         WorkManager::await(nat_);
         VariantT<Suc, Nil> nat = nat_->value();
         switch (nat.tag) {
         case 0: {
             Suc::type s = reinterpret_cast<Suc *>(&nat.value)->value;
-            VariantT<Suc, Nil> r = *s;
-            return std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(r);
+            return s;
         }
         case 1: {
             VariantT<Suc, Nil> n = {};
@@ -779,11 +768,13 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
 
     VariantT<Suc, Nil> inner = {};
     inner.tag = 0ULL;
-    new (&inner.value) Suc{std::make_shared<VariantT<Suc, Nil>>(n)};
+    new (&inner.value)
+        Suc{std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(n)};
 
     VariantT<Suc, Nil> outer = {};
     outer.tag = 0ULL;
-    new (&outer.value) Suc{std::make_shared<VariantT<Suc, Nil>>(inner)};
+    new (&outer.value)
+        Suc{std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(inner)};
 
     std::shared_ptr<SimpleRecursiveTypeExample> fn =
         std::make_shared<SimpleRecursiveTypeExample>(outer);
@@ -794,11 +785,11 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
               reinterpret_cast<Suc *>(&inner.value)->value);
 }
 
-using F = TupleT<std::shared_ptr<Lazy<FnT<Int, Int>>>>;
+using F = LazyT<TupleT<FnT<Int, Int>>>;
 struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
     using Closure<SelfRecursiveFn, F, Int, Int>::Closure;
     FnT<Int, Int> g = nullptr;
-    std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override {
+    LazyT<Int> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
             auto lz = std::get<0>(this->env);
@@ -820,7 +811,7 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
     FnT<Int, Int> f = std::make_shared<SelfRecursiveFn>();
     std::dynamic_pointer_cast<SelfRecursiveFn>(f)->env =
         std::make_tuple(std::make_shared<LazyConstant<FnT<Int, Int>>>(f));
-    std::shared_ptr<Lazy<Int>> x = std::make_shared<LazyConstant<Int>>(5);
+    LazyT<Int> x = std::make_shared<LazyConstant<Int>>(5);
     f->args = std::make_tuple(x);
 
     WorkManager::run(f);

@@ -6,6 +6,7 @@
 #include "system/work_manager_pre.hpp"
 #include "time/sleep.hpp"
 #include "types/builtin.hpp"
+#include "types/utils.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -35,7 +36,7 @@ class Fn {
 
 template <typename Ret, typename... Args>
 struct ParametricFn : public Fn, Lazy<Ret> {
-    using ArgsT = std::tuple<std::shared_ptr<Lazy<std::decay_t<Args>>>...>;
+    using ArgsT = LazyT<std::tuple<std::decay_t<Args>...>>;
     using R = std::decay_t<Ret>;
     std::atomic<bool> done_flag{false};
     Locked<std::vector<Continuation>> continuations;
@@ -43,9 +44,8 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     R ret;
     ParametricFn() = default;
 
-    explicit ParametricFn(
-        std::shared_ptr<
-            Lazy<std::decay_t<Args>>>... args) requires(sizeof...(Args) > 0)
+    explicit ParametricFn(LazyT<std::decay_t<Args>>... args) requires(
+        sizeof...(Args) > 0)
         : args(args...) {}
 
     explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
@@ -53,20 +53,19 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         : args(reference_all(args...)) {}
     virtual ~ParametricFn() { cleanup_args(); }
     virtual std::shared_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
-    virtual std::shared_ptr<Lazy<R>>
-    body(std::add_lvalue_reference_t<
-         std::shared_ptr<Lazy<std::decay_t<Args>>>>...) = 0;
+    virtual LazyT<R>
+    body(std::add_lvalue_reference_t<LazyT<std::decay_t<Args>>>...) = 0;
     void run() override {
         auto arguments = this->args;
         if (!done_flag.load(std::memory_order_acquire)) {
-            std::shared_ptr<Lazy<R>> return_ = std::apply(
+            LazyT<R> return_ = std::apply(
                 [this](auto &&...t) { return body(t...); }, arguments);
             WorkManager::await(return_);
-            ret = return_->value();
+            ret = Lazy<R>::extract_value(return_);
         }
         continuations.acquire();
         for (const Continuation &c : *continuations) {
-            Lazy<Ret>::update_continuation(c);
+            Lazy<R>::update_continuation(c);
         }
         continuations->clear();
         done_flag.store(true, std::memory_order_release);
@@ -78,12 +77,12 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     bool done() const override {
         return done_flag.load(std::memory_order_relaxed);
     }
-    R value() override { return ret; }
+    R value() const override { return ret; }
     void add_continuation(Continuation c) override {
         continuations.acquire();
         if (done()) {
             continuations.release();
-            Lazy<Ret>::update_continuation(c);
+            Lazy<R>::update_continuation(c);
         } else {
             continuations->push_back(c);
             continuations.release();
@@ -105,12 +104,10 @@ class FinishWork : public Fn {
 };
 
 template <typename T> struct BlockFn : public ParametricFn<T> {
-    std::function<std::shared_ptr<Lazy<T>>()> body_fn;
-    std::shared_ptr<Lazy<T>> body() override { return body_fn(); }
-    explicit BlockFn(std::function<std::shared_ptr<Lazy<T>>()> &&f)
-        : body_fn(std::move(f)){};
-    explicit BlockFn(const std::function<std::shared_ptr<Lazy<T>>()> &f)
-        : body_fn(f){};
+    std::function<LazyT<T>()> body_fn;
+    LazyT<T> body() override { return body_fn(); }
+    explicit BlockFn(std::function<LazyT<T>()> &&f) : body_fn(std::move(f)){};
+    explicit BlockFn(const std::function<LazyT<T>()> &f) : body_fn(f){};
     std::shared_ptr<ParametricFn<T>> clone() const override {
         return std::make_shared<BlockFn<T>>(body_fn);
     }

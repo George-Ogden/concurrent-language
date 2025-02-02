@@ -19,6 +19,7 @@ struct WorkManager {
     template <typename... Vs> static void await(Vs &...vs);
 
   protected:
+    template <typename... Vs> static void await_all(Vs &...vs);
     static std::monostate main(std::atomic<std::shared_ptr<Fn>> *ref);
     static std::shared_ptr<Fn> get_work();
     template <typename... Vs> static bool all_done(Vs &&...vs) {
