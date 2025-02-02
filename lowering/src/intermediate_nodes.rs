@@ -166,15 +166,6 @@ impl fmt::Debug for Location {
     }
 }
 
-type IntermediateMemory = Location;
-
-#[derive(Clone, FromVariants, PartialEq, Eq, Debug, Hash)]
-pub enum IntermediateValue {
-    IntermediateBuiltIn(IntermediateBuiltIn),
-    IntermediateMemory(IntermediateMemory),
-    IntermediateArg(IntermediateArg),
-}
-
 impl IntermediateValue {
     fn substitute(&self, substitution: &Substitution) -> IntermediateValue {
         substitution.get(&self).unwrap_or(&self).clone()
@@ -183,6 +174,16 @@ impl IntermediateValue {
         for value in values {
             *value = value.substitute(substitution);
         }
+    }
+    pub fn type_(&self) -> IntermediateType {
+        match self {
+            IntermediateValue::IntermediateBuiltIn(built_in) => built_in.type_(),
+            IntermediateValue::IntermediateMemory(memory) => memory.type_(),
+            IntermediateValue::IntermediateArg(arg) => arg.type_(),
+        }
+    }
+    fn types(values: &Vec<Self>) -> Vec<IntermediateType> {
+        values.iter().map(Self::type_).collect()
     }
 }
 
@@ -204,11 +205,31 @@ impl From<BuiltInFn> for IntermediateValue {
     }
 }
 
+impl From<IntermediateAssignment> for IntermediateValue {
+    fn from(value: IntermediateAssignment) -> IntermediateValue {
+        IntermediateMemory {
+            location: value.location,
+            type_: value.expression.type_(),
+        }
+        .into()
+    }
+}
+
 #[derive(Clone, Debug, FromVariants, PartialEq, Eq, Hash)]
 pub enum IntermediateBuiltIn {
     Integer(Integer),
     Boolean(Boolean),
     BuiltInFn(BuiltInFn),
+}
+
+impl IntermediateBuiltIn {
+    pub fn type_(&self) -> IntermediateType {
+        match self {
+            IntermediateBuiltIn::Integer(_) => AtomicTypeEnum::INT.into(),
+            IntermediateBuiltIn::Boolean(_) => AtomicTypeEnum::BOOL.into(),
+            IntermediateBuiltIn::BuiltInFn(BuiltInFn(_, type_)) => type_.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -286,7 +307,7 @@ impl IntermediateExpression {
                 let IntermediateLambda {
                     args,
                     statements,
-                    ret: (return_value, _),
+                    ret: return_value,
                 } = lambda;
                 let mut values: Vec<_> = IntermediateStatement::all_values(statements);
                 values.push(return_value.clone());
@@ -331,6 +352,16 @@ impl IntermediateExpression {
             IntermediateExpression::IntermediateLambda(lambda) => lambda.substitute(substitution),
         }
     }
+    pub fn type_(&self) -> IntermediateType {
+        match self {
+            IntermediateExpression::IntermediateValue(value) => value.type_(),
+            IntermediateExpression::IntermediateElementAccess(element) => element.type_(),
+            IntermediateExpression::IntermediateTupleExpression(tuple) => tuple.type_().into(),
+            IntermediateExpression::IntermediateFnCall(fn_call) => fn_call.type_(),
+            IntermediateExpression::IntermediateCtorCall(ctor_call) => ctor_call.type_().into(),
+            IntermediateExpression::IntermediateLambda(lambda) => lambda.type_().into(),
+        }
+    }
 }
 
 impl From<IntermediateArg> for IntermediateExpression {
@@ -360,6 +391,17 @@ impl ExpressionEqualityChecker {
             true_history: HashMap::new(),
             history: HashMap::new(),
         }
+    }
+    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
+        let IntermediateMemory {
+            location: l1,
+            type_: _,
+        } = m1;
+        let IntermediateMemory {
+            location: l2,
+            type_: _,
+        } = m2;
+        self.equal_locations(l1, l2)
     }
     fn equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) -> bool {
         let IntermediateArg {
@@ -497,8 +539,7 @@ impl ExpressionEqualityChecker {
             ) => {
                 self.equal_args(a1, a2)
                     && self.equal_statements(&s1, &s2)
-                    && r1.1 == r2.1
-                    && self.equal_value(&r1.0, &r2.0)
+                    && self.equal_value(&r1, &r2)
             }
             _ => false,
         }
@@ -515,7 +556,7 @@ impl ExpressionEqualityChecker {
             (
                 IntermediateValue::IntermediateMemory(m1),
                 IntermediateValue::IntermediateMemory(m2),
-            ) => self.equal_locations(m1, m2),
+            ) => self.equal_memory(m1, m2),
             _ => false,
         }
     }
@@ -606,10 +647,56 @@ impl ExpressionEqualityChecker {
     }
 }
 
+#[derive(Clone, FromVariants, PartialEq, Eq, Debug, Hash)]
+pub enum IntermediateValue {
+    IntermediateBuiltIn(IntermediateBuiltIn),
+    IntermediateMemory(IntermediateMemory),
+    IntermediateArg(IntermediateArg),
+}
+
+#[derive(Clone, Eq, Debug)]
+pub struct IntermediateMemory {
+    pub type_: IntermediateType,
+    pub location: Location,
+}
+
+impl IntermediateMemory {
+    pub fn type_(&self) -> IntermediateType {
+        self.type_.clone()
+    }
+}
+
+impl PartialEq for IntermediateMemory {
+    fn eq(&self, other: &Self) -> bool {
+        self.location == other.location
+    }
+}
+
+impl Hash for IntermediateMemory {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.location.hash(state);
+    }
+}
+
+impl From<IntermediateType> for IntermediateMemory {
+    fn from(value: IntermediateType) -> Self {
+        IntermediateMemory {
+            type_: value,
+            location: Location::new(),
+        }
+    }
+}
+
 #[derive(Clone, Eq, Debug)]
 pub struct IntermediateArg {
     pub type_: IntermediateType,
     pub location: Location,
+}
+
+impl IntermediateArg {
+    pub fn type_(&self) -> IntermediateType {
+        self.type_.clone()
+    }
 }
 
 impl PartialEq for IntermediateArg {
@@ -639,13 +726,40 @@ pub struct IntermediateElementAccess {
     pub idx: usize,
 }
 
+impl IntermediateElementAccess {
+    pub fn type_(&self) -> IntermediateType {
+        let IntermediateType::IntermediateTupleType(IntermediateTupleType(types)) =
+            self.value.type_()
+        else {
+            panic!("Accessing non-tuple");
+        };
+        types[self.idx].clone()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateTupleExpression(pub Vec<IntermediateValue>);
+
+impl IntermediateTupleExpression {
+    pub fn type_(&self) -> IntermediateTupleType {
+        IntermediateTupleType(IntermediateValue::types(&self.0))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateFnCall {
     pub fn_: IntermediateValue,
     pub args: Vec<IntermediateValue>,
+}
+
+impl IntermediateFnCall {
+    pub fn type_(&self) -> IntermediateType {
+        let IntermediateType::IntermediateFnType(IntermediateFnType(_, ret)) = self.fn_.type_()
+        else {
+            panic!("Calling non-function")
+        };
+        *ret
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -655,16 +769,36 @@ pub struct IntermediateCtorCall {
     pub type_: IntermediateUnionType,
 }
 
+impl IntermediateCtorCall {
+    pub fn type_(&self) -> IntermediateUnionType {
+        self.type_.clone()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateLambda {
     pub args: Vec<IntermediateArg>,
     pub statements: Vec<IntermediateStatement>,
-    pub ret: (IntermediateValue, IntermediateType),
+    pub ret: IntermediateValue,
 }
 
 type Substitution = HashMap<IntermediateValue, IntermediateValue>;
 
 impl IntermediateLambda {
+    pub fn type_(&self) -> IntermediateFnType {
+        IntermediateFnType(
+            IntermediateValue::types(
+                &self
+                    .args
+                    .iter()
+                    .cloned()
+                    .map(IntermediateValue::from)
+                    .collect(),
+            ),
+            Box::new(self.ret.type_()),
+        )
+    }
+
     pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
         let targets: HashSet<Location> =
             HashSet::from_iter(IntermediateStatement::all_targets(&self.statements));
@@ -675,7 +809,9 @@ impl IntermediateLambda {
             .into_iter()
             .filter(|value| match value {
                 IntermediateValue::IntermediateBuiltIn(_) => false,
-                IntermediateValue::IntermediateMemory(location) => !targets.contains(location),
+                IntermediateValue::IntermediateMemory(memory) => {
+                    !targets.contains(&memory.location)
+                }
                 IntermediateValue::IntermediateArg(_) => true,
             })
             .collect()
