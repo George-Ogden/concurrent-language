@@ -709,15 +709,19 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
-    LazyT<ListInt> tail = std::make_shared<LazyConstant<ListInt>>(
+    LazyT<ListInt> tail;
+    tail = std::make_shared<LazyConstant<remove_lazy_t<decltype(tail)>>>(
         std::integral_constant<std::size_t, 1>(), Nil{});
-    LazyT<ListInt> third = std::make_shared<LazyConstant<ListInt>>(
+    LazyT<ListInt> third;
+    third = std::make_shared<LazyConstant<remove_lazy_t<decltype(third)>>>(
         std::integral_constant<std::size_t, 0>(),
         Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(8), tail)});
-    LazyT<ListInt> second = std::make_shared<LazyConstant<ListInt>>(
+    LazyT<ListInt> second;
+    second = std::make_shared<LazyConstant<remove_lazy_t<decltype(second)>>>(
         std::integral_constant<std::size_t, 0>(),
         Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(4), third)});
-    LazyT<ListInt> first = std::make_shared<LazyConstant<ListInt>>(
+    LazyT<ListInt> first;
+    first = std::make_shared<LazyConstant<remove_lazy_t<decltype(first)>>>(
         std::integral_constant<std::size_t, 0>(),
         Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(-9), second)});
 
@@ -740,10 +744,10 @@ struct SimpleRecursiveTypeExample
                       VariantT<Suc, Nil>>::EasyCloneFn;
     LazyT<VariantT<Suc, Nil>> body(LazyT<VariantT<Suc, Nil>> &nat) override {
         WorkManager::await(nat);
-        switch (nat->value().tag) {
+        VariantT<Suc, Nil> nat_ = nat->value();
+        switch (nat_.tag) {
         case 0: {
-            auto tmp = nat->value().value;
-            LazyT<Suc::type> s = reinterpret_cast<Suc *>(&tmp)->value;
+            LazyT<Suc::type> s = reinterpret_cast<Suc *>(&nat_.value)->value;
             return s;
         }
         case 1: {
