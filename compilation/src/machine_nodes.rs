@@ -17,8 +17,6 @@ pub enum MachineType {
     FnType(FnType),
     UnionType(UnionType),
     NamedType(Name),
-    Reference(Box<MachineType>),
-    Lazy(Box<MachineType>),
 }
 
 impl From<AtomicTypeEnum> for MachineType {
@@ -55,7 +53,7 @@ impl TypeDef {
     }
     fn used_types(&self, type_: &MachineType) -> Vec<Name> {
         match type_ {
-            MachineType::AtomicType(_) | MachineType::Reference(_) => Vec::new(),
+            MachineType::AtomicType(_) => Vec::new(),
             MachineType::TupleType(TupleType(types)) => self.all_used_types(types),
             MachineType::FnType(FnType(args, ret)) => {
                 let mut types = self.all_used_types(args);
@@ -64,7 +62,6 @@ impl TypeDef {
             }
             MachineType::UnionType(UnionType(names)) => names.clone(),
             MachineType::NamedType(name) => vec![name.clone()],
-            MachineType::Lazy(type_) => self.used_types(&*type_),
         }
     }
     fn all_used_types(&self, types: &Vec<MachineType>) -> Vec<Name> {
@@ -84,12 +81,6 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Memory(pub Id);
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Block {
-    pub statements: Vec<Statement>,
-    pub ret: (Value, MachineType),
-}
-
 #[derive(Clone, Debug, FromVariants, PartialEq)]
 pub enum BuiltIn {
     Integer(Integer),
@@ -99,10 +90,7 @@ pub enum BuiltIn {
 
 #[derive(Clone, Debug, FromVariants, PartialEq)]
 pub enum Expression {
-    Block(Block),
     Value(Value),
-    Wrap(Value, MachineType),
-    Unwrap(Value),
     ElementAccess(ElementAccess),
     TupleExpression(TupleExpression),
     FnCall(FnCall),
@@ -230,16 +218,13 @@ impl Statement {
                         fn_type: FnType(_, r),
                         args: _,
                     }),
-                check_null: _,
             }) => HashMap::from([(
                 target.clone(),
                 AllocationState::Undeclared(Some(*r.clone())),
             )]),
-            Statement::Assignment(Assignment {
-                target,
-                value: _,
-                check_null: _,
-            }) => HashMap::from([(target.clone(), AllocationState::Undeclared(None))]),
+            Statement::Assignment(Assignment { target, value: _ }) => {
+                HashMap::from([(target.clone(), AllocationState::Undeclared(None))])
+            }
             Statement::Declaration(Declaration { type_, memory }) => {
                 HashMap::from([(memory.clone(), AllocationState::Declared(type_.clone()))])
             }
@@ -253,6 +238,7 @@ impl Statement {
             Statement::MatchStatement(MatchStatement {
                 expression: _,
                 branches,
+                auxiliary_memory: _,
             }) => {
                 let mut declarations = HashMap::new();
                 for branch in branches {
@@ -297,7 +283,6 @@ pub struct Declaration {
 pub struct Assignment {
     pub target: Memory,
     pub value: Expression,
-    pub check_null: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -310,6 +295,7 @@ pub struct IfStatement {
 pub struct MatchStatement {
     pub expression: (Value, UnionType),
     pub branches: Vec<MatchBranch>,
+    pub auxiliary_memory: Memory,
 }
 
 #[derive(Clone, Debug, PartialEq)]

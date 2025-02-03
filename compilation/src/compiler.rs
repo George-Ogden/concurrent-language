@@ -99,9 +99,9 @@ impl Compiler {
                 FnType(
                     self.compile_types(arg_types)
                         .into_iter()
-                        .map(|type_| MachineType::Lazy(Box::new(type_)))
+                        .map(|type_| type_)
                         .collect(),
-                    Box::new(MachineType::Lazy(Box::new(self.compile_type(&*ret_type)))),
+                    Box::new(self.compile_type(&*ret_type)),
                 )
                 .into()
             }
@@ -110,7 +110,7 @@ impl Compiler {
             }
             IntermediateType::Reference(reference) => {
                 match self.reference_names.get(&reference.as_ptr()) {
-                    Some(type_) => MachineType::Reference(Box::new(type_.clone())),
+                    Some(type_) => type_.clone(),
                     None => self.compile_type(&reference.borrow().clone()),
                 }
             }
@@ -211,16 +211,8 @@ impl Compiler {
                 let memory = self.new_memory_location();
                 statements.push(
                     Declaration {
-                        type_: MachineType::Lazy(Box::new(type_.clone())),
+                        type_: type_.clone(),
                         memory: memory.clone(),
-                    }
-                    .into(),
-                );
-                statements.push(
-                    Assignment {
-                        check_null: false,
-                        target: memory.clone(),
-                        value: Expression::Wrap(non_lazy_val, type_),
                     }
                     .into(),
                 );
@@ -255,14 +247,6 @@ impl Compiler {
                                 }
                                 .into(),
                             );
-                            statements.push(
-                                Assignment {
-                                    check_null: false,
-                                    target: memory.clone(),
-                                    value: Expression::Unwrap(lazy_val),
-                                }
-                                .into(),
-                            );
                             self.non_lazy_vals
                                 .insert(value.clone().into(), memory.clone().into());
                             (statements, memory.into())
@@ -291,12 +275,6 @@ impl Compiler {
                                         Declaration {
                                             type_: self.compile_type(&value.type_()),
                                             memory: mem.clone(),
-                                        }
-                                        .into(),
-                                        Assignment {
-                                            target: mem.clone(),
-                                            value: Expression::Unwrap(lazy_mem.clone().into()),
-                                            check_null: false,
                                         }
                                         .into(),
                                     ],
@@ -428,14 +406,11 @@ impl Compiler {
     ) -> Vec<Statement> {
         match statement {
             Statement::Await(await_) => vec![await_.into()],
-            Statement::Assignment(Assignment {
-                target,
-                value,
-                check_null,
-            }) if matches!(
-                declarations.get(&target),
-                Some(&AllocationState::Undeclared(_))
-            ) && !matches!(&value, Expression::FnCall(_) | Expression::Wrap(_, _)) =>
+            Statement::Assignment(Assignment { target, value })
+                if matches!(
+                    declarations.get(&target),
+                    Some(&AllocationState::Undeclared(_))
+                ) && !matches!(&value, Expression::FnCall(_)) =>
             {
                 let Some(&AllocationState::Undeclared(Some(ref type_))) = declarations.get(&target)
                 else {
@@ -451,13 +426,6 @@ impl Compiler {
                     Assignment {
                         value,
                         target: temporary_target.clone(),
-                        check_null,
-                    }
-                    .into(),
-                    Assignment {
-                        target,
-                        value: Expression::Wrap(temporary_target.into(), type_.clone()),
-                        check_null: true,
                     }
                     .into(),
                 ]
@@ -485,6 +453,7 @@ impl Compiler {
             Statement::MatchStatement(MatchStatement {
                 expression,
                 branches,
+                auxiliary_memory,
             }) => vec![MatchStatement {
                 expression,
                 branches: branches
@@ -494,6 +463,7 @@ impl Compiler {
                         statements: self.update_all_declarations(statements, declarations),
                     })
                     .collect_vec(),
+                auxiliary_memory,
             }
             .into()],
         }
@@ -603,6 +573,7 @@ impl Compiler {
             MatchStatement {
                 expression: (subject, union_type),
                 branches,
+                auxiliary_memory: self.new_memory_location(),
             }
             .into(),
         );
@@ -636,7 +607,6 @@ impl Compiler {
                 Assignment {
                     target: memory,
                     value,
-                    check_null: true,
                 }
                 .into(),
             );
@@ -654,7 +624,6 @@ impl Compiler {
                 Assignment {
                     target: memory,
                     value,
-                    check_null: false,
                 }
                 .into(),
             );
@@ -709,7 +678,6 @@ impl Compiler {
                             value: Memory(Id::from("env")).into(),
                         }
                         .into(),
-                        check_null: false,
                     }
                     .into(),
                 ]
@@ -723,12 +691,7 @@ impl Compiler {
         let env_mapping = self.replace_open_vars(&mut lambda);
         let env_types = env_mapping
             .iter()
-            .map(|(value, location)| {
-                (
-                    location.clone(),
-                    MachineType::Lazy(Box::new(self.compile_type(&value.type_()))),
-                )
-            })
+            .map(|(value, location)| (location.clone(), self.compile_type(&value.type_())))
             .collect_vec();
 
         let vals = (self.non_lazy_vals.clone(), self.lazy_vals.clone());
@@ -741,18 +704,13 @@ impl Compiler {
         } = lambda;
         let args = args
             .into_iter()
-            .map(|arg| {
-                (
-                    self.compile_arg(&arg),
-                    MachineType::Lazy(Box::new(self.compile_type(&arg.type_()))),
-                )
-            })
+            .map(|arg| (self.compile_arg(&arg), self.compile_type(&arg.type_())))
             .collect_vec();
         let mut prefix = self.closure_prefix(&env_types);
         let mut statements = self.compile_statements(statements);
         prefix.extend(statements);
         statements = prefix;
-        let ret_type = MachineType::Lazy(Box::new(self.compile_type(&return_value.type_())));
+        let ret_type = self.compile_type(&return_value.type_());
         let (extra_statements, ret_val) = self.compile_value(return_value, true);
         statements.extend(extra_statements);
         (self.non_lazy_vals, self.lazy_vals) = vals;
@@ -797,7 +755,6 @@ impl Compiler {
                 Assignment {
                     target: tuple_mem.clone(),
                     value: TupleExpression(values).into(),
-                    check_null: false,
                 }
                 .into(),
             ]);
@@ -1097,7 +1054,6 @@ mod tests {
                     type_: AtomicTypeEnum::INT.into()
                 }.into(),
                 Assignment{
-                    check_null: false,
                     target: Memory(Id::from("m1")),
                     value: Expression::Unwrap(Memory(Id::from("m0")).into())
                 }.into()
@@ -1123,7 +1079,6 @@ mod tests {
                     memory: Memory(Id::from("m1"))
                 }.into(),
                 Assignment{
-                    check_null: false,
                     target: Memory(Id::from("m1")),
                     value: Expression::Unwrap(Memory(Id::from("m0")).into())
                 }.into(),
@@ -1156,7 +1111,6 @@ mod tests {
                     memory: Memory(Id::from("m1"))
                 }.into(),
                 Assignment{
-                    check_null: false,
                     target: Memory(Id::from("m1")),
                     value: Expression::Unwrap(Memory(Id::from("m0")).into())
                 }.into()
@@ -1182,13 +1136,11 @@ mod tests {
         (
             vec![
                 Declaration{
-                    type_: MachineType::Lazy(
-                        Box::new(AtomicTypeEnum::INT.into())
-                    ),
+                    type_:AtomicTypeEnum::INT.into()
+                    ,
                     memory: Memory(Id::from("m0"))
                 }.into(),
                 Assignment{
-                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Wrap(
                         BuiltIn::from(Integer{value: 7}).into(),
@@ -1202,8 +1154,8 @@ mod tests {
                     Name::from("Increment__BuiltIn"),
                 ).into(),
                 fn_type: FnType(
-                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
                 )
             }.into()
         );
@@ -1226,13 +1178,11 @@ mod tests {
         (
             vec![
                 Declaration {
-                    type_: MachineType::Lazy(
-                        Box::new(AtomicTypeEnum::INT.into())
-                    ),
+                    type_:AtomicTypeEnum::INT.into()
+                    ,
                     memory: Memory(Id::from("m0"))
                 }.into(),
                 Assignment{
-                    check_null: false,
                     target: Memory(Id::from("m0")),
                     value: Expression::Wrap(
                         BuiltIn::from(Integer{value: 9}).into(),
@@ -1250,10 +1200,10 @@ mod tests {
                 ).into(),
                 fn_type: FnType(
                     vec![
-                        MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                        MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::INT.into(),
                     ],
-                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                    Box::new(AtomicTypeEnum::INT.into())
                 )
             }.into()
         );
@@ -1281,14 +1231,13 @@ mod tests {
                 Declaration {
                     type_: FnType(
                         vec![
-                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            AtomicTypeEnum::INT.into(),
                         ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
+                        Box::new(AtomicTypeEnum::BOOL.into())
                     ).into(),
                     memory: Memory(Id::from("m1"))
                 }.into(),
                 Assignment{
-                    check_null: false,
                     target: Memory(Id::from("m1")),
                     value: Expression::Unwrap(
                         Memory(Id::from("m0")).into()
@@ -1301,8 +1250,8 @@ mod tests {
                 ],
                 fn_: Memory(Id::from("m1")).into(),
                 fn_type: FnType(
-                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::BOOL.into())
                 )
             }.into()
         );
@@ -1412,7 +1361,6 @@ mod tests {
                     BuiltIn::from(Integer{value: 5}).into(),
                     BuiltIn::from(Boolean{value: false}).into(),
                 ]).into(),
-                check_null: false
             }.into()
         ];
         "tuple expression assignment"
@@ -1448,7 +1396,6 @@ mod tests {
             Assignment {
                 target: Memory(Id::from("m1")),
                 value: Expression::Unwrap(Memory(Id::from("m0")).into()),
-                check_null: false
             }.into(),
             Declaration {
                 memory: Memory(Id::from("m2")),
@@ -1460,7 +1407,6 @@ mod tests {
                     idx: 1,
                     value: Memory(Id::from("m1")).into(),
                 }.into(),
-                check_null: false
             }.into()
         ];
         "tuple access assignment"
@@ -1486,9 +1432,8 @@ mod tests {
         vec![
             Declaration {
                 memory: Memory(Id::from("m0")),
-                type_: MachineType::Lazy(
-                    Box::new(AtomicTypeEnum::INT.into()),
-                ).into()
+                type_:AtomicTypeEnum::INT.into(),
+                .into()
             }.into(),
             Assignment {
                 target: Memory(Id::from("m0")),
@@ -1496,7 +1441,6 @@ mod tests {
                     BuiltIn::from(Integer{value: 11}).into(),
                     AtomicTypeEnum::INT.into()
                 ).into(),
-                check_null: false
             }.into(),
             Assignment {
                 target: Memory(Id::from("m1")),
@@ -1505,12 +1449,11 @@ mod tests {
                         Name::from("Decrement__BuiltIn"),
                     ).into(),
                     fn_type: FnType(
-                        vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into())
                     ),
                     args: vec![Memory(Id::from("m0")).into()]
                 }.into(),
-                check_null: true
             }.into(),
         ];
         "fn call"
@@ -1569,16 +1512,15 @@ mod tests {
                 value: TupleExpression(vec![
                     BuiltIn::from(Integer{value: 5}).into(),
                 ]).into(),
-                check_null: false
             }.into(),
             Await(vec![Memory(Id::from("m1"))]).into(),
             Declaration {
                 memory: Memory(Id::from("m2")),
                 type_: FnType(
-                    vec![MachineType::Lazy(Box::new(
+                    vec![
                         TupleType(vec![AtomicTypeEnum::INT.into()]).into()
-                    ))],
-                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                    ],
+                    Box::new(AtomicTypeEnum::INT.into())
                 ).into()
             }.into(),
             Assignment {
@@ -1590,9 +1532,9 @@ mod tests {
             }.into(),
             Declaration {
                 memory: Memory(Id::from("m3")),
-                type_: MachineType::Lazy(Box::new(TupleType(vec![
+                type_: TupleType(vec![
                     AtomicTypeEnum::INT.into(),
-                ]).into()))
+                ]).into()
             }.into(),
             Assignment {
                 target: Memory(Id::from("m3")),
@@ -1612,8 +1554,8 @@ mod tests {
                         Memory(Id::from("m3")).into(),
                     ],
                     fn_type: FnType(
-                        vec![MachineType::Lazy(Box::new(TupleType(vec![AtomicTypeEnum::INT.into()]).into()))],
-                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                        vec![TupleType(vec![AtomicTypeEnum::INT.into()]).into()],
+                        Box::new(AtomicTypeEnum::INT.into())
                     )
                 }.into(),
                 check_null: true
@@ -1622,10 +1564,10 @@ mod tests {
             Declaration {
                 memory: Memory(Id::from("m6")),
                 type_: FnType(
-                    vec![MachineType::Lazy(Box::new(
+                    vec![
                         TupleType(vec![AtomicTypeEnum::INT.into()]).into()
-                    ))],
-                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                    ],
+                    Box::new(AtomicTypeEnum::INT.into())
                 ).into()
             }.into(),
             Assignment {
@@ -1643,8 +1585,8 @@ mod tests {
                         Memory(Id::from("m3")).into(),
                     ],
                     fn_type: FnType(
-                        vec![MachineType::Lazy(Box::new(TupleType(vec![AtomicTypeEnum::INT.into()]).into()))],
-                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                        vec![TupleType(vec![AtomicTypeEnum::INT.into()]).into()],
+                        Box::new(AtomicTypeEnum::INT.into())
                     )
                 }.into(),
                 check_null: true
@@ -1817,7 +1759,7 @@ mod tests {
                 branches: (
                     vec![
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m0"))
                         }.into(),
                         Assignment {
@@ -1835,8 +1777,8 @@ mod tests {
                                     Name::from("Increment__BuiltIn"),
                                 ).into(),
                                 fn_type: FnType(
-                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
                                 ),
                                 args: vec![Memory(Id::from("m0")).into()]
                             }.into(),
@@ -1937,7 +1879,7 @@ mod tests {
                     ],
                     vec![
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m1"))
                         }.into(),
                         Assignment {
@@ -1955,8 +1897,8 @@ mod tests {
                                     Name::from("Increment__BuiltIn"),
                                 ).into(),
                                 fn_type: FnType(
-                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
                                 ),
                                 args: vec![Memory(Id::from("m1")).into()]
                             }.into(),
@@ -2010,9 +1952,9 @@ mod tests {
             Declaration {
                 type_: FnType(
                     vec![
-                        MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())),
+                        AtomicTypeEnum::BOOL.into(),
                     ],
-                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
+                    Box::new(AtomicTypeEnum::BOOL.into())
                 ).into(),
                 memory: Memory(Id::from("m1")),
             }.into(),
@@ -2197,7 +2139,7 @@ mod tests {
                         statements: vec![
                             Declaration {
                                 memory: Memory(Id::from("m3")),
-                                type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                type_: AtomicTypeEnum::INT.into()
                             }.into(),
                             Assignment {
                                 target: Memory(Id::from("m3")),
@@ -2215,10 +2157,10 @@ mod tests {
                                     ).into(),
                                     fn_type: FnType(
                                         vec![
-                                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                            AtomicTypeEnum::INT.into(),
+                                            AtomicTypeEnum::INT.into()
                                         ],
-                                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
+                                        Box::new(AtomicTypeEnum::BOOL.into())
                                     ),
                                     args: vec![
                                         Memory(Id::from("m2")).into(),
@@ -2358,7 +2300,7 @@ mod tests {
                         statements: vec![
                             Declaration {
                                 memory: Memory(Id::from("m3")),
-                                type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                type_: AtomicTypeEnum::INT.into()
                             }.into(),
                             Assignment {
                                 target: Memory(Id::from("m3")),
@@ -2376,10 +2318,10 @@ mod tests {
                                     ).into(),
                                     fn_type: FnType(
                                         vec![
-                                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                                            MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                            AtomicTypeEnum::INT.into(),
+                                            AtomicTypeEnum::INT.into()
                                         ],
-                                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::BOOL.into())))
+                                        Box::new(AtomicTypeEnum::BOOL.into())
                                     ),
                                     args: vec![
                                         Memory(Id::from("m2")).into(),
@@ -2517,8 +2459,8 @@ mod tests {
             FnDef{
                 name: Name::from("F0"),
                 arguments: vec![
-                    (Memory(Id::from("m0")), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
-                    (Memory(Id::from("m1")), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    (Memory(Id::from("m0")), AtomicTypeEnum::INT.into()),
+                    (Memory(Id::from("m1")), AtomicTypeEnum::INT.into()),
                 ],
                 env: None,
                 statements: vec![
@@ -2530,10 +2472,10 @@ mod tests {
                             ).into(),
                             fn_type: FnType(
                                 vec![
-                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                    AtomicTypeEnum::INT.into(),
+                                    AtomicTypeEnum::INT.into()
                                 ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                Box::new(AtomicTypeEnum::INT.into())
                             ),
                             args: vec![
                                 Memory(Id::from("m0")).into(),
@@ -2545,12 +2487,12 @@ mod tests {
                 ],
                 ret: (
                     Memory(Id::from("m2")).into(),
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    AtomicTypeEnum::INT.into()
                 ),
                 allocations: vec![
                     Declaration {
                         memory: Memory(Id::from("m2")),
-                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                 ]
             }
@@ -2590,7 +2532,7 @@ mod tests {
             vec![
                 Declaration {
                     memory: Memory(Id::from("m5")),
-                    type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    type_: AtomicTypeEnum::INT.into()
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("m5")),
@@ -2602,7 +2544,7 @@ mod tests {
                 }.into(),
                 Declaration {
                     memory: Memory(Id::from("m7")),
-                    type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    type_: AtomicTypeEnum::INT.into()
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("m7")),
@@ -2615,8 +2557,8 @@ mod tests {
                 Declaration {
                     memory: Memory(Id::from("m3")),
                     type_: TupleType(vec![
-                        MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                        MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::INT.into()
                     ]).into()
                 }.into(),
                 Assignment {
@@ -2636,13 +2578,13 @@ mod tests {
                 name: Name::from("F0"),
                 arguments: Vec::new(),
                 env: Some(TupleType(vec![
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    AtomicTypeEnum::INT.into(),
+                    AtomicTypeEnum::INT.into()
                 ]).into()),
                 statements: vec![
                     Declaration {
                         memory: Memory(Id::from("m0")),
-                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                     Assignment {
                         target: Memory(Id::from("m0")),
@@ -2654,7 +2596,7 @@ mod tests {
                     }.into(),
                     Declaration {
                         memory: Memory(Id::from("m1")),
-                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                     Assignment {
                         target: Memory(Id::from("m1")),
@@ -2672,10 +2614,10 @@ mod tests {
                             ).into(),
                             fn_type: FnType(
                                 vec![
-                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                    AtomicTypeEnum::INT.into(),
+                                    AtomicTypeEnum::INT.into()
                                 ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                Box::new(AtomicTypeEnum::INT.into())
                             ),
                             args: vec![
                                 Memory(Id::from("m0")).into(),
@@ -2687,12 +2629,12 @@ mod tests {
                 ],
                 ret: (
                     Memory(Id::from("m2")).into(),
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    AtomicTypeEnum::INT.into()
                 ),
                 allocations: vec![
                     Declaration {
                         memory: Memory(Id::from("m2")),
-                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                 ]
             }
@@ -2732,7 +2674,7 @@ mod tests {
             vec![
                 Declaration {
                     memory: Memory(Id::from("m5")),
-                    type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    type_: AtomicTypeEnum::INT.into()
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("m5")),
@@ -2745,7 +2687,7 @@ mod tests {
                 Declaration {
                     memory: Memory(Id::from("m3")),
                     type_: TupleType(vec![
-                        MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                        AtomicTypeEnum::INT.into(),
                     ]).into()
                 }.into(),
                 Assignment {
@@ -2762,14 +2704,14 @@ mod tests {
             },
             FnDef{
                 name: Name::from("F0"),
-                arguments: vec![(Memory(Id::from("m0")), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))],
+                arguments: vec![(Memory(Id::from("m0")), AtomicTypeEnum::INT.into())],
                 env: Some(TupleType(vec![
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                    AtomicTypeEnum::INT.into(),
                 ]).into()),
                 statements: vec![
                     Declaration {
                         memory: Memory(Id::from("m1")),
-                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                     Assignment {
                         target: Memory(Id::from("m1")),
@@ -2787,10 +2729,10 @@ mod tests {
                             ).into(),
                             fn_type: FnType(
                                 vec![
-                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                                    AtomicTypeEnum::INT.into(),
+                                    AtomicTypeEnum::INT.into()
                                 ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                Box::new(AtomicTypeEnum::INT.into())
                             ),
                             args: vec![
                                 Memory(Id::from("m1")).into(),
@@ -2802,12 +2744,12 @@ mod tests {
                 ],
                 ret: (
                     Memory(Id::from("m2")).into(),
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                    AtomicTypeEnum::INT.into()
                 ),
                 allocations: vec![
                     Declaration {
                         memory: Memory(Id::from("m2")),
-                        type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                 ]
             }
@@ -2914,9 +2856,9 @@ mod tests {
             fn_defs: vec![
                 FnDef {
                     name: Name::from("F0"),
-                    arguments: vec![(Memory(Id::from("m0")), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))],
+                    arguments: vec![(Memory(Id::from("m0")), AtomicTypeEnum::INT.into())],
                     statements: Vec::new(),
-                    ret: (Memory(Id::from("m0")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
                     env: None,
                     allocations: Vec::new()
                 },
@@ -2925,10 +2867,10 @@ mod tests {
                     arguments: Vec::new(),
                     statements: vec![
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(FnType(
-                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))).into())
-                            ).into(),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())).into()
+                            .into(),
                             memory: Memory(Id::from("m2")),
                         }.into(),
                         Assignment {
@@ -2942,8 +2884,8 @@ mod tests {
                         Await(vec![Memory(Id::from("m2"))]).into(),
                         Declaration {
                             type_: FnType(
-                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
                             ).into(),
                             memory: Memory(Id::from("m3"))
                         }.into(),
@@ -2953,7 +2895,7 @@ mod tests {
                             check_null: false
                         }.into(),
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m4"))
                         }.into(),
                         Assignment {
@@ -2969,26 +2911,25 @@ mod tests {
                             value: FnCall {
                                 fn_: Memory(Id::from("m3")).into(),
                                 fn_type: FnType(
-                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
                                 ),
                                 args: vec![Memory(Id::from("m4")).into()]
                             }.into(),
                             check_null: true
                         }.into()
                     ],
-                    ret: (Memory(Id::from("m5")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    ret: (Memory(Id::from("m5")).into(), AtomicTypeEnum::INT.into()),
                     env: Some(TupleType(vec![
-                        MachineType::Lazy(
-                            Box::new(FnType(
-                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
-                            ).into())
-                        )
+                       FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
+                            ).into()
+
                     ]).into()),
                     allocations: vec![
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m5"))
                         }
                     ]
@@ -2999,8 +2940,8 @@ mod tests {
                     statements: vec![
                         Declaration {
                             type_: FnType(
-                                vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
                             ).into(),
                             memory: Memory(Id::from("m1"))
                         }.into(),
@@ -3010,12 +2951,11 @@ mod tests {
                             check_null: false
                         }.into(),
                         Declaration {
-                            type_: MachineType::Lazy(
-                                Box::new(FnType(
-                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
-                                ).into())
-                            ),
+                            type_:FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            ,
                             memory: Memory(Id::from("m7"))
                         }.into(),
                         Assignment {
@@ -3023,20 +2963,20 @@ mod tests {
                             value: Expression::Wrap(
                                 Memory(Id::from("m1")).into(),
                                 FnType(
-                                    vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
                                 ).into()
                             ),
                             check_null: false
                         }.into(),
                         Declaration {
                             type_: TupleType(
-                                vec![MachineType::Lazy(
-                                    Box::new(FnType(
-                                        vec![MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))],
-                                        Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
-                                    ).into())
-                                )]
+                                vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into())
+                                    ).into()
+                                ]
                             ).into(),
                             memory: Memory(Id::from("m6"))
                         }.into(),
@@ -3046,7 +2986,7 @@ mod tests {
                             check_null: false
                         }.into(),
                         Declaration {
-                            type_: FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))).into(),
+                            type_: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
                             memory: Memory(Id::from("m8"))
                         }.into(),
                         Assignment {
@@ -3061,17 +3001,17 @@ mod tests {
                             target: Memory(Id::from("m9")),
                             value: FnCall {
                                 fn_: Memory(Id::from("m8")).into(),
-                                fn_type: FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))).into(),
+                                fn_type: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
                                 args: Vec::new()
                             }.into(),
                             check_null: true
                         }.into()
                     ],
-                    ret: (Memory(Id::from("m9")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    ret: (Memory(Id::from("m9")).into(), AtomicTypeEnum::INT.into()),
                     env: None,
                     allocations: vec![
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m9"))
                         }
                     ]
@@ -3199,7 +3139,7 @@ mod tests {
                             ]
                         }.into(),
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m2"))
                         }.into(),
                         Assignment {
@@ -3211,7 +3151,7 @@ mod tests {
                             check_null: false
                         }.into()
                     ],
-                    ret: (Memory(Id::from("m2")).into(),MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    ret: (Memory(Id::from("m2")).into(),AtomicTypeEnum::INT.into()),
                     env: None,
                     allocations: Vec::new()
                 },
@@ -3222,7 +3162,7 @@ mod tests {
                         Declaration {
                             type_: FnType(
                                 Vec::new(),
-                                Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                Box::new(AtomicTypeEnum::INT.into())
                             ).into(),
                             memory: Memory(Id::from("m3"))
                         }.into(),
@@ -3237,18 +3177,18 @@ mod tests {
                                 fn_: Memory(Id::from("m3")).into(),
                                 fn_type: FnType(
                                     Vec::new(),
-                                    Box::new(MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())))
+                                    Box::new(AtomicTypeEnum::INT.into())
                                 ),
                                 args: Vec::new()
                             }.into(),
                             check_null: true
                         }.into()
                     ],
-                    ret: (Memory(Id::from("m4")).into(), MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))),
+                    ret: (Memory(Id::from("m4")).into(), AtomicTypeEnum::INT.into()),
                     env: None,
                     allocations: vec![
                         Declaration {
-                            type_: MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
+                            type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m4"))
                         }
                     ]

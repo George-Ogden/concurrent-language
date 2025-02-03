@@ -441,7 +441,7 @@ struct ApplyIntBool : EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int> {
     using EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int>::EasyCloneFn;
     LazyT<Bool> body(LazyT<FnT<Bool, Int>> &f, LazyT<Int> &x) override {
         WorkManager::await(f);
-        auto g = f->value();
+        auto g = f->value()->clone();
         g->args = std::make_tuple(x);
         WorkManager::call(g);
         return g;
@@ -487,12 +487,12 @@ struct HigherOrderReuse
                     LazyT<Int> &y) override {
         WorkManager::await(f);
         if (call1 == nullptr) {
-            call1 = f->value();
+            call1 = f->value()->clone();
             call1->args = std::make_tuple(x);
             WorkManager::call(call1);
         }
         if (call2 == nullptr) {
-            call2 = call1->clone();
+            call2 = f->value()->clone();
             call2->args = std::make_tuple(y);
             WorkManager::call(call2);
         }
