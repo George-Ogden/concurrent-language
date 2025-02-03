@@ -666,8 +666,8 @@ struct Cons;
 struct Nil;
 typedef VariantT<Cons, Nil> ListInt;
 struct Cons {
-    using type = LazyT<TupleT<Int, ListInt>>;
-    type value;
+    using type = TupleT<Int, ListInt>;
+    LazyT<type> value;
 };
 struct Nil {
     Empty value;
@@ -709,23 +709,17 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
-    ListInt tail{};
-    tail.tag = 1ULL;
-    ListInt third{};
-    third.tag = 0ULL;
-    new (&third.value)
-        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(8),
-                             std::make_shared<LazyConstant<ListInt>>(tail))};
-    ListInt second{};
-    second.tag = 0ULL;
-    new (&second.value)
-        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(4),
-                             std::make_shared<LazyConstant<ListInt>>(third))};
-    ListInt first{};
-    first.tag = 0ULL;
-    new (&first.value)
-        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(-9),
-                             std::make_shared<LazyConstant<ListInt>>(second))};
+    LazyT<ListInt> tail = std::make_shared<LazyConstant<ListInt>>(
+        std::integral_constant<std::size_t, 1>(), Nil{});
+    LazyT<ListInt> third = std::make_shared<LazyConstant<ListInt>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(8), tail)});
+    LazyT<ListInt> second = std::make_shared<LazyConstant<ListInt>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(4), third)});
+    LazyT<ListInt> first = std::make_shared<LazyConstant<ListInt>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(-9), second)});
 
     std::shared_ptr<ListIntSum> summer = std::make_shared<ListIntSum>(first);
     WorkManager::run(summer);
@@ -735,8 +729,8 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
 struct Suc;
 typedef VariantT<Suc, Nil> Nat;
 struct Suc {
-    using type = LazyT<Nat>;
-    type value;
+    using type = Nat;
+    LazyT<type> value;
 };
 
 struct SimpleRecursiveTypeExample
@@ -744,12 +738,12 @@ struct SimpleRecursiveTypeExample
                   VariantT<Suc, Nil>> {
     using EasyCloneFn<SimpleRecursiveTypeExample, VariantT<Suc, Nil>,
                       VariantT<Suc, Nil>>::EasyCloneFn;
-    LazyT<VariantT<Suc, Nil>> body(LazyT<VariantT<Suc, Nil>> &nat_) override {
-        WorkManager::await(nat_);
-        VariantT<Suc, Nil> nat = nat_->value();
-        switch (nat.tag) {
+    LazyT<VariantT<Suc, Nil>> body(LazyT<VariantT<Suc, Nil>> &nat) override {
+        WorkManager::await(nat);
+        switch (nat->value().tag) {
         case 0: {
-            Suc::type s = reinterpret_cast<Suc *>(&nat.value)->value;
+            auto tmp = nat->value().value;
+            LazyT<Suc::type> s = reinterpret_cast<Suc *>(&tmp)->value;
             return s;
         }
         case 1: {
@@ -763,26 +757,24 @@ struct SimpleRecursiveTypeExample
 };
 
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
-    VariantT<Suc, Nil> n = {};
-    n.tag = 1ULL;
-
-    VariantT<Suc, Nil> inner = {};
-    inner.tag = 0ULL;
-    new (&inner.value)
-        Suc{std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(n)};
-
-    VariantT<Suc, Nil> outer = {};
-    outer.tag = 0ULL;
-    new (&outer.value)
-        Suc{std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(inner)};
+    LazyT<VariantT<Suc, Nil>> n =
+        std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(
+            std::integral_constant<std::size_t, 1>());
+    LazyT<VariantT<Suc, Nil>> inner =
+        std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(
+            std::integral_constant<std::size_t, 0>(), Suc{n});
+    LazyT<VariantT<Suc, Nil>> outer =
+        std::make_shared<LazyConstant<VariantT<Suc, Nil>>>(
+            std::integral_constant<std::size_t, 0>(), Suc{inner});
 
     std::shared_ptr<SimpleRecursiveTypeExample> fn =
         std::make_shared<SimpleRecursiveTypeExample>(outer);
 
     WorkManager::run(fn);
-    ASSERT_EQ(fn->ret.tag, inner.tag);
+    ASSERT_EQ(fn->ret.tag, inner->value().tag);
+    auto tmp = inner->value().value;
     ASSERT_EQ(reinterpret_cast<Suc *>(&fn->ret.value)->value,
-              reinterpret_cast<Suc *>(&inner.value)->value);
+              reinterpret_cast<Suc *>(&tmp)->value);
 }
 
 using F = LazyT<TupleT<FnT<Int, Int>>>;

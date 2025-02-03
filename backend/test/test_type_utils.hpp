@@ -6,21 +6,17 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <type_traits>
 
 TEST(VariantDestructorTests, ContainedIntegerTest) {
-    VariantT<Int, std::shared_ptr<Int>> v;
-    v.tag = 0;
-    new (&v.value) Int{4LL};
+    VariantT<Int, std::shared_ptr<Int>> v{
+        std::integral_constant<std::size_t, 0>(), static_cast<Int>(4LL)};
     ASSERT_EQ(*reinterpret_cast<Int *>(&v.value), 4LL);
 }
 
 TEST(VariantDestructorTests, ContainedSharedPtrTest) {
-    VariantT<Int, std::shared_ptr<Int>> v;
-    {
-        std::shared_ptr<Int> p = std::make_shared<Int>(4);
-        v.tag = 1;
-        new (&v.value) std::shared_ptr<Int>{p};
-    }
+    VariantT<Int, std::shared_ptr<Int>> v{
+        std::integral_constant<std::size_t, 1>(), std::make_shared<Int>(4)};
     ASSERT_EQ(**reinterpret_cast<std::shared_ptr<Int> *>(&v.value), 4);
 }
 
@@ -38,14 +34,11 @@ TEST(VariantDestructorTests, DoubleReferenceTestWithoutVariant) {
 
 TEST(VariantDestructorTests, DoubleReferenceTest) {
     using T = VariantT<std::shared_ptr<Int>>;
-    T t;
-    t.tag = 0;
-    new (&t.value) std::shared_ptr<Int>(std::make_shared<Int>(4LL));
+    T t{std::integral_constant<std::size_t, 0>(), std::make_shared<Int>(4LL)};
 
     using U = VariantT<std::shared_ptr<T>>;
-    U u;
-    u.tag = 0;
-    new (&u.value) std::shared_ptr<T>(std::make_shared<T>(t));
+    U u{std::integral_constant<std::size_t, 0>(), std::make_shared<T>(t)};
+
     ASSERT_EQ(**reinterpret_cast<std::shared_ptr<Int> *>(&t.value), 4);
     ASSERT_EQ(**reinterpret_cast<std::shared_ptr<Int> *>(
                   &(*reinterpret_cast<std::shared_ptr<T> *>(&u.value))->value),

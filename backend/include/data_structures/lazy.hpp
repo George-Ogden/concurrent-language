@@ -43,6 +43,14 @@ template <typename T> class LazyConstant : public Lazy<T> {
 
   public:
     explicit LazyConstant(const T &data) : data(data) {}
+    explicit LazyConstant(T &&data) : data(std::forward<T>(data)) {}
+    template <std::size_t Index>
+    explicit LazyConstant(std::integral_constant<std::size_t, Index>)
+        : data(std::integral_constant<std::size_t, Index>{}) {}
+    template <std::size_t Index, typename U>
+    explicit LazyConstant(std::integral_constant<std::size_t, Index>, U &&value)
+        : data(std::integral_constant<std::size_t, Index>{},
+               std::forward<U>(value)) {}
     bool done() const override { return true; }
     T value() const override { return data; }
     void add_continuation(Continuation c) override {
