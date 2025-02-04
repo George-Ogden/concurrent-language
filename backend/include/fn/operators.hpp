@@ -13,6 +13,7 @@
 template <typename R, typename... Ts>
 struct Op__BuiltIn : public ParametricFn<R, Ts...> {
     using ParametricFn<R, Ts...>::ParametricFn;
+    using FnT = std::shared_ptr<ParametricFn<R, Ts...>>;
     std::shared_ptr<Lazy<R>>
     body(std::add_lvalue_reference_t<
          std::shared_ptr<Lazy<std::decay_t<Ts>>>>... args) override {

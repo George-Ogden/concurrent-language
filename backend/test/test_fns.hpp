@@ -505,8 +505,11 @@ struct HigherOrderReuse
 };
 
 TEST_P(FnCorrectnessTest, ReusedHigherOrderFunctionTest) {
-    FnT<Int, Int> f = std::make_shared<Increment__BuiltIn>();
-    Int x = 5, y = 4;
+    LazyT<FnT<Int, Int>> f =
+        std::make_shared<LazyConstant<typename Increment__BuiltIn::FnT>>(
+            std::make_shared<Increment__BuiltIn>());
+    LazyT<Int> x = std::make_shared<LazyConstant<Int>>(5),
+               y = std::make_shared<LazyConstant<Int>>(4);
     std::shared_ptr<HigherOrderReuse> F =
         std::make_shared<HigherOrderReuse>(f, x, y);
 

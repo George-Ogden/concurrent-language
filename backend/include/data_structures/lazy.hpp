@@ -92,6 +92,7 @@ template <typename T> class LazyConstant : public Lazy<T> {
     const T data;
 
   public:
+    explicit LazyConstant() : data() {}
     explicit LazyConstant(const T &data) : data(data) {}
     explicit LazyConstant(T &&data) : data(std::forward<T>(data)) {}
     template <std::size_t Index>

@@ -109,7 +109,9 @@ impl Translator {
             BuiltIn::Boolean(Boolean { value }) => {
                 format!("std::make_shared<LazyConstant<Bool>>({value})")
             }
-            BuiltIn::BuiltInFn(name) => format!("std::make_shared<{name}>()"),
+            BuiltIn::BuiltInFn(name) => format!(
+                "std::make_shared<LazyConstant<typename {name}::FnT>>(std::make_shared<{name}>())"
+            ),
         }
     }
     fn translate_memory(&self, memory: Memory) -> Code {
@@ -709,14 +711,14 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
-        "std::make_shared<Plus__BuiltIn>()";
+        "std::make_shared<LazyConstant<typename Plus__BuiltIn::FnT>>(std::make_shared<Plus__BuiltIn>())";
         "builtin plus translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
         ),
-        "std::make_shared<Comparison_GE__BuiltIn>()";
+        "std::make_shared<LazyConstant<typename Comparison_GE__BuiltIn::FnT>>(std::make_shared<Comparison_GE__BuiltIn>())";
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
@@ -743,7 +745,7 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
-        "std::make_shared<Comparison_LT__BuiltIn>()";
+        "std::make_shared<LazyConstant<typename Comparison_LT__BuiltIn::FnT>>(std::make_shared<Comparison_LT__BuiltIn>())";
         "builtin function translation"
     )]
     #[test_case(
