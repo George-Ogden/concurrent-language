@@ -210,7 +210,7 @@ impl Translator {
         let condition_code = self.translate_value(if_statement.condition);
         let if_branch = self.translate_statements(if_statement.branches.0);
         let else_branch = self.translate_statements(if_statement.branches.1);
-        format!("if ({condition_code}) {{ {if_branch} }} else {{ {else_branch} }}",)
+        format!("if ({condition_code}->value()) {{ {if_branch} }} else {{ {else_branch} }}",)
     }
     fn translate_match_statement(&self, match_statement: MatchStatement) -> Code {
         let UnionType(types) = match_statement.expression.1;
@@ -1043,7 +1043,7 @@ mod tests {
                 }.into()],
             )
         }.into(),
-        "if (z) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); }";
+        "if (z->value()) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); }";
         "if-else statement"
     )]
     #[test_case(
@@ -1085,7 +1085,7 @@ mod tests {
                 ],
             )
         }.into(),
-        "if (z) { if (y) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); } r = std::make_shared<LazyConstant<Bool>>(true); } else { x = std::make_shared<LazyConstant<Int>>(0LL); r = std::make_shared<LazyConstant<Bool>>(false); }";
+        "if (z->value()) { if (y->value()) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); } r = std::make_shared<LazyConstant<Bool>>(true); } else { x = std::make_shared<LazyConstant<Int>>(0LL); r = std::make_shared<LazyConstant<Bool>>(false); }";
         "nested if-else statement"
     )]
     fn test_statement_translation(statement: Statement, expected: &str) {
