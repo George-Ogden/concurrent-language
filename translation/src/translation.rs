@@ -151,21 +151,22 @@ impl Translator {
         format!("if ({target} == nullptr) {{ {code} }}")
     }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
-        let fn_initialization_code = match fn_call.fn_ {
+        let args_code = self.translate_value_list(fn_call.args);
+        self.check_nullptr(&target,
+        match fn_call.fn_ {
             Value::BuiltIn(built_in) => {
-                format!("{};", self.translate_builtin(built_in))
+                let BuiltIn::BuiltInFn(name) = built_in else {
+                    panic!("Attempt to call non-fn built-in.")
+                };
+                format!(
+                    "{target} = std::make_shared<{name}>({args_code}); WorkManager::call(dynamic_fn_cast({target}));",
+                )
             }
             Value::Memory(memory) => {
                 let memory_code = self.translate_memory(memory);
-                format!("{memory_code}->value()->clone();",)
+                format!("std::shared_ptr<Fn> fn; std::tie(fn, {target}) = {memory_code}->value()->clone_with_args({args_code}); WorkManager::call(fn);",)
             }
-        };
-        let type_code = self.translate_type(&fn_call.fn_type.into());
-        let args_assignment = format!(
-            "dynamic_fn_cast<{type_code}>({target})->args = std::make_tuple({});",
-            self.translate_value_list(fn_call.args)
-        );
-        self.check_nullptr(&target, format!("{target} = {fn_initialization_code} {args_assignment} WorkManager::call(dynamic_fn_cast<{type_code}>({target}));"))
+        })
     }
     fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
         let indexing_code = format!(
@@ -289,7 +290,7 @@ impl Translator {
     fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
         let Declaration { memory, type_ } = memory_allocation;
         format!(
-            "{} {} = nullptr;",
+            "{} {};",
             self.translate_lazy_type(&type_),
             self.translate_memory(memory)
         )
@@ -826,7 +827,7 @@ mod tests {
                 ]
             }.into(),
         },
-        "if (call == nullptr) { call = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(arg1, arg2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call)); }";
+        "if (call == nullptr) { call = std::make_shared<Plus__BuiltIn>(arg1, arg2); WorkManager::call(dynamic_fn_cast(call)); }";
         "built-in fn call"
     )]
     #[test_case(
@@ -847,7 +848,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (call2 == nullptr) { call2 = call1->value()->clone();  dynamic_fn_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(arg1, arg2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call2)); }";
+        "if (call2 == nullptr) { std::shared_ptr<Fn> fn; std::tie(fn, call2) = call1->value()->clone_with_args(arg1, arg2); WorkManager::call(fn); }";
         "custom fn call"
     )]
     #[test_case(
@@ -978,7 +979,7 @@ mod tests {
                 }
             ]
         },
-        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call==nullptr){ call=std::make_shared<Comparison_GE__BuiltIn>(); dynamic_fn_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x,y); WorkManager::call(dynamic_fn_cast<FnT<Bool,Int,Int>>(call)); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
+        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call==nullptr){ call=std::make_shared<Comparison_GE__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1274,37 +1275,19 @@ mod tests {
             allocations: vec![
                 Declaration {
                     memory: Memory(Id::from("call1")),
-                    type_: FnType(
-                        vec![
-                            AtomicType(AtomicTypeEnum::INT).into(),
-                            AtomicType(AtomicTypeEnum::INT).into()
-                        ],
-                        Box::new(AtomicType(AtomicTypeEnum::INT).into()),
-                    ).into()
+                    type_: AtomicTypeEnum::INT.into()
                 },
                 Declaration {
                     memory: Memory(Id::from("call2")),
-                    type_: FnType(
-                        vec![
-                            AtomicType(AtomicTypeEnum::INT).into(),
-                            AtomicType(AtomicTypeEnum::INT).into()
-                        ],
-                        Box::new(AtomicType(AtomicTypeEnum::INT).into()),
-                    ).into()
+                    type_: AtomicTypeEnum::INT.into()
                 },
                 Declaration {
                     memory: Memory(Id::from("call3")),
-                    type_: FnType(
-                        vec![
-                            AtomicType(AtomicTypeEnum::INT).into(),
-                            AtomicType(AtomicTypeEnum::INT).into()
-                        ],
-                        Box::new(AtomicType(AtomicTypeEnum::INT).into()),
-                    ).into()
+                    type_: AtomicTypeEnum::INT.into()
                 }
             ]
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<FnT<Int,Int,Int>> call1 = nullptr; LazyT<FnT<Int,Int,Int>> call2 = nullptr; LazyT<FnT<Int,Int,Int>> call3 = nullptr; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == nullptr) { call1 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call1)->args = std::make_tuple(a, b); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call1)); } if (call2 == nullptr) { call2 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(c, d); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call2)); } if (call3 == nullptr) { call3 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call3)->args = std::make_tuple(call1, call2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call3)); } return call3; } };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == nullptr) { call1 = std::make_shared<Plus__BuiltIn>(a, b); WorkManager::call(dynamic_fn_cast(call1)); } if (call2 == nullptr) { call2 = std::make_shared<Plus__BuiltIn>(c, d); WorkManager::call(dynamic_fn_cast(call2)); } if (call3 == nullptr) { call3 = std::make_shared<Plus__BuiltIn>(call1,call2); WorkManager::call(dynamic_fn_cast(call3)); } return call3;} };";
         "four way plus int"
     )]
     #[test_case(
@@ -1337,17 +1320,11 @@ mod tests {
             allocations: vec![
                 Declaration{
                     memory: Memory(Id::from("inner_res")),
-                    type_: FnType(
-                        vec![
-                            AtomicType(AtomicTypeEnum::INT).into(),
-                            AtomicType(AtomicTypeEnum::INT).into(),
-                        ],
-                        Box::new(AtomicType(AtomicTypeEnum::INT).into()),
-                    ).into()
+                    type_: AtomicType(AtomicTypeEnum::INT).into(),
                 }
             ]
         },
-    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<FnT<Int, Int, Int>> inner_res = nullptr; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == nullptr) { inner_res = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)->args = std::make_tuple(x, env); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)); } return inner_res; } };";
+    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == nullptr) { inner_res = std::make_shared<Plus__BuiltIn>(x, env); WorkManager::call(dynamic_fn_cast(inner_res)); } return inner_res; } };";
     "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
