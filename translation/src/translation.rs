@@ -148,7 +148,7 @@ impl Translator {
         format!("WorkManager::await({arguments});")
     }
     fn check_nullptr(&self, target: &Id, code: Code) -> Code {
-        format!("if ({target} == nullptr) {{ {code} }}")
+        format!("if ({target} == decltype({target}){{}}) {{ {code} }}")
     }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
         let args_code = self.translate_value_list(fn_call.args);
@@ -827,7 +827,7 @@ mod tests {
                 ]
             }.into(),
         },
-        "if (call == nullptr) { call = std::make_shared<Plus__BuiltIn>(arg1, arg2); WorkManager::call(dynamic_fn_cast(call)); }";
+        "if (call == decltype(call){}) { call = std::make_shared<Plus__BuiltIn>(arg1, arg2); WorkManager::call(dynamic_fn_cast(call)); }";
         "built-in fn call"
     )]
     #[test_case(
@@ -848,7 +848,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (call2 == nullptr) { std::shared_ptr<Fn> fn; std::tie(fn, call2) = call1->value()->clone_with_args(arg1, arg2); WorkManager::call(fn); }";
+        "if (call2 == decltype(call2){}) { std::shared_ptr<Fn> fn; std::tie(fn, call2) = call1->value()->clone_with_args(arg1, arg2); WorkManager::call(fn); }";
         "custom fn call"
     )]
     #[test_case(
@@ -979,7 +979,7 @@ mod tests {
                 }
             ]
         },
-        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call==nullptr){ call=std::make_shared<Comparison_GE__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
+        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call == decltype(call){}){ call=std::make_shared<Comparison_GE__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1287,7 +1287,7 @@ mod tests {
                 }
             ]
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == nullptr) { call1 = std::make_shared<Plus__BuiltIn>(a, b); WorkManager::call(dynamic_fn_cast(call1)); } if (call2 == nullptr) { call2 = std::make_shared<Plus__BuiltIn>(c, d); WorkManager::call(dynamic_fn_cast(call2)); } if (call3 == nullptr) { call3 = std::make_shared<Plus__BuiltIn>(call1,call2); WorkManager::call(dynamic_fn_cast(call3)); } return call3;} };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == decltype(call1){}) { call1 = std::make_shared<Plus__BuiltIn>(a, b); WorkManager::call(dynamic_fn_cast(call1)); } if (call2 == decltype(call2){}) { call2 = std::make_shared<Plus__BuiltIn>(c, d); WorkManager::call(dynamic_fn_cast(call2)); } if (call3 == decltype(call3){}) { call3 = std::make_shared<Plus__BuiltIn>(call1,call2); WorkManager::call(dynamic_fn_cast(call3)); } return call3;} };";
         "four way plus int"
     )]
     #[test_case(
@@ -1324,7 +1324,7 @@ mod tests {
                 }
             ]
         },
-    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == nullptr) { inner_res = std::make_shared<Plus__BuiltIn>(x, env); WorkManager::call(dynamic_fn_cast(inner_res)); } return inner_res; } };";
+    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == decltype(inner_res){}) { inner_res = std::make_shared<Plus__BuiltIn>(x, env); WorkManager::call(dynamic_fn_cast(inner_res)); } return inner_res; } };";
     "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1415,7 +1415,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call = nullptr; LazyT<Int> body() override { if(call==nullptr){ call=std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call)->args=std::make_tuple(x,y); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call)); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main = nullptr; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if(main==nullptr){ main = std::make_shared<Main>(); dynamic_fn_cast<FnT<Int>>(main)->args = std::make_tuple(); WorkManager::call(dynamic_fn_cast<FnT<Int>>(main));} return main; }};";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call; LazyT<Int> body() override { if (call == decltype(call){}){ call=std::make_shared<Plus__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if (main == decltype(main){}){ main = std::make_shared<Main>(); WorkManager::call(dynamic_fn_cast(main));} return main; }};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
