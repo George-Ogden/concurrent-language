@@ -17,6 +17,7 @@ struct WorkManager {
     static void call(std::shared_ptr<Fn> fn);
     static void run(std::shared_ptr<Fn> fn);
     template <typename... Vs> static void await(Vs &...vs);
+    template <typename... Vs> static void await_all(Vs &...vs);
 
   protected:
     template <typename... Vs> static void await_restricted(Vs &...vs);
@@ -28,3 +29,4 @@ struct WorkManager {
 };
 
 struct stack_inversion : public std::exception {};
+struct finished : public std::exception {};

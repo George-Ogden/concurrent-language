@@ -74,12 +74,12 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
         }
     }
     void assign(LazyT<T> value) {
-        reference = value;
         continuations.acquire();
         for (Continuation &c : *continuations) {
-            reference->add_continuation(c);
+            value->add_continuation(c);
         }
         continuations->clear();
+        reference = value;
         continuations.release();
     }
     bool done() const override {

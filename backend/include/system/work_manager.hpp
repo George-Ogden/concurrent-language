@@ -33,21 +33,26 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Fn>> *ref) {
             ref->exchange(nullptr, std::memory_order_relaxed);
         if (fn != nullptr) {
             fn->run();
+            fn->await_all();
             call(std::make_shared<FinishWork>());
+        } else {
+            while (1) {
+                fn = get_work();
+                if (fn == nullptr) {
+                    sleep(1us);
+                    continue;
+                }
+                if (dynamic_cast<FinishWork *>(fn.get()) != nullptr) {
+                    call(fn);
+                    break;
+                }
+                try {
+                    fn->run();
+                } catch (finished &e) {
+                    break;
+                }
+            }
         }
-    }
-    while (1) {
-
-        std::shared_ptr<Fn> fn = get_work();
-        if (fn == nullptr) {
-            sleep(1us);
-            continue;
-        }
-        if (dynamic_cast<FinishWork *>(fn.get()) != nullptr) {
-            call(fn);
-            break;
-        }
-        fn->run();
     }
     return std::monostate{};
 }
@@ -73,18 +78,13 @@ template <typename T> constexpr auto filter_if_not_tuple(T &&v) {
 }
 
 template <typename... Vs> void WorkManager::await(Vs &...vs) {
-    auto filtered = std::apply(
-        [](auto &&...ts) {
-            return std::tuple_cat(
-                filter_if_not_tuple(std::forward<decltype(ts)>(ts))...);
-        },
-        std::forward_as_tuple(vs...));
+    std::apply([&](auto &&...ts) { await_restricted(ts...); },
+               std::tuple_cat(filter_if_not_tuple(vs)...));
+}
 
-    std::apply(
-        [&](auto &&...ts) {
-            await_restricted(std::forward<decltype(ts)>(ts)...);
-        },
-        filtered);
+template <typename... Vs> void WorkManager::await_all(Vs &...vs) {
+    std::apply([&](auto &&...ts) { await_restricted(ts...); },
+               flatten(std::make_tuple(vs...)));
 }
 
 template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
@@ -104,6 +104,10 @@ template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
     }
     while (true) {
         std::shared_ptr<Fn> fn = get_work();
+        if (dynamic_cast<FinishWork *>(fn.get()) != nullptr) {
+            call(fn);
+            throw finished{};
+        }
         try {
             if (counter.load(std::memory_order_relaxed) > 0) {
                 throw stack_inversion{};

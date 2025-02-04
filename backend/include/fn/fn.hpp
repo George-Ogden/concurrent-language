@@ -25,6 +25,7 @@ class Fn {
   protected:
     virtual void run() = 0;
     virtual bool done() const = 0;
+    virtual void await_all() = 0;
 
   public:
     virtual ~Fn() = default;
@@ -79,6 +80,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         cleanup();
         continuations.release();
     }
+    void await_all() override { WorkManager::await_all(ret); }
     template <typename T> static void assign(T &ret, T &return_) {
         if constexpr (is_lazy_v<T>) {
             auto ptr =
@@ -124,8 +126,9 @@ struct EasyCloneFn : ParametricFn<R, A...> {
 };
 
 class FinishWork : public Fn {
-    void run() override{};
-    bool done() const override { return true; };
+    void run() override {}
+    bool done() const override { return true; }
+    void await_all() override {}
 };
 
 template <typename T> struct BlockFn : public ParametricFn<T> {
