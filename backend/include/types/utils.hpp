@@ -4,7 +4,10 @@
 
 template <typename... Types> struct VariantT;
 
+#include <concepts>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 struct Fn;
@@ -91,5 +94,23 @@ template <typename T> struct lazy_type<std::shared_ptr<Lazy<T>>> {
 template <typename... Ts> struct lazy_type<std::tuple<Ts...>> {
     using type = std::tuple<LazyT<Ts>...>;
 };
+
+template <typename T>
+Int convert_arg(char *&arg) requires std::same_as<T, Int> {
+    return std::stoll(arg);
+}
+
+template <typename T>
+Bool convert_arg(char *&arg) requires std::same_as<T, Bool> {
+    std::string_view str(arg);
+    if (str == "true" || str == "True") {
+        return true;
+    } else if (str == "false" || str == "False") {
+        return false;
+    } else {
+        throw std::invalid_argument("Could not convert " + std::string(arg) +
+                                    " to boolean.");
+    }
+}
 
 #include "data_structures/lazy.hpp"
