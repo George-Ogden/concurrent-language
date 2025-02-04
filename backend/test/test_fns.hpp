@@ -36,7 +36,7 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
     id->args = std::make_tuple(std::make_shared<LazyConstant<Int>>(x));
 
     WorkManager::run(id);
-    ASSERT_EQ(id->ret, 5);
+    ASSERT_EQ(id->value(), 5);
 }
 
 struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
@@ -94,7 +94,7 @@ TEST_P(FnCorrectnessTest, FourWayPlusV1Test) {
                                  std::make_shared<LazyConstant<Int>>(z));
 
     WorkManager::run(plus);
-    ASSERT_EQ(plus->ret, 48);
+    ASSERT_EQ(plus->value(), 48);
 }
 
 TEST_P(FnCorrectnessTest, FourWayPlusV2Test) {
@@ -106,7 +106,7 @@ TEST_P(FnCorrectnessTest, FourWayPlusV2Test) {
                                  std::make_shared<LazyConstant<Int>>(z));
 
     WorkManager::run(plus);
-    ASSERT_EQ(plus->ret, 48);
+    ASSERT_EQ(plus->value(), 48);
 }
 
 struct BranchingExample : EasyCloneFn<BranchingExample, Int, Int, Int, Int> {
@@ -149,7 +149,7 @@ TEST_P(FnCorrectnessTest, PositiveBranchingExampleTest) {
         std::make_shared<BranchingExample>(x, y, z);
 
     WorkManager::run(branching);
-    ASSERT_EQ(branching->ret, 9);
+    ASSERT_EQ(branching->value(), 9);
 }
 
 TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
@@ -158,7 +158,7 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
         std::make_shared<BranchingExample>(x, y, z);
 
     WorkManager::run(branching);
-    ASSERT_EQ(branching->ret, 21);
+    ASSERT_EQ(branching->value(), 21);
 }
 
 struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
@@ -188,7 +188,7 @@ TEST_P(FnCorrectnessTest, FlatBlockExampleTest) {
         std::make_shared<FlatBlockExample>(x);
 
     WorkManager::run(block);
-    ASSERT_EQ(block->ret, 6);
+    ASSERT_EQ(block->value(), 6);
 }
 
 struct NestedBlockExample : EasyCloneFn<NestedBlockExample, Int, Int> {
@@ -239,7 +239,7 @@ TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
         std::make_shared<NestedBlockExample>(x);
 
     WorkManager::run(block);
-    ASSERT_EQ(block->ret, 8);
+    ASSERT_EQ(block->value(), 8);
 }
 
 struct Adder : Closure<Adder, LazyT<Int>, Int, Int> {
@@ -256,17 +256,20 @@ struct Adder : Closure<Adder, LazyT<Int>, Int, Int> {
 
 struct NestedFnExample : EasyCloneFn<NestedFnExample, Int, Int> {
     using EasyCloneFn<NestedFnExample, Int, Int>::EasyCloneFn;
-    FnT<Int, Int> closure = nullptr;
-    FnT<Int, Int> res = nullptr;
+    LazyT<FnT<Int, Int>> closure = nullptr;
+    LazyT<Int> res = nullptr;
     LazyT<Int> body(LazyT<Int> &x) override {
         if (closure == nullptr) {
-            closure = std::make_shared<Adder>();
-            std::dynamic_pointer_cast<Adder>(closure)->env = x;
+            closure = std::make_shared<
+                LazyConstant<remove_lazy_t<decltype(closure)>>>(
+                std::make_shared<Adder>());
+            std::dynamic_pointer_cast<Adder>(closure->value())->env = x;
         }
         if (res == nullptr) {
-            res = closure->clone();
-            res->args = std::make_tuple(x);
-            WorkManager::call(res);
+            WorkManager::await(closure);
+            FnT<Int, Int> fn;
+            std::tie(fn, res) = closure->value()->clone_with_args(x);
+            WorkManager::call(fn);
         }
         return res;
     }
@@ -278,7 +281,7 @@ TEST_P(FnCorrectnessTest, NestedFnExampleTest) {
         std::make_shared<NestedFnExample>(x);
 
     WorkManager::run(nested);
-    ASSERT_EQ(nested->ret, 10);
+    ASSERT_EQ(nested->value(), 10);
 }
 
 struct IfStatementExample
@@ -342,7 +345,7 @@ TEST_P(FnCorrectnessTest, IfStatementExampleTest) {
         std::make_shared<IfStatementExample>(x, y, z);
 
     WorkManager::run(branching);
-    ASSERT_EQ(branching->ret, 9);
+    ASSERT_EQ(branching->value(), 9);
 }
 
 struct SharedRegisterExample : EasyCloneFn<SharedRegisterExample, Int, Bool> {
@@ -366,7 +369,7 @@ TEST_P(FnCorrectnessTest, SharedRegisterExampleTest) {
             std::make_shared<SharedRegisterExample>(b);
 
         WorkManager::run(example);
-        ASSERT_EQ(example->ret, 1);
+        ASSERT_EQ(example->value(), 1);
     }
     {
         Bool b = false;
@@ -374,7 +377,7 @@ TEST_P(FnCorrectnessTest, SharedRegisterExampleTest) {
             std::make_shared<SharedRegisterExample>(b);
 
         WorkManager::run(example);
-        ASSERT_EQ(example->ret, 0);
+        ASSERT_EQ(example->value(), 0);
     }
 }
 
@@ -417,7 +420,7 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest1) {
         std::make_shared<RecursiveDouble>(x);
 
     WorkManager::run(double_);
-    ASSERT_EQ(double_->ret, 4);
+    ASSERT_EQ(double_->value(), 4);
 }
 
 TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
@@ -426,7 +429,7 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
         std::make_shared<RecursiveDouble>(x);
 
     WorkManager::run(double_);
-    ASSERT_EQ(double_->ret, 0);
+    ASSERT_EQ(double_->value(), 0);
 }
 
 struct EvenOrOdd : EasyCloneFn<EvenOrOdd, Bool, Int> {
@@ -454,7 +457,7 @@ TEST_P(FnCorrectnessTest, HigherOrderFunctionTest) {
     std::shared_ptr<ApplyIntBool> apply = std::make_shared<ApplyIntBool>(f, x);
 
     WorkManager::run(apply);
-    ASSERT_TRUE(apply->ret);
+    ASSERT_TRUE(apply->value());
 }
 
 struct PairIntBool
@@ -473,8 +476,8 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     std::shared_ptr<PairIntBool> pair = std::make_shared<PairIntBool>(x, y);
 
     WorkManager::run(pair);
-    ASSERT_EQ(std::get<0>(pair->ret), 5);
-    ASSERT_EQ(std::get<0>(std::get<1>(pair->ret)), true);
+    ASSERT_EQ(std::get<0>(pair->value()), 5);
+    ASSERT_EQ(std::get<0>(std::get<1>(pair->value())), true);
 }
 
 struct HigherOrderReuse
@@ -511,7 +514,7 @@ TEST_P(FnCorrectnessTest, ReusedHigherOrderFunctionTest) {
         std::make_shared<HigherOrderReuse>(f, x, y);
 
     WorkManager::run(F);
-    ASSERT_EQ(F->ret, 11);
+    ASSERT_EQ(F->value(), 11);
 }
 
 struct Twoo;
@@ -535,7 +538,7 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
         std::shared_ptr<BoolUnion> fn = std::make_shared<BoolUnion>(bull);
 
         WorkManager::run(fn);
-        ASSERT_TRUE(fn->ret);
+        ASSERT_TRUE(fn->value());
     }
 
     {
@@ -544,7 +547,7 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
         std::shared_ptr<BoolUnion> fn = std::make_shared<BoolUnion>(bull);
 
         WorkManager::run(fn);
-        ASSERT_FALSE(fn->ret);
+        ASSERT_FALSE(fn->value());
     }
 }
 
@@ -603,7 +606,7 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
             std::make_shared<EitherIntBoolExtractor>(either);
 
         WorkManager::run(fn);
-        ASSERT_EQ(fn->ret, result);
+        ASSERT_EQ(fn->value(), result);
     }
 }
 
@@ -658,7 +661,7 @@ TEST_P(FnCorrectnessTest, EdgeCaseTest) {
             std::make_shared<EitherIntBoolEdgeCase>(either);
 
         WorkManager::run(fn);
-        ASSERT_EQ(fn->ret, result);
+        ASSERT_EQ(fn->value(), result);
     }
 }
 
@@ -727,7 +730,7 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
 
     std::shared_ptr<ListIntSum> summer = std::make_shared<ListIntSum>(first);
     WorkManager::run(summer);
-    ASSERT_EQ(summer->ret, 3);
+    ASSERT_EQ(summer->value(), 3);
 }
 
 struct Suc;
@@ -775,9 +778,11 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
         std::make_shared<SimpleRecursiveTypeExample>(outer);
 
     WorkManager::run(fn);
-    ASSERT_EQ(fn->ret.tag, inner->value().tag);
+
+    auto res = fn->value();
+    ASSERT_EQ(res.tag, inner->value().tag);
     auto tmp = inner->value().value;
-    ASSERT_EQ(reinterpret_cast<Suc *>(&fn->ret.value)->value,
+    ASSERT_EQ(reinterpret_cast<Suc *>(&res.value)->value,
               reinterpret_cast<Suc *>(&tmp)->value);
 }
 
@@ -811,7 +816,60 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
     f->args = std::make_tuple(x);
 
     WorkManager::run(f);
-    ASSERT_EQ(f->ret, 0);
+    ASSERT_EQ(f->value(), 0);
+}
+
+struct MakeTupleFn : Closure<MakeTupleFn, Empty, TupleT<Int, Int>, Int, Int> {
+    using Closure<MakeTupleFn, Empty, TupleT<Int, Int>, Int, Int>::Closure;
+    LazyT<TupleT<Int, Int>> body(LazyT<Int> &x, LazyT<Int> &y) override {
+        return std::make_tuple(x, y);
+    }
+};
+
+TEST_P(FnCorrectnessTest, MakeTupleFnTest) {
+    FnT<TupleT<Int, Int>, Int, Int> tuple_maker =
+        std::make_shared<MakeTupleFn>();
+    LazyT<Int> x = std::make_shared<LazyConstant<Int>>(0),
+               y = std::make_shared<LazyConstant<Int>>(1);
+    LazyT<TupleT<Int, Int>> result;
+    FnT<TupleT<Int, Int>, Int, Int> fn;
+    std::tie(fn, result) = tuple_maker->clone_with_args(x, y);
+
+    WorkManager::run(fn);
+    ASSERT_EQ(std::get<0>(result)->value(), 0);
+    ASSERT_EQ(std::get<1>(result)->value(), 1);
+}
+
+struct TupleAddFn : Closure<TupleAddFn, Empty, TupleT<Int, Int>, Int, Int> {
+    using Closure<TupleAddFn, Empty, TupleT<Int, Int>, Int, Int>::Closure;
+    std::shared_ptr<Plus__BuiltIn> plus = nullptr;
+    std::shared_ptr<Minus__BuiltIn> minus = nullptr;
+    LazyT<TupleT<Int, Int>> body(LazyT<Int> &x, LazyT<Int> &y) override {
+        if (plus == nullptr) {
+            plus = std::make_shared<Plus__BuiltIn>();
+            plus->args = std::make_tuple(x, y);
+            WorkManager::call(plus);
+        }
+        if (minus == nullptr) {
+            minus = std::make_shared<Minus__BuiltIn>();
+            minus->args = std::make_tuple(x, y);
+            WorkManager::call(minus);
+        }
+        return std::make_tuple(plus, minus);
+    }
+};
+
+TEST_P(FnCorrectnessTest, TupleAddFnTest) {
+    FnT<TupleT<Int, Int>, Int, Int> tuple_fn = std::make_shared<TupleAddFn>();
+    LazyT<Int> x = std::make_shared<LazyConstant<Int>>(2),
+               y = std::make_shared<LazyConstant<Int>>(9);
+    LazyT<TupleT<Int, Int>> result;
+    FnT<TupleT<Int, Int>, Int, Int> fn;
+    std::tie(fn, result) = tuple_fn->clone_with_args(x, y);
+
+    WorkManager::run(fn);
+    ASSERT_EQ(std::get<0>(result)->value(), 11);
+    ASSERT_EQ(std::get<1>(result)->value(), -7);
 }
 
 const std::vector<unsigned> cpu_counts = {1, 2, 3, 4};

@@ -25,7 +25,7 @@ TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
 
             WorkManager::run(fn);
             Int expected = validate(x, y);
-            ASSERT_EQ(fn->ret, expected);
+            ASSERT_EQ(fn->value(), expected);
         }
     }
 }
@@ -87,7 +87,7 @@ TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
 
         WorkManager::run(fn);
         Int expected = validate(x);
-        ASSERT_EQ(fn->ret, expected);
+        ASSERT_EQ(fn->value(), expected);
     }
 }
 
@@ -114,7 +114,7 @@ TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
 
             WorkManager::run(fn);
             Bool expected = validate(x, y);
-            ASSERT_EQ(fn->ret, expected);
+            ASSERT_EQ(fn->value(), expected);
         }
     }
 }
@@ -142,7 +142,7 @@ TEST(NegationTests, OperatorCorrectness) {
         fn->args = Fn::reference_all(t);
 
         WorkManager::run(fn);
-        ASSERT_EQ(fn->ret, false);
+        ASSERT_EQ(fn->value(), false);
     }
     {
         auto fn = std::make_shared<Negation__BuiltIn>();
@@ -150,6 +150,6 @@ TEST(NegationTests, OperatorCorrectness) {
         fn->args = Fn::reference_all(f);
 
         WorkManager::run(fn);
-        ASSERT_EQ(fn->ret, true);
+        ASSERT_EQ(fn->value(), true);
     }
 }

@@ -21,12 +21,6 @@ std::ostream &operator<<(std::ostream &os, TupleT<Args...> const &t) {
     return os;
 }
 
-// template <typename T, typename = std::enable_if_t<is_shared_ptr_v<T>>>
-// std::ostream &operator<<(std::ostream &os, T const &t) {
-//     os << *t;
-//     return os;
-// }
-
 template <typename T, typename = std::enable_if_t<is_lazy_v<T>>>
 std::ostream &operator<<(std::ostream &os, T const &t) {
     os << t->value();

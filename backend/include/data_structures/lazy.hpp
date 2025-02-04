@@ -1,8 +1,11 @@
 #pragma once
 
 #include "fn/continuation.hpp"
+#include "types/utils.hpp"
 
 #include <type_traits>
+
+template <typename> struct LazyPlaceholder;
 
 template <typename T> struct Lazy {
     virtual bool done() const = 0;
@@ -23,6 +26,7 @@ template <typename T> struct Lazy {
             }
         }
     }
+
     template <typename U> static auto extract_value(const U &v) { return v; }
     template <typename... Us>
     static auto extract_value(const std::tuple<Us...> &v) {
@@ -36,6 +40,52 @@ template <typename T> struct Lazy {
     static auto extract_value(const std::shared_ptr<Lazy<U>> &v) {
         return v->value();
     }
+
+    static LazyT<T> make_placeholders() {
+        if constexpr (is_lazy_v<T>) {
+            return std::make_shared<LazyPlaceholder<remove_lazy_t<T>>>();
+        } else if constexpr (is_tuple_v<T>) {
+            return std::apply(
+                [](auto &&...args) {
+                    return std::make_tuple(Lazy<std::decay_t<decltype(args)>>::
+                                               make_placeholders()...);
+                },
+                T{});
+        } else {
+            return nullptr;
+        }
+    }
+};
+
+template <typename T> class LazyPlaceholder : public Lazy<T> {
+    LazyT<T> reference = nullptr;
+    Locked<std::vector<Continuation>> continuations;
+
+  public:
+    explicit LazyPlaceholder() {}
+    void add_continuation(Continuation c) override {
+        continuations.acquire();
+        if (reference == nullptr) {
+            continuations->push_back(c);
+            continuations.release();
+        } else {
+            continuations.release();
+            reference->add_continuation(c);
+        }
+    }
+    void assign(LazyT<T> value) {
+        reference = value;
+        continuations.acquire();
+        for (Continuation &c : *continuations) {
+            reference->add_continuation(c);
+        }
+        continuations->clear();
+        continuations.release();
+    }
+    bool done() const override {
+        return reference != nullptr && reference->done();
+    }
+    T value() const override { return reference->value(); }
 };
 
 template <typename T> class LazyConstant : public Lazy<T> {
@@ -56,25 +106,4 @@ template <typename T> class LazyConstant : public Lazy<T> {
     void add_continuation(Continuation c) override {
         Lazy<T>::update_continuation(c);
     }
-};
-
-template <typename> struct is_lazy : std::false_type {};
-
-template <typename T>
-struct is_lazy<std::shared_ptr<Lazy<T>>> : std::true_type {};
-
-template <typename T> inline constexpr bool is_lazy_v = is_lazy<T>::value;
-
-template <typename T> struct lazy_type {
-    using type = std::shared_ptr<Lazy<T>>;
-};
-
-template <typename T> using LazyT = typename lazy_type<T>::type;
-
-template <typename T> struct lazy_type<std::shared_ptr<Lazy<T>>> {
-    using type = std::shared_ptr<Lazy<T>>;
-};
-
-template <typename... Ts> struct lazy_type<std::tuple<Ts...>> {
-    using type = std::tuple<LazyT<Ts>...>;
 };

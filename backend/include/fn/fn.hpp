@@ -41,7 +41,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     std::atomic<bool> done_flag{false};
     Locked<std::vector<Continuation>> continuations;
     ArgsT args;
-    R ret;
+    LazyT<R> ret;
     ParametricFn() = default;
 
     explicit ParametricFn(LazyT<std::decay_t<Args>>... args) requires(
@@ -53,6 +53,13 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         : args(reference_all(args...)) {}
     virtual ~ParametricFn() { cleanup_args(); }
     virtual std::shared_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
+    virtual std::tuple<std::shared_ptr<ParametricFn<Ret, Args...>>, LazyT<Ret>>
+    clone_with_args(LazyT<std::decay_t<Args>>... args) const {
+        std::shared_ptr<ParametricFn<Ret, Args...>> call = this->clone();
+        call->args = std::make_tuple(args...);
+        call->ret = Lazy<LazyT<R>>::make_placeholders();
+        return std::make_tuple(call, call->ret);
+    };
     virtual LazyT<R>
     body(std::add_lvalue_reference_t<LazyT<std::decay_t<Args>>>...) = 0;
     void run() override {
@@ -61,7 +68,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
             LazyT<R> return_ = std::apply(
                 [this](auto &&...t) { return body(t...); }, arguments);
             WorkManager::await(return_);
-            ret = Lazy<R>::extract_value(return_);
+            assign(ret, return_);
         }
         continuations.acquire();
         for (const Continuation &c : *continuations) {
@@ -72,12 +79,30 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         cleanup();
         continuations.release();
     }
+    template <typename T> static void assign(T &ret, T &return_) {
+        if constexpr (is_lazy_v<T>) {
+            auto ptr =
+                std::dynamic_pointer_cast<LazyPlaceholder<remove_lazy_t<T>>>(
+                    ret);
+            if (ptr == nullptr) {
+                ret = return_;
+            } else {
+                ptr->assign(return_);
+            }
+        } else if constexpr (is_tuple_v<T>) {
+            constexpr auto size = std::tuple_size_v<T>;
+            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                ((assign(std::get<Is>(ret), std::get<Is>(return_))), ...);
+            }
+            (std::make_index_sequence<size>{});
+        }
+    }
     virtual void cleanup() { cleanup_args(); }
     void cleanup_args() { this->args = ArgsT{}; }
     bool done() const override {
         return done_flag.load(std::memory_order_relaxed);
     }
-    R value() const override { return ret; }
+    R value() const override { return Lazy<R>::extract_value(ret); }
     void add_continuation(Continuation c) override {
         continuations.acquire();
         if (done()) {
