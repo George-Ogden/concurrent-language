@@ -196,7 +196,7 @@ impl Translator {
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
                 return env.map_or_else(Code::new, |env| {
                     format!(
-                        "std::dynamic_pointer_cast<{name}>({id})->env = {};",
+                        "std::dynamic_pointer_cast<{name}>({id}->value())->env = {};",
                         self.translate_value(env)
                     )
                 })
@@ -272,7 +272,7 @@ impl Translator {
                 }) = statement
                 {
                     let id = self.translate_memory(target.clone());
-                    Some(self.check_nullptr(&id, format!("{id} = std::make_shared<{name}>();",)))
+                    Some(format!("{id} = std::make_shared<LazyConstant<remove_lazy_t<decltype({id})>>>(std::make_shared<{name}>());"))
                 } else {
                     None
                 }
@@ -290,7 +290,7 @@ impl Translator {
         let Declaration { memory, type_ } = memory_allocation;
         format!(
             "{} {} = nullptr;",
-            self.translate_type(&type_),
+            self.translate_lazy_type(&type_),
             self.translate_memory(memory)
         )
     }
@@ -1101,7 +1101,7 @@ mod tests {
                 env: None
             }.into(),
         }.into()],
-        "if (closure==nullptr) { closure = std::make_shared<Closure>(); }";
+        "closure = std::make_shared<LazyConstant<remove_lazy_t<decltype(closure)>>>(std::make_shared<Closure>());";
         "closure without env assignment"
     )]
     #[test_case(
@@ -1112,7 +1112,7 @@ mod tests {
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
         }.into()],
-        "if (closure == nullptr) { closure = std::make_shared<Adder>(); } std::dynamic_pointer_cast<Adder>(closure)->env = x;";
+        "closure = std::make_shared<LazyConstant<remove_lazy_t<decltype(closure)>>>(std::make_shared<Adder>());  std::dynamic_pointer_cast<Adder>(closure->value())->env = x;";
         "closure assignment"
     )]
     #[test_case(
@@ -1304,7 +1304,7 @@ mod tests {
                 }
             ]
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == nullptr) { call1 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call1)->args = std::make_tuple(a, b); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call1)); } if (call2 == nullptr) { call2 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(c, d); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call2)); } if (call3 == nullptr) { call3 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call3)->args = std::make_tuple(call1, call2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call3)); } return call3; } };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<FnT<Int,Int,Int>> call1 = nullptr; LazyT<FnT<Int,Int,Int>> call2 = nullptr; LazyT<FnT<Int,Int,Int>> call3 = nullptr; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == nullptr) { call1 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call1)->args = std::make_tuple(a, b); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call1)); } if (call2 == nullptr) { call2 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(c, d); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call2)); } if (call3 == nullptr) { call3 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call3)->args = std::make_tuple(call1, call2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call3)); } return call3; } };";
         "four way plus int"
     )]
     #[test_case(
@@ -1347,7 +1347,7 @@ mod tests {
                 }
             ]
         },
-    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; FnT<Int, Int, Int> inner_res = nullptr; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == nullptr) { inner_res = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)->args = std::make_tuple(x, env); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)); } return inner_res; } };";
+    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<FnT<Int, Int, Int>> inner_res = nullptr; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == nullptr) { inner_res = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)->args = std::make_tuple(x, env); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)); } return inner_res; } };";
     "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1397,13 +1397,7 @@ mod tests {
                     allocations: vec![
                         Declaration{
                             memory: Memory(Id::from("call")),
-                            type_: FnType(
-                                vec![
-                                    AtomicType(AtomicTypeEnum::INT).into(),
-                                    AtomicType(AtomicTypeEnum::INT).into(),
-                                ],
-                                Box::new(AtomicType(AtomicTypeEnum::INT).into()),
-                            ).into()
+                            type_: AtomicType(AtomicTypeEnum::INT).into()
                         }
                     ]
                 },
@@ -1438,16 +1432,13 @@ mod tests {
                     allocations: vec![
                         Declaration{
                             memory: Memory(Id::from("main")),
-                            type_: FnType(
-                                Vec::new(),
-                                Box::new(AtomicType(AtomicTypeEnum::INT).into()),
-                            ).into()
+                            type_: AtomicType(AtomicTypeEnum::INT).into()
                         }
                     ]
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; FnT<Int,Int,Int>call = nullptr; LazyT<Int> body() override { if(call==nullptr){ call=std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call)->args=std::make_tuple(x,y); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call)); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; FnT<Int>main = nullptr; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if(main==nullptr){ main = std::make_shared<Main>(); dynamic_fn_cast<FnT<Int>>(main)->args = std::make_tuple(); WorkManager::call(dynamic_fn_cast<FnT<Int>>(main));} return main; }};";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call = nullptr; LazyT<Int> body() override { if(call==nullptr){ call=std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call)->args=std::make_tuple(x,y); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call)); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main = nullptr; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if(main==nullptr){ main = std::make_shared<Main>(); dynamic_fn_cast<FnT<Int>>(main)->args = std::make_tuple(); WorkManager::call(dynamic_fn_cast<FnT<Int>>(main));} return main; }};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

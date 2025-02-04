@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data_structures/lazy.hpp"
 #include "types/compound.hpp"
 #include "types/utils.hpp"
 
@@ -20,8 +21,14 @@ std::ostream &operator<<(std::ostream &os, TupleT<Args...> const &t) {
     return os;
 }
 
-template <typename T, typename = std::enable_if_t<is_shared_ptr_v<T>>>
+// template <typename T, typename = std::enable_if_t<is_shared_ptr_v<T>>>
+// std::ostream &operator<<(std::ostream &os, T const &t) {
+//     os << *t;
+//     return os;
+// }
+
+template <typename T, typename = std::enable_if_t<is_lazy_v<T>>>
 std::ostream &operator<<(std::ostream &os, T const &t) {
-    os << *t;
+    os << t->value();
     return os;
 }

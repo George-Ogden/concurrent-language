@@ -114,8 +114,8 @@ template <typename T> struct BlockFn : public ParametricFn<T> {
 };
 
 template <typename E> struct ClosureRoot {
-    E env;
-    explicit ClosureRoot(const E &e) : env(e) {}
+    LazyT<E> env;
+    explicit ClosureRoot(const LazyT<E> &e) : env(e) {}
     explicit ClosureRoot() = default;
     virtual ~ClosureRoot() = default;
 };
@@ -126,8 +126,7 @@ struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
     std::shared_ptr<ParametricFn<R, A...>> clone() const override {
         return std::make_shared<T>(this->env);
     }
-    void cleanup_env() { this->env = E{}; }
-    virtual ~Closure() { cleanup_env(); }
+    virtual ~Closure() {}
 };
 
 template <> struct ClosureRoot<Empty> {};
