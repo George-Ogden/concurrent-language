@@ -64,12 +64,30 @@ std::shared_ptr<Fn> WorkManager::get_work() {
     return fn;
 }
 
-template <typename... Vs> void WorkManager::await(Vs &...vs) {
-    std::apply([](auto &&...args) { return WorkManager::await_all(args...); },
-               spill(std::make_tuple(vs...)));
+template <typename T> constexpr auto filter_if_not_tuple(T &&v) {
+    if constexpr (is_tuple_v<std::decay_t<T>>) {
+        return std::tuple<>();
+    } else {
+        return std::tuple<std::decay_t<T>>(std::forward<T>(v));
+    }
 }
 
-template <typename... Vs> void WorkManager::await_all(Vs &...vs) {
+template <typename... Vs> void WorkManager::await(Vs &...vs) {
+    auto filtered = std::apply(
+        [](auto &&...ts) {
+            return std::tuple_cat(
+                filter_if_not_tuple(std::forward<decltype(ts)>(ts))...);
+        },
+        std::forward_as_tuple(vs...));
+
+    std::apply(
+        [&](auto &&...ts) {
+            await_restricted(std::forward<decltype(ts)>(ts)...);
+        },
+        filtered);
+}
+
+template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
     unsigned n = sizeof...(vs);
     if (n == 0) {
         return;
