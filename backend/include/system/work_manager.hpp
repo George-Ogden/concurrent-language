@@ -69,22 +69,43 @@ std::shared_ptr<Fn> WorkManager::get_work() {
     return fn;
 }
 
-template <typename T> constexpr auto filter_if_not_tuple(T &&v) {
-    if constexpr (is_tuple_v<std::decay_t<T>>) {
-        return std::tuple<>();
-    } else {
-        return std::tuple<std::decay_t<T>>(std::forward<T>(v));
-    }
+template <typename T> constexpr auto filter_awaitable(T &v) {
+    return std::tuple<std::decay_t<T>>(v);
+}
+
+template <typename... Ts>
+constexpr auto filter_awaitable(std::tuple<Ts...> &v) {
+    return std::tuple<>{};
 }
 
 template <typename... Vs> void WorkManager::await(Vs &...vs) {
     std::apply([&](auto &&...ts) { await_restricted(ts...); },
-               std::tuple_cat(filter_if_not_tuple(vs)...));
+               std::tuple_cat(filter_awaitable(vs)...));
+}
+
+template <typename T> void await_variants(T &v) {}
+
+template <typename... Ts>
+void await_variants(std::shared_ptr<Lazy<VariantT<Ts...>>> &l) {
+    auto v = l->value();
+    std::size_t idx = v.tag;
+    using AwaitFn = void (*)(std::aligned_union_t<0, Ts...> &);
+
+    static constexpr AwaitFn waiters[sizeof...(Ts)] = {[](auto &storage) {
+        WorkManager::await_all(
+            std::launder(reinterpret_cast<Ts *>(&storage))->value);
+    }...};
+
+    waiters[idx](v.value);
 }
 
 template <typename... Vs> void WorkManager::await_all(Vs &...vs) {
-    std::apply([&](auto &&...ts) { await_restricted(ts...); },
-               flatten(std::make_tuple(vs...)));
+    if constexpr (sizeof...(vs) != 0) {
+        auto flat_types = flatten(std::make_tuple(vs...));
+        std::apply([&](auto &&...ts) { await_restricted(ts...); }, flat_types);
+        std::apply([&](auto &&...ts) { (await_variants(ts), ...); },
+                   flat_types);
+    }
 }
 
 template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {

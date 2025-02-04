@@ -1,5 +1,9 @@
 #pragma once
 
+#include "types/builtin.hpp"
+
+template <typename... Types> struct VariantT;
+
 #include <memory>
 #include <type_traits>
 
@@ -12,16 +16,30 @@ template <typename... T> struct is_tuple<std::tuple<T...>> : std::true_type {};
 
 template <typename T> inline constexpr bool is_tuple_v = is_tuple<T>::value;
 
-template <typename Tuple> constexpr auto flatten(Tuple &&t) {
-    if constexpr (is_tuple_v<std::remove_reference_t<Tuple>>) {
+template <typename> struct is_empty : std::false_type {};
+
+template <> struct is_empty<Empty> : std::true_type {};
+
+template <typename T> inline constexpr bool is_empty_v = is_empty<T>::value;
+
+template <typename> struct is_variant : std::false_type {};
+
+template <typename... T> struct is_variant<VariantT<T...>> : std::true_type {};
+
+template <typename T> inline constexpr bool is_variant_v = is_variant<T>::value;
+
+template <typename T> constexpr auto flatten(T &&t) {
+    if constexpr (is_tuple_v<std::remove_reference_t<T>>) {
         return std::apply(
             [](auto &&...args) {
                 return std::tuple_cat(
                     flatten(std::forward<decltype(args)>(args))...);
             },
-            std::forward<Tuple>(t));
+            std::forward<T>(t));
+    } else if constexpr (is_empty_v<std::decay_t<T>>) {
+        return std::tuple<>{};
     } else {
-        return std::make_tuple(std::forward<Tuple>(t));
+        return std::make_tuple(std::forward<T>(t));
     }
 }
 template <typename T> struct remove_shared_ptr { using type = T; };
