@@ -1,11 +1,11 @@
 #include "main/main.hpp"
 #include "system/work_manager.hpp"
+#include "time/utils.hpp"
 
-#include <chrono>
 #include <iostream>
 
 int main(int argc, char *argv[]) {
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = time_utils::now();
     using ArgsT = remove_lazy_t<Main::ArgsT>;
     argc--;
     argv++;
@@ -29,13 +29,12 @@ int main(int argc, char *argv[]) {
     main->args = args;
     WorkManager::run(main);
 
-    auto end = std::chrono::high_resolution_clock::now();
+    auto end = time_utils::now();
 
     std::cout << main->value() << std::endl;
 
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-    std::cerr << "Execution time: " << duration.count() << " ns" << std::endl;
+    auto duration = time_utils::time_delta(start, end);
+    std::cerr << "Execution time: " << duration << " ns" << std::endl;
 
     return 0;
 }
