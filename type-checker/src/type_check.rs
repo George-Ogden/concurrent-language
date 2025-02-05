@@ -1031,40 +1031,34 @@ impl TypeChecker {
         let program_block = Block {
             assignments,
             expression: Box::new(
-                FunctionCall {
-                    function: Box::new(
-                        GenericVariable {
-                            id: Id::from("main"),
-                            type_instances: Vec::new(),
-                        }
-                        .into(),
-                    ),
-                    arguments: Vec::new(),
+                GenericVariable {
+                    id: Id::from("main"),
+                    type_instances: Vec::new(),
                 }
                 .into(),
             ),
         };
         let typed_block =
             type_checker.check_block(program_block, context.clone(), GenericVariables::new())?;
-        if let Type::TypeFn(_) = typed_block.type_() {
-            return Err(TypeCheckError::MainFunctionReturnsFunction {
+        let Type::TypeFn(TypeFn(args, ret)) = typed_block.type_() else {
+            return Err(TypeCheckError::IncorrectMainType {
                 type_: typed_block.type_(),
             });
-        }
-        let TypedExpression::TypedFunctionCall(TypedFunctionCall {
-            function,
-            arguments,
-        }) = &*typed_block.expression
-        else {
-            panic!("Main function call changed form.")
         };
-        if arguments.len() != 0 {
-            panic!("Main function call changed form.")
+        if !args.iter().all(|arg| matches!(arg, Type::TypeAtomic(_))) {
+            return Err(TypeCheckError::IncorrectMainType {
+                type_: typed_block.type_(),
+            });
+        };
+        if let Type::TypeFn(_) = &*ret {
+            return Err(TypeCheckError::IncorrectMainType {
+                type_: typed_block.type_(),
+            });
         }
         let TypedExpression::TypedAccess(TypedAccess {
             variable: main,
             parameters: _,
-        }) = &**function
+        }) = &*typed_block.expression
         else {
             panic!("Main function call changed form.")
         };
@@ -4836,7 +4830,35 @@ mod tests {
         },
         Err(()),
         TypeContext::new();
-        "too many arguments"
+        "wrong argument type"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: vec![
+                            TypedAssignee {
+                                assignee: Assignee { id: Id::from("x") },
+                                type_: ATOMIC_TYPE_INT.into()
+                            },
+                            TypedAssignee {
+                                assignee: Assignee { id: Id::from("y") },
+                                type_: ATOMIC_TYPE_BOOL.into()
+                            },
+                        ],
+                        return_type: ATOMIC_TYPE_INT.into(),
+                        body: ExpressionBlock(
+                            Var("x").into(),
+                        )
+                    }.into())
+                }.into()
+            ]
+        },
+        Ok(()),
+        TypeContext::new();
+        "main with arguments"
     )]
     #[test_case(
         Program{

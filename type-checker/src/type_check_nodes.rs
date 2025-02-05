@@ -1147,7 +1147,7 @@ pub enum TypeCheckError {
         block: TypedBlock,
         variable: TypedVariable,
     },
-    MainFunctionReturnsFunction {
+    IncorrectMainType {
         type_: Type,
     },
 }
