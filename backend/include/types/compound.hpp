@@ -1,9 +1,11 @@
 #pragma once
 
+#include "data_structures/lazy.hpp"
 #include "fn/fn.hpp"
 
 #include <iostream>
 #include <memory>
+#include <new>
 #include <tuple>
 #include <type_traits>
 
@@ -18,6 +20,26 @@ template <typename... Types> struct VariantT {
                                               std::uint16_t, std::uint32_t>>;
     TagType tag = sizeof...(Types);
     std::aligned_union_t<0, Types...> value;
+
+    template <std::size_t Index>
+    requires(Index < sizeof...(Types)) explicit constexpr VariantT(
+        std::integral_constant<std::size_t, Index>)
+        : tag(static_cast<TagType>(Index)) {}
+
+    template <std::size_t Index, typename T>
+    requires(Index < sizeof...(Types)) &&
+        std::is_same_v<
+            std::tuple_element_t<Index, std::tuple<Types...>>,
+            std::decay_t<T>> explicit constexpr VariantT(std::
+                                                             integral_constant<
+                                                                 std::size_t,
+                                                                 Index>,
+                                                         T &&value)
+        : tag(static_cast<TagType>(Index)) {
+        new (std::launder(
+            reinterpret_cast<std::decay_t<T> *>(std::addressof(this->value))))
+            std::remove_reference_t<T>(std::forward<T>(value));
+    }
 
     VariantT() = default;
     VariantT(const VariantT &other) { copy(*this, other); }

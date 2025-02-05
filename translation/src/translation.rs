@@ -6,7 +6,7 @@ use std::{
 };
 
 use compilation::{
-    Assignment, AtomicType, AtomicTypeEnum, Await, Block, Boolean, BuiltIn, ClosureInstantiation,
+    Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ClosureInstantiation,
     ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
     IfStatement, Integer, MachineType, MatchStatement, Memory, Name, Program, Statement,
     TupleExpression, TupleType, TypeDef, UnionType, Value,
@@ -19,6 +19,9 @@ pub struct Translator {}
 impl Translator {
     fn translate_type(&self, type_: &MachineType) -> Code {
         format!("{}", TypeFormatter(type_))
+    }
+    fn translate_lazy_type(&self, type_: &MachineType) -> Code {
+        format!("LazyT<{}>", TypeFormatter(type_))
     }
     fn top_sort(&self, type_defs: &Vec<TypeDef>) -> Vec<(Name, Option<MachineType>)> {
         let mut visited = HashSet::<Name>::new();
@@ -81,7 +84,11 @@ impl Translator {
         let constructor_definitions = ctors.iter().map(|(name, type_)| {
             let fields = match type_ {
                 Some(type_) => {
-                    format!("using type = {}; type value;", self.translate_type(type_))
+                    format!(
+                        "using type = {}; {} value;",
+                        self.translate_type(type_),
+                        self.translate_lazy_type(&MachineType::NamedType(Name::from("type")))
+                    )
                 }
                 None => Code::from("Empty value;"),
             };
@@ -96,24 +103,19 @@ impl Translator {
     }
     fn translate_builtin(&self, value: BuiltIn) -> Code {
         match value {
-            BuiltIn::Integer(Integer { value }) => format!("{value}LL"),
-            BuiltIn::Boolean(Boolean { value }) => format!("{value}"),
-            BuiltIn::BuiltInFn(name) => format!("std::make_shared<{name}>()"),
+            BuiltIn::Integer(Integer { value }) => {
+                format!("std::make_shared<LazyConstant<Int>>({value}LL)")
+            }
+            BuiltIn::Boolean(Boolean { value }) => {
+                format!("std::make_shared<LazyConstant<Bool>>({value})")
+            }
+            BuiltIn::BuiltInFn(name) => format!(
+                "std::make_shared<LazyConstant<typename {name}::FnT>>(std::make_shared<{name}>())"
+            ),
         }
     }
     fn translate_memory(&self, memory: Memory) -> Code {
         memory.0
-    }
-    fn translate_block(&self, block: Block) -> Code {
-        let statements_code = self.translate_statements(block.statements);
-        let MachineType::Lazy(type_) = &block.ret.1 else {
-            panic!("Block has non-lazy return type.")
-        };
-        let type_code = self.translate_type(&*type_);
-        let return_code = format!("return {};", self.translate_value(block.ret.0));
-        format!(
-            "std::make_shared<BlockFn<{type_code}>>([&]() {{ {statements_code} {return_code} }})"
-        )
     }
     fn translate_value(&self, value: Value) -> Code {
         match value {
@@ -133,16 +135,9 @@ impl Translator {
                 format!("std::get<{idx}ULL>({})", self.translate_value(value))
             }
             Expression::Value(value) => self.translate_value(value),
-            Expression::Wrap(value, type_) => format!(
-                "std::make_shared<LazyConstant<{}>>({})",
-                self.translate_type(&type_),
-                self.translate_value(value)
-            ),
-            Expression::Unwrap(value) => format!("{}->value()", self.translate_value(value)),
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
-            Expression::Block(block) => self.translate_block(block),
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -154,76 +149,78 @@ impl Translator {
             .join(",");
         format!("WorkManager::await({arguments});")
     }
+    fn check_nullptr(&self, target: &Id, code: Code) -> Code {
+        format!("if ({target} == decltype({target}){{}}) {{ {code} }}")
+    }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
-        let fn_initialization_code = match fn_call.fn_ {
+        let args_code = self.translate_value_list(fn_call.args);
+        self.check_nullptr(&target,
+        match fn_call.fn_ {
             Value::BuiltIn(built_in) => {
-                format!("{};", self.translate_builtin(built_in))
+                let BuiltIn::BuiltInFn(name) = built_in else {
+                    panic!("Attempt to call non-fn built-in.")
+                };
+                format!(
+                    "{target} = std::make_shared<{name}>({args_code}); WorkManager::call(dynamic_fn_cast({target}));",
+                )
             }
             Value::Memory(memory) => {
                 let memory_code = self.translate_memory(memory);
-                format!("{memory_code}->clone();",)
+                format!("std::shared_ptr<Fn> fn; std::tie(fn, {target}) = {memory_code}->value()->clone_with_args({args_code}); WorkManager::call(fn);",)
             }
-        };
-        let type_code = self.translate_type(&fn_call.fn_type.into());
-        let args_assignment = format!(
-            "dynamic_fn_cast<{type_code}>({target})->args = std::make_tuple({});",
-            self.translate_value_list(fn_call.args)
-        );
-        format!("{fn_initialization_code} {args_assignment} WorkManager::call(dynamic_fn_cast<{type_code}>({target}))",)
+        })
     }
     fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
-        let declaration = format!("{{}};");
-        let indexing_code = format!("{target}.tag = {}ULL", constructor_call.idx);
+        let indexing_code = format!(
+            "std::integral_constant<std::size_t,{}>()",
+            constructor_call.idx
+        );
         let value_code = match constructor_call.data {
             None => Code::new(),
-            Some((name, value)) => format!(
-                "new (&{target}.value) {name}{{create_references<{name}::type>({})}};",
-                self.translate_value(value)
-            ),
+            Some((name, value)) => format!(", {name}{{{}}}", self.translate_value(value)),
         };
-        format!("{declaration} {value_code} {indexing_code}")
+        format!("std::make_shared<LazyConstant<remove_lazy_t<decltype({target})>>>({indexing_code}{value_code})")
     }
     fn translate_declaration(&self, declaration: Declaration) -> Code {
         let Declaration { type_, memory } = declaration;
         format!(
             "{} {};",
-            self.translate_type(&type_),
+            self.translate_lazy_type(&type_),
             self.translate_memory(memory)
         )
     }
     fn translate_assignment(&self, assignment: Assignment) -> Code {
         let Memory(id) = assignment.target;
         let value_code = match assignment.value {
-            Expression::FnCall(fn_call) => self.translate_fn_call(id.clone(), fn_call),
+            Expression::FnCall(fn_call) => return self.translate_fn_call(id.clone(), fn_call),
             Expression::ConstructorCall(constructor_call) => {
                 self.translate_constructor_call(id.clone(), constructor_call)
             }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
                 return env.map_or_else(Code::new, |env| {
                     format!(
-                        "std::dynamic_pointer_cast<{name}>({id})->env = {};",
+                        "std::dynamic_pointer_cast<{name}>({id}->value())->env = {};",
                         self.translate_value(env)
                     )
                 })
             }
             value => self.translate_expression(value),
         };
-        let assignment_code = format!("{id} = {value_code};");
-        if assignment.check_null {
-            format!("if ({id} == nullptr) {{ {assignment_code} }}")
-        } else {
-            assignment_code
-        }
+        format!("{id} = {value_code};")
     }
     fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
         let condition_code = self.translate_value(if_statement.condition);
         let if_branch = self.translate_statements(if_statement.branches.0);
         let else_branch = self.translate_statements(if_statement.branches.1);
-        format!("if ({condition_code}) {{ {if_branch} }} else {{ {else_branch} }}",)
+        format!("if ({condition_code}->value()) {{ {if_branch} }} else {{ {else_branch} }}",)
     }
     fn translate_match_statement(&self, match_statement: MatchStatement) -> Code {
         let UnionType(types) = match_statement.expression.1;
-        let expression_code = self.translate_value(match_statement.expression.0);
+        let subject = self.translate_memory(match_statement.auxiliary_memory);
+        let extraction = format!(
+            "auto {subject} = {}->value();",
+            self.translate_value(match_statement.expression.0)
+        );
         let branches_code = match_statement
             .branches
             .into_iter()
@@ -232,21 +229,21 @@ impl Translator {
                 let assignment_code = match branch.target {
                     Some(Memory(id)) => {
                         let type_name = &types[i];
-                        let lazy_type = format!("destroy_references_t<{type_name}::type>");
                         format!(
-                            "std::shared_ptr<Lazy<{lazy_type}>> {id} = std::make_shared<LazyConstant<{lazy_type}>>(destroy_references(reinterpret_cast<{type_name}*>(&{expression_code}.value)->value));",
+                            "{} {id} = reinterpret_cast<{type_name}*>(&{subject}.value)->value;",
+                            self.translate_lazy_type(&MachineType::NamedType(format!(
+                                "{type_name}::type"
+                            )))
                         )
                     }
                     None => Code::new(),
                 };
                 let statements_code = self.translate_statements(branch.statements);
 
-                format!(
-                    "case {i}ULL : {{ {assignment_code} {statements_code} break; }}",
-                )
+                format!("case {i}ULL : {{ {assignment_code} {statements_code} break; }}",)
             })
             .join("\n");
-        format!("switch ({expression_code}.tag) {{ {branches_code} }}")
+        format!("{extraction} switch ({subject}.tag) {{ {branches_code} }}")
     }
     fn translate_statement(&self, statement: Statement) -> Code {
         match statement {
@@ -275,20 +272,10 @@ impl Translator {
                 if let Statement::Assignment(Assignment {
                     target,
                     value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: _ }),
-                    check_null,
                 }) = statement
                 {
-                    if *check_null {
-                        let target = self.translate_memory(target.clone());
-                        Some(format!(
-                            "if ({target} == nullptr) {{ {target} = std::make_shared<{name}>(); }}"
-                        ))
-                    } else {
-                        Some(format!(
-                            "{} = std::make_shared<{name}>();",
-                            self.translate_memory(target.clone())
-                        ))
-                    }
+                    let id = self.translate_memory(target.clone());
+                    Some(format!("{id} = std::make_shared<LazyConstant<remove_lazy_t<decltype({id})>>>(std::make_shared<{name}>());"))
                 } else {
                     None
                 }
@@ -305,8 +292,8 @@ impl Translator {
     fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
         let Declaration { memory, type_ } = memory_allocation;
         format!(
-            "{} {} = nullptr;",
-            self.translate_type(&type_),
+            "{} {};",
+            self.translate_lazy_type(&type_),
             self.translate_memory(memory)
         )
     }
@@ -319,18 +306,10 @@ impl Translator {
     fn translate_fn_def(&self, fn_def: FnDef) -> Code {
         let name = fn_def.name;
         let return_type = fn_def.ret.1;
-        let MachineType::Lazy(raw_return_type) = &return_type else {
-            panic!("Function has invalid return type.")
-        };
         let raw_argument_types = fn_def
             .arguments
             .iter()
-            .map(|(_, type_)| {
-                let MachineType::Lazy(raw_argument_type) = &type_ else {
-                    panic!("Function has invalid argument type.")
-                };
-                *raw_argument_type.clone()
-            })
+            .map(|(_, type_)| type_.clone())
             .collect_vec();
         let base_name = "Closure";
         let memory_allocations = fn_def.allocations;
@@ -343,7 +322,7 @@ impl Translator {
                 .env
                 .map_or_else(|| Code::from("Empty"), |type_| self.translate_type(&type_)),
             TypesFormatter(
-                &std::iter::once(*raw_return_type.clone())
+                &std::iter::once(return_type.clone())
                     .chain(raw_argument_types.into_iter())
                     .collect_vec()
             )
@@ -352,13 +331,13 @@ impl Translator {
         let constructor_code = format!("using {base}::{base_name};");
         let header_code = format!(
             "{} body({}) override",
-            self.translate_type(&return_type),
+            self.translate_lazy_type(&return_type),
             fn_def
                 .arguments
                 .into_iter()
                 .map(|(memory, type_)| format!(
                     "{} &{}",
-                    self.translate_type(&type_),
+                    self.translate_lazy_type(&type_),
                     self.translate_memory(memory)
                 ))
                 .join(",")
@@ -400,12 +379,6 @@ impl fmt::Display for TypeFormatter<'_> {
                     TypesFormatter(
                         &std::iter::once(*ret.clone())
                             .chain(args.clone().into_iter())
-                            .map(|type_| {
-                                let MachineType::Lazy(t) = type_ else {
-                                    panic!("Function type without lazy arguments and return.");
-                                };
-                                *t
-                            })
                             .collect()
                     )
                 )
@@ -414,12 +387,6 @@ impl fmt::Display for TypeFormatter<'_> {
                 write!(f, "VariantT<{}>", type_names.join(","))
             }
             MachineType::NamedType(name) => write!(f, "{}", name),
-            MachineType::Reference(type_) => {
-                write!(f, "std::shared_ptr<{}>", TypeFormatter(&**type_))
-            }
-            MachineType::Lazy(type_) => {
-                write!(f, "std::shared_ptr<Lazy<{}>>", TypeFormatter(&**type_))
-            }
         }
     }
 }
@@ -444,7 +411,7 @@ impl fmt::Display for TypesFormatter<'_> {
 mod tests {
     use super::*;
 
-    use compilation::{Block, Id, MatchBranch, Name};
+    use compilation::{Id, MatchBranch, Name};
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
@@ -543,14 +510,14 @@ mod tests {
         "nested tuple type"
     )]
     #[test_case(
-        FnType(Vec::new(), Box::new(MachineType::Lazy(Box::new(TupleType(Vec::new()).into())))).into(),
+        FnType(Vec::new(), Box::new(TupleType(Vec::new()).into())).into(),
         "FnT<TupleT<>>";
         "unit fn type"
     )]
     #[test_case(
         FnType(
-            vec![MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),],
-            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),)
+            vec![AtomicType(AtomicTypeEnum::INT).into()],
+            Box::new(AtomicType(AtomicTypeEnum::INT).into())
         ).into(),
         "FnT<Int,Int>";
         "int identity fn"
@@ -558,10 +525,10 @@ mod tests {
     #[test_case(
         FnType(
             vec![
-                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                AtomicType(AtomicTypeEnum::INT).into(),
+                AtomicType(AtomicTypeEnum::INT).into(),
             ],
-            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())),)
+            Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
         ).into(),
         "FnT<Bool,Int,Int>";
         "int comparison fn"
@@ -569,15 +536,15 @@ mod tests {
     #[test_case(
         FnType(
             vec![
-                MachineType::Lazy(Box::new(FnType(
+                FnType(
                     vec![
-                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                        AtomicType(AtomicTypeEnum::INT).into(),
                     ],
-                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())),)
-                ).into())),
-                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                    Box::new(AtomicType(AtomicTypeEnum::BOOL).into(),)
+                ).into(),
+                AtomicType(AtomicTypeEnum::INT).into(),
             ],
-            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into())),)
+            Box::new(AtomicType(AtomicTypeEnum::BOOL).into(),)
         ).into(),
         "FnT<Bool,FnT<Bool,Int>,Int>";
         "higher order fn"
@@ -605,30 +572,6 @@ mod tests {
         UnionType(vec![Name::from("Cons_Int"), Name::from("Nil_Int")]).into(),
         "VariantT<Cons_Int,Nil_Int>";
         "list int type"
-    )]
-    #[test_case(
-        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-        "std::shared_ptr<Lazy<Int>>";
-        "lazy int type"
-    )]
-    #[test_case(
-        MachineType::Lazy(Box::new(
-            TupleType(vec![
-                AtomicType(AtomicTypeEnum::INT).into(),
-                AtomicType(AtomicTypeEnum::BOOL).into()
-            ]).into()
-        )),
-        "std::shared_ptr<Lazy<TupleT<Int,Bool>>>";
-        "lazy tuple type"
-    )]
-    #[test_case(
-        MachineType::Reference(Box::new(
-            MachineType::NamedType(
-                Name::from("Cons")
-            )
-        )),
-        "std::shared_ptr<Cons>";
-        "reference type"
     )]
     fn test_type_translation(type_: MachineType, expected: &str) {
         let code = TRANSLATOR.translate_type(&type_);
@@ -665,7 +608,7 @@ mod tests {
                 ),
             ]
         },
-        "struct Left_IntBool; struct Right_IntBool; typedef VariantT<Left_IntBool, Right_IntBool> EitherIntBool; struct Left_IntBool { using type = Int; type value; }; struct Right_IntBool { using type = Bool; type value; };";
+        "struct Left_IntBool; struct Right_IntBool; typedef VariantT<Left_IntBool, Right_IntBool> EitherIntBool; struct Left_IntBool { using type = Int; LazyT<type> value; }; struct Right_IntBool { using type = Bool; LazyT<type> value; };";
         "either int bool"
     )]
     #[test_case(
@@ -676,13 +619,13 @@ mod tests {
                     Name::from("Cons_Int"),
                     Some(TupleType(vec![
                         AtomicType(AtomicTypeEnum::INT).into(),
-                        MachineType::Reference(Box::new(MachineType::NamedType(Name::from("ListInt"))))
+                        MachineType::NamedType(Name::from("ListInt"))
                     ]).into())
                 ),
                 (Name::from("Nil_Int"), None)
             ]
         },
-        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,std::shared_ptr<ListInt>>; type value;}; struct Nil_Int{ Empty value; };";
+        "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt>; LazyT<type> value;}; struct Nil_Int{ Empty value; };";
         "list int"
     )]
     fn test_typedef_translations(type_def: TypeDef, expected: &str) {
@@ -704,8 +647,8 @@ mod tests {
                         Name::from("Complex"),
                         Some(TupleType(
                             vec![
-                                MachineType::Reference(Box::new(MachineType::NamedType(Name::from("Value")))),
-                                MachineType::Reference(Box::new(MachineType::NamedType(Name::from("Value")))),
+                                MachineType::NamedType(Name::from("Value")),
+                                MachineType::NamedType(Name::from("Value")),
                             ]
                         ).into())
                     ),
@@ -720,12 +663,12 @@ mod tests {
                     ),
                     (
                         Name::from("Some"),
-                        Some(MachineType::Reference(Box::new(MachineType::NamedType(Name::from("Expression")))))
+                        Some(MachineType::NamedType(Name::from("Expression")))
                     ),
                 ]
             }
         ],
-        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct Basic { using type = Int; type value; }; struct Complex { using type = TupleT<std::shared_ptr<Value>, std::shared_ptr<Value>>; type value; }; struct None{Empty value;}; struct Some { using type = std::shared_ptr<Expression>; type value; };";
+        "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct None{Empty value;}; struct Some { using type = Expression; LazyT<type> value; }; struct Basic { using type = Int; LazyT<type> value; }; struct Complex { using type = TupleT<Value, Value>; LazyT<type> value; };";
         "mutually recursive types"
     )]
     fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
@@ -736,46 +679,46 @@ mod tests {
 
     #[test_case(
         Integer{value: 24}.into(),
-        "24LL";
+        "std::make_shared<LazyConstant<Int>>(24LL)";
         "integer translation"
     )]
     #[test_case(
         Integer{value: -24}.into(),
-        "-24LL";
+        "std::make_shared<LazyConstant<Int>>(-24LL)";
         "negative integer translation"
     )]
     #[test_case(
         Integer{value: 0}.into(),
-        "0LL";
+        "std::make_shared<LazyConstant<Int>>(0LL)";
         "zero translation"
     )]
     #[test_case(
         Integer{value: 10000000000009}.into(),
-        "10000000000009LL";
+        "std::make_shared<LazyConstant<Int>>(10000000000009LL)";
         "large integer translation"
     )]
     #[test_case(
         Boolean{value: true}.into(),
-        "true";
+        "std::make_shared<LazyConstant<Bool>>(true)";
         "true translation"
     )]
     #[test_case(
         Boolean{value: false}.into(),
-        "false";
+        "std::make_shared<LazyConstant<Bool>>(false)";
         "false translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
-        "std::make_shared<Plus__BuiltIn>()";
+        "std::make_shared<LazyConstant<typename Plus__BuiltIn::FnT>>(std::make_shared<Plus__BuiltIn>())";
         "builtin plus translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
         ),
-        "std::make_shared<Comparison_GE__BuiltIn>()";
+        "std::make_shared<LazyConstant<typename Comparison_GE__BuiltIn::FnT>>(std::make_shared<Comparison_GE__BuiltIn>())";
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
@@ -802,12 +745,12 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
-        " std::make_shared<Comparison_LT__BuiltIn>()";
+        "std::make_shared<LazyConstant<typename Comparison_LT__BuiltIn::FnT>>(std::make_shared<Comparison_LT__BuiltIn>())";
         "builtin function translation"
     )]
     #[test_case(
         BuiltIn::Integer(Integer{value: -1}).into(),
-        "-1LL";
+        "std::make_shared<LazyConstant<Int>>(-1LL)";
         "builtin integer translation"
     )]
     fn test_value_translation(value: Value, expected: &str) {
@@ -818,8 +761,8 @@ mod tests {
 
     #[test_case(
         Value::BuiltIn(BuiltIn::Integer(Integer{value: -1}).into()).into(),
-        "-1LL";
-        "index access"
+        "std::make_shared<LazyConstant<Int>>(-1LL)";
+        "integer"
     )]
     #[test_case(
         ElementAccess{
@@ -831,22 +774,6 @@ mod tests {
         "std::get<1ULL>(tuple)";
         "tuple index access"
     )]
-    #[test_case(
-        Expression::Wrap(
-            BuiltIn::BuiltInFn(Name::from("Plus__BuiltIn")).into(),
-            FnType(
-                vec![
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into())),
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
-                ],
-                Box::new(
-                    MachineType::Lazy(Box::new(AtomicTypeEnum::INT.into()))
-                )
-            ).into()
-        ),
-        "std::make_shared<LazyConstant<FnT<Int,Int,Int>>>(std::make_shared<Plus__BuiltIn>())";
-        "lazy function instantiation"
-    )]
     fn test_expression_translation(expression: Expression, expected: &str) {
         let code = TRANSLATOR.translate_expression(expression);
         let expected_code = Code::from(expected);
@@ -857,9 +784,8 @@ mod tests {
         Assignment {
             target: Memory(Id::from("x")).into(),
             value: Value::BuiltIn(Integer{value: 5}.into()).into(),
-            check_null: false
         },
-        "x = 5LL;";
+        "x = std::make_shared<LazyConstant<Int>>(5LL);";
         "integer assignment"
     )]
     #[test_case(
@@ -871,7 +797,6 @@ mod tests {
                 ).into()),
                 idx: 0
             }.into(),
-            check_null: false
         },
         "x = std::get<0ULL>(tuple);";
         "tuple access assignment"
@@ -880,56 +805,9 @@ mod tests {
         Assignment {
             target: Memory(Id::from("y")).into(),
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
-            check_null: false
         },
-        "y = true;";
+        "y = std::make_shared<LazyConstant<Bool>>(true);";
         "boolean assignment"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("x")).into(),
-            value: Expression::Wrap(Value::BuiltIn(Integer{value: -5}.into()), AtomicType(AtomicTypeEnum::INT).into()),
-            check_null: true
-        },
-        "if (x == nullptr) { x = std::make_shared<LazyConstant<Int>>(-5LL); }";
-        "wrapping constant"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(
-                Id::from("g"),
-            ),
-            value: Expression::Wrap(
-                Memory(
-                    Id::from("f"),
-                ).into(),
-                FnType(
-                    vec![MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),],
-                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),),
-                ).into()
-            ),
-            check_null: true
-        },
-        "if (g == nullptr) { g = std::make_shared<LazyConstant<FnT<Int,Int>>>(f); }";
-        "wrapping function from variable"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("w")).into(),
-            value: Expression::Unwrap(Memory(Id::from("g")).into()),
-            check_null: false
-        },
-        "w = g->value();";
-        "unwrapping function from variable"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("y")).into(),
-            value: Expression::Unwrap(Memory(Id::from("t")).into()),
-            check_null: false
-        },
-        "y = t->value();";
-        "unwrapping boolean from variable"
     )]
     #[test_case(
         Assignment {
@@ -940,102 +818,19 @@ mod tests {
                 ).into(),
                 fn_type: FnType(
                     vec![
-                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                        AtomicType(AtomicTypeEnum::INT).into(),
+                        AtomicType(AtomicTypeEnum::INT).into()
                     ],
-                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                 ),
                 args: vec![
                     Memory(Id::from("arg1")).into(),
                     Memory(Id::from("arg2")).into(),
                 ]
             }.into(),
-            check_null: true
         },
-        "if (call == nullptr) { call = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(arg1, arg2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call)); }";
+        "if (call == decltype(call){}) { call = std::make_shared<Plus__BuiltIn>(arg1, arg2); WorkManager::call(dynamic_fn_cast(call)); }";
         "built-in fn call"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("call")),
-            value: Block{
-                statements: Vec::new(),
-                ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))
-            }.into(),
-            check_null: false
-        },
-        "call = std::make_shared<BlockFn<Int>>([&](){ return call; });";
-        "empty block"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("block")),
-            value: Block{
-                statements: vec![
-                    Assignment {
-                        target: Memory(Id::from("call")),
-                        value: FnCall{
-                            fn_: BuiltIn::BuiltInFn(
-                                Name::from("Increment__BuiltIn"),
-                            ).into(),
-                            fn_type: FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ),
-                            args: vec![
-                                Memory(
-                                    Id::from("x")
-                                ).into()
-                            ]
-                        }.into(),
-                        check_null: true
-                    }.into(),
-                ],
-                ret: (
-                    Memory(
-                        Id::from("call"),
-                    ).into(),
-                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                )
-            }.into(),
-            check_null: true
-        },
-        "if (block == nullptr) { block = std::make_shared<BlockFn<Int>>([&]() { if (call == nullptr) { call = std::make_shared<Increment__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int>>(call)->args = std::make_tuple(x); WorkManager::call(dynamic_fn_cast<FnT<Int,Int>>(call)); } return call; });}";
-        "internal fn call block fn call"
-    )]
-    #[test_case(
-        Assignment {
-            target: Memory(Id::from("block")),
-            value: Block{
-                statements: vec![
-                    Assignment {
-                        target: Memory(Id::from("call")),
-                        value: FnCall{
-                            fn_: BuiltIn::BuiltInFn(
-                                Name::from("Decrement__BuiltIn"),
-                            ).into(),
-                            fn_type: FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ),
-                            args: vec![Memory(Id::from("y")).into()]
-                        }.into(),
-                        check_null: true
-                    }.into(),
-                ],
-                ret: (
-                    Memory(Id::from("call")).into(),
-                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                )
-            }.into(),
-            check_null: false
-        },
-        "block = std::make_shared<BlockFn<Int>>([&](){ if (call == nullptr) { call = std::make_shared<Decrement__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int>>(call)->args = std::make_tuple(y); WorkManager::call(dynamic_fn_cast<FnT<Int,Int>>(call)); } return call; });";
-        "block assignment"
     )]
     #[test_case(
         Assignment {
@@ -1048,22 +843,20 @@ mod tests {
                 ],
                 fn_type: FnType(
                     vec![
-                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                        AtomicType(AtomicTypeEnum::INT).into(),
+                        AtomicType(AtomicTypeEnum::INT).into(),
                     ],
-                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                 ).into()
             }.into(),
-            check_null: true
         },
-        "if (call2 == nullptr) { call2 = call1->clone();  dynamic_fn_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(arg1, arg2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call2)); }";
+        "if (call2 == decltype(call2){}) { std::shared_ptr<Fn> fn; std::tie(fn, call2) = call1->value()->clone_with_args(arg1, arg2); WorkManager::call(fn); }";
         "custom fn call"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("e")),
             value: TupleExpression(Vec::new()).into(),
-            check_null: false
         },
         "e = std::make_tuple();";
         "empty tuple assignment"
@@ -1074,9 +867,8 @@ mod tests {
             value: TupleExpression(vec![
                 Value::BuiltIn(Integer{value: 5}.into())
             ]).into(),
-            check_null: false
         },
-        "t = std::make_tuple(5LL);";
+        "t = std::make_tuple(std::make_shared<LazyConstant<Int>>(5LL));";
         "singleton tuple assignment"
     )]
     #[test_case(
@@ -1086,9 +878,8 @@ mod tests {
                 Value::BuiltIn(Integer{value: -4}.into()),
                 Memory(Id::from("y")).into()
             ]).into(),
-            check_null: false
         },
-        "t = std::make_tuple(-4LL,y);";
+        "t = std::make_tuple(std::make_shared<LazyConstant<Int>>(-4LL),y);";
         "double tuple assignment"
     )]
     #[test_case(
@@ -1098,9 +889,8 @@ mod tests {
                 idx: 1,
                 data: None
             }.into(),
-            check_null: false
         },
-        "bull = {}; bull.tag = 1ULL;";
+        "bull = std::make_shared<LazyConstant<remove_lazy_t<decltype(bull)>>>(std::integral_constant<std::size_t,1>());";
         "empty constructor assignment"
     )]
     #[test_case(
@@ -1110,9 +900,8 @@ mod tests {
                 idx: 0,
                 data: Some((Name::from("Wrapper"), Value::BuiltIn(Integer{value: 4}.into())))
             }.into(),
-            check_null: false
         },
-        "wrapper = {}; new (&wrapper.value) Wrapper{create_references<Wrapper::type>(4LL)}; wrapper.tag = 0ULL;";
+        "wrapper = std::make_shared<LazyConstant<remove_lazy_t<decltype(wrapper)>>>(std::integral_constant<std::size_t,0>(), Wrapper{std::make_shared<LazyConstant<Int>>(4LL)});";
         "wrapper constructor assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
@@ -1124,14 +913,14 @@ mod tests {
     #[test_case(
         MatchStatement{
             expression: (Memory(Id::from("bull")).into(), UnionType(vec![Name::from("Twoo"), Name::from("Faws")]).into()),
+            auxiliary_memory: Memory(Id::from("tmp")),
             branches: vec![
                 MatchBranch {
                     target: None,
                     statements: vec![
                         Assignment {
                             target: Memory(Id::from("r")).into(),
-                            value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                            check_null: true
+                            value: Expression::Value(Value::BuiltIn(Boolean{value: true}.into()).into()),
                         }.into(),
                     ],
                 },
@@ -1140,18 +929,18 @@ mod tests {
                     statements: vec![
                         Assignment {
                             target: Memory(Id::from("r")).into(),
-                            value: Expression::Wrap(Value::BuiltIn(Boolean{value: false}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                            check_null: true
+                            value: Expression::Value(Value::BuiltIn(Boolean{value: false}.into()).into()),
                         }.into(),
                     ],
                 }
             ]
         },
-        "switch (bull.tag) { case 0ULL: { if (r == nullptr) { r = std::make_shared<LazyConstant<Bool>>(true); } break; } case 1ULL: { if (r == nullptr) { r = std::make_shared<LazyConstant<Bool>>(false); } break; } }";
+        "auto tmp = bull->value(); switch (tmp.tag) { case 0ULL: { r = std::make_shared<LazyConstant<Bool>>(true); break; } case 1ULL: { r = std::make_shared<LazyConstant<Bool>>(false); break; }}";
         "match statement no values"
     )]
     #[test_case(
         MatchStatement {
+            auxiliary_memory: Memory(Id::from("tmp")),
             expression: (
                 Memory(Id::from("either")).into(),
                 UnionType(vec![Name::from("Left"), Name::from("Right")]).into()
@@ -1168,17 +957,16 @@ mod tests {
                                 ).into(),
                                 fn_type: FnType(
                                     vec![
-                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                        AtomicType(AtomicTypeEnum::INT).into(),
+                                        AtomicType(AtomicTypeEnum::INT).into()
                                     ],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::BOOL).into()))),
+                                    Box::new(AtomicType(AtomicTypeEnum::BOOL).into()),
                                 ),
                                 args: vec![
                                     Memory(Id::from("x")).into(),
                                     Memory(Id::from("y")).into(),
                                 ]
                             }.into(),
-                            check_null: true
                         }.into()
                     ],
                 },
@@ -1188,39 +976,25 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("call")).into(),
                             value: Value::from(Memory(Id::from("x"))).into(),
-                            check_null: true
                         }.into(),
                     ],
                 }
             ]
         },
-        "switch (either.tag) {case 0ULL: { std::shared_ptr<Lazy<destroy_references_t<Left::type>>> x = std::make_shared<LazyConstant<destroy_references_t<Left::type>>>(destroy_references(reinterpret_cast<Left*>(&either.value)->value)); if (call==nullptr){ call=std::make_shared<Comparison_GE__BuiltIn>(); dynamic_fn_cast<FnT<Bool,Int,Int>>(call)->args = std::make_tuple(x,y); WorkManager::call(dynamic_fn_cast<FnT<Bool,Int,Int>>(call)); } break; } case 1ULL:{ std::shared_ptr<Lazy<destroy_references_t<Right::type>>> x = std::make_shared<LazyConstant<destroy_references_t<Right::type>>>(destroy_references(reinterpret_cast<Right*>(&either.value)->value)); if (call==nullptr){ call = x; } break; }}";
+        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call == decltype(call){}){ call=std::make_shared<Comparison_GE__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
         "match statement read values"
     )]
     #[test_case(
         MatchStatement {
+            auxiliary_memory: Memory(Id::from("nat_")),
             expression: (Memory(Id::from("nat")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")])),
             branches: vec![
                 MatchBranch {
                     target: Some(Memory(Name::from("s"))),
                     statements: vec![
-                        Declaration {
-                            memory: Memory(Id::from("t")),
-                            type_: MachineType::Reference(Box::new(UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()))
-                        }.into(),
-                        Assignment {
-                            target: Memory(Id::from("t")),
-                            value: Expression::Unwrap(Memory(Name::from("s")).into()),
-                            check_null: false
-                        }.into(),
-                        Declaration {
-                            memory: Memory(Id::from("u")),
-                            type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("r")).into(),
-                            value: Expression::Wrap(Memory(Name::from("u")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                            check_null: true
+                            value: Expression::Value(Memory(Name::from("s")).into())
                         }.into(),
                     ],
                 },
@@ -1229,14 +1003,13 @@ mod tests {
                     statements: vec![
                         Assignment {
                             target: Memory(Id::from("r")).into(),
-                            value: Expression::Wrap(Memory(Name::from("nil")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into()),
-                            check_null: true
+                            value: Expression::Value(Memory(Name::from("nil")).into()),
                         }.into(),
                     ],
                 }
             ]
         },
-        "switch (nat.tag) { case 0ULL: { std::shared_ptr<Lazy<destroy_references_t<Suc::type>>> s = std::make_shared<LazyConstant<destroy_references_t<Suc::type>>>(destroy_references(reinterpret_cast<Suc*>(&nat.value)->value)); std::shared_ptr<VariantT<Suc,Nil>> t; VariantT<Suc,Nil> u; t = s->value(); if (r==nullptr){ r=std::make_shared<LazyConstant<VariantT<Suc,Nil>>>(u); } break; } case 1ULL: {if (r==nullptr){ r=std::make_shared<LazyConstant<VariantT<Suc,Nil>>>(nil); } break; }}";
+        "auto nat_ = nat->value(); switch (nat_.tag) { case 0ULL: { LazyT<Suc::type> s = reinterpret_cast<Suc*>(&nat_.value)->value; r = s; break; } case 1ULL: { r = nil; break; }}";
         "match statement recursive type"
     )]
     fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
@@ -1264,17 +1037,15 @@ mod tests {
             branches: (
                 vec![Assignment {
                     target: Memory(Id::from("x")),
-                    value: Expression::Wrap(Value::BuiltIn(Integer{value: 1}.into()).into(),  AtomicType(AtomicTypeEnum::INT).into()),
-                    check_null: true
+                    value: Expression::Value(Value::BuiltIn(Integer{value: 1}.into()).into()),
                 }.into()],
                 vec![Assignment {
                     target: Memory(Id::from("x")).into(),
-                    value: Expression::Wrap(Value::BuiltIn(Integer{value: -1}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                    check_null: true
+                    value: Expression::Value(Value::BuiltIn(Integer{value: -1}.into()).into()),
                 }.into()],
             )
         }.into(),
-        "if (z) { if (x == nullptr) { x = std::make_shared<LazyConstant<Int>>(1LL); } } else { if (x == nullptr) { x = std::make_shared<LazyConstant<Int>>(-1LL); } }";
+        "if (z->value()) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); }";
         "if-else statement"
     )]
     #[test_case(
@@ -1288,40 +1059,35 @@ mod tests {
                             vec![
                                 Assignment {
                                     target: Memory(Id::from("x")).into(),
-                                    value: Expression::Wrap(Value::BuiltIn(Integer{value: 1}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                                    check_null: true
+                                    value: Expression::Value(Value::BuiltIn(Integer{value: 1}.into()).into()),
                                 }.into()
                             ],
                             vec![
                                 Assignment {
                                     target: Memory(Id::from("x")).into(),
-                                    value: Expression::Wrap(Value::BuiltIn(Integer{value: -1}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                                    check_null: true
+                                    value: Expression::Value(Value::BuiltIn(Integer{value: -1}.into()).into()),
                                 }.into()
                             ],
                         )
                     }.into(),
                     Assignment {
                         target: Memory(Id::from("r")).into(),
-                        value: Expression::Wrap(Value::BuiltIn(Boolean{value: true}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                        check_null: true
+                        value: Expression::Value(Value::BuiltIn(Boolean{value: true}.into()).into()),
                     }.into(),
                 ],
                 vec![
                     Assignment {
                         target: Memory(Id::from("x")).into(),
-                        value: Expression::Wrap(Value::BuiltIn(Integer{value: 0}.into()).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                        check_null: true
+                        value: Expression::Value(Value::BuiltIn(Integer{value: 0}.into()).into()),
                     }.into(),
                     Assignment {
                         target: Memory(Id::from("r")).into(),
-                        value: Expression::Wrap(Value::BuiltIn(Boolean{value: false}.into()).into(), AtomicType(AtomicTypeEnum::BOOL).into()),
-                        check_null: true
+                        value: Expression::Value(Value::BuiltIn(Boolean{value: false}.into()).into()),
                     }.into(),
                 ],
             )
         }.into(),
-        "if (z) { if (y) { if (x == nullptr){ x = std::make_shared<LazyConstant<Int>>(1LL); } } else {if (x == nullptr){ x = std::make_shared<LazyConstant<Int>>(-1LL); } } if (r == nullptr) { r = std::make_shared<LazyConstant<Bool>>(true); } } else { if (x == nullptr){ x = std::make_shared<LazyConstant<Int>>(0LL); } if (r == nullptr) { r = std::make_shared<LazyConstant<Bool>>(false); } }";
+        "if (z->value()) { if (y->value()) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); } r = std::make_shared<LazyConstant<Bool>>(true); } else { x = std::make_shared<LazyConstant<Int>>(0LL); r = std::make_shared<LazyConstant<Bool>>(false); }";
         "nested if-else statement"
     )]
     fn test_statement_translation(statement: Statement, expected: &str) {
@@ -1337,9 +1103,8 @@ mod tests {
                 name: Name::from("Closure"),
                 env: None
             }.into(),
-            check_null: true
         }.into()],
-        "if (closure==nullptr) { closure = std::make_shared<Closure>(); }";
+        "closure = std::make_shared<LazyConstant<remove_lazy_t<decltype(closure)>>>(std::make_shared<Closure>());";
         "closure without env assignment"
     )]
     #[test_case(
@@ -1349,9 +1114,8 @@ mod tests {
                 name: Name::from("Adder"),
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
-            check_null: true
         }.into()],
-        "if (closure == nullptr) { closure = std::make_shared<Adder>(); } std::dynamic_pointer_cast<Adder>(closure)->env = x;";
+        "closure = std::make_shared<LazyConstant<remove_lazy_t<decltype(closure)>>>(std::make_shared<Adder>());  std::dynamic_pointer_cast<Adder>(closure->value())->env = x;";
         "closure assignment"
     )]
     #[test_case(
@@ -1359,17 +1123,6 @@ mod tests {
             Await(vec![
                 Memory(Id::from("t"))
             ]).into(),
-            Declaration {
-                type_: TupleType(vec![AtomicType(AtomicTypeEnum::INT).into(), AtomicType(AtomicTypeEnum::INT).into()]).into(),
-                memory: Memory(Id::from("tuple"))
-            }.into(),
-            Assignment {
-                target: Memory(Id::from("tuple")),
-                value: Expression::Unwrap(
-                    Memory(Id::from("t")).into()
-                ),
-                check_null: false
-            }.into(),
             Declaration {
                 type_: AtomicType(AtomicTypeEnum::INT).into(),
                 memory: Memory(Id::from("x"))
@@ -1380,16 +1133,15 @@ mod tests {
                     value: Memory(Id::from("tuple")).into(),
                     idx: 1
                 }.into(),
-                check_null: false
             }.into()
         ],
-        "TupleT<Int,Int> tuple; Int x; WorkManager::await(t); tuple = t->value(); x = std::get<1ULL>(tuple);";
+        "LazyT<Int> x; WorkManager::await(t); x = std::get<1ULL>(tuple);";
         "tuple access"
     )]
     #[test_case(
         vec![
             Declaration{
-                type_: MachineType::Reference(Box::new(MachineType::NamedType(Name::from("List")))).into(),
+                type_: MachineType::NamedType(Name::from("List")),
                 memory:  Memory(Id::from("tail")),
             }.into(),
             Assignment {
@@ -1398,14 +1150,9 @@ mod tests {
                     value: Memory(Id::from("cons")).into(),
                     idx: 1
                 }.into(),
-                check_null: false
-            }.into(),
-            Declaration{
-                type_: UnionType(vec![Name::from("Cons"), Name::from("Nil")]).into(),
-                memory: Memory(Id::from("tail"))
             }.into(),
         ],
-        "std::shared_ptr<List> tail; VariantT<Cons,Nil> tail; tail = std::get<1ULL>(cons);";
+        "LazyT<List> tail; tail = std::get<1ULL>(cons);";
         "cons extraction"
     )]
     #[test_case(
@@ -1420,7 +1167,6 @@ mod tests {
                     idx: 1,
                     data: None
                 }.into(),
-                check_null: false
             }.into(),
             Declaration{
                 type_:UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
@@ -1435,11 +1181,10 @@ mod tests {
                         Memory(Id::from("n")).into()
                     ))
                 }.into(),
-                check_null: false
             }.into(),
         ],
-        "VariantT<Suc, Nil> n; VariantT<Suc, Nil> s; n = {}; n.tag = 1ULL; s= {}; new (&s.value) Suc{create_references<Suc::type>(n)}; s.tag = 0ULL;";
-        "simple recursive type extraction"
+        "LazyT<VariantT<Suc, Nil>> n; LazyT<VariantT<Suc, Nil>> s; n = std::make_shared<LazyConstant<remove_lazy_t<decltype(n)>>>(std::integral_constant<std::size_t,1>()); s = std::make_shared<LazyConstant<remove_lazy_t<decltype(s)>>>(std::integral_constant<std::size_t,0>(), Suc{n});";
+        "simple recursive type instantiation"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
         let code = TRANSLATOR.translate_statements(statements);
@@ -1451,12 +1196,12 @@ mod tests {
         FnDef {
             env: None,
             name: Name::from("IdentityInt"),
-            arguments: vec![(Memory(Id::from("x")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))],
+            arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: Vec::new(),
-            ret: (Memory(Id::from("x")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            ret: (Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: Vec::new()
         },
-        "struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> { using Closure<IdentityInt, Empty, Int, Int>::Closure; std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override { return x; } };";
+        "struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> { using Closure<IdentityInt, Empty, Int, Int>::Closure; LazyT<Int> body(LazyT<Int> &x) override { return x; } };";
         "identity int"
     )]
     #[test_case(
@@ -1464,25 +1209,24 @@ mod tests {
             env: None,
             name: Name::from("FourWayPlus"),
             arguments: vec![
-                (Memory(Id::from("a")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                (Memory(Id::from("b")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                (Memory(Id::from("c")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                (Memory(Id::from("d")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                (Memory(Id::from("a")), AtomicType(AtomicTypeEnum::INT).into()),
+                (Memory(Id::from("b")), AtomicType(AtomicTypeEnum::INT).into()),
+                (Memory(Id::from("c")), AtomicType(AtomicTypeEnum::INT).into()),
+                (Memory(Id::from("d")), AtomicType(AtomicTypeEnum::INT).into()),
             ],
             statements: vec![
                 Assignment {
                     target: Memory(Id::from("call1")),
-                    check_null: true,
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
                         ).into(),
                         fn_type: FnType(
                             vec![
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                AtomicType(AtomicTypeEnum::INT).into(),
+                                AtomicType(AtomicTypeEnum::INT).into()
                             ],
-                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                         ),
                         args: vec![
                             Memory(Id::from("a")).into(),
@@ -1492,17 +1236,16 @@ mod tests {
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("call2")),
-                    check_null: true,
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
                         ).into(),
                         fn_type: FnType(
                             vec![
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                AtomicType(AtomicTypeEnum::INT).into(),
+                                AtomicType(AtomicTypeEnum::INT).into()
                             ],
-                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                         ),
                         args: vec![
                             Memory(Id::from("c")).into(),
@@ -1512,17 +1255,16 @@ mod tests {
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("call3")),
-                    check_null: true,
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
                         ).into(),
                         fn_type: FnType(
                             vec![
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                AtomicType(AtomicTypeEnum::INT).into(),
+                                AtomicType(AtomicTypeEnum::INT).into()
                             ],
-                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                         ),
                         args: vec![
                             Memory(Id::from("call1")).into(),
@@ -1531,126 +1273,30 @@ mod tests {
                     }.into()
                 }.into(),
             ],
-            ret: (Memory(Id::from("call3")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            ret: (Memory(Id::from("call3")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: vec![
                 Declaration {
                     memory: Memory(Id::from("call1")),
-                    type_: FnType(
-                        vec![
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                        ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
+                    type_: AtomicTypeEnum::INT.into()
                 },
                 Declaration {
                     memory: Memory(Id::from("call2")),
-                    type_: FnType(
-                        vec![
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                        ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
+                    type_: AtomicTypeEnum::INT.into()
                 },
                 Declaration {
                     memory: Memory(Id::from("call3")),
-                    type_: FnType(
-                        vec![
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
-                        ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
+                    type_: AtomicTypeEnum::INT.into()
                 }
             ]
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; FnT<Int,Int,Int> call1 = nullptr; FnT<Int,Int,Int> call2 = nullptr; FnT<Int,Int,Int> call3 = nullptr; std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &a, std::shared_ptr<Lazy<Int>> &b, std::shared_ptr<Lazy<Int>> &c, std::shared_ptr<Lazy<Int>> &d) override { if (call1 == nullptr) { call1 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call1)->args = std::make_tuple(a, b); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call1)); } if (call2 == nullptr) { call2 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call2)->args = std::make_tuple(c, d); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call2)); } if (call3 == nullptr) { call3 = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call3)->args = std::make_tuple(call1, call2); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call3)); } return call3; } };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == decltype(call1){}) { call1 = std::make_shared<Plus__BuiltIn>(a, b); WorkManager::call(dynamic_fn_cast(call1)); } if (call2 == decltype(call2){}) { call2 = std::make_shared<Plus__BuiltIn>(c, d); WorkManager::call(dynamic_fn_cast(call2)); } if (call3 == decltype(call3){}) { call3 = std::make_shared<Plus__BuiltIn>(call1,call2); WorkManager::call(dynamic_fn_cast(call3)); } return call3;} };";
         "four way plus int"
     )]
     #[test_case(
-        FnDef {
-            env: None,
-            name: Name::from("FlatBlockExample"),
-            arguments: vec![
-                (Memory(Id::from("x")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-            ],
-            statements: vec![
-                Declaration {
-                    memory: Memory(Id::from("block_tmp")),
-                    type_: FnType(
-                        Vec::new(),
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
-                }.into(),
-                Assignment {
-                    target: Memory(Id::from("block_tmp")),
-                    value: Block{
-                        statements: vec![
-                            Assignment {
-                                check_null: true,
-                                target: Memory(Id::from("call")),
-                                value: FnCall{
-                                    fn_: BuiltIn::BuiltInFn(
-                                        Name::from("Increment__BuiltIn"),
-                                    ).into(),
-                                    fn_type: FnType(
-                                        vec![
-                                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                        ],
-                                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                                    ),
-                                    args: vec![
-                                        Memory(Id::from("x")).into()
-                                    ]
-                                }.into()
-                            }.into(),
-                        ],
-                        ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))
-                    }.into(),
-                    check_null: false,
-                }.into(),
-                Assignment {
-                    target: Memory(Id::from("block")),
-                    check_null: true,
-                    value: FnCall{
-                        fn_: Memory(Id::from("block_tmp")).into(),
-                        fn_type: FnType(
-                            Vec::new(),
-                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                        ),
-                        args: Vec::new()
-                    }.into()
-                }.into(),
-            ],
-            ret: (Memory(Id::from("block")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-            allocations: vec![
-                Declaration{
-                    memory: Memory(Id::from("block")),
-                    type_: FnType(
-                        Vec::new(),
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
-                },
-                Declaration{
-                    memory: Memory(Id::from("call")),
-                    type_: FnType(
-                        vec![
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                        ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
-                }
-            ]
-        },
-        "struct FlatBlockExample : Closure<FlatBlockExample, Empty, Int, Int> { using Closure<FlatBlockExample, Empty, Int, Int>::Closure; FnT<Int> block = nullptr; FnT<Int, Int> call = nullptr; std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override { FnT<Int> block_tmp; block_tmp = std::make_shared<BlockFn<Int>>([&]() { if (call == nullptr) { call = std::make_shared<Increment__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int>>(call)->args = std::make_tuple(x); WorkManager::call(dynamic_fn_cast<FnT<Int,Int>>(call)); } return call; }); if (block == nullptr) { block = block_tmp->clone(); dynamic_fn_cast<FnT<Int>>(block)->args = std::make_tuple(); WorkManager::call(dynamic_fn_cast<FnT<Int>>(block)); } return block; } };";
-        "flat block example"
-    )]
-    #[test_case(
         FnDef{
-            env: Some(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            env: Some(AtomicType(AtomicTypeEnum::INT).into()),
             name: Name::from("Adder"),
-            arguments: vec![(Memory(Id::from("x")), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())))],
+            arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: vec![
                 Assignment {
                     target: Memory(Id::from("inner_res")),
@@ -1660,34 +1306,27 @@ mod tests {
                         ).into(),
                         fn_type: FnType(
                             vec![
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
+                                AtomicType(AtomicTypeEnum::INT).into(),
+                                AtomicType(AtomicTypeEnum::INT).into(),
                             ],
-                            Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                            Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                         ),
                         args: vec![
                             Memory(Id::from("x")).into(),
                             Memory(Id::from("env")).into(),
                         ]
                     }.into(),
-                    check_null: true
                 }.into()
             ],
-            ret: (Memory(Id::from("inner_res")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+            ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: vec![
                 Declaration{
                     memory: Memory(Id::from("inner_res")),
-                    type_: FnType(
-                        vec![
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                            MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                        ],
-                        Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                    ).into()
+                    type_: AtomicType(AtomicTypeEnum::INT).into(),
                 }
             ]
         },
-    "struct Adder : Closure<Adder, std::shared_ptr<Lazy<Int>>, Int, Int> { using Closure<Adder, std::shared_ptr<Lazy<Int>>, Int, Int>::Closure; FnT<Int, Int, Int> inner_res = nullptr; std::shared_ptr<Lazy<Int>> body(std::shared_ptr<Lazy<Int>> &x) override { if (inner_res == nullptr) { inner_res = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)->args = std::make_tuple(x, env); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(inner_res)); } return inner_res; } };";
+    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == decltype(inner_res){}) { inner_res = std::make_shared<Plus__BuiltIn>(x, env); WorkManager::call(dynamic_fn_cast(inner_res)); } return inner_res; } };";
     "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1721,30 +1360,23 @@ mod tests {
                                 ).into(),
                                 fn_type: FnType(
                                     vec![
-                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                        MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))
+                                        AtomicType(AtomicTypeEnum::INT).into(),
+                                        AtomicType(AtomicTypeEnum::INT).into()
                                     ],
-                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                                 ),
                                 args: vec![
                                     Memory(Id::from("x")).into(),
                                     Memory(Id::from("y")).into(),
                                 ]
                             }.into(),
-                            check_null: true
                         }.into(),
                     ],
-                    ret: (Memory(Id::from("call")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    ret: (Memory(Id::from("call")).into(), AtomicType(AtomicTypeEnum::INT).into()),
                     allocations: vec![
                         Declaration{
                             memory: Memory(Id::from("call")),
-                            type_: FnType(
-                                vec![
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                    MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into())),
-                                ],
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ).into()
+                            type_: AtomicType(AtomicTypeEnum::INT).into()
                         }
                     ]
                 },
@@ -1755,43 +1387,37 @@ mod tests {
                     statements: vec![
                         Assignment {
                             target: Memory(Id::from("x")).into(),
-                            value: Expression::Wrap(Value::BuiltIn(Integer{value: 9}.into()),AtomicType(AtomicTypeEnum::INT).into()),
-                            check_null: true
+                            value: Expression::Value(Value::BuiltIn(Integer{value: 9}.into())),
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("y")).into(),
-                            value: Expression::Wrap(Value::BuiltIn(Integer{value: 5}.into()),AtomicType(AtomicTypeEnum::INT).into()),
-                            check_null: true
+                            value: Expression::Value(Value::BuiltIn(Integer{value: 5}.into())),
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("main")),
-                            check_null: true,
                             value: FnCall{
                                 fn_: BuiltIn::BuiltInFn(
                                     Name::from("Main"),
                                 ).into(),
                                 fn_type: FnType(
                                     Vec::new(),
-                                    Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                                 ),
                                 args: Vec::new()
                             }.into()
                         }.into(),
                     ],
-                    ret: (Memory(Id::from("main")).into(), MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
+                    ret: (Memory(Id::from("main")).into(), AtomicType(AtomicTypeEnum::INT).into()),
                     allocations: vec![
                         Declaration{
                             memory: Memory(Id::from("main")),
-                            type_: FnType(
-                                Vec::new(),
-                                Box::new(MachineType::Lazy(Box::new(AtomicType(AtomicTypeEnum::INT).into()))),
-                            ).into()
+                            type_: AtomicType(AtomicTypeEnum::INT).into()
                         }
                     ]
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo, Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main, Empty, Int> { using Closure<Main, Empty, Int>::Closure; FnT<Int, Int, Int> call = nullptr; std::shared_ptr<Lazy<Int>> body() override { if (call == nullptr){ call = std::make_shared<Plus__BuiltIn>(); dynamic_fn_cast<FnT<Int,Int,Int>>(call)->args = std::make_tuple(x,y); WorkManager::call(dynamic_fn_cast<FnT<Int,Int,Int>>(call)); } return call; } }; struct PreMain : Closure<PreMain, Empty, Int> { using Closure<PreMain, Empty, Int>::Closure; FnT<Int> main = nullptr; std::shared_ptr<Lazy<Int>> body() override { if (x == nullptr) {x = std::make_shared<LazyConstant<Int>>(9LL);} if (y == nullptr) {y = std::make_shared<LazyConstant<Int>>(5LL); }if (main == nullptr){ main = std::make_shared<Main>(); dynamic_fn_cast<FnT<Int>>(main)->args = std::make_tuple(); WorkManager::call(dynamic_fn_cast<FnT<Int>>(main)); } return main; } }; ";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call; LazyT<Int> body() override { if (call == decltype(call){}){ call=std::make_shared<Plus__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if (main == decltype(main){}){ main = std::make_shared<Main>(); WorkManager::call(dynamic_fn_cast(main));} return main; }};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

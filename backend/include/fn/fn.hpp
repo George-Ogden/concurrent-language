@@ -6,6 +6,7 @@
 #include "system/work_manager_pre.hpp"
 #include "time/sleep.hpp"
 #include "types/builtin.hpp"
+#include "types/utils.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -24,6 +25,7 @@ class Fn {
   protected:
     virtual void run() = 0;
     virtual bool done() const = 0;
+    virtual void await_all() = 0;
 
   public:
     virtual ~Fn() = default;
@@ -35,17 +37,16 @@ class Fn {
 
 template <typename Ret, typename... Args>
 struct ParametricFn : public Fn, Lazy<Ret> {
-    using ArgsT = std::tuple<std::shared_ptr<Lazy<std::decay_t<Args>>>...>;
+    using ArgsT = LazyT<std::tuple<std::decay_t<Args>...>>;
     using R = std::decay_t<Ret>;
     std::atomic<bool> done_flag{false};
     Locked<std::vector<Continuation>> continuations;
     ArgsT args;
-    R ret;
+    LazyT<R> ret;
     ParametricFn() = default;
 
-    explicit ParametricFn(
-        std::shared_ptr<
-            Lazy<std::decay_t<Args>>>... args) requires(sizeof...(Args) > 0)
+    explicit ParametricFn(LazyT<std::decay_t<Args>>... args) requires(
+        sizeof...(Args) > 0)
         : args(args...) {}
 
     explicit ParametricFn(std::add_const_t<std::add_lvalue_reference_t<
@@ -53,37 +54,62 @@ struct ParametricFn : public Fn, Lazy<Ret> {
         : args(reference_all(args...)) {}
     virtual ~ParametricFn() { cleanup_args(); }
     virtual std::shared_ptr<ParametricFn<Ret, Args...>> clone() const = 0;
-    virtual std::shared_ptr<Lazy<R>>
-    body(std::add_lvalue_reference_t<
-         std::shared_ptr<Lazy<std::decay_t<Args>>>>...) = 0;
+    virtual std::tuple<std::shared_ptr<ParametricFn<Ret, Args...>>, LazyT<Ret>>
+    clone_with_args(LazyT<std::decay_t<Args>>... args) const {
+        std::shared_ptr<ParametricFn<Ret, Args...>> call = this->clone();
+        call->args = std::make_tuple(args...);
+        call->ret = Lazy<LazyT<R>>::make_placeholders();
+        return std::make_tuple(call, call->ret);
+    };
+    virtual LazyT<R>
+    body(std::add_lvalue_reference_t<LazyT<std::decay_t<Args>>>...) = 0;
     void run() override {
         auto arguments = this->args;
         if (!done_flag.load(std::memory_order_acquire)) {
-            std::shared_ptr<Lazy<R>> return_ = std::apply(
+            LazyT<R> return_ = std::apply(
                 [this](auto &&...t) { return body(t...); }, arguments);
             WorkManager::await(return_);
-            ret = return_->value();
+            assign(ret, return_);
         }
         continuations.acquire();
         for (const Continuation &c : *continuations) {
-            Lazy<Ret>::update_continuation(c);
+            Lazy<R>::update_continuation(c);
         }
         continuations->clear();
         done_flag.store(true, std::memory_order_release);
         cleanup();
         continuations.release();
     }
+    void await_all() override { WorkManager::await_all(ret); }
+    template <typename T> static void assign(T &ret, T &return_) {
+        if constexpr (is_lazy_v<T>) {
+            auto ptr =
+                std::dynamic_pointer_cast<LazyPlaceholder<remove_lazy_t<T>>>(
+                    ret);
+            if (ptr == nullptr) {
+                ret = return_;
+            } else {
+                ptr->assign(return_);
+            }
+        } else if constexpr (is_tuple_v<T>) {
+            constexpr auto size = std::tuple_size_v<T>;
+            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                ((assign(std::get<Is>(ret), std::get<Is>(return_))), ...);
+            }
+            (std::make_index_sequence<size>{});
+        }
+    }
     virtual void cleanup() { cleanup_args(); }
     void cleanup_args() { this->args = ArgsT{}; }
     bool done() const override {
         return done_flag.load(std::memory_order_relaxed);
     }
-    R value() override { return ret; }
+    R value() const override { return Lazy<R>::extract_value(ret); }
     void add_continuation(Continuation c) override {
         continuations.acquire();
         if (done()) {
             continuations.release();
-            Lazy<Ret>::update_continuation(c);
+            Lazy<R>::update_continuation(c);
         } else {
             continuations->push_back(c);
             continuations.release();
@@ -100,25 +126,24 @@ struct EasyCloneFn : ParametricFn<R, A...> {
 };
 
 class FinishWork : public Fn {
-    void run() override{};
-    bool done() const override { return true; };
+    void run() override {}
+    bool done() const override { return true; }
+    void await_all() override {}
 };
 
 template <typename T> struct BlockFn : public ParametricFn<T> {
-    std::function<std::shared_ptr<Lazy<T>>()> body_fn;
-    std::shared_ptr<Lazy<T>> body() override { return body_fn(); }
-    explicit BlockFn(std::function<std::shared_ptr<Lazy<T>>()> &&f)
-        : body_fn(std::move(f)){};
-    explicit BlockFn(const std::function<std::shared_ptr<Lazy<T>>()> &f)
-        : body_fn(f){};
+    std::function<LazyT<T>()> body_fn;
+    LazyT<T> body() override { return body_fn(); }
+    explicit BlockFn(std::function<LazyT<T>()> &&f) : body_fn(std::move(f)){};
+    explicit BlockFn(const std::function<LazyT<T>()> &f) : body_fn(f){};
     std::shared_ptr<ParametricFn<T>> clone() const override {
         return std::make_shared<BlockFn<T>>(body_fn);
     }
 };
 
 template <typename E> struct ClosureRoot {
-    E env;
-    explicit ClosureRoot(const E &e) : env(e) {}
+    LazyT<E> env;
+    explicit ClosureRoot(const LazyT<E> &e) : env(e) {}
     explicit ClosureRoot() = default;
     virtual ~ClosureRoot() = default;
 };
@@ -129,8 +154,7 @@ struct Closure : ClosureRoot<E>, ParametricFn<R, A...> {
     std::shared_ptr<ParametricFn<R, A...>> clone() const override {
         return std::make_shared<T>(this->env);
     }
-    void cleanup_env() { this->env = E{}; }
-    virtual ~Closure() { cleanup_env(); }
+    virtual ~Closure() {}
 };
 
 template <> struct ClosureRoot<Empty> {};
