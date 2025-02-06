@@ -593,23 +593,31 @@ impl Compiler {
             types,
         } = program;
         let type_defs = self.compile_type_defs(types);
-        let IntermediateType::IntermediateFnType(IntermediateFnType(_, main_ret_type)) =
+        let IntermediateType::IntermediateFnType(IntermediateFnType(main_arg_types, main_ret_type)) =
             main.type_()
         else {
-            panic!("Man has non fn type.")
+            panic!("Main has non fn type.")
         };
+        let args = main_arg_types
+            .iter()
+            .map(|type_| IntermediateArg::from(type_.clone()))
+            .collect_vec();
         let call = IntermediateMemory::from(*main_ret_type);
         let assignment = IntermediateAssignment {
             expression: IntermediateFnCall {
                 fn_: main.clone().into(),
-                args: Vec::new(),
+                args: args
+                    .clone()
+                    .into_iter()
+                    .map(IntermediateValue::from)
+                    .collect(),
             }
             .into(),
             location: call.location.clone(),
         };
         statements.push(IntermediateStatement::IntermediateAssignment(assignment));
         let (statements, _) = self.compile_lambda(IntermediateLambda {
-            args: Vec::new(),
+            args: args,
             ret: call.clone().into(),
             statements: statements,
         });
@@ -2378,6 +2386,93 @@ mod tests {
             ]
         };
         "program with type defs"
+    )]
+    #[test_case(
+        {
+            let main = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::INT.into(),
+                    ],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let arg0: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let arg1: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            IntermediateProgram {
+                statements: vec![
+                    IntermediateAssignment{
+                        location: main.location.clone(),
+                        expression:
+                            IntermediateLambda{
+                                ret: arg1.clone().into(),
+                                args: vec![arg0, arg1],
+                                statements: Vec::new(),
+                            }.into()
+                    }.into(),
+                ],
+                main: main.clone().into(),
+                types: Vec::new()
+            }
+        },
+        Program {
+            type_defs: Vec::new(),
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: vec![
+                        (Memory(Id::from("m2")), AtomicTypeEnum::INT.into()),
+                        (Memory(Id::from("m3")), AtomicTypeEnum::INT.into()),
+                    ],
+                    statements: Vec::new(),
+                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
+                    env: None,
+                    allocations: Vec::new()
+                },
+                FnDef {
+                    name: Name::from("Main"),
+                    arguments: vec![
+                        (Memory(Id::from("m0")), AtomicTypeEnum::INT.into()),
+                        (Memory(Id::from("m1")), AtomicTypeEnum::INT.into()),
+                    ],
+                    statements: vec![
+                        Declaration {
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
+                            ).into(),
+                            memory: Memory(Id::from("m4"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m4")),
+                            value: ClosureInstantiation { name: Name::from("F0"), env: None }.into(),
+                        }.into(),
+                        Await(vec![Memory(Id::from("m4"))]).into(),
+                        Assignment {
+                            target: Memory(Id::from("m5")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m4")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ),
+                                args: vec![Memory(Id::from("m0")).into(),Memory(Id::from("m1")).into()]
+                            }.into(),
+                        }.into()
+                    ],
+                    ret: (Memory(Id::from("m5")).into(), AtomicTypeEnum::INT.into()),
+                    env: None,
+                    allocations: vec![
+                        Declaration {
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory: Memory(Id::from("m5"))
+                        }
+                    ]
+                }
+            ]
+        };
+        "program with args"
     )]
     fn test_compile_program(program: IntermediateProgram, expected_program: Program) {
         let mut compiler = Compiler::new();

@@ -14,8 +14,8 @@ fib = (n: int) -> int {
     }
 };
 
-main = () -> int {
-    fib(20)
+main = (n: int) -> int {
+    fib(n)
 };
 
 /*
