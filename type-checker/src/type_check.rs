@@ -1,3 +1,4 @@
+use crate::prefix::prefix;
 use crate::type_check_nodes::{
     ConstructorType, GenericVariables, ParametricType, Type, TypeCheckError, TypeContext,
     TypeDefinitions, TypedAccess, TypedAssignment, TypedBlock, TypedConstructorCall,
@@ -44,12 +45,6 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
             Type::from(TypeFn(vec![TYPE_BOOL], Box::new(TYPE_BOOL))),
         )
     });
-    let boolean_binary_operators = ["&&", "||"].into_iter().map(|operator| {
-        (
-            Id::from(operator),
-            Type::from(TypeFn(vec![TYPE_BOOL, TYPE_BOOL], Box::new(TYPE_BOOL))),
-        )
-    });
     let integer_comparisons = ["<", "<=", ">", ">=", "==", "!="]
         .into_iter()
         .map(|operator| {
@@ -60,7 +55,6 @@ thread_local! {pub static DEFAULT_CONTEXT: Lazy<TypeContext> = Lazy::new(|| {
         });
     TypeContext::from_iter(
         integer_binary_operators
-            .chain(boolean_binary_operators)
             .chain(integer_comparisons)
             .chain(integer_unary_operators)
             .chain(boolean_unary_operators)
@@ -1084,7 +1078,8 @@ impl TypeChecker {
             block: typed_block,
         });
     }
-    pub fn type_check(program: Program) -> Result<TypedProgram, TypeCheckError> {
+    pub fn type_check(mut program: Program) -> Result<TypedProgram, TypeCheckError> {
+        program.definitions = vec![prefix(), program.definitions].concat();
         DEFAULT_CONTEXT.with(|context| Self::check_program(program, context))
     }
 }
@@ -5006,7 +5001,32 @@ mod tests {
             ]
         },
         Ok(());
-        "default operator usage"
+        "builtin-in operator usage"
+    )]
+    #[test_case(
+        Program{
+            definitions: vec![
+                Assignment{
+                    assignee: VariableAssignee("main"),
+                    expression: Box::new(FunctionDefinition{
+                        parameters: Vec::new(),
+                        return_type: ATOMIC_TYPE_BOOL.into(),
+                        body: ExpressionBlock(FunctionCall{
+                            function: Box::new(GenericVariable{
+                                id: Id::from("&&"),
+                                type_instances: Vec::new()
+                            }.into()),
+                            arguments: vec![
+                                Boolean{ value: false }.into(),
+                                Boolean{ value: true }.into(),
+                            ]
+                        }.into())
+                    }.into())
+                }.into(),
+            ]
+        },
+        Ok(());
+        "pre-defined operator usage"
     )]
     fn test_default_program(program: Program, result: Result<(), ()>) {
         let type_check_result = TypeChecker::type_check(program);
