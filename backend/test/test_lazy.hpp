@@ -61,7 +61,7 @@ class LazyFunctionTest : public ::testing::Test {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
         WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
-        lazy_fn = std::make_shared<Increment__BuiltIn>();
+        lazy_fn = std::make_shared<Increment__BuiltIn_Fn>();
         lazy_fn->args = std::make_tuple(std::make_shared<LazyConstant<Int>>(4));
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }

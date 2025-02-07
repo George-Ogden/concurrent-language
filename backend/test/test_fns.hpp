@@ -45,15 +45,15 @@ struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
     LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
                     LazyT<Int> &d) override {
         if (call1 == decltype(call1){}) {
-            call1 = std::make_shared<Plus__BuiltIn>(a, b);
+            call1 = std::make_shared<Plus__BuiltIn_Fn>(a, b);
             WorkManager::call(call1);
         }
         if (call2 == decltype(call2){}) {
-            call2 = std::make_shared<Plus__BuiltIn>(c, d);
+            call2 = std::make_shared<Plus__BuiltIn_Fn>(c, d);
             WorkManager::call(call2);
         }
         if (call3 == decltype(call3){}) {
-            call3 = std::make_shared<Plus__BuiltIn>(call1, call2);
+            call3 = std::make_shared<Plus__BuiltIn_Fn>(call1, call2);
             WorkManager::call(call3);
         }
         return call3;
@@ -62,20 +62,20 @@ struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
 
 struct FourWayPlusV2 : Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int> {
     using Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int>::Closure;
-    std::shared_ptr<Plus__BuiltIn> call1 = nullptr, call2 = nullptr,
-                                   call3 = nullptr;
+    std::shared_ptr<Plus__BuiltIn_Fn> call1 = nullptr, call2 = nullptr,
+                                      call3 = nullptr;
     LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
                     LazyT<Int> &d) override {
         if (call1 == decltype(call1){}) {
-            call1 = std::make_shared<Plus__BuiltIn>(a, b);
+            call1 = std::make_shared<Plus__BuiltIn_Fn>(a, b);
             WorkManager::call(call1);
         }
         if (call2 == decltype(call2){}) {
-            call2 = std::make_shared<Plus__BuiltIn>(call1, c);
+            call2 = std::make_shared<Plus__BuiltIn_Fn>(call1, c);
             WorkManager::call(call2);
         }
         if (call3 == decltype(call3){}) {
-            call3 = std::make_shared<Plus__BuiltIn>(call2, d);
+            call3 = std::make_shared<Plus__BuiltIn_Fn>(call2, d);
             WorkManager::call(call3);
         }
         return call3;
@@ -108,31 +108,31 @@ TEST_P(FnCorrectnessTest, FourWayPlusV2Test) {
 
 struct BranchingExample : EasyCloneFn<BranchingExample, Int, Int, Int, Int> {
     using EasyCloneFn<BranchingExample, Int, Int, Int, Int>::EasyCloneFn;
-    std::shared_ptr<Comparison_GE__BuiltIn> call1 = nullptr;
-    std::shared_ptr<Plus__BuiltIn> call2 = nullptr;
-    std::shared_ptr<Minus__BuiltIn> call3 = nullptr;
+    std::shared_ptr<Comparison_GE__BuiltIn_Fn> call1 = nullptr;
+    std::shared_ptr<Plus__BuiltIn_Fn> call2 = nullptr;
+    std::shared_ptr<Minus__BuiltIn_Fn> call3 = nullptr;
     LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y, LazyT<Int> &z) override {
         if (call1 == decltype(call1){}) {
-            call1 = std::make_shared<Comparison_GE__BuiltIn>(
+            call1 = std::make_shared<Comparison_GE__BuiltIn_Fn>(
                 x, std::make_shared<LazyConstant<Int>>(0));
             WorkManager::call(call1);
         }
         WorkManager::await(call1);
         if (call1->value()) {
             if (call2 == decltype(call2){}) {
-                call2 = std::make_shared<Plus__BuiltIn>(
+                call2 = std::make_shared<Plus__BuiltIn_Fn>(
                     y, std::make_shared<LazyConstant<Int>>(1));
                 WorkManager::call(call2);
             }
         } else {
             if (call2 == decltype(call2){}) {
-                call2 = std::make_shared<Plus__BuiltIn>(
+                call2 = std::make_shared<Plus__BuiltIn_Fn>(
                     z, std::make_shared<LazyConstant<Int>>(1));
                 WorkManager::call(call2);
             }
         }
         if (call3 == decltype(call3){}) {
-            call3 = std::make_shared<Minus__BuiltIn>(
+            call3 = std::make_shared<Minus__BuiltIn_Fn>(
                 call2, std::make_shared<LazyConstant<Int>>(2));
             WorkManager::call(call3);
         }
@@ -166,7 +166,7 @@ struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
         if (block1 == decltype(block1){}) {
             block1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call1 == decltype(call1){}) {
-                    call1 = std::make_shared<Increment__BuiltIn>();
+                    call1 = std::make_shared<Increment__BuiltIn_Fn>();
                     call1->args = std::make_tuple(x);
                     WorkManager::call(call1);
                 }
@@ -190,27 +190,28 @@ TEST_P(FnCorrectnessTest, FlatBlockExampleTest) {
 
 struct NestedBlockExample : EasyCloneFn<NestedBlockExample, Int, Int> {
     using EasyCloneFn<NestedBlockExample, Int, Int>::EasyCloneFn;
-    std::shared_ptr<Increment__BuiltIn> call1 = nullptr, call2 = nullptr,
-                                        call3 = nullptr;
+    std::shared_ptr<Increment__BuiltIn_Fn> call1 = nullptr, call2 = nullptr,
+                                           call3 = nullptr;
     FnT<Int> block1 = nullptr, block2 = nullptr, block3 = nullptr;
     LazyT<Int> body(LazyT<Int> &x) override {
         if (block1 == decltype(block1){}) {
             block1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call1 == decltype(call1){}) {
-                    call1 = std::make_shared<Increment__BuiltIn>(x);
+                    call1 = std::make_shared<Increment__BuiltIn_Fn>(x);
                     WorkManager::call(call1);
                 }
                 if (block2 == decltype(block2){}) {
                     block2 = std::make_shared<BlockFn<Int>>([&]() {
                         if (call2 == decltype(call2){}) {
-                            call2 = std::make_shared<Increment__BuiltIn>(call1);
+                            call2 =
+                                std::make_shared<Increment__BuiltIn_Fn>(call1);
                             WorkManager::call(call2);
                         }
                         if (block3 == decltype(block3){}) {
                             block3 = std::make_shared<BlockFn<Int>>([&] {
                                 if (call3 == decltype(call3){}) {
                                     call3 =
-                                        std::make_shared<Increment__BuiltIn>(
+                                        std::make_shared<Increment__BuiltIn_Fn>(
                                             call2);
                                     WorkManager::call(call3);
                                 }
@@ -241,11 +242,10 @@ TEST_P(FnCorrectnessTest, NestedBlockExampleTest) {
 
 struct Adder : Closure<Adder, LazyT<Int>, Int, Int> {
     using Closure<Adder, LazyT<Int>, Int, Int>::Closure;
-    FnT<Int, Int, Int> inner_res = nullptr;
+    LazyT<Int> inner_res;
     LazyT<Int> body(LazyT<Int> &x) override {
         if (inner_res == decltype(inner_res){}) {
-            inner_res = std::make_shared<Plus__BuiltIn>(x, env);
-            WorkManager::call(inner_res);
+            inner_res = Plus__BuiltIn(x, env);
         }
         return inner_res;
     }
@@ -284,15 +284,15 @@ TEST_P(FnCorrectnessTest, NestedFnExampleTest) {
 struct IfStatementExample
     : EasyCloneFn<IfStatementExample, Int, Int, Int, Int> {
     using EasyCloneFn<IfStatementExample, Int, Int, Int, Int>::EasyCloneFn;
-    std::shared_ptr<Comparison_GE__BuiltIn> call1 = nullptr;
+    LazyT<Bool> comparison = nullptr;
     FnT<Int> branch1 = nullptr, branch2 = nullptr, branch = nullptr;
-    std::shared_ptr<Plus__BuiltIn> call2_1 = nullptr, call2_2 = nullptr;
-    std::shared_ptr<Minus__BuiltIn> call3 = nullptr;
+    std::shared_ptr<Plus__BuiltIn_Fn> call2_1 = nullptr, call2_2 = nullptr;
+    LazyT<Int> ret = nullptr;
     LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y, LazyT<Int> &z) override {
         if (branch1 == decltype(branch1){}) {
             branch1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call2_1 == decltype(call2_1){}) {
-                    call2_1 = std::make_shared<Plus__BuiltIn>(
+                    call2_1 = std::make_shared<Plus__BuiltIn_Fn>(
                         y, std::make_shared<LazyConstant<Int>>(1));
                     WorkManager::call(call2_1);
                 }
@@ -302,7 +302,7 @@ struct IfStatementExample
         if (branch2 == decltype(branch2){}) {
             branch2 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call2_2 == decltype(call2_2){}) {
-                    call2_2 = std::make_shared<Plus__BuiltIn>(
+                    call2_2 = std::make_shared<Plus__BuiltIn_Fn>(
                         z, std::make_shared<LazyConstant<Int>>(1));
                     WorkManager::call(call2_2);
                 }
@@ -310,13 +310,10 @@ struct IfStatementExample
             });
         }
 
-        if (call1 == decltype(call1){}) {
-            call1 = std::make_shared<Comparison_GE__BuiltIn>(
-                x, std::make_shared<LazyConstant<Int>>(0));
-            WorkManager::call(call1);
-        }
-        WorkManager::await(call1);
-        if (call1->value()) {
+        comparison =
+            Comparison_GE__BuiltIn(x, std::make_shared<LazyConstant<Int>>(0));
+        WorkManager::await(comparison);
+        if (comparison->value()) {
             if (branch == decltype(branch){}) {
                 branch = branch1;
                 WorkManager::call(branch);
@@ -327,12 +324,8 @@ struct IfStatementExample
                 WorkManager::call(branch);
             };
         }
-        if (call3 == decltype(call3){}) {
-            call3 = std::make_shared<Minus__BuiltIn>(
-                branch, std::make_shared<LazyConstant<Int>>(2));
-            WorkManager::call(call3);
-        }
-        return call3;
+        ret = Minus__BuiltIn(branch, std::make_shared<LazyConstant<Int>>(2));
+        return ret;
     }
 };
 
@@ -380,31 +373,27 @@ TEST_P(FnCorrectnessTest, SharedRegisterExampleTest) {
 
 struct RecursiveDouble : EasyCloneFn<RecursiveDouble, Int, Int> {
     using EasyCloneFn<RecursiveDouble, Int, Int>::EasyCloneFn;
-    std::shared_ptr<RecursiveDouble> call1 = nullptr, call3 = nullptr;
-    std::shared_ptr<Plus__BuiltIn> call2 = nullptr;
+    LazyT<Int> recursive_call = nullptr, plus = nullptr, extra_call = nullptr;
     LazyT<Int> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
-            if (call1 == decltype(call1){}) {
-                auto arg = std::make_shared<Decrement__BuiltIn>(x);
-                WorkManager::call(arg);
-                call1 = std::make_shared<RecursiveDouble>(arg);
-                WorkManager::call(call1);
+            if (recursive_call == decltype(recursive_call){}) {
+                auto arg = Decrement__BuiltIn(x);
+                recursive_call = std::make_shared<RecursiveDouble>(arg);
+                WorkManager::call(dynamic_fn_cast(recursive_call));
             }
 
-            if (call3 == decltype(call3){}) {
-                auto arg = std::make_shared<Decrement__BuiltIn>(x);
-                WorkManager::call(arg);
-                call3 = std::make_shared<RecursiveDouble>(arg);
-                call3->run();
+            if (extra_call == decltype(extra_call){}) {
+                auto arg = Decrement__BuiltIn(x);
+                extra_call = std::make_shared<RecursiveDouble>(arg);
+                dynamic_fn_cast<FnT<Int, Int>>(extra_call)->run();
             }
 
-            if (call2 == decltype(call2){}) {
-                call2 = std::make_shared<Plus__BuiltIn>(
-                    call1, std::make_shared<LazyConstant<Int>>(2));
-                WorkManager::call(call2);
+            if (plus == decltype(plus){}) {
+                plus = Plus__BuiltIn(recursive_call,
+                                     std::make_shared<LazyConstant<Int>>(2));
             }
-            return call2;
+            return plus;
         } else {
             return std::make_shared<LazyConstant<Int>>(0);
         }
@@ -482,7 +471,7 @@ struct HigherOrderReuse
     using EasyCloneFn<HigherOrderReuse, Int, FnT<Int, Int>, Int,
                       Int>::EasyCloneFn;
     FnT<Int, Int> call1 = nullptr, call2 = nullptr;
-    std::shared_ptr<Plus__BuiltIn> call3 = nullptr;
+    LazyT<Int> ret = nullptr;
     LazyT<Int> body(LazyT<FnT<Int, Int>> &f, LazyT<Int> &x,
                     LazyT<Int> &y) override {
         WorkManager::await(f);
@@ -496,18 +485,17 @@ struct HigherOrderReuse
             call2->args = std::make_tuple(y);
             WorkManager::call(call2);
         }
-        if (call3 == decltype(call3){}) {
-            call3 = std::make_shared<Plus__BuiltIn>(call1, call2);
-            WorkManager::call(call3);
+        if (ret == decltype(ret){}) {
+            ret = Plus__BuiltIn(call1, call2);
         }
-        return call3;
+        return ret;
     }
 };
 
 TEST_P(FnCorrectnessTest, ReusedHigherOrderFunctionTest) {
     LazyT<FnT<Int, Int>> f =
-        std::make_shared<LazyConstant<typename Increment__BuiltIn::FnT>>(
-            std::make_shared<Increment__BuiltIn>());
+        std::make_shared<LazyConstant<typename Increment__BuiltIn_Fn::T>>(
+            std::make_shared<Increment__BuiltIn_Fn>());
     LazyT<Int> x = std::make_shared<LazyConstant<Int>>(5),
                y = std::make_shared<LazyConstant<Int>>(4);
     std::shared_ptr<HigherOrderReuse> F =
@@ -622,10 +610,7 @@ struct EitherIntBoolEdgeCase
             LazyT<Left::type> i = reinterpret_cast<Left *>(&x.value)->value;
             LazyT<Int> z = std::make_shared<LazyConstant<Int>>(0);
             if (y == decltype(y){}) {
-                y = std::make_shared<Comparison_GT__BuiltIn>();
-                dynamic_fn_cast<FnT<Bool, Int, Int>>(y)->args =
-                    std::make_tuple(i, z);
-                WorkManager::call(dynamic_fn_cast(y));
+                y = Comparison_GT__BuiltIn(i, z);
             }
             break;
         }
@@ -678,8 +663,8 @@ struct Nil {
 
 struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
     using EasyCloneFn<ListIntSum, Int, ListInt>::EasyCloneFn;
-    std::shared_ptr<ListIntSum> call1 = nullptr;
-    std::shared_ptr<Plus__BuiltIn> call2 = nullptr;
+    std::shared_ptr<ListIntSum> call = nullptr;
+    LazyT<Int> ret = nullptr;
     LazyT<Int> body(LazyT<ListInt> &lazy_list) override {
         WorkManager::await(lazy_list);
         ListInt list = lazy_list->value();
@@ -691,18 +676,16 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
             LazyT<Int> head = std::get<0ULL>(cons);
             LazyT<ListInt> tail = std::get<1ULL>(cons);
 
-            if (call1 == decltype(call1){}) {
-                call1 = std::make_shared<ListIntSum>();
-                call1->args = std::make_tuple(tail);
-                WorkManager::call(call1);
+            if (call == decltype(call){}) {
+                call = std::make_shared<ListIntSum>();
+                call->args = std::make_tuple(tail);
+                WorkManager::call(call);
             }
 
-            if (call2 == decltype(call2){}) {
-                call2 = std::make_shared<Plus__BuiltIn>();
-                call2->args = std::make_tuple(call1, head);
-                WorkManager::call(call2);
+            if (ret == decltype(ret){}) {
+                ret = Plus__BuiltIn(call, head);
             }
-            return call2;
+            return ret;
         }
         case 1:
             return std::make_shared<LazyConstant<Int>>(0);
@@ -857,8 +840,7 @@ struct PairSumFn : Closure<PairSumFn, Empty, Int, Int, Int> {
         LazyT<Int> a = std::get<0>(pair);
         LazyT<Int> b = std::get<1>(pair);
         if (res == decltype(res){}) {
-            res = std::make_shared<Plus__BuiltIn>(a, b);
-            WorkManager::call(dynamic_fn_cast(res));
+            res = Plus__BuiltIn(a, b);
         }
         return res;
     }
@@ -880,16 +862,16 @@ TEST_P(FnCorrectnessTest, PairSumTest) {
 
 struct TupleAddFn : Closure<TupleAddFn, Empty, TupleT<Int, Int>, Int, Int> {
     using Closure<TupleAddFn, Empty, TupleT<Int, Int>, Int, Int>::Closure;
-    std::shared_ptr<Plus__BuiltIn> plus = nullptr;
-    std::shared_ptr<Minus__BuiltIn> minus = nullptr;
+    std::shared_ptr<Plus__BuiltIn_Fn> plus = nullptr;
+    std::shared_ptr<Minus__BuiltIn_Fn> minus = nullptr;
     LazyT<TupleT<Int, Int>> body(LazyT<Int> &x, LazyT<Int> &y) override {
         if (plus == decltype(plus){}) {
-            plus = std::make_shared<Plus__BuiltIn>();
+            plus = std::make_shared<Plus__BuiltIn_Fn>();
             plus->args = std::make_tuple(x, y);
             WorkManager::call(plus);
         }
         if (minus == decltype(minus){}) {
-            minus = std::make_shared<Minus__BuiltIn>();
+            minus = std::make_shared<Minus__BuiltIn_Fn>();
             minus->args = std::make_tuple(x, y);
             WorkManager::call(minus);
         }

@@ -35,27 +35,27 @@
         }                                                                      \
     };
 
-LazyT<Int> Plus__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Plus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() + y->value());
 }
 
-LazyT<Int> Minus__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Minus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() - y->value());
 }
 
-LazyT<Int> Multiply__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Multiply__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() * y->value());
 }
 
-LazyT<Int> Divide__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Divide__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() / y->value());
 }
 
-LazyT<Int> Exponentiate__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Exponentiate__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(y);
     if (y->value() < 0)
         return std::make_shared<LazyConstant<Int>>(0);
@@ -70,22 +70,22 @@ LazyT<Int> Exponentiate__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
     return std::make_shared<LazyConstant<Int>>(res);
 }
 
-LazyT<Int> Modulo__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Modulo__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() % y->value());
 }
 
-LazyT<Int> Right_Shift__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Right_Shift__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() >> y->value());
 }
 
-LazyT<Int> Left_Shift__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Left_Shift__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() << y->value());
 }
 
-LazyT<Int> Spaceship__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Spaceship__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     const auto o = (x->value() <=> y->value());
     if (o == std::strong_ordering::less)
@@ -95,62 +95,62 @@ LazyT<Int> Spaceship__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
     return std::make_shared<LazyConstant<Int>>(0);
 }
 
-LazyT<Int> Bitwise_And__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Bitwise_And__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() & y->value());
 }
 
-LazyT<Int> Bitwise_Or__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Bitwise_Or__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() | y->value());
 }
 
-LazyT<Int> Bitwise_Xor__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Int> Bitwise_Xor__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Int>>(x->value() ^ y->value());
 }
 
-LazyT<Int> Increment__BuiltIn(LazyT<Int> &x) {
+LazyT<Int> Increment__BuiltIn(LazyT<Int> x) {
     WorkManager::await(x);
     return std::make_shared<LazyConstant<Int>>(x->value() + 1);
 }
 
-LazyT<Int> Decrement__BuiltIn(LazyT<Int> &x) {
+LazyT<Int> Decrement__BuiltIn(LazyT<Int> x) {
     WorkManager::await(x);
     return std::make_shared<LazyConstant<Int>>(x->value() - 1);
 }
 
-LazyT<Bool> Negation__BuiltIn(LazyT<Bool> &x) {
+LazyT<Bool> Negation__BuiltIn(LazyT<Bool> x) {
     WorkManager::await(x);
     return std::make_shared<LazyConstant<Bool>>(!x->value());
 }
 
-LazyT<Bool> Comparison_LT__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Bool> Comparison_LT__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Bool>>(x->value() < y->value());
 }
 
-LazyT<Bool> Comparison_LE__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Bool> Comparison_LE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Bool>>(x->value() <= y->value());
 }
 
-LazyT<Bool> Comparison_EQ__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Bool> Comparison_EQ__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Bool>>(x->value() == y->value());
 }
 
-LazyT<Bool> Comparison_NE__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Bool> Comparison_NE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Bool>>(x->value() != y->value());
 }
 
-LazyT<Bool> Comparison_GT__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Bool> Comparison_GT__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Bool>>(x->value() > y->value());
 }
 
-LazyT<Bool> Comparison_GE__BuiltIn(LazyT<Int> &x, LazyT<Int> &y) {
+LazyT<Bool> Comparison_GE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
     return std::make_shared<LazyConstant<Bool>>(x->value() >= y->value());
 }
