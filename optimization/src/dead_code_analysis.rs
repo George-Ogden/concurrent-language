@@ -210,9 +210,9 @@ impl DeadCodeAnalyzer {
             }
         }
     }
-    fn solve_constraints(&self, initial_solution: Location) -> HashSet<Location> {
-        let mut solution = HashSet::from_iter([initial_solution.clone()]);
-        let mut new_variables = VecDeque::from([initial_solution]);
+    fn solve_constraints(&self, initial_solution: Vec<Location>) -> HashSet<Location> {
+        let mut solution = HashSet::from_iter(initial_solution.clone());
+        let mut new_variables = VecDeque::from(initial_solution);
         let mut double_constraint_index: HashMap<Location, Vec<Location>> = HashMap::from_iter(
             self.double_constraints
                 .keys()
@@ -472,7 +472,9 @@ impl DeadCodeAnalyzer {
         let IntermediateValue::IntermediateMemory(memory) = &program.main else {
             return program;
         };
-        optimizer.variables = optimizer.solve_constraints(memory.location.clone());
+        let mut initial_solution = vec![memory.location.clone()];
+        initial_solution.extend(optimizer.fn_args[&memory.location].clone());
+        optimizer.variables = optimizer.solve_constraints(initial_solution);
         let statements = optimizer.remove_redundancy(program.statements);
         IntermediateProgram {
             statements,
@@ -1084,6 +1086,7 @@ mod tests {
         assert_eq!(single_constraints, expected_single_constraints);
         assert_eq!(optimizer.double_constraints, expected_double_constraints);
     }
+
     #[test_case(
         {
             let location = Location::new();
@@ -1166,9 +1169,10 @@ mod tests {
         for ((l1, l2), v) in double_constraints {
             optimizer.add_double_constraint(l1, l2, v);
         }
-        let solution = optimizer.solve_constraints(initial_solution);
+        let solution = optimizer.solve_constraints(vec![initial_solution]);
         assert_eq!(solution, HashSet::from_iter(expected_solution));
     }
+
     #[test_case(
         {
             let w = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
@@ -1240,7 +1244,6 @@ mod tests {
                                         }.into(),
                                     ],
                                     ret: y.clone().into(),
-
                                 }.into()
                         }.into(),
                     ],
@@ -1287,6 +1290,59 @@ mod tests {
             )
         };
         "unused variables"
+    )]
+    #[test_case(
+        {
+            let main = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::BOOL.into(),
+                    ],
+                    Box::new(AtomicTypeEnum::BOOL.into()),
+                ))
+            );
+            let unused = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
+            (
+                IntermediateProgram{
+                    statements: vec![
+                        IntermediateAssignment{
+                            location: main.location.clone(),
+                            expression:
+                                IntermediateLambda{
+                                    args: vec![
+                                        IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
+                                        IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
+                                    ],
+                                    statements: Vec::new(),
+                                    ret: Boolean{value: true}.into()
+                                }.into()
+                        }.into(),
+                    ],
+                    types: Vec::new(),
+                    main: main.clone().into()
+                },
+                IntermediateProgram{
+                    statements: vec![
+                        IntermediateAssignment{
+                            location: main.location.clone(),
+                            expression:
+                                IntermediateLambda{
+                                    args: vec![
+                                        IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
+                                        IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
+                                    ],
+                                    statements: Vec::new(),
+                                    ret: Boolean{value: true}.into()
+                                }.into()
+                        }.into(),
+                    ],
+                    types: Vec::new(),
+                    main: main.clone().into()
+                },
+            )
+        };
+        "unused main args"
     )]
     #[test_case(
         {
