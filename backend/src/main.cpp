@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
     std::cout << main->value() << std::endl;
 
     auto duration = time_utils::time_delta(start, end);
-    std::cerr << "Execution time: " << duration << " ns" << std::endl;
+    std::cerr << "Execution time: " << duration << std::endl;
 
     return 0;
 }
