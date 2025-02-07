@@ -28,5 +28,8 @@ struct WorkManager {
     }
 };
 
-struct stack_inversion : public std::exception {};
+struct stack_inversion : public std::exception {
+    stack_inversion() = default;
+    const char *what() const noexcept override { return "Stack inversion"; }
+};
 struct finished : public std::exception {};

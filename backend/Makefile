@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors
+CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors -g
 OPTIMIZATION := -Ofast
 LIBS := -lpthread
 INCLUDE := -Iinclude
@@ -85,6 +85,6 @@ run: build
 	./$(TARGET) $(FLAGS)
 
 %: $(TARGET_DIR)/%
-	ASAN_OPTIONS=detect_stack_use_after_return=1 ASAN_OPTIONS=detect_leaks=0 ./$<
+	ASAN_OPTIONS=detect_stack_use_after_return=1:detect_leaks=0 ./$<
 
 .PHONY: all build clean default run

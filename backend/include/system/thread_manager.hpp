@@ -119,7 +119,8 @@ class ThreadManager {
             return result;
         } catch (const std::exception &e) {
             m.lock();
-            std::cerr << e.what() << std::endl;
+            std::cerr << "Exception in thread " << cpu_id << ": " << e.what()
+                      << std::endl;
             m.unlock();
             throw e;
         }
