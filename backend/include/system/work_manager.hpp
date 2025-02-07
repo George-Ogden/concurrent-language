@@ -152,12 +152,10 @@ template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
             }
             counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
 
-            if (!was_valid) {
-                if (counter.load(std::memory_order_relaxed) == 0) {
-                    while (!all_done(vs...)) {
-                    }
-                    return;
+            if (!was_valid && counter.load(std::memory_order_relaxed) == 0) {
+                while (!all_done(vs...)) {
                 }
+                return;
             }
             throw;
         }
