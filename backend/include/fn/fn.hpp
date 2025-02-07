@@ -39,6 +39,7 @@ template <typename Ret, typename... Args>
 struct ParametricFn : public Fn, Lazy<Ret> {
     using ArgsT = LazyT<std::tuple<std::decay_t<Args>...>>;
     using R = std::decay_t<Ret>;
+    using T = std::shared_ptr<ParametricFn<R, Args...>>;
     std::atomic<bool> done_flag{false};
     Locked<std::vector<Continuation>> continuations;
     ArgsT args;

@@ -6,232 +6,176 @@
 #include "types/builtin.hpp"
 
 #include <compare>
-#include <memory>
-#include <type_traits>
-#include <utility>
 
-template <typename R, typename... Ts>
-struct Op__BuiltIn : public ParametricFn<R, Ts...> {
-    using ParametricFn<R, Ts...>::ParametricFn;
-    using FnT = std::shared_ptr<ParametricFn<R, Ts...>>;
-    std::shared_ptr<Lazy<R>>
-    body(std::add_lvalue_reference_t<
-         std::shared_ptr<Lazy<std::decay_t<Ts>>>>... args) override {
-        WorkManager::await(args...);
-        return std::make_shared<LazyConstant<R>>(op(args->value()...));
+#define Binary_Int_Int_Int_Op__BuiltIn(fn)                                     \
+    struct fn##_Fn : public EasyCloneFn<fn##_Fn, Int, Int, Int> {              \
+        using EasyCloneFn<fn##_Fn, Int, Int, Int>::EasyCloneFn;                \
+        LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y) override {               \
+            return fn(x, y);                                                   \
+        }                                                                      \
     };
-    virtual std::decay_t<R> op(std::add_const_t<Ts>...) const = 0;
-};
 
-using Unary_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int>;
-using Unary_Int_Int_Op__BuiltIn_Base = ParametricFn<Int, Int>;
-using Unary_Bool_Bool_Op__BuiltIn = Op__BuiltIn<Bool, Bool>;
-using Unary_Bool_Bool_Op__BuiltIn_Base = ParametricFn<Bool, Bool>;
-using Binary_Int_Int_Int_Op__BuiltIn = Op__BuiltIn<Int, Int, Int>;
-using Binary_Int_Int_Int_Op__BuiltIn_Base = ParametricFn<Int, Int, Int>;
-using Binary_Int_Int_Bool_Op__BuiltIn = Op__BuiltIn<Bool, Int, Int>;
-using Binary_Int_Int_Bool_Op__BuiltIn_Base = ParametricFn<Bool, Int, Int>;
+#define Unary_Int_Int_Op__BuiltIn(fn)                                          \
+    struct fn##_Fn : public EasyCloneFn<fn##_Fn, Int, Int> {                   \
+        using EasyCloneFn<fn##_Fn, Int, Int>::EasyCloneFn;                     \
+        LazyT<Int> body(LazyT<Int> &x) override { return fn(x); }              \
+    };
 
-struct Plus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Plus__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x + y; }
-};
+#define Unary_Bool_Bool_Op__BuiltIn(fn)                                        \
+    struct fn##_Fn : public EasyCloneFn<fn##_Fn, Bool, Bool> {                 \
+        using EasyCloneFn<fn##_Fn, Bool, Bool>::EasyCloneFn;                   \
+        LazyT<Bool> body(LazyT<Bool> &x) override { return fn(x); }            \
+    };
 
-struct Minus__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Minus__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x - y; }
-};
+#define Binary_Int_Int_Bool_Op__BuiltIn(fn)                                    \
+    struct fn##_Fn : public EasyCloneFn<fn##_Fn, Bool, Int, Int> {             \
+        using EasyCloneFn<fn##_Fn, Bool, Int, Int>::EasyCloneFn;               \
+        LazyT<Bool> body(LazyT<Int> &x, LazyT<Int> &y) override {              \
+            return fn(x, y);                                                   \
+        }                                                                      \
+    };
 
-struct Multiply__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Multiply__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x * y; }
-};
+LazyT<Int> Plus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() + y->value());
+}
 
-struct Divide__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Divide__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x / y; }
-};
+LazyT<Int> Minus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() - y->value());
+}
 
-struct Exponentiate__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Exponentiate__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override {
-        if (y < 0)
-            return 0;
-        Int res = 1, base = x, exp = y;
-        while (exp) {
-            if (exp & 1)
-                res *= base;
-            exp >>= 1;
-            base *= base;
-        }
-        return res;
-    }
-};
+LazyT<Int> Multiply__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() * y->value());
+}
 
-struct Modulo__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Modulo__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x % y; }
-};
+LazyT<Int> Divide__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() / y->value());
+}
 
-struct Left_Shift__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Left_Shift__BuiltIn>();
+LazyT<Int> Exponentiate__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(y);
+    if (y->value() < 0)
+        return std::make_shared<LazyConstant<Int>>(0);
+    WorkManager::await(x);
+    Int res = 1, base = x->value(), exp = y->value();
+    while (exp) {
+        if (exp & 1)
+            res *= base;
+        exp >>= 1;
+        base *= base;
     }
-    Int op(const Int x, const Int y) const override { return x << y; }
-};
+    return std::make_shared<LazyConstant<Int>>(res);
+}
 
-struct Right_Shift__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Right_Shift__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x >> y; }
-};
+LazyT<Int> Modulo__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() % y->value());
+}
 
-struct Spaceship__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Spaceship__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override {
-        const auto o = (x <=> y);
-        if (o == std::strong_ordering::less)
-            return -1;
-        if (o == std::strong_ordering::greater)
-            return 1;
-        return 0;
-    }
-};
+LazyT<Int> Right_Shift__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() >> y->value());
+}
 
-struct Bitwise_And__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Bitwise_And__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x & y; }
-};
+LazyT<Int> Left_Shift__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() << y->value());
+}
 
-struct Bitwise_Or__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Bitwise_Or__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x | y; }
-};
+LazyT<Int> Spaceship__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    const auto o = (x->value() <=> y->value());
+    if (o == std::strong_ordering::less)
+        return std::make_shared<LazyConstant<Int>>(-1);
+    if (o == std::strong_ordering::greater)
+        return std::make_shared<LazyConstant<Int>>(1);
+    return std::make_shared<LazyConstant<Int>>(0);
+}
 
-struct Bitwise_Xor__BuiltIn : public Binary_Int_Int_Int_Op__BuiltIn {
-    using Binary_Int_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Int_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Bitwise_Xor__BuiltIn>();
-    }
-    Int op(const Int x, const Int y) const override { return x ^ y; }
-};
+LazyT<Int> Bitwise_And__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() & y->value());
+}
 
-struct Increment__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
-    using Unary_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Unary_Int_Int_Op__BuiltIn_Base> clone() const override {
-        return std::make_shared<Increment__BuiltIn>();
-    }
-    Int op(const Int x) const override { return x + 1; }
-};
+LazyT<Int> Bitwise_Or__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() | y->value());
+}
 
-struct Decrement__BuiltIn : public Unary_Int_Int_Op__BuiltIn {
-    using Unary_Int_Int_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Unary_Int_Int_Op__BuiltIn_Base> clone() const override {
-        return std::make_shared<Decrement__BuiltIn>();
-    }
-    Int op(const Int x) const override { return x - 1; }
-};
+LazyT<Int> Bitwise_Xor__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Int>>(x->value() ^ y->value());
+}
 
-struct Negation__BuiltIn : public Unary_Bool_Bool_Op__BuiltIn {
-    using Unary_Bool_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Unary_Bool_Bool_Op__BuiltIn_Base> clone() const override {
-        return std::make_shared<Negation__BuiltIn>();
-    }
-    Bool op(const Bool x) const override { return !x; }
-};
+LazyT<Int> Increment__BuiltIn(LazyT<Int> x) {
+    WorkManager::await(x);
+    return std::make_shared<LazyConstant<Int>>(x->value() + 1);
+}
 
-struct Comparison_LT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
-    using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Comparison_LT__BuiltIn>();
-    }
-    Bool op(const Int x, const Int y) const override { return x < y; }
-};
+LazyT<Int> Decrement__BuiltIn(LazyT<Int> x) {
+    WorkManager::await(x);
+    return std::make_shared<LazyConstant<Int>>(x->value() - 1);
+}
 
-struct Comparison_LE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
-    using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Comparison_LE__BuiltIn>();
-    }
-    Bool op(const Int x, const Int y) const override { return x <= y; }
-};
+LazyT<Bool> Negation__BuiltIn(LazyT<Bool> x) {
+    WorkManager::await(x);
+    return std::make_shared<LazyConstant<Bool>>(!x->value());
+}
 
-struct Comparison_GT__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
-    using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Comparison_GT__BuiltIn>();
-    }
-    Bool op(const Int x, const Int y) const override { return x > y; }
-};
+LazyT<Bool> Comparison_LT__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Bool>>(x->value() < y->value());
+}
 
-struct Comparison_GE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
-    using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Comparison_GE__BuiltIn>();
-    }
-    Bool op(const Int x, const Int y) const override { return x >= y; }
-};
+LazyT<Bool> Comparison_LE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Bool>>(x->value() <= y->value());
+}
 
-struct Comparison_EQ__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
-    using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Comparison_EQ__BuiltIn>();
-    }
-    Bool op(const Int x, const Int y) const override { return x == y; }
-};
+LazyT<Bool> Comparison_EQ__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Bool>>(x->value() == y->value());
+}
 
-struct Comparison_NE__BuiltIn : public Binary_Int_Int_Bool_Op__BuiltIn {
-    using Binary_Int_Int_Bool_Op__BuiltIn::Op__BuiltIn;
-    std::shared_ptr<Binary_Int_Int_Bool_Op__BuiltIn_Base>
-    clone() const override {
-        return std::make_shared<Comparison_NE__BuiltIn>();
-    }
-    Bool op(const Int x, const Int y) const override { return x != y; }
-};
+LazyT<Bool> Comparison_NE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Bool>>(x->value() != y->value());
+}
+
+LazyT<Bool> Comparison_GT__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Bool>>(x->value() > y->value());
+}
+
+LazyT<Bool> Comparison_GE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
+    WorkManager::await(x, y);
+    return std::make_shared<LazyConstant<Bool>>(x->value() >= y->value());
+}
+
+Binary_Int_Int_Int_Op__BuiltIn(Plus__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Minus__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Multiply__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Divide__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Exponentiate__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Modulo__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Right_Shift__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Left_Shift__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Spaceship__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Bitwise_And__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Bitwise_Or__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Bitwise_Xor__BuiltIn);
+
+Unary_Int_Int_Op__BuiltIn(Increment__BuiltIn);
+Unary_Int_Int_Op__BuiltIn(Decrement__BuiltIn);
+
+Unary_Bool_Bool_Op__BuiltIn(Negation__BuiltIn);
+
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_LT__BuiltIn);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_LE__BuiltIn);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_EQ__BuiltIn);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_NE__BuiltIn);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_GT__BuiltIn);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_GE__BuiltIn);
