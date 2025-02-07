@@ -109,9 +109,12 @@ impl Translator {
             BuiltIn::Boolean(Boolean { value }) => {
                 format!("std::make_shared<LazyConstant<Bool>>({value})")
             }
-            BuiltIn::BuiltInFn(name) => format!(
-                "std::make_shared<LazyConstant<typename {name}::FnT>>(std::make_shared<{name}>())"
-            ),
+            BuiltIn::BuiltInFn(name) => {
+                let name = format!("{name}_Fn");
+                format!(
+                "std::make_shared<LazyConstant<typename {name}::T>>(std::make_shared<{name}>())"
+            )
+            }
         }
     }
     fn translate_memory(&self, memory: Memory) -> Code {
@@ -161,7 +164,7 @@ impl Translator {
                     panic!("Attempt to call non-fn built-in.")
                 };
                 format!(
-                    "{target} = std::make_shared<{name}>({args_code}); WorkManager::call(dynamic_fn_cast({target}));",
+                    "{target} = {name}({args_code});",
                 )
             }
             Value::Memory(memory) => {
@@ -711,14 +714,14 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
-        "std::make_shared<LazyConstant<typename Plus__BuiltIn::FnT>>(std::make_shared<Plus__BuiltIn>())";
+        "std::make_shared<LazyConstant<typename Plus__BuiltIn_Fn::T>>(std::make_shared<Plus__BuiltIn_Fn>())";
         "builtin plus translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
         ),
-        "std::make_shared<LazyConstant<typename Comparison_GE__BuiltIn::FnT>>(std::make_shared<Comparison_GE__BuiltIn>())";
+        "std::make_shared<LazyConstant<typename Comparison_GE__BuiltIn_Fn::T>>(std::make_shared<Comparison_GE__BuiltIn_Fn>())";
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
@@ -745,7 +748,7 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
-        "std::make_shared<LazyConstant<typename Comparison_LT__BuiltIn::FnT>>(std::make_shared<Comparison_LT__BuiltIn>())";
+        "std::make_shared<LazyConstant<typename Comparison_LT__BuiltIn_Fn::T>>(std::make_shared<Comparison_LT__BuiltIn_Fn>())";
         "builtin function translation"
     )]
     #[test_case(
@@ -829,7 +832,7 @@ mod tests {
                 ]
             }.into(),
         },
-        "if (call == decltype(call){}) { call = std::make_shared<Plus__BuiltIn>(arg1, arg2); WorkManager::call(dynamic_fn_cast(call)); }";
+        "if (call == decltype(call){}) { call = Plus__BuiltIn(arg1, arg2); }";
         "built-in fn call"
     )]
     #[test_case(
@@ -981,7 +984,7 @@ mod tests {
                 }
             ]
         },
-        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call == decltype(call){}){ call=std::make_shared<Comparison_GE__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
+        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call == decltype(call){}){ call = Comparison_GE__BuiltIn(x,y); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1289,7 +1292,7 @@ mod tests {
                 }
             ]
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == decltype(call1){}) { call1 = std::make_shared<Plus__BuiltIn>(a, b); WorkManager::call(dynamic_fn_cast(call1)); } if (call2 == decltype(call2){}) { call2 = std::make_shared<Plus__BuiltIn>(c, d); WorkManager::call(dynamic_fn_cast(call2)); } if (call3 == decltype(call3){}) { call3 = std::make_shared<Plus__BuiltIn>(call1,call2); WorkManager::call(dynamic_fn_cast(call3)); } return call3;} };";
+        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == decltype(call1){}) { call1 = Plus__BuiltIn(a, b); } if (call2 == decltype(call2){}) { call2 = Plus__BuiltIn(c, d); } if (call3 == decltype(call3){}) { call3 = Plus__BuiltIn(call1,call2); } return call3;} };";
         "four way plus int"
     )]
     #[test_case(
@@ -1326,7 +1329,7 @@ mod tests {
                 }
             ]
         },
-    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == decltype(inner_res){}) { inner_res = std::make_shared<Plus__BuiltIn>(x, env); WorkManager::call(dynamic_fn_cast(inner_res)); } return inner_res; } };";
+    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == decltype(inner_res){}) { inner_res = Plus__BuiltIn(x, env); } return inner_res; } };";
     "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1396,8 +1399,8 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("main")),
                             value: FnCall{
-                                fn_: BuiltIn::BuiltInFn(
-                                    Name::from("Main"),
+                                fn_: Memory(
+                                    Id::from("Main"),
                                 ).into(),
                                 fn_type: FnType(
                                     Vec::new(),
@@ -1417,7 +1420,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call; LazyT<Int> body() override { if (call == decltype(call){}){ call=std::make_shared<Plus__BuiltIn>(x,y); WorkManager::call(dynamic_fn_cast(call)); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if (main == decltype(main){}){ main = std::make_shared<Main>(); WorkManager::call(dynamic_fn_cast(main));} return main; }};";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call; LazyT<Int> body() override { if (call == decltype(call){}){ call = Plus__BuiltIn(x,y); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if (main == decltype(main){}){ std::shared_ptr<Fn> fn; std::tie(fn,main) = Main->value()->clone_with_args(); WorkManager::call(fn);} return main; }};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
