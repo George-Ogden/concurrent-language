@@ -5,6 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     rc::Rc,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use from_variants::FromVariants;
@@ -127,42 +128,13 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
-#[derive(Clone, Eq)]
-pub struct Location(Rc<RefCell<()>>);
+static LOCATION_ID: AtomicUsize = AtomicUsize::new(0);
+#[derive(Clone, PartialEq, Ord, PartialOrd, Hash, Debug, Eq)]
+pub struct Location(usize);
 
 impl Location {
     pub fn new() -> Self {
-        Self(Rc::new(RefCell::new(())))
-    }
-}
-
-impl PartialEq for Location {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_ptr() == other.0.as_ptr()
-    }
-}
-
-impl PartialOrd for Location {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Location {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.as_ptr().cmp(&other.0.as_ptr())
-    }
-}
-
-impl Hash for Location {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.as_ptr().hash(state);
-    }
-}
-
-impl fmt::Debug for Location {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?}", self.0.as_ptr())
+        Self(LOCATION_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
