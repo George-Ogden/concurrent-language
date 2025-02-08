@@ -119,9 +119,12 @@ template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
     Continuation c{remaining, counter, valid};
     (vs->add_continuation(c), ...);
     if (all_done(vs...)) {
-        counter.fetch_sub(1, std::memory_order_relaxed);
         delete valid;
-        return;
+        if (counter.fetch_sub(1, std::memory_order_relaxed) == 1) {
+            return;
+        } else {
+            throw stack_inversion{};
+        }
     }
     while (true) {
         std::shared_ptr<Fn> fn = get_work();
@@ -137,22 +140,24 @@ template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
                 fn->run();
             }
         } catch (stack_inversion &e) {
-            if (fn != nullptr && !fn->done()) {
-                call(fn);
-            }
             valid->acquire();
             bool was_valid = **valid;
             **valid = false;
             valid->release();
+            if (fn != nullptr && !fn->done()) {
+                call(fn);
+            }
             if (!was_valid) {
                 delete valid;
             }
-            if (all_done(vs...)) {
-                counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
+            counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
+
+            if (!was_valid && counter.load(std::memory_order_relaxed) == 0) {
+                while (!all_done(vs...)) {
+                }
                 return;
-            } else {
-                throw;
             }
+            throw;
         }
     }
 };
