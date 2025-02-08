@@ -1302,7 +1302,6 @@ mod tests {
                     Box::new(AtomicTypeEnum::BOOL.into()),
                 ))
             );
-            let unused = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
             (
                 IntermediateProgram{
                     statements: vec![

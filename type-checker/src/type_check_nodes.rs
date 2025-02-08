@@ -8,6 +8,7 @@ use std::fmt::{self, Debug};
 use std::hash::Hash;
 use std::ops::Index;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(PartialEq, Clone, Debug, Eq)]
 pub struct ParametricType {
@@ -504,30 +505,13 @@ impl fmt::Debug for Type {
     }
 }
 
-#[derive(Eq, Clone)]
-pub struct Variable(pub Rc<RefCell<()>>);
-
-impl fmt::Debug for Variable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Variable").field(&self.0.as_ptr()).finish()
-    }
-}
+static VARIABLE_ID: AtomicUsize = AtomicUsize::new(0);
+#[derive(Eq, Clone, PartialEq, Debug, Hash)]
+pub struct Variable(usize);
 
 impl Variable {
     pub fn new() -> Self {
-        Variable(Rc::new(RefCell::new(())))
-    }
-}
-
-impl Hash for Variable {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.as_ptr().hash(state);
-    }
-}
-
-impl PartialEq for Variable {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_ptr() == other.0.as_ptr()
+        Variable(VARIABLE_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 

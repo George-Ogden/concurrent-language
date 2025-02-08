@@ -2038,7 +2038,7 @@ mod tests {
                 ]
             }
         );
-        "env and closure"
+        "env and argument"
     )]
     fn test_compile_fn_defs(
         fn_def: IntermediateLambda,
@@ -2473,6 +2473,251 @@ mod tests {
             ]
         };
         "program with args"
+    )]
+    #[test_case(
+        {
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let fn_ = IntermediateMemory::from(IntermediateType::from(IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into())
+            )));
+            let main = IntermediateMemory::from(IntermediateType::from(IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into())
+            )));
+            let call: IntermediateExpression = IntermediateFnCall{
+                fn_: fn_.clone().into(),
+                args: vec![
+                    x.clone().into(),
+                ]
+            }.into();
+            let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            IntermediateProgram{
+                main: main.clone().into(),
+                types: Vec::new(),
+                statements: vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda {
+                            args: vec![x.into()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression: call,
+                                }.into()
+                            ],
+                            ret: y.into()
+                        }.into(),
+                        location: fn_.location.clone(),
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda {
+                            args: vec![arg.clone().into()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: fn_.clone().into(),
+                                        args: vec![
+                                            arg.clone().into(),
+                                        ]
+                                    }.into(),
+                                }.into()
+                            ],
+                            ret: main_call.into()
+                        }.into(),
+                        location: main.location,
+                    }.into()
+                ]
+            }
+        },
+        Program{
+            type_defs: Vec::new(),
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: vec![
+                        (Memory(Id::from("m1")), AtomicTypeEnum::INT.into()),
+                    ],
+                    statements: vec![
+                        Declaration {
+                            memory: Memory(Id::from("m2")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
+                            ).into()
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m2")),
+                            value: ElementAccess{
+                                value: Memory(Id::from("env")).into(),
+                                idx: 0
+                            }.into()
+                        }.into(),
+                        Await(vec![Memory(Id::from("m2")).into()]).into(),
+                        Assignment {
+                            target: Memory(Id::from("m3")),
+                            value: FnCall{
+                                fn_: Memory(Id::from("m2")).into(),
+                                args: vec![Memory(Id::from("m1")).into()],
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
+                    env: Some(TupleType(vec![
+                        FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ).into()
+                    ]).into()),
+                    allocations: vec![
+                        Declaration {
+                            memory: Memory(Id::from("m3")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }
+                    ]
+                },
+                FnDef {
+                    name: Name::from("F1"),
+                    arguments: vec![
+                        (Memory(Id::from("m6")), AtomicTypeEnum::INT.into()),
+                    ],
+                    statements: vec![
+                        Declaration {
+                            memory: Memory(Id::from("m7")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
+                            ).into()
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m7")),
+                            value: ElementAccess{
+                                value: Memory(Id::from("env")).into(),
+                                idx: 0
+                            }.into()
+                        }.into(),
+                        Await(vec![Memory(Id::from("m7")).into()]).into(),
+                        Assignment {
+                            target: Memory(Id::from("m8")),
+                            value: FnCall{
+                                fn_: Memory(Id::from("m7")).into(),
+                                args: vec![Memory(Id::from("m6")).into()],
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: (Memory(Id::from("m8")).into(), AtomicTypeEnum::INT.into()),
+                    env: Some(TupleType(vec![
+                        FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ).into()
+                    ]).into()),
+                    allocations: vec![
+                        Declaration {
+                            memory: Memory(Id::from("m8")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }
+                    ]
+                },
+                FnDef {
+                    name: Name::from("Main"),
+                    arguments: vec![
+                        (Memory(Id::from("m0")), AtomicTypeEnum::INT.into()),
+                    ],
+                    statements: vec![
+                        Declaration {
+                            memory: Memory(Id::from("m4")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m4")),
+                            value: TupleExpression(vec![
+                                Memory(Id::from("m5")).into(),
+                            ]).into()
+                        }.into(),
+                        Declaration {
+                            memory: Memory(Id::from("m5")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
+                            ).into()
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m5")),
+                            value: ClosureInstantiation{
+                                name: Name::from("F0"),
+                                env: Some(Memory(Id::from("m4")).into())
+                            }.into(),
+                        }.into(),
+                        Declaration {
+                            memory: Memory(Id::from("m9")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m9")),
+                            value: TupleExpression(vec![
+                                Memory(Id::from("m5")).into(),
+                            ]).into()
+                        }.into(),
+                        Declaration {
+                            memory: Memory(Id::from("m10")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into())
+                            ).into()
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m10")),
+                            value: ClosureInstantiation{
+                                name: Name::from("F1"),
+                                env: Some(Memory(Id::from("m9")).into())
+                            }.into(),
+                        }.into(),
+                        Await(vec![Memory(Id::from("m10")).into()]).into(),
+                        Assignment {
+                            target: Memory(Id::from("m11")),
+                            value: FnCall{
+                                fn_: Memory(Id::from("m10")).into(),
+                                args: vec![Memory(Id::from("m0")).into()],
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: (Memory(Id::from("m11")).into(), AtomicTypeEnum::INT.into()),
+                    env: None,
+                    allocations: vec![
+                        Declaration {
+                            memory: Memory(Id::from("m11")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }
+                    ]
+                }
+            ],
+        };
+        "recursive closure program"
     )]
     fn test_compile_program(program: IntermediateProgram, expected_program: Program) {
         let mut compiler = Compiler::new();
