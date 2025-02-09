@@ -4,7 +4,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::intermediate_nodes::*;
+use crate::{
+    allocations::{AllocationOptimizer, MemoryMap},
+    intermediate_nodes::*,
+};
 use itertools::{zip_eq, Itertools};
 use type_checker::*;
 
@@ -12,7 +15,6 @@ type Scope = HashMap<(Variable, Vec<Type>), IntermediateValue>;
 type History = HashMap<IntermediateExpression, IntermediateValue>;
 type Uninstantiated = HashMap<Variable, TypedStatement>;
 type TypeDefs = HashMap<Type, Rc<RefCell<IntermediateType>>>;
-type MemoryMap = HashMap<Location, Vec<IntermediateExpression>>;
 
 pub struct Lowerer {
     scope: Scope,
@@ -357,159 +359,6 @@ impl Lowerer {
             Type::TypeVariable(TypeVariable(var)) => Type::from(TypeVariable(var.clone())),
         }
     }
-    fn remove_wasted_allocations_from_expression(
-        &mut self,
-        expression: IntermediateExpression,
-    ) -> IntermediateExpression {
-        match expression {
-            IntermediateExpression::IntermediateValue(value) => match value.clone() {
-                _ => IntermediateExpression::IntermediateValue(
-                    self.remove_wasted_allocations_from_value(value),
-                ),
-            },
-            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
-                value,
-                idx,
-            }) => IntermediateElementAccess {
-                value: self.remove_wasted_allocations_from_value(value),
-                idx,
-            }
-            .into(),
-            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-                values,
-            )) => IntermediateTupleExpression(self.remove_wasted_allocations_from_values(values))
-                .into(),
-            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
-                IntermediateFnCall {
-                    fn_: self.remove_wasted_allocations_from_value(fn_),
-                    args: self.remove_wasted_allocations_from_values(args),
-                }
-                .into()
-            }
-            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
-                idx,
-                data,
-                type_,
-            }) => IntermediateCtorCall {
-                idx,
-                data: data.map(|data| self.remove_wasted_allocations_from_value(data)),
-                type_,
-            }
-            .into(),
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                args,
-                statements,
-                ret,
-            }) => IntermediateLambda {
-                args,
-                statements: self.remove_wasted_allocations_from_statements(statements),
-                ret: self.remove_wasted_allocations_from_value(ret),
-            }
-            .into(),
-        }
-    }
-    fn remove_wasted_allocations_from_value(
-        &mut self,
-        value: IntermediateValue,
-    ) -> IntermediateValue {
-        match value.clone() {
-            IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
-            IntermediateValue::IntermediateArg(arg) => arg.into(),
-            IntermediateValue::IntermediateMemory(memory) => {
-                let expressions = self.memory.get(&memory.location);
-                if expressions.map(Vec::len) == Some(1) {
-                    let expressions = expressions.unwrap();
-                    let expression = expressions[0].clone();
-                    match expression {
-                        IntermediateExpression::IntermediateValue(value) => {
-                            self.remove_wasted_allocations_from_value(value)
-                        }
-                        _ => memory.into(),
-                    }
-                } else {
-                    memory.into()
-                }
-            }
-        }
-    }
-    fn remove_wasted_allocations_from_values(
-        &mut self,
-        values: Vec<IntermediateValue>,
-    ) -> Vec<IntermediateValue> {
-        values
-            .into_iter()
-            .map(|value| self.remove_wasted_allocations_from_value(value))
-            .collect()
-    }
-    fn remove_wasted_allocations_from_statement(
-        &mut self,
-        statement: IntermediateStatement,
-    ) -> Option<IntermediateStatement> {
-        match statement {
-            IntermediateStatement::IntermediateAssignment(assignment) => {
-                let IntermediateAssignment {
-                    expression,
-                    location,
-                } = assignment;
-                if matches!(&expression, IntermediateExpression::IntermediateValue(_))
-                    && self.memory.get(&location).map(Vec::len) == Some(1)
-                {
-                    return None;
-                }
-                let condensed_expression =
-                    self.remove_wasted_allocations_from_expression(expression.clone());
-                let expression = condensed_expression;
-                Some(IntermediateStatement::IntermediateAssignment(
-                    IntermediateAssignment {
-                        location,
-                        expression: expression,
-                    }
-                    .into(),
-                ))
-            }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => Some(
-                IntermediateIfStatement {
-                    condition: self.remove_wasted_allocations_from_value(condition),
-                    branches: (
-                        self.remove_wasted_allocations_from_statements(branches.0),
-                        self.remove_wasted_allocations_from_statements(branches.1),
-                    ),
-                }
-                .into(),
-            ),
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject,
-                branches,
-            }) => Some(
-                IntermediateMatchStatement {
-                    subject: self.remove_wasted_allocations_from_value(subject),
-                    branches: branches
-                        .into_iter()
-                        .map(|IntermediateMatchBranch { target, statements }| {
-                            IntermediateMatchBranch {
-                                target,
-                                statements: self
-                                    .remove_wasted_allocations_from_statements(statements),
-                            }
-                        })
-                        .collect(),
-                }
-                .into(),
-            ),
-        }
-    }
-    fn remove_wasted_allocations_from_statements(
-        &mut self,
-        statements: Vec<IntermediateStatement>,
-    ) -> Vec<IntermediateStatement> {
-        statements
-            .into_iter()
-            .filter_map(|statement| self.remove_wasted_allocations_from_statement(statement))
-            .collect()
-    }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
         let type_ = self.clear_names(type_);
         let lower_type = self.lower_type_internal(&type_, HashSet::new());
@@ -654,8 +503,9 @@ impl Lowerer {
     }
     fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
         let main = self.lower_lambda_def(program.main);
+        let allocation_optimizer = AllocationOptimizer::new(self.memory.clone());
         let IntermediateExpression::IntermediateLambda(main) =
-            self.remove_wasted_allocations_from_expression(main.into())
+            allocation_optimizer.remove_wasted_allocations_from_expression(main.into())
         else {
             panic!("Main fn changed form in allocation removal.")
         };
@@ -1605,9 +1455,10 @@ mod tests {
         .into();
         let mut lowerer = Lowerer::new();
         let value = lowerer.lower_expression(expression);
-        let efficient_value = lowerer.remove_wasted_allocations_from_value(value);
-        let efficient_statements =
-            lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        let allocation_optimizer = AllocationOptimizer::new(lowerer.memory.clone());
+        let efficient_value = allocation_optimizer.remove_wasted_allocations_from_value(value);
+        let efficient_statements = allocation_optimizer
+            .remove_wasted_allocations_from_statements(lowerer.statements.clone());
         let efficient_fn = IntermediateLambda {
             args: Vec::new(),
             statements: efficient_statements,
@@ -2626,8 +2477,9 @@ mod tests {
         let (statements, expected_scope) = statements_scope;
         let mut lowerer = Lowerer::new();
         lowerer.lower_statements(statements);
-        lowerer.statements =
-            lowerer.remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        let allocation_optimizer = AllocationOptimizer::new(lowerer.memory.clone());
+        lowerer.statements = allocation_optimizer
+            .remove_wasted_allocations_from_statements(lowerer.statements.clone());
         let flat_scope: HashMap<(Variable, Vec<Type>), IntermediateValue> = lowerer
             .scope
             .clone()
@@ -2636,10 +2488,10 @@ mod tests {
             .collect::<HashMap<_, _>>();
         let mut tuples = (Vec::new(), Vec::new());
         for (k, e) in expected_scope {
-            let value =
-                lowerer.remove_wasted_allocations_from_value(flat_scope[&(k, Vec::new())].clone());
+            let value = allocation_optimizer
+                .remove_wasted_allocations_from_value(flat_scope[&(k, Vec::new())].clone());
             let expression = match value {
-                IntermediateValue::IntermediateMemory(memory) => lowerer
+                IntermediateValue::IntermediateMemory(memory) => allocation_optimizer
                     .remove_wasted_allocations_from_expression(
                         lowerer.memory[&memory.location][0].clone(),
                     ),

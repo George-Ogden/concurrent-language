@@ -1,3 +1,4 @@
+mod allocations;
 mod intermediate_nodes;
 mod lower;
 
