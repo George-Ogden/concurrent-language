@@ -653,11 +653,14 @@ impl Lowerer {
         }
     }
     fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
-        self.lower_statements(program.statements);
-        let main = self.scope[&(program.main.variable, Vec::new())].clone();
+        let main = self.lower_lambda_def(program.main);
+        let IntermediateExpression::IntermediateLambda(main) =
+            self.remove_wasted_allocations_from_expression(main.into())
+        else {
+            panic!("Main fn changed form in allocation removal.")
+        };
         IntermediateProgram {
-            statements: self.remove_wasted_allocations_from_statements(self.statements.clone()),
-            main: self.remove_wasted_allocations_from_value(main),
+            main,
             types: self.type_defs.values().cloned().collect(),
         }
     }
@@ -2680,20 +2683,34 @@ mod tests {
             }.into();
             TypedProgram {
                 type_definitions: TypeDefinitions::new(),
-                statements: vec![
-                    TypedAssignment{
-                        variable: main.clone(),
-                        expression: TypedExpression::from(TypedLambdaDef{
-                            parameters: Vec::new(),
-                            return_type: Box::new(TYPE_INT),
-                            body: TypedBlock {
-                                statements: Vec::new(),
-                                expression: Box::new(Integer{value:0}.into())
-                            }
-                        }).into()
-                    }.into()
-                ],
-                main
+                main: TypedLambdaDef{
+                    parameters: Vec::new(),
+                    body: TypedBlock{
+                        statements: vec![
+                            TypedAssignment{
+                                variable: main.clone(),
+                                expression: TypedExpression::from(TypedLambdaDef{
+                                    parameters: Vec::new(),
+                                    return_type: Box::new(TYPE_INT),
+                                    body: TypedBlock {
+                                        statements: Vec::new(),
+                                        expression: Box::new(Integer{value:0}.into())
+                                    }
+                                }).into()
+                            }.into(),
+                        ],
+                        expression: Box::new(
+                            TypedFunctionCall{
+                                function: Box::new(TypedAccess{
+                                    variable: main,
+                                    parameters: Vec::new()
+                                }.into()),
+                                arguments: Vec::new()
+                            }.into()
+                        )
+                    },
+                    return_type: Box::new(TYPE_INT)
+                }
             }
         },
         {
@@ -2702,15 +2719,115 @@ mod tests {
                 statements: Vec::new(),
                 ret: IntermediateBuiltIn::from(Integer{value: 0}).into()
             }).into();
+            let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                args: Vec::new(),
+                fn_: IntermediateMemory{
+                    location: main.location.clone(),
+                    type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
+                }.into()
+            }).into();
             IntermediateProgram{
-                statements: vec![
-                    main.clone().into()
-                ],
+                main: IntermediateLambda{
+                    args: Vec::new(),
+                    statements: vec![
+                        main.clone().into(),
+                        main_call.clone().into()
+                    ],
+                    ret: IntermediateMemory{
+                        location: main_call.location.clone(),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into()
+                },
                 types: Vec::new(),
-                main: main.into()
             }
         };
         "return 0"
+    )]
+    #[test_case(
+        {
+            let main: TypedVariable = ParametricType {
+                type_: Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_INT))),
+                parameters: Vec::new()
+            }.into();
+            let x: TypedVariable = ParametricType {
+                type_: TYPE_INT,
+                parameters: Vec::new()
+            }.into();
+            let arg: TypedVariable = ParametricType {
+                type_: TYPE_INT,
+                parameters: Vec::new()
+            }.into();
+            TypedProgram {
+                type_definitions: TypeDefinitions::new(),
+                main: TypedLambdaDef{
+                    parameters: vec![arg.clone()],
+                    body: TypedBlock{
+                        statements: vec![
+                            TypedAssignment{
+                                variable: main.clone(),
+                                expression: TypedExpression::from(TypedLambdaDef{
+                                    parameters: vec![x.clone()],
+                                    return_type: Box::new(TYPE_INT),
+                                    body: TypedBlock {
+                                        statements: Vec::new(),
+                                        expression: Box::new(TypedAccess{
+                                            variable: x.clone(),
+                                            parameters: Vec::new()
+                                        }.into())
+                                    }
+                                }).into()
+                            }.into(),
+                        ],
+                        expression: Box::new(
+                            TypedFunctionCall{
+                                function: Box::new(TypedAccess{
+                                    variable: main,
+                                    parameters: Vec::new()
+                                }.into()),
+                                arguments: vec![
+                                    TypedAccess{
+                                        variable: arg.clone(),
+                                        parameters: Vec::new()
+                                    }.into()
+                                ]
+                            }.into()
+                        )
+                    },
+                    return_type: Box::new(TYPE_INT)
+                }
+            }
+        },
+        {
+            let x: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let main: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                args: vec![x.clone()],
+                statements: Vec::new(),
+                ret: x.clone().into()
+            }).into();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                args: vec![arg.clone().into()],
+                fn_: IntermediateMemory{
+                    location: main.location.clone(),
+                    type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
+                }.into()
+            }).into();
+            IntermediateProgram{
+                main: IntermediateLambda{
+                    args: vec![arg.clone()],
+                    statements: vec![
+                        main.clone().into(),
+                        main_call.clone().into()
+                    ],
+                    ret: IntermediateMemory{
+                        location: main_call.location.clone(),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into()
+                },
+                types: Vec::new(),
+            }
+        };
+        "return input"
     )]
     #[test_case(
         {
@@ -2742,71 +2859,85 @@ mod tests {
             }.into();
             TypedProgram {
                 type_definitions: type_definitions.clone(),
-                statements: vec![
-                    TypedAssignment {
-                        expression: ParametricExpression{
-                            parameters: Vec::new(),
-                            expression: TypedMatch{
-                                subject: Box::new(
-                                    TypedConstructorCall{
-                                        idx: 1,
-                                        output_type: Type::from(TypeInstantiation{reference: type_definitions.get(&Id::from("Option")).unwrap().clone(), instances: vec![TYPE_INT]}),
-                                        arguments: vec![Integer{value:1}.into()]
-                                    }.into(),
-                                ),
-                                blocks: vec![
-                                    TypedMatchBlock{
-                                        matches: vec![
-                                            TypedMatchItem {
-                                                type_idx: 1,
-                                                assignee: None
-                                            },
-                                        ],
-                                        block: TypedBlock {
-                                            statements: Vec::new(),
-                                            expression: Box::new(
-                                                Integer{value: 0}.into()
-                                            )
-                                        }
-                                    },
-                                    TypedMatchBlock{
-                                        matches: vec![
-                                            TypedMatchItem {
-                                                type_idx: 0,
-                                                assignee: Some(var.clone())
-                                            },
-                                        ],
-                                        block: TypedBlock {
-                                            statements: Vec::new(),
-                                            expression: Box::new(
-                                                TypedAccess {
-                                                    variable: var.into(),
-                                                    parameters: Vec::new()
-                                                }.into()
-                                            )
-                                        }
-                                    },
-                                ],
-                            }.into()
-                        },
-                        variable: x.clone()
-                    }.into(),
-                    TypedAssignment{
-                        variable: main.clone(),
-                        expression: TypedExpression::from(TypedLambdaDef{
-                            parameters: Vec::new(),
-                            return_type: Box::new(TYPE_INT),
-                            body: TypedBlock {
-                                statements: Vec::new(),
-                                expression: Box::new(TypedAccess{
-                                    variable: x,
+                main: TypedLambdaDef {
+                    body: TypedBlock {
+                        statements: vec![
+                            TypedAssignment {
+                                expression: ParametricExpression{
                                     parameters: Vec::new(),
-                                }.into())
-                            }
-                        }).into()
-                    }.into()
-                ],
-                main
+                                    expression: TypedMatch{
+                                        subject: Box::new(
+                                            TypedConstructorCall{
+                                                idx: 1,
+                                                output_type: Type::from(TypeInstantiation{reference: type_definitions.get(&Id::from("Option")).unwrap().clone(), instances: vec![TYPE_INT]}),
+                                                arguments: vec![Integer{value:1}.into()]
+                                            }.into(),
+                                        ),
+                                        blocks: vec![
+                                            TypedMatchBlock{
+                                                matches: vec![
+                                                    TypedMatchItem {
+                                                        type_idx: 1,
+                                                        assignee: None
+                                                    },
+                                                ],
+                                                block: TypedBlock {
+                                                    statements: Vec::new(),
+                                                    expression: Box::new(
+                                                        Integer{value: 0}.into()
+                                                    )
+                                                }
+                                            },
+                                            TypedMatchBlock{
+                                                matches: vec![
+                                                    TypedMatchItem {
+                                                        type_idx: 0,
+                                                        assignee: Some(var.clone())
+                                                    },
+                                                ],
+                                                block: TypedBlock {
+                                                    statements: Vec::new(),
+                                                    expression: Box::new(
+                                                        TypedAccess {
+                                                            variable: var.into(),
+                                                            parameters: Vec::new()
+                                                        }.into()
+                                                    )
+                                                }
+                                            },
+                                        ],
+                                    }.into()
+                                },
+                                variable: x.clone()
+                            }.into(),
+                            TypedAssignment{
+                                variable: main.clone(),
+                                expression: TypedExpression::from(TypedLambdaDef{
+                                    parameters: Vec::new(),
+                                    return_type: Box::new(TYPE_INT),
+                                    body: TypedBlock {
+                                        statements: Vec::new(),
+                                        expression: Box::new(TypedAccess{
+                                            variable: x,
+                                            parameters: Vec::new(),
+                                        }.into())
+                                    }
+                                }).into()
+                            }.into(),
+                        ],
+                        expression: Box::new(
+                            TypedFunctionCall{
+                                function: Box::new(TypedAccess{
+                                    variable: main,
+                                    parameters: Vec::new()
+                                }.into()),
+                                arguments: Vec::new()
+                            }.into()
+                        )
+                    },
+                    parameters: Vec::new(),
+                    return_type: Box::new(TYPE_INT)
+                }
             }
         },
         {
@@ -2822,35 +2953,49 @@ mod tests {
                 statements: Vec::new(),
                 ret: memory.clone().into()
             }).into();
+            let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                args: Vec::new(),
+                fn_: IntermediateMemory{
+                    location: main.location.clone(),
+                    type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
+                }.into()
+            }).into();
             IntermediateProgram{
-                statements: vec![
-                    ctor.clone().into(),
-                    IntermediateMatchStatement{
-                        subject: ctor.into(),
-                        branches: vec![
-                            IntermediateMatchBranch{
-                                target: Some(arg.clone()),
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: memory.location.clone(),
-                                        expression: arg.clone().into()
-                                    }.into(),
-                                ]
-                            },
-                            IntermediateMatchBranch{
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: memory.location.clone(),
-                                        expression: IntermediateBuiltIn::from(Integer{value: 0}).into()
-                                    }.into(),
-                                ]
-                            },
-                        ]
-                    }.into(),
-                    main.clone().into()
-                ],
-                main: main.into(),
+                main: IntermediateLambda{
+                    args: Vec::new(),
+                    statements: vec![
+                        ctor.clone().into(),
+                        IntermediateMatchStatement{
+                            subject: ctor.into(),
+                            branches: vec![
+                                IntermediateMatchBranch{
+                                    target: Some(arg.clone()),
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: memory.location.clone(),
+                                            expression: arg.clone().into()
+                                        }.into(),
+                                    ]
+                                },
+                                IntermediateMatchBranch{
+                                    target: None,
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: memory.location.clone(),
+                                            expression: IntermediateBuiltIn::from(Integer{value: 0}).into()
+                                        }.into(),
+                                    ]
+                                },
+                            ]
+                        }.into(),
+                        main.clone().into(),
+                        main_call.clone().into()
+                    ],
+                    ret: IntermediateMemory{
+                        location: main_call.location.clone(),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into()
+                },
                 types: vec![
                     Rc::new(RefCell::new(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),None]).into()))
                 ]
@@ -2876,49 +3021,63 @@ mod tests {
             }.into();
             TypedProgram {
                 type_definitions: TypeDefinitions::new(),
-                statements: vec![
-                    TypedAssignment {
-                        expression: ParametricExpression{
-                            parameters: vec![(Id::from("T"), parameter.clone())],
-                            expression: TypedLambdaDef{
-                                parameters: vec![
-                                    arg.clone()
-                                ],
-                                return_type: Box::new(type_variable.clone()),
-                                body: TypedBlock {
-                                    statements: Vec::new(),
-                                    expression: Box::new(TypedAccess{
-                                        variable: arg,
-                                        parameters: Vec::new()
-                                    }.into())
-                                }
-                            }.into()
-                        },
-                        variable: id.clone()
-                    }.into(),
-                    TypedAssignment{
-                        variable: main.clone(),
-                        expression: TypedExpression::from(TypedLambdaDef{
-                            parameters: Vec::new(),
-                            return_type: Box::new(TYPE_INT),
-                            body: TypedBlock {
-                                statements: Vec::new(),
-                                expression: Box::new(
-                                    TypedFunctionCall{
-                                        function: Box::new(TypedAccess{
-                                            variable: id,
-                                            parameters: vec![TYPE_INT],
-                                        }.into()),
-                                        arguments: vec![
-                                            Integer{value: 0}.into()
-                                        ]
+                main: TypedLambdaDef{
+                    parameters: Vec::new(),
+                    return_type: Box::new(TYPE_INT),
+                    body: TypedBlock{
+                        statements: vec![
+                            TypedAssignment {
+                                expression: ParametricExpression{
+                                    parameters: vec![(Id::from("T"), parameter.clone())],
+                                    expression: TypedLambdaDef{
+                                        parameters: vec![
+                                            arg.clone()
+                                        ],
+                                        return_type: Box::new(type_variable.clone()),
+                                        body: TypedBlock {
+                                            statements: Vec::new(),
+                                            expression: Box::new(TypedAccess{
+                                                variable: arg,
+                                                parameters: Vec::new()
+                                            }.into())
+                                        }
                                     }.into()
-                                )
-                            }
-                        }).into()
-                    }.into()
-                ],
-                main
+                                },
+                                variable: id.clone()
+                            }.into(),
+                            TypedAssignment{
+                                variable: main.clone(),
+                                expression: TypedExpression::from(TypedLambdaDef{
+                                    parameters: Vec::new(),
+                                    return_type: Box::new(TYPE_INT),
+                                    body: TypedBlock {
+                                        statements: Vec::new(),
+                                        expression: Box::new(
+                                            TypedFunctionCall{
+                                                function: Box::new(TypedAccess{
+                                                    variable: id,
+                                                    parameters: vec![TYPE_INT],
+                                                }.into()),
+                                                arguments: vec![
+                                                    Integer{value: 0}.into()
+                                                ]
+                                            }.into()
+                                        )
+                                    }
+                                }).into()
+                            }.into()
+                        ],
+                        expression: Box::new(
+                            TypedFunctionCall{
+                                function: Box::new(TypedAccess{
+                                    variable: main,
+                                    parameters: Vec::new()
+                                }.into()),
+                                arguments: Vec::new()
+                            }.into()
+                        )
+                    }
+                }
             }
         },
         {
@@ -2940,12 +3099,26 @@ mod tests {
                 ],
                 ret: fn_call.into()
             }).into();
+            let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                args: Vec::new(),
+                fn_: IntermediateMemory{
+                    location: main.location.clone(),
+                    type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
+                }.into()
+            }).into();
             IntermediateProgram{
-                statements: vec![
-                    main.clone().into()
-                ],
+                main: IntermediateLambda{
+                    args: Vec::new(),
+                    statements: vec![
+                        main.clone().into(),
+                        main_call.clone().into()
+                    ],
+                    ret: IntermediateMemory{
+                        location: main_call.location.clone(),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into()
+                },
                 types: Vec::new(),
-                main: main.into()
             }
         };
         "parametric variable"
@@ -2953,19 +3126,11 @@ mod tests {
     fn test_lower_program(program: TypedProgram, expected: IntermediateProgram) {
         let mut lowerer = Lowerer::new();
         let lower_program = lowerer.lower_program(program);
-        let lower_fn: IntermediateExpression = IntermediateLambda {
-            args: Vec::new(),
-            statements: lower_program.statements,
-            ret: lower_program.main,
-        }
-        .into();
-        let expected_fn: IntermediateExpression = IntermediateLambda {
-            args: Vec::new(),
-            statements: expected.statements,
-            ret: expected.main,
-        }
-        .into();
-        assert!(ExpressionEqualityChecker::equal(&lower_fn, &expected_fn));
+        dbg!(&lower_program, &expected);
+        assert!(ExpressionEqualityChecker::equal(
+            &lower_program.main.into(),
+            &expected.main.into()
+        ));
         assert_eq!(lower_program.types, expected.types)
     }
 }

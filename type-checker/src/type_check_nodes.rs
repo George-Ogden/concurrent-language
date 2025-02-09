@@ -1060,8 +1060,7 @@ impl TypedBlock {
 #[derive(Clone, Debug)]
 pub struct TypedProgram {
     pub type_definitions: TypeDefinitions,
-    pub main: TypedVariable,
-    pub statements: Vec<TypedStatement>,
+    pub main: TypedLambdaDef,
 }
 
 #[derive(Debug, Clone, PartialEq)]
