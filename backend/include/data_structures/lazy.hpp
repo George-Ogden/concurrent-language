@@ -5,7 +5,7 @@
 
 #include <type_traits>
 
-template <typename> struct LazyPlaceholder;
+template <typename T, typename U> struct LazyPlaceholder;
 
 template <typename T> struct Lazy {
     virtual bool done() const = 0;
@@ -41,14 +41,19 @@ template <typename T> struct Lazy {
         return v->value();
     }
 
-    static LazyT<T> make_placeholders() {
+    template <typename U>
+    requires is_shared_ptr_v<U>
+    static LazyT<T> make_placeholders(U fn) {
         if constexpr (is_lazy_v<T>) {
-            return std::make_shared<LazyPlaceholder<remove_lazy_t<T>>>();
+            return std::make_shared<
+                LazyPlaceholder<remove_lazy_t<T>, typename U::element_type>>(
+                fn);
         } else if constexpr (is_tuple_v<T>) {
             return std::apply(
-                [](auto &&...args) {
-                    return std::make_tuple(Lazy<std::decay_t<decltype(args)>>::
-                                               make_placeholders()...);
+                [fn](auto &&...args) {
+                    return std::make_tuple(
+                        Lazy<std::decay_t<decltype(args)>>::make_placeholders(
+                            fn)...);
                 },
                 T{});
         } else {
@@ -57,12 +62,11 @@ template <typename T> struct Lazy {
     }
 };
 
-template <typename T> class LazyPlaceholder : public Lazy<T> {
+template <typename T> class LazyPlaceholderBase : public Lazy<T> {
     LazyT<T> reference = nullptr;
     Locked<std::vector<Continuation>> continuations;
 
   public:
-    explicit LazyPlaceholder() {}
     void add_continuation(Continuation c) override {
         continuations.acquire();
         if (reference == nullptr) {
@@ -86,6 +90,15 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
         return reference != nullptr && reference->done();
     }
     T value() const override { return reference->value(); }
+};
+
+template <typename T, typename U>
+class LazyPlaceholder : public LazyPlaceholderBase<T> {
+    std::shared_ptr<U> reference;
+
+  public:
+    explicit LazyPlaceholder(std::shared_ptr<U> reference)
+        : reference(reference) {}
 };
 
 template <typename T> class LazyConstant : public Lazy<T> {

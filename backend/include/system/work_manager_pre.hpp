@@ -12,7 +12,8 @@
 class Fn;
 
 struct WorkManager {
-    static inline Locked<std::deque<std::shared_ptr<Fn>>> queue;
+    static inline Locked<std::deque<std::weak_ptr<Fn>>> queue;
+    static std::shared_ptr<Fn> finish_work;
     static inline std::vector<std::atomic<unsigned>> counters;
     static void call(std::shared_ptr<Fn> fn);
     static void run(std::shared_ptr<Fn> fn);
