@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+std::shared_ptr<Fn> WorkManager::finish_work = std::make_shared<FinishWork>();
+
 void WorkManager::run(std::shared_ptr<Fn> fn) {
     std::atomic<std::shared_ptr<Fn>> ref{fn};
     ThreadManager::RunConfig config{ThreadManager::available_concurrency(),
@@ -34,7 +36,7 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Fn>> *ref) {
         if (fn != nullptr) {
             fn->run();
             fn->await_all();
-            call(std::make_shared<FinishWork>());
+            call(WorkManager::finish_work);
         } else {
             while (1) {
                 fn = get_work();
@@ -63,7 +65,8 @@ std::shared_ptr<Fn> WorkManager::get_work() {
         WorkManager::queue.release();
         return nullptr;
     }
-    std::shared_ptr<Fn> fn = WorkManager::queue->front();
+
+    std::shared_ptr<Fn> fn = WorkManager::queue->front().lock();
     WorkManager::queue->pop_front();
     WorkManager::queue.release();
     return fn;

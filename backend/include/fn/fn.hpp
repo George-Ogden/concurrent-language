@@ -59,7 +59,7 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     clone_with_args(LazyT<std::decay_t<Args>>... args) const {
         std::shared_ptr<ParametricFn<Ret, Args...>> call = this->clone();
         call->args = std::make_tuple(args...);
-        call->ret = Lazy<LazyT<R>>::make_placeholders();
+        call->ret = Lazy<LazyT<R>>::make_placeholders(call);
         return std::make_tuple(call, call->ret);
     };
     virtual LazyT<R>
@@ -84,9 +84,8 @@ struct ParametricFn : public Fn, Lazy<Ret> {
     void await_all() override { WorkManager::await_all(ret); }
     template <typename T> static void assign(T &ret, T &return_) {
         if constexpr (is_lazy_v<T>) {
-            auto ptr =
-                std::dynamic_pointer_cast<LazyPlaceholder<remove_lazy_t<T>>>(
-                    ret);
+            auto ptr = std::dynamic_pointer_cast<
+                LazyPlaceholderBase<remove_lazy_t<T>>>(ret);
             if (ptr == nullptr) {
                 ret = return_;
             } else {
