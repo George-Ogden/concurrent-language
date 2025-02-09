@@ -1061,14 +1061,47 @@ impl TypeChecker {
             if let TypedStatement::TypedFnDef(TypedFnDef {
                 variable,
                 parameters: _,
-                fn_: __,
+                fn_:
+                    TypedLambdaDef {
+                        parameters,
+                        return_type,
+                        body: _,
+                    },
             }) = statement
             {
                 if *variable == main {
+                    let args = parameters
+                        .iter()
+                        .map(|TypedVariable { variable: _, type_ }| TypedVariable {
+                            variable: Variable::new(),
+                            type_: type_.clone(),
+                        })
+                        .collect_vec();
                     return Ok(TypedProgram {
                         type_definitions: type_checker.type_definitions,
-                        main,
-                        statements: typed_block.statements,
+                        main: TypedLambdaDef {
+                            parameters: args.clone(),
+                            return_type: return_type.clone(),
+                            body: TypedBlock {
+                                statements: typed_block.statements,
+                                expression: Box::new(
+                                    TypedFunctionCall {
+                                        function: typed_block.expression,
+                                        arguments: args
+                                            .into_iter()
+                                            .map(|arg| {
+                                                TypedAccess {
+                                                    variable: arg,
+                                                    parameters: Vec::new(),
+                                                }
+                                                .into()
+                                            })
+                                            .collect_vec(),
+                                    }
+                                    .into(),
+                                ),
+                            },
+                        },
                     });
                 }
             }
