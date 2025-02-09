@@ -929,7 +929,6 @@ pub struct IntermediateMatchBranch {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntermediateProgram {
-    pub statements: Vec<IntermediateStatement>,
-    pub main: IntermediateValue,
+    pub main: IntermediateLambda,
     pub types: Vec<Rc<RefCell<IntermediateType>>>,
 }
