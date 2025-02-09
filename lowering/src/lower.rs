@@ -2746,6 +2746,92 @@ mod tests {
     #[test_case(
         {
             let main: TypedVariable = ParametricType {
+                type_: Type::from(TypeFn(vec![TYPE_INT], Box::new(TYPE_INT))),
+                parameters: Vec::new()
+            }.into();
+            let x: TypedVariable = ParametricType {
+                type_: TYPE_INT,
+                parameters: Vec::new()
+            }.into();
+            let arg: TypedVariable = ParametricType {
+                type_: TYPE_INT,
+                parameters: Vec::new()
+            }.into();
+            TypedProgram {
+                type_definitions: TypeDefinitions::new(),
+                main: TypedLambdaDef{
+                    parameters: vec![arg.clone()],
+                    body: TypedBlock{
+                        statements: vec![
+                            TypedAssignment{
+                                variable: main.clone(),
+                                expression: TypedExpression::from(TypedLambdaDef{
+                                    parameters: vec![x.clone()],
+                                    return_type: Box::new(TYPE_INT),
+                                    body: TypedBlock {
+                                        statements: Vec::new(),
+                                        expression: Box::new(TypedAccess{
+                                            variable: x.clone(),
+                                            parameters: Vec::new()
+                                        }.into())
+                                    }
+                                }).into()
+                            }.into(),
+                        ],
+                        expression: Box::new(
+                            TypedFunctionCall{
+                                function: Box::new(TypedAccess{
+                                    variable: main,
+                                    parameters: Vec::new()
+                                }.into()),
+                                arguments: vec![
+                                    TypedAccess{
+                                        variable: arg.clone(),
+                                        parameters: Vec::new()
+                                    }.into()
+                                ]
+                            }.into()
+                        )
+                    },
+                    return_type: Box::new(TYPE_INT)
+                }
+            }
+        },
+        {
+            let x: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let main: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                args: vec![x.clone()],
+                statements: Vec::new(),
+                ret: x.clone().into()
+            }).into();
+            let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                args: vec![arg.clone().into()],
+                fn_: IntermediateMemory{
+                    location: main.location.clone(),
+                    type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
+                }.into()
+            }).into();
+            IntermediateProgram{
+                main: IntermediateLambda{
+                    args: vec![arg.clone()],
+                    statements: vec![
+                        main.clone().into(),
+                        main_call.clone().into()
+                    ],
+                    ret: IntermediateMemory{
+                        location: main_call.location.clone(),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into()
+                },
+                types: Vec::new(),
+            }
+        };
+        "return input"
+    )]
+    #[test_case(
+        {
+            let main: TypedVariable = ParametricType {
                 type_: Type::from(TypeFn(Vec::new(), Box::new(TYPE_INT))),
                 parameters: Vec::new()
             }.into();
