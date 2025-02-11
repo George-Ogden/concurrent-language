@@ -468,18 +468,18 @@ impl Compiler {
         let open_vars = fn_def.find_open_vars();
         let new_locations = open_vars
             .iter()
-            .map(|val| IntermediateMemory::from(val.type_()))
+            .map(|val| IntermediateMemory::from(val.type_.clone()))
             .collect_vec();
         let substitution = open_vars
             .iter()
             .zip(new_locations.iter())
-            .map(|(var, loc)| (var.clone(), loc.clone().into()))
+            .map(|(var, mem)| (var.location.clone(), mem.location.clone()))
             .collect::<HashMap<_, _>>();
         fn_def.substitute(&substitution);
         open_vars
             .iter()
             .zip(new_locations.iter())
-            .map(|(val, mem)| (val.clone(), mem.location.clone()))
+            .map(|(val, mem)| (val.clone().into(), mem.location.clone()))
             .collect()
     }
     fn closure_prefix(&mut self, env_types: &Vec<(Location, MachineType)>) -> Vec<Statement> {

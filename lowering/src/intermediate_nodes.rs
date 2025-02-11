@@ -140,7 +140,25 @@ impl Location {
 
 impl IntermediateValue {
     fn substitute(&self, substitution: &Substitution) -> IntermediateValue {
-        substitution.get(&self).unwrap_or(&self).clone()
+        match self {
+            IntermediateValue::IntermediateBuiltIn(built_in) => built_in.clone().into(),
+            IntermediateValue::IntermediateMemory(memory) => IntermediateMemory {
+                type_: memory.type_.clone(),
+                location: substitution
+                    .get(&memory.location)
+                    .unwrap_or(&memory.location)
+                    .clone(),
+            }
+            .into(),
+            IntermediateValue::IntermediateArg(arg) => IntermediateArg {
+                type_: arg.type_.clone(),
+                location: substitution
+                    .get(&arg.location)
+                    .unwrap_or(&arg.location)
+                    .clone(),
+            }
+            .into(),
+        }
     }
     fn substitute_all(values: &mut Vec<Self>, substitution: &Substitution) {
         for value in values {
@@ -754,7 +772,7 @@ pub struct IntermediateLambda {
     pub ret: IntermediateValue,
 }
 
-type Substitution = HashMap<IntermediateValue, IntermediateValue>;
+type Substitution = HashMap<Location, Location>;
 
 impl IntermediateLambda {
     pub fn type_(&self) -> IntermediateFnType {
@@ -771,7 +789,7 @@ impl IntermediateLambda {
         )
     }
 
-    pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
+    pub fn find_open_vars(&self) -> Vec<IntermediateMemory> {
         let targets: HashSet<Location> =
             HashSet::from_iter(IntermediateStatement::all_targets(&self.statements));
         let values = IntermediateExpression::from(self.clone()).values();
@@ -779,12 +797,19 @@ impl IntermediateLambda {
             .into_iter()
             .unique()
             .into_iter()
-            .filter(|value| match value {
-                IntermediateValue::IntermediateBuiltIn(_) => false,
+            .filter_map(|value| match value {
+                IntermediateValue::IntermediateBuiltIn(_) => None,
                 IntermediateValue::IntermediateMemory(memory) => {
-                    !targets.contains(&memory.location)
+                    if !targets.contains(&memory.location) {
+                        Some(memory)
+                    } else {
+                        None
+                    }
                 }
-                IntermediateValue::IntermediateArg(_) => true,
+                IntermediateValue::IntermediateArg(arg) => Some(IntermediateMemory {
+                    location: arg.location,
+                    type_: arg.type_,
+                }),
             })
             .collect()
     }
