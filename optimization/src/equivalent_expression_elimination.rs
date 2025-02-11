@@ -10,15 +10,23 @@ type NormalizedLocations = HashMap<Location, Location>;
 
 struct EquivalentExpressionEliminator {
     historical_expressions: HistoricalExpressions,
-    nomalized_locations: NormalizedLocations,
+    normalized_locations: NormalizedLocations,
 }
 
 impl EquivalentExpressionEliminator {
     pub fn new() -> Self {
         Self {
             historical_expressions: HistoricalExpressions::new(),
-            nomalized_locations: NormalizedLocations::new(),
+            normalized_locations: NormalizedLocations::new(),
         }
+    }
+
+    fn normalize_expression(
+        &self,
+        mut expression: IntermediateExpression,
+    ) -> IntermediateExpression {
+        expression.substitute(&self.normalized_locations);
+        expression
     }
 
     fn eliminate_from_statement(
@@ -30,6 +38,7 @@ impl EquivalentExpressionEliminator {
                 expression,
                 location,
             }) => {
+                let expression = self.normalize_expression(expression);
                 vec![match self.historical_expressions.get(&expression) {
                     None => {
                         self.historical_expressions
@@ -39,14 +48,18 @@ impl EquivalentExpressionEliminator {
                             location,
                         }
                     }
-                    Some(updated_location) => IntermediateAssignment {
-                        location: location.clone(),
-                        expression: IntermediateValue::from(IntermediateMemory {
-                            location: updated_location.clone(),
-                            type_: expression.type_(),
-                        })
-                        .into(),
-                    },
+                    Some(updated_location) => {
+                        self.normalized_locations
+                            .insert(location.clone(), updated_location.clone());
+                        IntermediateAssignment {
+                            location,
+                            expression: IntermediateValue::from(IntermediateMemory {
+                                location: updated_location.clone(),
+                                type_: expression.type_(),
+                            })
+                            .into(),
+                        }
+                    }
                 }
                 .into()]
             }
@@ -179,6 +192,7 @@ mod tests {
         let optimized_statements =
             equivalent_expression_eliminator.eliminate_from_statements(original_statements);
         let allocation_optimizer = AllocationOptimizer::from_statements(&optimized_statements);
+        dbg!(&optimized_statements);
         let optimized_statements =
             allocation_optimizer.remove_wasted_allocations_from_statements(optimized_statements);
         assert_eq!(optimized_statements, expected_statements);

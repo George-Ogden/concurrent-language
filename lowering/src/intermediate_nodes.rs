@@ -311,7 +311,7 @@ impl IntermediateExpression {
             }
         }
     }
-    fn substitute(&mut self, substitution: &Substitution) {
+    pub fn substitute(&mut self, substitution: &Substitution) {
         match self {
             IntermediateExpression::IntermediateValue(value) => {
                 *value = value.substitute(substitution);
