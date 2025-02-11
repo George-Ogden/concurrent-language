@@ -175,6 +175,15 @@ impl IntermediateValue {
     fn types(values: &Vec<Self>) -> Vec<IntermediateType> {
         values.iter().map(Self::type_).collect()
     }
+    pub fn filter_memory_location(&self) -> Option<Location> {
+        if let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }) =
+            self
+        {
+            Some(location.clone())
+        } else {
+            None
+        }
+    }
 }
 
 impl From<Integer> for IntermediateValue {
@@ -826,7 +835,7 @@ pub enum IntermediateStatement {
 }
 
 impl IntermediateStatement {
-    fn values(&self) -> Vec<IntermediateValue> {
+    pub fn values(&self) -> Vec<IntermediateValue> {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
