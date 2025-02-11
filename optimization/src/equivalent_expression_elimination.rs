@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use lowering::{IntermediateAssignment, IntermediateExpression, IntermediateStatement, Location};
+use lowering::{
+    IntermediateAssignment, IntermediateExpression, IntermediateMemory, IntermediateStatement,
+    IntermediateValue, Location,
+};
 
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
 type NormalizedLocations = HashMap<Location, Location>;
@@ -26,18 +29,27 @@ impl EquivalentExpressionEliminator {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location,
-            }) => match self.historical_expressions.get(&expression) {
-                None => {
-                    self.historical_expressions
-                        .insert(expression.clone(), location.clone());
-                    vec![IntermediateAssignment {
-                        expression,
-                        location,
+            }) => {
+                vec![match self.historical_expressions.get(&expression) {
+                    None => {
+                        self.historical_expressions
+                            .insert(expression.clone(), location.clone());
+                        IntermediateAssignment {
+                            expression,
+                            location,
+                        }
                     }
-                    .into()]
+                    Some(updated_location) => IntermediateAssignment {
+                        location: location.clone(),
+                        expression: IntermediateValue::from(IntermediateMemory {
+                            location: updated_location.clone(),
+                            type_: expression.type_(),
+                        })
+                        .into(),
+                    },
                 }
-                Some(location) => Vec::new(),
-            },
+                .into()]
+            }
             IntermediateStatement::IntermediateIfStatement(intermediate_if_statement) => todo!(),
             IntermediateStatement::IntermediateMatchStatement(intermediate_match_statement) => {
                 todo!()
@@ -60,10 +72,49 @@ mod tests {
     use super::*;
 
     use lowering::{
-        IntermediateAssignment, IntermediateMemory, IntermediateTupleExpression,
-        IntermediateTupleType, IntermediateType, Location,
+        AllocationOptimizer, IntermediateAssignment, IntermediateMemory,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType, IntermediateValue,
+        Location,
     };
     use test_case::test_case;
+
+    #[test_case(
+        {
+            let expression = IntermediateTupleExpression(Vec::new());
+            let memory = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
+            let assignment_0 = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: memory.location.clone()
+            };
+            let assignment_1 = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            (
+                vec![
+                    assignment_0.clone().into(),
+                    assignment_1.clone().into()
+                ],
+                vec![
+                    assignment_0.clone().into(),
+                    IntermediateAssignment{
+                        location: assignment_1.location.clone(),
+                        expression: IntermediateValue::from(
+                            memory.clone()
+                        ).into()
+                    }.into()
+                ]
+            )
+        };
+        "empty tuple assignment"
+    )]
+    fn test_raw_eliminate(statements: (Vec<IntermediateStatement>, Vec<IntermediateStatement>)) {
+        let (original_statements, expected_statements) = statements;
+        let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
+        let optimized_statements =
+            equivalent_expression_eliminator.eliminate_from_statements(original_statements);
+        assert_eq!(optimized_statements, expected_statements);
+    }
 
     #[test_case(
         {
@@ -127,6 +178,9 @@ mod tests {
         let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
         let optimized_statements =
             equivalent_expression_eliminator.eliminate_from_statements(original_statements);
+        let allocation_optimizer = AllocationOptimizer::from_statements(&optimized_statements);
+        let optimized_statements =
+            allocation_optimizer.remove_wasted_allocations_from_statements(optimized_statements);
         assert_eq!(optimized_statements, expected_statements);
     }
 }
