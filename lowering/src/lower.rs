@@ -503,7 +503,7 @@ impl Lowerer {
     }
     fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
         let main = self.lower_lambda_def(program.main);
-        let allocation_optimizer = AllocationOptimizer::new(self.memory.clone());
+        let allocation_optimizer = AllocationOptimizer::from_memory_map(self.memory.clone());
         let IntermediateExpression::IntermediateLambda(main) =
             allocation_optimizer.remove_wasted_allocations_from_expression(main.into())
         else {
@@ -1455,7 +1455,7 @@ mod tests {
         .into();
         let mut lowerer = Lowerer::new();
         let value = lowerer.lower_expression(expression);
-        let allocation_optimizer = AllocationOptimizer::new(lowerer.memory.clone());
+        let allocation_optimizer = AllocationOptimizer::from_memory_map(lowerer.memory.clone());
         let efficient_value = allocation_optimizer.remove_wasted_allocations_from_value(value);
         let efficient_statements = allocation_optimizer
             .remove_wasted_allocations_from_statements(lowerer.statements.clone());
@@ -2477,7 +2477,7 @@ mod tests {
         let (statements, expected_scope) = statements_scope;
         let mut lowerer = Lowerer::new();
         lowerer.lower_statements(statements);
-        let allocation_optimizer = AllocationOptimizer::new(lowerer.memory.clone());
+        let allocation_optimizer = AllocationOptimizer::from_memory_map(lowerer.memory.clone());
         lowerer.statements = allocation_optimizer
             .remove_wasted_allocations_from_statements(lowerer.statements.clone());
         let flat_scope: HashMap<(Variable, Vec<Type>), IntermediateValue> = lowerer

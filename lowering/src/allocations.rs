@@ -8,9 +8,59 @@ pub struct AllocationOptimizer {
     memory: MemoryMap,
 }
 impl AllocationOptimizer {
-    pub fn new(memory_map: MemoryMap) -> Self {
+    pub fn from_memory_map(memory_map: MemoryMap) -> Self {
         Self { memory: memory_map }
     }
+    pub fn from_statements(statements: &Vec<IntermediateStatement>) -> Self {
+        let mut allocation_optimizer = Self::from_memory_map(MemoryMap::new());
+        allocation_optimizer.register_memory(statements);
+        allocation_optimizer
+    }
+
+    fn register_memory(&mut self, statements: &Vec<IntermediateStatement>) {
+        for statement in statements {
+            match statement {
+                IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                    expression,
+                    location,
+                }) => {
+                    match &expression {
+                        IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                            args: _,
+                            statements,
+                            ret: _,
+                        }) => {
+                            self.register_memory(statements);
+                        }
+                        _ => {}
+                    }
+                    if !self.memory.contains_key(&location) {
+                        self.memory.insert(location.clone(), Vec::new());
+                    }
+                    self.memory
+                        .get_mut(&location)
+                        .unwrap()
+                        .push(expression.clone());
+                }
+                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                    condition: _,
+                    branches,
+                }) => {
+                    self.register_memory(&branches.0);
+                    self.register_memory(&branches.1);
+                }
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject: _,
+                    branches,
+                }) => {
+                    for branch in branches {
+                        self.register_memory(&branch.statements)
+                    }
+                }
+            }
+        }
+    }
+
     pub fn remove_wasted_allocations_from_expression(
         &self,
         expression: IntermediateExpression,
