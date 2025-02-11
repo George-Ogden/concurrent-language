@@ -1,13 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use lowering::{
-    IntermediateAssignment, IntermediateExpression, IntermediateMemory, IntermediateStatement,
-    IntermediateValue, Location,
+    IntermediateAssignment, IntermediateExpression, IntermediateIfStatement, IntermediateMemory,
+    IntermediateStatement, IntermediateValue, Location,
 };
 
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
 type NormalizedLocations = HashMap<Location, Location>;
 
+#[derive(Clone)]
 struct EquivalentExpressionEliminator {
     historical_expressions: HistoricalExpressions,
     normalized_locations: NormalizedLocations,
@@ -49,6 +51,9 @@ impl EquivalentExpressionEliminator {
                         }
                     }
                     Some(updated_location) => {
+                        if updated_location == &location {
+                            return Vec::new();
+                        }
                         self.normalized_locations
                             .insert(location.clone(), updated_location.clone());
                         IntermediateAssignment {
@@ -63,7 +68,41 @@ impl EquivalentExpressionEliminator {
                 }
                 .into()]
             }
-            IntermediateStatement::IntermediateIfStatement(intermediate_if_statement) => todo!(),
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition,
+                branches,
+            }) => {
+                let mut true_eliminator = self.clone();
+                let mut false_eliminator = self.clone();
+                true_eliminator.eliminate_from_statements(branches.0.clone());
+                false_eliminator.eliminate_from_statements(branches.1.clone());
+                let true_expressions: HashSet<&IntermediateExpression> =
+                    HashSet::from_iter(true_eliminator.historical_expressions.keys());
+                let false_expressions: HashSet<&IntermediateExpression> =
+                    HashSet::from_iter(false_eliminator.historical_expressions.keys());
+                let shared_expressions = true_expressions.intersection(&false_expressions);
+                let statements = shared_expressions
+                    .map(|&expression| {
+                        IntermediateAssignment {
+                            location: true_eliminator.historical_expressions[&expression].clone(),
+                            expression: expression.clone(),
+                        }
+                        .into()
+                    })
+                    .collect_vec();
+                let mut statements = self.eliminate_from_statements(statements);
+                statements.push(
+                    IntermediateIfStatement {
+                        condition,
+                        branches: (
+                            self.clone().eliminate_from_statements(branches.0),
+                            self.clone().eliminate_from_statements(branches.1),
+                        ),
+                    }
+                    .into(),
+                );
+                statements
+            }
             IntermediateStatement::IntermediateMatchStatement(intermediate_match_statement) => {
                 todo!()
             }
@@ -85,7 +124,8 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AllocationOptimizer, IntermediateAssignment, IntermediateMemory,
+        AllocationOptimizer, AtomicTypeEnum, Integer, IntermediateArg, IntermediateAssignment,
+        IntermediateBuiltIn, IntermediateIfStatement, IntermediateMemory,
         IntermediateTupleExpression, IntermediateTupleType, IntermediateType, IntermediateValue,
         Location,
     };
@@ -185,6 +225,138 @@ mod tests {
             )
         };
         "repeated nested empty tuple assignment assignment"
+    )]
+    #[test_case(
+        {
+            let a = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let b = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let zero = IntermediateTupleExpression(vec![IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()]);
+            let one = IntermediateTupleExpression(vec![IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()]);
+            let c = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL));
+            (
+                vec![
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: b.location.clone(),
+                                    expression: zero.clone().into()
+                                }.into()
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: a.location.clone(),
+                                    expression: one.clone().into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: b.location.clone(),
+                                    expression: one.clone().into()
+                                }.into(),
+                            ]
+                        )
+                    }.into()
+                ],
+                vec![
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: b.location.clone(),
+                                    expression: zero.clone().into()
+                                }.into()
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: a.location.clone(),
+                                    expression: one.clone().into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: b.location.clone(),
+                                    expression: IntermediateValue::from(a.clone()).into()
+                                }.into(),
+                            ]
+                        )
+                    }.into()
+                ]
+            )
+        };
+        "if statement"
+    )]
+    #[test_case(
+        {
+            let x = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let y = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![IntermediateTupleType(vec![AtomicTypeEnum::INT.into()]).into(),AtomicTypeEnum::INT.into()])));
+            let z = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let eight = IntermediateTupleExpression(vec![IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 8})).into()]);
+            let c = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL));
+            (
+                vec![
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression: eight.clone().into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        x.clone().into(),
+                                        Integer{value: 0}.into(),
+                                    ]).into()
+                                }.into()
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: eight.clone().into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        z.clone().into(),
+                                        Integer{value: 1}.into(),
+                                    ]).into()
+                                }.into(),
+                            ]
+                        )
+                    }.into()
+                ],
+                vec![
+                    IntermediateAssignment{
+                        location: x.location.clone(),
+                        expression: eight.clone().into()
+                    }.into(),
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        x.clone().into(),
+                                        Integer{value: 0}.into(),
+                                    ]).into()
+                                }.into()
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        x.clone().into(),
+                                        Integer{value: 1}.into(),
+                                    ]).into()
+                                }.into(),
+                            ]
+                        )
+                    }.into()
+                ]
+            )
+        };
+        "if statement shared value across branch"
     )]
     fn test_eliminate(statements: (Vec<IntermediateStatement>, Vec<IntermediateStatement>)) {
         let (original_statements, expected_statements) = statements;
