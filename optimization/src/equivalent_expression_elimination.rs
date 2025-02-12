@@ -45,7 +45,9 @@ impl EquivalentExpressionEliminator {
         let statements = if let Some(location) = IntermediateValue::filter_memory_location(&ret) {
             let statements =
                 self.weakly_reorder(statements, &vec![location.clone()], &mut HashSet::new());
-            self.strongly_reorder(statements, &vec![location], &mut HashSet::new())
+            let statements =
+                self.strongly_reorder(statements, &vec![location], &mut HashSet::new());
+            statements
         } else {
             Vec::new()
         };
@@ -80,9 +82,17 @@ impl EquivalentExpressionEliminator {
                     });
                     self.definitions
                         .insert(location.clone(), value.clone().into());
-                    *expression = value.into();
                     self.normalized_locations
                         .insert(location.clone(), new_location);
+                    if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                        args: _,
+                        statements,
+                        ret: _,
+                    }) = expression
+                    {
+                        self.prepare_history(statements);
+                    }
+                    *expression = value.into();
                 }
                 IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
                     condition: _,
@@ -107,7 +117,7 @@ impl EquivalentExpressionEliminator {
         }
     }
     fn weakly_reorder(
-        &mut self,
+        &self,
         statements: Vec<IntermediateStatement>,
         locations: &Vec<Location>,
         defined: &mut HashSet<Location>,
@@ -125,44 +135,6 @@ impl EquivalentExpressionEliminator {
                 *definitions.get_mut(&location).unwrap() = expression.clone();
             }
         }
-        fn weakly_process_location(
-            location: Location,
-            defined: &mut HashSet<Location>,
-            weakly_required_locations: &HashSet<Location>,
-            definitions: &mut HashMap<Location, IntermediateExpression>,
-            new_statements: &mut Vec<IntermediateStatement>,
-        ) {
-            if defined.contains(&location) || !weakly_required_locations.contains(&location) {
-                return;
-            }
-            defined.insert(location.clone());
-
-            let Some(expression) = definitions.remove(&location) else {
-                panic!("Location not found in definitions.")
-            };
-
-            for location in expression
-                .values()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-            {
-                weakly_process_location(
-                    location,
-                    defined,
-                    weakly_required_locations,
-                    definitions,
-                    new_statements,
-                );
-            }
-
-            new_statements.push(
-                IntermediateAssignment {
-                    location,
-                    expression,
-                }
-                .into(),
-            );
-        }
 
         for statement in statements {
             for dependency in statement
@@ -170,7 +142,7 @@ impl EquivalentExpressionEliminator {
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
             {
-                weakly_process_location(
+                self.weakly_process_location(
                     dependency,
                     defined,
                     &weakly_required_locations,
@@ -180,7 +152,7 @@ impl EquivalentExpressionEliminator {
             }
             match statement {
                 IntermediateStatement::IntermediateAssignment(assignment) => {
-                    weakly_process_location(
+                    self.weakly_process_location(
                         assignment.location,
                         defined,
                         &weakly_required_locations,
@@ -259,6 +231,65 @@ impl EquivalentExpressionEliminator {
         }
         return new_statements;
     }
+    fn weakly_process_location(
+        &self,
+        location: Location,
+        defined: &mut HashSet<Location>,
+        weakly_required_locations: &HashSet<Location>,
+        definitions: &mut HashMap<Location, IntermediateExpression>,
+        new_statements: &mut Vec<IntermediateStatement>,
+    ) {
+        if defined.contains(&location) || !weakly_required_locations.contains(&location) {
+            return;
+        }
+        defined.insert(location.clone());
+
+        let Some(mut expression) = definitions.remove(&location) else {
+            panic!("Location not found in definitions.")
+        };
+
+        let values = if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression
+        {
+            lambda.statements = self.weakly_reorder(
+                lambda.statements.clone(),
+                &lambda
+                    .ret
+                    .filter_memory_location()
+                    .into_iter()
+                    .collect_vec(),
+                defined,
+            );
+            lambda
+                .find_open_vars()
+                .into_iter()
+                .map(|memory| memory.location)
+                .collect_vec()
+        } else {
+            expression
+                .values()
+                .iter()
+                .filter_map(IntermediateValue::filter_memory_location)
+                .collect_vec()
+        };
+
+        for location in values {
+            self.weakly_process_location(
+                location,
+                defined,
+                weakly_required_locations,
+                definitions,
+                new_statements,
+            );
+        }
+
+        new_statements.push(
+            IntermediateAssignment {
+                location,
+                expression,
+            }
+            .into(),
+        );
+    }
     fn weakly_required_locations(
         &self,
         statements: &Vec<IntermediateStatement>,
@@ -266,19 +297,21 @@ impl EquivalentExpressionEliminator {
         HashSet::from_iter(statements.iter().flat_map(|statement| match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location: _,
+                location,
             }) => {
-                let IntermediateExpression::IntermediateValue(
+                let (location, expression) = if let IntermediateExpression::IntermediateValue(
                     IntermediateValue::IntermediateMemory(IntermediateMemory {
                         type_: _,
                         location: normalized_location,
                     }),
                 ) = expression
-                else {
-                    panic!("Expression not correctly converted.")
+                {
+                    let expression = self.definitions[&normalized_location].clone();
+                    (normalized_location.clone(), expression)
+                } else {
+                    (location.clone(), expression.clone())
                 };
-                let expression = self.definitions[&normalized_location].clone();
-                let mut locations = vec![normalized_location.clone()];
+                let mut locations = vec![location.clone()];
                 locations.extend(
                     expression
                         .values()
@@ -328,7 +361,7 @@ impl EquivalentExpressionEliminator {
     }
 
     fn strongly_reorder(
-        &mut self,
+        &self,
         statements: Vec<IntermediateStatement>,
         locations: &Vec<Location>,
         defined: &mut HashSet<Location>,
@@ -346,44 +379,6 @@ impl EquivalentExpressionEliminator {
                 *definitions.get_mut(&location).unwrap() = expression.clone();
             }
         }
-        fn strongly_process_location(
-            location: Location,
-            defined: &mut HashSet<Location>,
-            strongly_required_locations: &HashSet<Location>,
-            definitions: &mut HashMap<Location, IntermediateExpression>,
-            new_statements: &mut Vec<IntermediateStatement>,
-        ) {
-            if defined.contains(&location) {
-                return;
-            }
-            defined.insert(location.clone());
-
-            let Some(expression) = definitions.remove(&location) else {
-                panic!("Location not found in definitions.")
-            };
-
-            for location in expression
-                .values()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-            {
-                strongly_process_location(
-                    location,
-                    defined,
-                    strongly_required_locations,
-                    definitions,
-                    new_statements,
-                );
-            }
-
-            new_statements.push(
-                IntermediateAssignment {
-                    location,
-                    expression,
-                }
-                .into(),
-            );
-        }
 
         for statement in statements {
             for dependency in statement
@@ -392,7 +387,7 @@ impl EquivalentExpressionEliminator {
                 .filter_map(IntermediateValue::filter_memory_location)
             {
                 if strongly_required_locations.contains(&dependency) {
-                    strongly_process_location(
+                    self.strongly_process_location(
                         dependency,
                         defined,
                         &strongly_required_locations,
@@ -404,7 +399,7 @@ impl EquivalentExpressionEliminator {
             match statement {
                 IntermediateStatement::IntermediateAssignment(assignment) => {
                     if strongly_required_locations.contains(&assignment.location) {
-                        strongly_process_location(
+                        self.strongly_process_location(
                             assignment.location,
                             defined,
                             &strongly_required_locations,
@@ -483,6 +478,65 @@ impl EquivalentExpressionEliminator {
             }
         }
         return new_statements;
+    }
+    fn strongly_process_location(
+        &self,
+        location: Location,
+        defined: &mut HashSet<Location>,
+        strongly_required_locations: &HashSet<Location>,
+        definitions: &mut HashMap<Location, IntermediateExpression>,
+        new_statements: &mut Vec<IntermediateStatement>,
+    ) {
+        if defined.contains(&location) {
+            return;
+        }
+        defined.insert(location.clone());
+
+        let Some(mut expression) = definitions.remove(&location) else {
+            panic!("Location not found in definitions.");
+        };
+
+        let values = if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression
+        {
+            lambda.statements = self.strongly_reorder(
+                lambda.statements.clone(),
+                &lambda
+                    .ret
+                    .filter_memory_location()
+                    .into_iter()
+                    .collect_vec(),
+                defined,
+            );
+            lambda
+                .find_open_vars()
+                .into_iter()
+                .map(|memory| memory.location)
+                .collect_vec()
+        } else {
+            expression
+                .values()
+                .iter()
+                .filter_map(IntermediateValue::filter_memory_location)
+                .collect_vec()
+        };
+
+        for location in values {
+            self.strongly_process_location(
+                location,
+                defined,
+                strongly_required_locations,
+                definitions,
+                new_statements,
+            );
+        }
+
+        new_statements.push(
+            IntermediateAssignment {
+                location,
+                expression,
+            }
+            .into(),
+        );
     }
     fn strongly_required_locations(
         &self,
@@ -565,8 +619,8 @@ mod tests {
 
     use lowering::{
         AllocationOptimizer, AtomicTypeEnum, ExpressionEqualityChecker, Integer, IntermediateArg,
-        IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess,
-        IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
+        IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess, IntermediateFnCall,
+        IntermediateFnType, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
         IntermediateMatchStatement, IntermediateMemory, IntermediateTupleExpression,
         IntermediateTupleType, IntermediateType, IntermediateUnionType, IntermediateValue,
         Location,
@@ -1074,6 +1128,101 @@ mod tests {
             )
         };
         "match statement nested non-shared value available"
+    )]
+    #[test_case(
+        {
+            let expression = IntermediateTupleExpression(Vec::new());
+            let assignment = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            let ret = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            let lambda = Location::new();
+            (
+                vec![
+                    assignment.clone().into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: vec![
+                                ret.clone().into()
+                            ],
+                            ret: ret.clone().into()
+                        }.into(),
+                        location: lambda.clone()
+                    }.into()
+                ],
+                vec![
+                    assignment.clone().into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: Vec::new(),
+                            ret: assignment.clone().into()
+                        }.into(),
+                        location: lambda.clone()
+                    }.into()
+                ],
+                vec![
+                    assignment.location.clone(),
+                    lambda.clone()
+                ]
+            )
+        };
+        "fn body reassignment"
+    )]
+    #[test_case(
+        {
+            let lambda = IntermediateMemory::from(IntermediateType::from(
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                )
+            ));
+            let arg = IntermediateArg::from(IntermediateType::from(
+                AtomicTypeEnum::INT
+            ));
+            let call = IntermediateAssignment{
+                location: Location::new(),
+                expression: IntermediateFnCall{
+                    fn_: lambda.clone().into(),
+                    args: vec![arg.clone().into()]
+                }.into()
+            };
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![arg.clone()],
+                            statements: vec![
+                                call.clone().into()
+                            ],
+                            ret: call.clone().into()
+                        }.into(),
+                        location: lambda.location.clone()
+                    }.into()
+                ],
+                vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![arg.clone()],
+                            statements: vec![
+                                call.clone().into()
+                            ],
+                            ret: call.clone().into()
+                        }.into(),
+                        location: lambda.location.clone()
+                    }.into()
+                ],
+                vec![
+                    lambda.location.clone()
+                ]
+            )
+        };
+        "recursive fn"
     )]
     fn test_eliminate(
         statements: (

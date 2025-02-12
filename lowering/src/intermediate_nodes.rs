@@ -130,7 +130,7 @@ pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
 static LOCATION_ID: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, PartialEq, Ord, PartialOrd, Hash, Debug, Eq)]
-pub struct Location(pub usize);
+pub struct Location(usize);
 
 impl Location {
     pub fn new() -> Self {
