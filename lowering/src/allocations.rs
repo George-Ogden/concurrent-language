@@ -56,6 +56,10 @@ impl AllocationOptimizer {
                     for branch in branches {
                         self.register_memory(&branch.statements)
                     }
+                    if branches.len() == 1 {
+                        let statements = branches[0].statements.clone();
+                        self.register_memory(&vec![statements[statements.len() - 1].clone()])
+                    }
                 }
             }
         }
@@ -166,7 +170,7 @@ impl AllocationOptimizer {
                 Some(IntermediateStatement::IntermediateAssignment(
                     IntermediateAssignment {
                         location,
-                        expression: expression,
+                        expression,
                     }
                     .into(),
                 ))

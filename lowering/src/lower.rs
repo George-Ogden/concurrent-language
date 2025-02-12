@@ -260,9 +260,19 @@ impl Lowerer {
             .zip(statements.into_iter())
             .map(|(arg, statements)| IntermediateMatchBranch {
                 target: arg,
-                statements: statements,
+                statements,
             })
-            .collect();
+            .collect_vec();
+        if branches.len() == 1 {
+            if let IntermediateValue::IntermediateMemory(IntermediateMemory {
+                type_: _,
+                ref location,
+            }) = value
+            {
+                let store = self.memory.get_mut(&location).unwrap();
+                store.extend(store.clone());
+            }
+        }
         self.statements.push(
             IntermediateMatchStatement {
                 subject: lower_subject,
@@ -1351,6 +1361,212 @@ mod tests {
     )]
     #[test_case(
         {
+            let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Wrapper"),variants: vec![Some(TYPE_INT)]}));
+            let var = TypedVariable::from(TYPE_INT);
+            TypedLambdaDef{
+                parameters: vec![arg.clone()],
+                body: TypedBlock{
+                    statements: Vec::new(),
+                    expression: Box::new(TypedMatch{
+                        subject: Box::new(
+                            TypedAccess{
+                                variable: arg.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                        ),
+                        blocks: vec![
+                            TypedMatchBlock{
+                                matches: vec![
+                                    TypedMatchItem {
+                                        type_idx: 0,
+                                        assignee: Some(var.clone())
+                                    },
+                                ],
+                                block: TypedBlock {
+                                    statements: Vec::new(),
+                                    expression: Box::new(
+                                        TypedAccess {
+                                            variable: var.into(),
+                                            parameters: Vec::new()
+                                        }.into()
+                                    )
+                                }
+                            },
+                        ],
+                    }.into())
+                },
+                return_type: Box::new(TYPE_INT)
+            }.into()
+        },
+        {
+            let arg: IntermediateArg = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into())])).into();
+            let return_address: IntermediateAssignment = IntermediateValue::from(IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT))).into();
+            let var: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let memory: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                args: vec![arg.clone()],
+                statements: vec![
+                    IntermediateMatchStatement{
+                        subject: arg.into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(var.clone()),
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: return_address.location.clone(),
+                                        expression: var.clone().into()
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into()
+                ],
+                ret: return_address.clone().into()
+            }).into();
+            (
+                memory.clone().into(),
+                vec![memory.into()]
+            )
+        };
+        "match statement one branch using arg"
+    )]
+    #[test_case(
+        {
+            let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Wrapper"),variants: vec![Some(TYPE_INT)]}));
+            let var = TypedVariable::from(TYPE_INT);
+            TypedLambdaDef{
+                parameters: vec![arg.clone()],
+                body: TypedBlock{
+                    statements: Vec::new(),
+                    expression: Box::new(TypedMatch{
+                        subject: Box::new(
+                            TypedAccess{
+                                variable: arg.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                        ),
+                        blocks: vec![
+                            TypedMatchBlock{
+                                matches: vec![
+                                    TypedMatchItem {
+                                        type_idx: 0,
+                                        assignee: Some(var.clone())
+                                    },
+                                ],
+                                block: TypedBlock {
+                                    statements: Vec::new(),
+                                    expression: Box::new(
+                                        Integer {
+                                            value: 0
+                                        }.into()
+                                    )
+                                }
+                            },
+                        ],
+                    }.into())
+                },
+                return_type: Box::new(TYPE_INT)
+            }.into()
+        },
+        {
+            let arg: IntermediateArg = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into())])).into();
+            let return_address: IntermediateAssignment = IntermediateValue::from(IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT))).into();
+            let var: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+            let memory: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                args: vec![arg.clone()],
+                statements: vec![
+                    IntermediateMatchStatement{
+                        subject: arg.into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(var.clone()),
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: return_address.location.clone(),
+                                        expression: IntermediateValue::from(Integer{value: 0}).into()
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into()
+                ],
+                ret: return_address.clone().into()
+            }).into();
+            (
+                memory.clone().into(),
+                vec![memory.into()]
+            )
+        };
+        "match statement one branch unused arg"
+    )]
+    #[test_case(
+        {
+            let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Wrapper"),variants: vec![Some(TYPE_INT)]}));
+            TypedLambdaDef{
+                parameters: vec![arg.clone()],
+                body: TypedBlock{
+                    statements: Vec::new(),
+                    expression: Box::new(TypedMatch{
+                        subject: Box::new(
+                            TypedAccess{
+                                variable: arg.into(),
+                                parameters: Vec::new()
+                            }.into(),
+                        ),
+                        blocks: vec![
+                            TypedMatchBlock{
+                                matches: vec![
+                                    TypedMatchItem {
+                                        type_idx: 0,
+                                        assignee: None
+                                    },
+                                ],
+                                block: TypedBlock {
+                                    statements: Vec::new(),
+                                    expression: Box::new(
+                                        Integer {
+                                            value: 0
+                                        }.into()
+                                    )
+                                }
+                            },
+                        ],
+                    }.into())
+                },
+                return_type: Box::new(TYPE_INT)
+            }.into()
+        },
+        {
+            let arg: IntermediateArg = IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into())])).into();
+            let return_address: IntermediateAssignment = IntermediateValue::from(IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT))).into();
+            let memory: IntermediateAssignment = IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                args: vec![arg.clone()],
+                statements: vec![
+                    IntermediateMatchStatement{
+                        subject: arg.into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: return_address.location.clone(),
+                                        expression: IntermediateValue::from(Integer{value: 0}).into()
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into()
+                ],
+                ret: return_address.clone().into()
+            }).into();
+            (
+                memory.clone().into(),
+                vec![memory.into()]
+            )
+        };
+        "match statement one branch no arg"
+    )]
+    #[test_case(
+        {
             let arg = TypedVariable::from(Type::from(TypeUnion{id: Id::from("Option"),variants: vec![Some(TYPE_INT),None]}));
             let var = TypedVariable::from(TYPE_INT);
             TypedLambdaDef{
@@ -1464,6 +1680,7 @@ mod tests {
             statements: efficient_statements,
             ret: efficient_value,
         };
+        dbg!(&efficient_fn, &expected_fn);
         assert!(ExpressionEqualityChecker::equal(
             &expected_fn,
             &efficient_fn.into()

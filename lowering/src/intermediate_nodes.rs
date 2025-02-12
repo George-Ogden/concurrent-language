@@ -799,8 +799,12 @@ impl IntermediateLambda {
     }
 
     pub fn find_open_vars(&self) -> Vec<IntermediateMemory> {
-        let targets: HashSet<Location> =
+        let mut targets: HashSet<Location> =
             HashSet::from_iter(IntermediateStatement::all_targets(&self.statements));
+        let mut args: HashSet<IntermediateArg> =
+            HashSet::from_iter(IntermediateStatement::all_arguments(&self.statements));
+        args.extend(self.args.clone());
+        targets.extend(args.into_iter().map(|arg| arg.location));
         let values = IntermediateExpression::from(self.clone()).values();
         values
             .into_iter()
@@ -906,10 +910,55 @@ impl IntermediateStatement {
                 .collect(),
         }
     }
+    fn arguments(&self) -> Vec<IntermediateArg> {
+        match self {
+            IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                expression:
+                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                        args: arguments,
+                        statements,
+                        ret: _,
+                    }),
+                location: _,
+            }) => {
+                let mut args = IntermediateStatement::all_arguments(statements);
+                args.extend(arguments.clone());
+                args
+            }
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition: _,
+                branches,
+            }) => {
+                let mut args = IntermediateStatement::all_arguments(&branches.0);
+                args.extend(IntermediateStatement::all_arguments(&branches.1));
+                args
+            }
+            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                subject: _,
+                branches,
+            }) => branches
+                .iter()
+                .flat_map(|IntermediateMatchBranch { target, statements }| {
+                    let mut args = IntermediateStatement::all_arguments(&statements);
+                    if let Some(arg) = target {
+                        args.push(arg.clone());
+                    };
+                    args
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
     pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
         statements
             .iter()
             .flat_map(|statement| statement.targets())
+            .collect()
+    }
+    pub fn all_arguments(statements: &Vec<Self>) -> Vec<IntermediateArg> {
+        statements
+            .iter()
+            .flat_map(|statement| statement.arguments())
             .collect()
     }
     fn substitute(&mut self, substitution: &Substitution) {

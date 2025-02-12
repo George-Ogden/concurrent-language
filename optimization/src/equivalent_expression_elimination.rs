@@ -339,22 +339,24 @@ impl EquivalentExpressionEliminator {
                 branches,
             }) => {
                 let mut required = subject.filter_memory_location().into_iter().collect_vec();
-                let mut intersection = None;
-                for branch in branches {
-                    let new_locations = self.weakly_required_locations(&branch.statements);
-                    match intersection {
-                        None => intersection = Some(new_locations),
-                        Some(shared_locations) => {
-                            intersection = Some(
-                                shared_locations
-                                    .intersection(&new_locations)
-                                    .cloned()
-                                    .collect(),
-                            )
+                if branches.len() > 1 {
+                    let mut intersection = None;
+                    for branch in branches {
+                        let new_locations = self.weakly_required_locations(&branch.statements);
+                        match intersection {
+                            None => intersection = Some(new_locations),
+                            Some(shared_locations) => {
+                                intersection = Some(
+                                    shared_locations
+                                        .intersection(&new_locations)
+                                        .cloned()
+                                        .collect(),
+                                )
+                            }
                         }
                     }
+                    required.extend(intersection.unwrap_or_default());
                 }
-                required.extend(intersection.unwrap_or_default());
                 required
             }
         }))
@@ -596,30 +598,32 @@ impl EquivalentExpressionEliminator {
                 }) => {
                     strongly_required_locations
                         .extend(subject.filter_memory_location().into_iter().collect_vec());
-                    let mut intersection = None;
-                    for branch in branches {
-                        let new_locations = self.strongly_required_locations(
-                            &branch.statements,
-                            &strongly_required_locations,
-                        );
-                        match intersection {
-                            None => {
-                                intersection = Some(self.strongly_required_locations(
-                                    &branch.statements,
-                                    &new_locations,
-                                ))
-                            }
-                            Some(shared_locations) => {
-                                intersection = Some(
-                                    shared_locations
-                                        .intersection(&new_locations)
-                                        .cloned()
-                                        .collect(),
-                                )
+                    if branches.len() > 1 {
+                        let mut intersection = None;
+                        for branch in branches {
+                            let new_locations = self.strongly_required_locations(
+                                &branch.statements,
+                                &strongly_required_locations,
+                            );
+                            match intersection {
+                                None => {
+                                    intersection = Some(self.strongly_required_locations(
+                                        &branch.statements,
+                                        &new_locations,
+                                    ))
+                                }
+                                Some(shared_locations) => {
+                                    intersection = Some(
+                                        shared_locations
+                                            .intersection(&new_locations)
+                                            .cloned()
+                                            .collect(),
+                                    )
+                                }
                             }
                         }
+                        strongly_required_locations.extend(intersection.unwrap_or_default());
                     }
-                    strongly_required_locations.extend(intersection.unwrap_or_default());
                 }
             }
         }
@@ -990,6 +994,68 @@ mod tests {
     )]
     #[test_case(
         {
+            let x = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let s = IntermediateArg::from(IntermediateType::from(IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into())])));
+            (
+                vec![
+                    IntermediateMatchStatement{
+                        subject: s.clone().into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(arg.clone()),
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: x.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            arg.clone()
+                                        ).into()
+                                    }.into()
+                                ],
+                            },
+                        ]
+                    }.into(),
+                    IntermediateAssignment{
+                        location: y.location.clone(),
+                        expression: IntermediateTupleExpression(vec![
+                            x.clone().into(),
+                        ]).into()
+                    }.into()
+                ],
+                vec![
+                    IntermediateMatchStatement{
+                        subject: s.clone().into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: Some(arg.clone()),
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: x.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            arg.clone()
+                                        ).into()
+                                    }.into()
+                                ],
+                            },
+                        ]
+                    }.into(),
+                    IntermediateAssignment{
+                        location: y.location.clone(),
+                        expression: IntermediateTupleExpression(vec![
+                            x.clone().into(),
+                        ]).into()
+                    }.into()
+                ],
+                vec![
+                    y.location.clone(),
+                ]
+            )
+        };
+        "match statement single branch"
+    )]
+    #[test_case(
+        {
             let x = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
             let y = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![IntermediateTupleType(vec![AtomicTypeEnum::INT.into()]).into(),AtomicTypeEnum::INT.into()])));
             let z = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
@@ -1349,8 +1415,10 @@ mod tests {
                 ret: original_location.clone().into(),
             });
         let allocation_optimizer = AllocationOptimizer::from_statements(&optimized_fn.statements);
+        dbg!(&optimized_fn);
         let optimized_fn =
             allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
+        dbg!(&optimized_fn, &expected_fn);
         assert!(ExpressionEqualityChecker::equal(
             &optimized_fn,
             &expected_fn.into()

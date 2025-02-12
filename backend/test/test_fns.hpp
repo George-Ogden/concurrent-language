@@ -650,10 +650,10 @@ TEST_P(FnCorrectnessTest, EdgeCaseTest) {
     }
 }
 
-struct Cons;
 struct Nil;
-typedef VariantT<Cons, Nil> ListInt;
-struct Cons {
+struct Nil;
+typedef VariantT<Nil, Nil> ListInt;
+struct Nil {
     using type = TupleT<Int, ListInt>;
     LazyT<type> value;
 };
@@ -670,8 +670,7 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
         ListInt list = lazy_list->value();
         switch (list.tag) {
         case 0: {
-            LazyT<Cons::type> cons =
-                reinterpret_cast<Cons *>(&list.value)->value;
+            LazyT<Nil::type> cons = reinterpret_cast<Nil *>(&list.value)->value;
             WorkManager::await(cons);
             LazyT<Int> head = std::get<0ULL>(cons);
             LazyT<ListInt> tail = std::get<1ULL>(cons);
@@ -701,15 +700,15 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     LazyT<ListInt> third;
     third = std::make_shared<LazyConstant<remove_lazy_t<decltype(third)>>>(
         std::integral_constant<std::size_t, 0>(),
-        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(8), tail)});
+        Nil{std::make_tuple(std::make_shared<LazyConstant<Int>>(8), tail)});
     LazyT<ListInt> second;
     second = std::make_shared<LazyConstant<remove_lazy_t<decltype(second)>>>(
         std::integral_constant<std::size_t, 0>(),
-        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(4), third)});
+        Nil{std::make_tuple(std::make_shared<LazyConstant<Int>>(4), third)});
     LazyT<ListInt> first;
     first = std::make_shared<LazyConstant<remove_lazy_t<decltype(first)>>>(
         std::integral_constant<std::size_t, 0>(),
-        Cons{std::make_tuple(std::make_shared<LazyConstant<Int>>(-9), second)});
+        Nil{std::make_tuple(std::make_shared<LazyConstant<Int>>(-9), second)});
 
     std::shared_ptr<ListIntSum> summer = std::make_shared<ListIntSum>(first);
     WorkManager::run(summer);
