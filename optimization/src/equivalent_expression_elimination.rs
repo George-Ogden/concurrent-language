@@ -245,7 +245,7 @@ impl EquivalentExpressionEliminator {
         defined.insert(location.clone());
 
         let Some(mut expression) = definitions.remove(&location) else {
-            panic!("Location not found in definitions.")
+            return;
         };
 
         let values = if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression
@@ -507,7 +507,7 @@ impl EquivalentExpressionEliminator {
         defined.insert(location.clone());
 
         let Some(mut expression) = definitions.remove(&location) else {
-            panic!("Location not found in definitions.");
+            return;
         };
 
         let values = if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression
