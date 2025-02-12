@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use lowering::{
-    IntermediateAssignment, IntermediateExpression, IntermediateIfStatement, IntermediateLambda,
-    IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory, IntermediateStatement,
-    IntermediateValue, Location,
+    AllocationOptimizer, IntermediateAssignment, IntermediateExpression, IntermediateIfStatement,
+    IntermediateLambda, IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory,
+    IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
 };
 
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
@@ -611,19 +611,34 @@ impl EquivalentExpressionEliminator {
         }
         strongly_required_locations
     }
+
+    fn eliminate_equivalent_expressions(program: IntermediateProgram) -> IntermediateProgram {
+        let IntermediateProgram { main, types } = program;
+        let mut optimizer = EquivalentExpressionEliminator::new();
+        let lambda = optimizer.eliminate_from_lambda(main);
+        let allocation_optimizer = AllocationOptimizer::from_statements(&lambda.statements);
+        let IntermediateExpression::IntermediateLambda(main) =
+            allocation_optimizer.remove_wasted_allocations_from_expression(lambda.into())
+        else {
+            panic!("Main function changed form.")
+        };
+        IntermediateProgram { main, types }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use super::*;
 
     use lowering::{
         AllocationOptimizer, AtomicTypeEnum, ExpressionEqualityChecker, Integer, IntermediateArg,
         IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess, IntermediateFnCall,
         IntermediateFnType, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
-        IntermediateMatchStatement, IntermediateMemory, IntermediateTupleExpression,
-        IntermediateTupleType, IntermediateType, IntermediateUnionType, IntermediateValue,
-        Location,
+        IntermediateMatchStatement, IntermediateMemory, IntermediateProgram,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        IntermediateUnionType, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -1283,5 +1298,60 @@ mod tests {
             &optimized_fn,
             &expected_fn.into()
         ));
+    }
+
+    #[test_case(
+        {
+            let expression = IntermediateTupleExpression(Vec::new());
+            let assignment = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            let ret = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            let types = vec![
+                Rc::new(RefCell::new(IntermediateUnionType(vec![None, None]).into()))
+            ];
+            (
+                IntermediateProgram{
+                    main: IntermediateLambda{
+                        args: Vec::new(),
+                        statements: vec![
+                            assignment.clone().into(),
+                            ret.clone().into()
+                        ],
+                        ret: ret.clone().into()
+                    },
+                    types: types.clone()
+                },
+                IntermediateProgram{
+                    main: IntermediateLambda{
+                        args: Vec::new(),
+                        statements: vec![
+                            assignment.clone().into()
+                        ],
+                        ret: assignment.clone().into()
+                    }.into(),
+                    types
+                }.into()
+            )
+        };
+        "basic program"
+    )]
+    fn test_eliminate_program_equivalent_expressions(
+        program_expected: (IntermediateProgram, IntermediateProgram),
+    ) {
+        let (program, expected_program) = program_expected;
+        let optimized_program =
+            EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+        dbg!(&optimized_program);
+        dbg!(&expected_program);
+        assert_eq!(optimized_program.types, expected_program.types);
+        assert!(ExpressionEqualityChecker::equal(
+            &optimized_program.main.into(),
+            &expected_program.main.into()
+        ))
     }
 }
