@@ -12,7 +12,7 @@ type Definitions = HashMap<Location, IntermediateExpression>;
 type NormalizedLocations = HashMap<Location, Location>;
 
 #[derive(Clone)]
-struct EquivalentExpressionEliminator {
+pub struct EquivalentExpressionEliminator {
     historical_expressions: HistoricalExpressions,
     definitions: Definitions,
     normalized_locations: NormalizedLocations,
@@ -612,7 +612,7 @@ impl EquivalentExpressionEliminator {
         strongly_required_locations
     }
 
-    fn eliminate_equivalent_expressions(program: IntermediateProgram) -> IntermediateProgram {
+    pub fn eliminate_equivalent_expressions(program: IntermediateProgram) -> IntermediateProgram {
         let IntermediateProgram { main, types } = program;
         let mut optimizer = EquivalentExpressionEliminator::new();
         let lambda = optimizer.eliminate_from_lambda(main);

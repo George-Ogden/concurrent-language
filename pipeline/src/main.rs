@@ -2,7 +2,7 @@ use std::io::{self, Read};
 
 use compilation::Compiler;
 use lowering::Lowerer;
-use optimization::DeadCodeAnalyzer;
+use optimization::{DeadCodeAnalyzer, EquivalentExpressionEliminator};
 use translation::Translator;
 use type_checker::{Program, TypeChecker};
 
@@ -14,9 +14,14 @@ fn main() {
     match serde_json::from_str::<Program>(&input) {
         Ok(program) => match TypeChecker::type_check(program) {
             Ok(type_checked_program) => {
-                let lowered_program = Lowerer::lower(type_checked_program);
-                let optimized_lowered_program = DeadCodeAnalyzer::remove_dead_code(lowered_program);
-                let compiled_program = Compiler::compile(optimized_lowered_program);
+                let mut lowered_program = Lowerer::lower(type_checked_program);
+                for optimization in [
+                    DeadCodeAnalyzer::remove_dead_code,
+                    EquivalentExpressionEliminator::eliminate_equivalent_expressions,
+                ] {
+                    lowered_program = optimization(lowered_program);
+                }
+                let compiled_program = Compiler::compile(lowered_program);
                 let code = Translator::translate(compiled_program);
                 println!("{}", code)
             }
