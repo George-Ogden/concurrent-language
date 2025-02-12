@@ -824,6 +824,7 @@ impl IntermediateLambda {
     }
     pub fn substitute(&mut self, substitution: &Substitution) {
         IntermediateStatement::substitute_all(&mut self.statements, substitution);
+        self.ret = self.ret.substitute(substitution);
     }
 }
 
