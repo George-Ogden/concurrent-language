@@ -43,11 +43,12 @@ impl EquivalentExpressionEliminator {
         } = lambda;
         self.prepare_history(&mut statements);
         let statements = if let Some(location) = IntermediateValue::filter_memory_location(&ret) {
-            self.weakly_reorder(statements, vec![location], &mut HashSet::new())
+            let statements =
+                self.weakly_reorder(statements, &vec![location.clone()], &mut HashSet::new());
+            self.strongly_reorder(statements, &vec![location], &mut HashSet::new())
         } else {
             Vec::new()
         };
-        // TODO: strongly reorder
         IntermediateLambda {
             args,
             statements,
@@ -108,12 +109,12 @@ impl EquivalentExpressionEliminator {
     fn weakly_reorder(
         &mut self,
         statements: Vec<IntermediateStatement>,
-        locations: Vec<Location>,
+        locations: &Vec<Location>,
         defined: &mut HashSet<Location>,
     ) -> Vec<IntermediateStatement> {
         let mut new_statements = Vec::new();
         let mut weakly_required_locations = self.weakly_required_locations(&statements);
-        weakly_required_locations.extend(locations);
+        weakly_required_locations.extend(locations.clone());
         let mut definitions = self.definitions.clone();
         for statement in &statements {
             if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
@@ -124,8 +125,7 @@ impl EquivalentExpressionEliminator {
                 *definitions.get_mut(&location).unwrap() = expression.clone();
             }
         }
-
-        fn process_location(
+        fn weakly_process_location(
             location: Location,
             defined: &mut HashSet<Location>,
             weakly_required_locations: &HashSet<Location>,
@@ -146,7 +146,7 @@ impl EquivalentExpressionEliminator {
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
             {
-                process_location(
+                weakly_process_location(
                     location,
                     defined,
                     weakly_required_locations,
@@ -170,7 +170,7 @@ impl EquivalentExpressionEliminator {
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
             {
-                process_location(
+                weakly_process_location(
                     dependency,
                     defined,
                     &weakly_required_locations,
@@ -180,7 +180,7 @@ impl EquivalentExpressionEliminator {
             }
             match statement {
                 IntermediateStatement::IntermediateAssignment(assignment) => {
-                    process_location(
+                    weakly_process_location(
                         assignment.location,
                         defined,
                         &weakly_required_locations,
@@ -209,12 +209,12 @@ impl EquivalentExpressionEliminator {
                             branches: (
                                 self.weakly_reorder(
                                     branches.0.clone(),
-                                    shared_targets.clone(),
+                                    &shared_targets,
                                     &mut true_defined,
                                 ),
                                 self.weakly_reorder(
                                     branches.1,
-                                    shared_targets.clone(),
+                                    &shared_targets,
                                     &mut false_defined,
                                 ),
                             ),
@@ -243,11 +243,8 @@ impl EquivalentExpressionEliminator {
                         .into_iter()
                         .map(|IntermediateMatchBranch { target, statements }| {
                             let mut defined = defined.clone();
-                            let statements = self.weakly_reorder(
-                                statements,
-                                shared_targets.clone(),
-                                &mut defined,
-                            );
+                            let statements =
+                                self.weakly_reorder(statements, &shared_targets, &mut defined);
                             shared_defined = Some(match &shared_defined {
                                 None => defined,
                                 Some(set) => set.intersection(&defined).cloned().collect(),
@@ -256,7 +253,6 @@ impl EquivalentExpressionEliminator {
                         })
                         .collect_vec();
                     new_statements.push(IntermediateMatchStatement { subject, branches }.into());
-                    dbg!(&shared_defined);
                     *defined = shared_defined.unwrap_or(defined.clone());
                 }
             }
@@ -312,16 +308,13 @@ impl EquivalentExpressionEliminator {
                 let mut required = subject.filter_memory_location().into_iter().collect_vec();
                 let mut intersection = None;
                 for branch in branches {
+                    let new_locations = self.weakly_required_locations(&branch.statements);
                     match intersection {
-                        None => {
-                            intersection = Some(self.weakly_required_locations(&branch.statements))
-                        }
-                        Some(locations) => {
+                        None => intersection = Some(new_locations),
+                        Some(shared_locations) => {
                             intersection = Some(
-                                locations
-                                    .intersection(
-                                        &self.weakly_required_locations(&branch.statements),
-                                    )
+                                shared_locations
+                                    .intersection(&new_locations)
                                     .cloned()
                                     .collect(),
                             )
@@ -333,6 +326,237 @@ impl EquivalentExpressionEliminator {
             }
         }))
     }
+
+    fn strongly_reorder(
+        &mut self,
+        statements: Vec<IntermediateStatement>,
+        locations: &Vec<Location>,
+        defined: &mut HashSet<Location>,
+    ) -> Vec<IntermediateStatement> {
+        let mut new_statements = Vec::new();
+        let strongly_required_locations =
+            self.strongly_required_locations(&statements, &HashSet::from_iter(locations.clone()));
+        let mut definitions = self.definitions.clone();
+        for statement in &statements {
+            if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                expression,
+                location,
+            }) = statement
+            {
+                *definitions.get_mut(&location).unwrap() = expression.clone();
+            }
+        }
+        fn strongly_process_location(
+            location: Location,
+            defined: &mut HashSet<Location>,
+            strongly_required_locations: &HashSet<Location>,
+            definitions: &mut HashMap<Location, IntermediateExpression>,
+            new_statements: &mut Vec<IntermediateStatement>,
+        ) {
+            if defined.contains(&location) {
+                return;
+            }
+            defined.insert(location.clone());
+
+            let Some(expression) = definitions.remove(&location) else {
+                panic!("Location not found in definitions.")
+            };
+
+            for location in expression
+                .values()
+                .iter()
+                .filter_map(IntermediateValue::filter_memory_location)
+            {
+                strongly_process_location(
+                    location,
+                    defined,
+                    strongly_required_locations,
+                    definitions,
+                    new_statements,
+                );
+            }
+
+            new_statements.push(
+                IntermediateAssignment {
+                    location,
+                    expression,
+                }
+                .into(),
+            );
+        }
+
+        for statement in statements {
+            for dependency in statement
+                .values()
+                .iter()
+                .filter_map(IntermediateValue::filter_memory_location)
+            {
+                if strongly_required_locations.contains(&dependency) {
+                    strongly_process_location(
+                        dependency,
+                        defined,
+                        &strongly_required_locations,
+                        &mut definitions,
+                        &mut new_statements,
+                    );
+                }
+            }
+            match statement {
+                IntermediateStatement::IntermediateAssignment(assignment) => {
+                    if strongly_required_locations.contains(&assignment.location) {
+                        strongly_process_location(
+                            assignment.location,
+                            defined,
+                            &strongly_required_locations,
+                            &mut definitions,
+                            &mut new_statements,
+                        );
+                    }
+                }
+                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                    condition,
+                    branches,
+                }) => {
+                    let targets = (
+                        HashSet::<Location>::from_iter(IntermediateStatement::all_targets(
+                            &branches.0,
+                        )),
+                        HashSet::<Location>::from_iter(IntermediateStatement::all_targets(
+                            &branches.1,
+                        )),
+                    );
+                    let shared_targets = targets.0.intersection(&targets.1).cloned().collect_vec();
+                    let mut true_defined = defined.clone();
+                    let mut false_defined = defined.clone();
+                    new_statements.push(
+                        IntermediateIfStatement {
+                            condition,
+                            branches: (
+                                self.strongly_reorder(
+                                    branches.0.clone(),
+                                    &shared_targets,
+                                    &mut true_defined,
+                                ),
+                                self.strongly_reorder(
+                                    branches.1,
+                                    &shared_targets,
+                                    &mut false_defined,
+                                ),
+                            ),
+                        }
+                        .into(),
+                    );
+                    *defined = true_defined.intersection(&false_defined).cloned().collect();
+                }
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject,
+                    branches,
+                }) => {
+                    let mut shared_targets: Option<HashSet<Location>> = None;
+                    let mut shared_defined: Option<HashSet<Location>> = None;
+                    for branch in &branches {
+                        let targets = HashSet::from_iter(IntermediateStatement::all_targets(
+                            &branch.statements,
+                        ));
+                        shared_targets = Some(match shared_targets {
+                            None => targets,
+                            Some(set) => set.intersection(&targets).cloned().collect(),
+                        })
+                    }
+                    let shared_targets = Vec::from_iter(shared_targets.unwrap_or_default());
+                    let branches = branches
+                        .into_iter()
+                        .map(|IntermediateMatchBranch { target, statements }| {
+                            let mut defined = defined.clone();
+                            let statements =
+                                self.strongly_reorder(statements, &shared_targets, &mut defined);
+                            shared_defined = Some(match &shared_defined {
+                                None => defined,
+                                Some(set) => set.intersection(&defined).cloned().collect(),
+                            });
+                            IntermediateMatchBranch { target, statements }
+                        })
+                        .collect_vec();
+                    new_statements.push(IntermediateMatchStatement { subject, branches }.into());
+                    *defined = shared_defined.unwrap_or(defined.clone());
+                }
+            }
+        }
+        return new_statements;
+    }
+    fn strongly_required_locations(
+        &self,
+        statements: &Vec<IntermediateStatement>,
+        initial_locations: &HashSet<Location>,
+    ) -> HashSet<Location> {
+        let mut strongly_required_locations = HashSet::from_iter(initial_locations.iter().cloned());
+        for statement in statements.iter().rev() {
+            match statement {
+                IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                    expression,
+                    location,
+                }) => {
+                    if strongly_required_locations.contains(location) {
+                        strongly_required_locations.extend(
+                            expression
+                                .values()
+                                .iter()
+                                .filter_map(IntermediateValue::filter_memory_location)
+                                .collect_vec(),
+                        );
+                    }
+                }
+                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                    condition,
+                    branches,
+                }) => {
+                    strongly_required_locations
+                        .extend(condition.filter_memory_location().into_iter());
+                    strongly_required_locations.extend(
+                        self.strongly_required_locations(&branches.0, &strongly_required_locations)
+                            .intersection(&self.strongly_required_locations(
+                                &branches.1,
+                                &strongly_required_locations,
+                            ))
+                            .cloned()
+                            .collect_vec(),
+                    );
+                }
+                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                    subject,
+                    branches,
+                }) => {
+                    strongly_required_locations
+                        .extend(subject.filter_memory_location().into_iter().collect_vec());
+                    let mut intersection = None;
+                    for branch in branches {
+                        let new_locations = self.strongly_required_locations(
+                            &branch.statements,
+                            &strongly_required_locations,
+                        );
+                        match intersection {
+                            None => {
+                                intersection = Some(self.strongly_required_locations(
+                                    &branch.statements,
+                                    &new_locations,
+                                ))
+                            }
+                            Some(shared_locations) => {
+                                intersection = Some(
+                                    shared_locations
+                                        .intersection(&new_locations)
+                                        .cloned()
+                                        .collect(),
+                                )
+                            }
+                        }
+                    }
+                    strongly_required_locations.extend(intersection.unwrap_or_default());
+                }
+            }
+        }
+        strongly_required_locations
+    }
 }
 
 #[cfg(test)]
@@ -341,10 +565,11 @@ mod tests {
 
     use lowering::{
         AllocationOptimizer, AtomicTypeEnum, ExpressionEqualityChecker, Integer, IntermediateArg,
-        IntermediateAssignment, IntermediateBuiltIn, IntermediateIfStatement, IntermediateLambda,
-        IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory,
-        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
-        IntermediateUnionType, IntermediateValue, Location,
+        IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess,
+        IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
+        IntermediateMatchStatement, IntermediateMemory, IntermediateTupleExpression,
+        IntermediateTupleType, IntermediateType, IntermediateUnionType, IntermediateValue,
+        Location,
     };
     use test_case::test_case;
 
@@ -665,7 +890,7 @@ mod tests {
                                     }.into(),
                                     IntermediateAssignment{
                                         location: x.location.clone(),
-                                        expression: IntermediateValue::from(w.clone()).into()
+                                        expression: IntermediateValue::from(z.clone()).into()
                                     }.into()
                                 ],
                             },
@@ -673,11 +898,182 @@ mod tests {
                     }.into(),
                 ],
                 vec![
-                    x.location.clone()
+                    x.location.clone(),
+                    y.location.clone(),
                 ]
             )
         };
         "match statement shared value after branch"
+    )]
+    #[test_case(
+        {
+            let x = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let y = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![IntermediateTupleType(vec![AtomicTypeEnum::INT.into()]).into(),AtomicTypeEnum::INT.into()])));
+            let z = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let c = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL));
+            (
+                vec![
+                    IntermediateAssignment{
+                        location: y.location.clone(),
+                        expression: IntermediateTupleExpression(vec![
+                            Integer{value: 0}.into(),
+                        ]).into()
+                    }.into(),
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression: IntermediateValue::from(y.clone()).into()
+                                }.into(),
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        Integer{value: 1}.into(),
+                                    ]).into()
+                                }.into()
+                            ]
+                        )
+                    }.into(),
+                ],
+                vec![
+                    IntermediateIfStatement{
+                        condition: c.clone().into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        Integer{value: 0}.into(),
+                                    ]).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression: IntermediateValue::from(y.clone()).into()
+                                }.into(),
+                            ],
+                            vec![
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: IntermediateTupleExpression(vec![
+                                        Integer{value: 1}.into(),
+                                    ]).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression: IntermediateValue::from(z.clone()).into()
+                                }.into(),
+                            ]
+                        )
+                    }.into()
+                ],
+                vec![
+                    x.location.clone()
+                ]
+            )
+        };
+        "if statement non-shared value available"
+    )]
+    #[test_case(
+        {
+            let x = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(vec![AtomicTypeEnum::INT.into()])));
+            let y = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let z = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let s = IntermediateArg::from(IntermediateType::from(IntermediateUnionType(vec![None, None])));
+            (
+                vec![
+                    IntermediateAssignment{
+                        location: x.location.clone(),
+                        expression: IntermediateTupleExpression(vec![
+                            Integer{value: 0}.into(),
+                        ]).into()
+                    }.into(),
+                    IntermediateAssignment{
+                        location: z.location.clone(),
+                        expression: IntermediateElementAccess{
+                            value: x.clone().into(),
+                            idx: 0
+                        }.into()
+                    }.into(),
+                    IntermediateMatchStatement{
+                        subject: s.clone().into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: y.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            z.clone()
+                                        ).into()
+                                    }.into()
+                                ],
+                            },
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: y.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            Integer{value: 1}
+                                        ).into()
+                                    }.into()
+                                ]
+                            }
+                        ]
+                    }.into(),
+                ],
+                vec![
+                    IntermediateMatchStatement{
+                        subject: s.clone().into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: x.location.clone(),
+                                        expression: IntermediateTupleExpression(vec![
+                                            Integer{value: 0}.into(),
+                                        ]).into()
+                                    }.into(),
+                                    IntermediateAssignment{
+                                        location: z.location.clone(),
+                                        expression: IntermediateElementAccess{
+                                            value: x.clone().into(),
+                                            idx: 0
+                                        }.into()
+                                    }.into(),
+                                    IntermediateAssignment{
+                                        location: y.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            z.clone()
+                                        ).into()
+                                    }.into()
+                                ],
+                            },
+                            IntermediateMatchBranch{
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: y.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            Integer{value: 1}
+                                        ).into()
+                                    }.into(),
+                                ]
+                            }
+                        ]
+                    }.into(),
+                ],
+                vec![
+                    y.location.clone()
+                ]
+            )
+        };
+        "match statement nested non-shared value available"
     )]
     fn test_eliminate(
         statements: (
