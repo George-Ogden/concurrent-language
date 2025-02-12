@@ -64,7 +64,15 @@ impl EquivalentExpressionEliminator {
                     expression,
                     location,
                 }) => {
-                    let new_expression = self.normalize_expression(expression.clone());
+                    let mut new_expression = self.normalize_expression(expression.clone());
+                    if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                        args: _,
+                        ref mut statements,
+                        ret: _,
+                    }) = new_expression
+                    {
+                        self.prepare_history(statements);
+                    }
                     let new_location = match self.historical_expressions.get(&new_expression) {
                         None => {
                             let new_location = Location::new();
@@ -84,14 +92,6 @@ impl EquivalentExpressionEliminator {
                         .insert(location.clone(), value.clone().into());
                     self.normalized_locations
                         .insert(location.clone(), new_location);
-                    if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                        args: _,
-                        statements,
-                        ret: _,
-                    }) = expression
-                    {
-                        self.prepare_history(statements);
-                    }
                     *expression = value.into();
                 }
                 IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
@@ -381,11 +381,25 @@ impl EquivalentExpressionEliminator {
         }
 
         for statement in statements {
-            for dependency in statement
-                .values()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-            {
+            let values =
+                if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                    expression: IntermediateExpression::IntermediateLambda(lambda),
+                    location: _,
+                }) = &statement
+                {
+                    lambda
+                        .find_open_vars()
+                        .into_iter()
+                        .map(|memory| memory.location)
+                        .collect_vec()
+                } else {
+                    statement
+                        .values()
+                        .iter()
+                        .filter_map(IntermediateValue::filter_memory_location)
+                        .collect_vec()
+                };
+            for dependency in values {
                 if strongly_required_locations.contains(&dependency) {
                     self.strongly_process_location(
                         dependency,
@@ -1187,7 +1201,52 @@ mod tests {
                 ]
             )
         };
-        "fn body reassignment"
+        "fn body external reassignment"
+    )]
+    #[test_case(
+        {
+            let expression = IntermediateTupleExpression(Vec::new());
+            let assignment = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            let ret = IntermediateAssignment{
+                expression: expression.clone().into(),
+                location: Location::new()
+            };
+            let lambda = Location::new();
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: vec![
+                                assignment.clone().into(),
+                                ret.clone().into()
+                            ],
+                            ret: ret.clone().into()
+                        }.into(),
+                        location: lambda.clone()
+                    }.into()
+                ],
+                vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: vec![
+                                assignment.clone().into(),
+                            ],
+                            ret: assignment.clone().into()
+                        }.into(),
+                        location: lambda.clone()
+                    }.into()
+                ],
+                vec![
+                    lambda.clone()
+                ]
+            )
+        };
+        "fn body internal reassignment"
     )]
     #[test_case(
         {
@@ -1290,10 +1349,8 @@ mod tests {
                 ret: original_location.clone().into(),
             });
         let allocation_optimizer = AllocationOptimizer::from_statements(&optimized_fn.statements);
-        dbg!(&optimized_fn);
         let optimized_fn =
             allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
-        dbg!(&optimized_fn, &expected_fn);
         assert!(ExpressionEqualityChecker::equal(
             &optimized_fn,
             &expected_fn.into()
