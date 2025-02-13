@@ -1,0 +1,23 @@
+fib = (n: int) -> int {
+    if (n <= 1){
+        if (n < 0){
+            0
+        } else {
+            1
+        }
+    } else {
+        fib_inner = (m: int) -> (int, int) {
+            if (m == 0){
+                (1, 1)
+            } else {
+                f = fib_inner(m - 1);
+                (f.1, f.0 + f.1)
+            }
+        };
+        fib_inner(n-1).1
+    }
+};
+
+main = (n: int) -> int {
+    fib(n)
+};

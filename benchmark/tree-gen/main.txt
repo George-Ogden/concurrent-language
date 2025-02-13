@@ -1,0 +1,22 @@
+typedef Tree{T} {Node(Tree{T}, T, Tree{T}) | Leaf};
+
+gen_tree = (n: int) -> Tree{int} {
+    gen_tree_inner = (n: int, m: int) -> Tree{int}{
+        if (n <= 0) {
+            Leaf{int}{}
+        } else {
+            Node{int}{
+                (
+                    gen_tree_inner(n-1, 2 * m),
+                    m,
+                    gen_tree_inner(n-1, 2 * m + 1),
+                )
+            }
+        }
+    };
+    gen_tree_inner(n, 0)
+};
+
+main = (n: int) -> Tree{int} {
+    gen_tree(n)
+};
