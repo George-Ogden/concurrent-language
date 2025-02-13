@@ -93,7 +93,7 @@ clean:
 	find -path '*/__pycache__*' -delete
 
 LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
-REPEATS := 5
+REPEATS := 10
 
 $(LOG_DIR):
 	mkdir -p $@
@@ -105,13 +105,14 @@ benchmark: $(LOG_DIR)
 	for program in benchmark/**; do \
 		make build FILE=$$program/main.txt; \
 			while read input; do  \
+				echo $$program $$input; \
 				{ sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null || echo "nan"; } \
 				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
 				| xargs -0 echo  >> $(LOG_DIR)/log.tsv; \
-			done < $$program/input.txt;  \
+			done < $$program/input.txt; \
 		done; \
 	done;
 
