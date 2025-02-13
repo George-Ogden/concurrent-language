@@ -68,6 +68,9 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: build
+	for sample in benchmark/**/main.txt; do \
+		make build FILE=$$sample || exit 1; \
+	done;
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
