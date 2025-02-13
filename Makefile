@@ -92,4 +92,27 @@ clean:
 	make -C backend clean
 	find -path '*/__pycache__*' -delete
 
-.PHONY: all clean parse type-check
+LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
+REPEATS := 5
+
+$(LOG_DIR):
+	mkdir -p $@
+
+benchmark: $(LOG_DIR)
+	git log --format="%H" -n 1 > $^/git
+	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
+		for i in `seq 1 $(REPEATS)`; do \
+	for program in benchmark/**; do \
+		make build FILE=$$program/main.txt; \
+			while read input; do  \
+				{ sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null || echo "nan"; } \
+				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
+				| xargs printf '%s\t' \
+					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
+					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
+				| xargs -0 echo  >> $(LOG_DIR)/log.tsv; \
+			done < $$program/input.txt;  \
+		done; \
+	done;
+
+.PHONY: all benchmark clean run
