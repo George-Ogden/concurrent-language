@@ -40,21 +40,27 @@ $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
+	touch $@
 
 $(LOWERER): $(wildcard lowering/src/*) $(TYPE_CHECKER)
 	cargo build --manifest-path $(LOWERER_MANIFEST)
+	touch $@
 
 $(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
 	cargo build --manifest-path $(COMPILER_MANIFEST)
+	touch $@
 
 $(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
 	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
+	touch $@
 
 $(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
 	cargo build --manifest-path $(OPTIMIZER_MANIFEST)
+	touch $@
 
 $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST)
+	touch $@
 
 $(BACKEND):
 	make -C backend
