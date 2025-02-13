@@ -106,7 +106,8 @@ benchmark: $(LOG_DIR)
 		make build FILE=$$program/main.txt; \
 			while read input; do  \
 				echo $$program $$input; \
-				{ sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null || echo "nan"; } \
+				sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null \
+				| { if read -r output; then echo "$$output"; else echo "nan"; fi; } \
 				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
