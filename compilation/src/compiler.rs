@@ -468,18 +468,18 @@ impl Compiler {
         let open_vars = fn_def.find_open_vars();
         let new_locations = open_vars
             .iter()
-            .map(|val| IntermediateMemory::from(val.type_()))
+            .map(|val| IntermediateMemory::from(val.type_.clone()))
             .collect_vec();
         let substitution = open_vars
             .iter()
             .zip(new_locations.iter())
-            .map(|(var, loc)| (var.clone(), loc.clone().into()))
+            .map(|(var, mem)| (var.location.clone(), mem.location.clone()))
             .collect::<HashMap<_, _>>();
         fn_def.substitute(&substitution);
         open_vars
             .iter()
             .zip(new_locations.iter())
-            .map(|(val, mem)| (val.clone(), mem.location.clone()))
+            .map(|(val, mem)| (val.clone().into(), mem.location.clone()))
             .collect()
     }
     fn closure_prefix(&mut self, env_types: &Vec<(Location, MachineType)>) -> Vec<Statement> {
@@ -2206,6 +2206,148 @@ mod tests {
             ]
         };
         "identity call program"
+    )]
+    #[test_case(
+        {
+            let t1 = IntermediateMemory::from(
+                IntermediateType::from(IntermediateTupleType(Vec::new()))
+            );
+            let t2 = IntermediateMemory::from(
+                IntermediateType::from(IntermediateTupleType(vec![IntermediateTupleType(Vec::new()).into()])),
+            );
+            let main = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    Vec::new(),
+                    Box::new(IntermediateTupleType(vec![IntermediateTupleType(Vec::new()).into()]).into()),
+                ))
+            );
+            let main_call = IntermediateMemory::from(
+                IntermediateType::from(IntermediateTupleType(vec![IntermediateTupleType(Vec::new()).into()])),
+            );
+            IntermediateProgram {
+                main: IntermediateLambda{
+                    args: Vec::new(),
+                    ret: main_call.clone().into(),
+                    statements: vec![
+                        IntermediateAssignment{
+                            location: t1.location.clone(),
+                            expression:
+                                IntermediateTupleExpression(Vec::new()).into()
+                        }.into(),
+                        IntermediateAssignment{
+                            location: t2.location.clone(),
+                            expression:
+                                IntermediateTupleExpression(vec![t1.clone().into()]).into()
+                        }.into(),
+                        IntermediateAssignment{
+                            location: main.location.clone(),
+                            expression:
+                                IntermediateLambda{
+                                    args: Vec::new(),
+                                    statements: Vec::new(),
+                                    ret: t2.clone().into()
+                                }.into()
+                        }.into(),
+                        IntermediateAssignment{
+                            location: main_call.location.clone(),
+                            expression:
+                                IntermediateFnCall{
+                                    fn_: main.clone().into(),
+                                    args: Vec::new()
+                                }.into()
+                        }.into(),
+                    ],
+                },
+                types: Vec::new()
+            }
+        },
+        Program {
+            type_defs: Vec::new(),
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Declaration {
+                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
+                            memory: Memory(Id::from("m2")),
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("m2")),
+                            value: ElementAccess{
+                                value: Memory(Id::from("env")).into(),
+                                idx: 0
+                            }.into()
+                        }.into()
+                    ],
+                    ret: (Memory(Id::from("m2")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
+                    env: Some(TupleType(vec![TupleType(vec![TupleType(Vec::new()).into()]).into()]).into()),
+                    allocations: Vec::new()
+                },
+                FnDef {
+                    name: Name::from("Main"),
+                    arguments: Vec::new(),
+                    statements: vec![
+                        Declaration {
+                            type_: TupleType(Vec::new()).into(),
+                            memory: Memory(Id::from("m0")),
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: TupleExpression(Vec::new()).into(),
+                        }.into(),
+                        Declaration {
+                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
+                            memory: Memory(Id::from("m1")),
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m1")),
+                            value: TupleExpression(vec![Memory(Id::from("m0")).into()]).into(),
+                        }.into(),
+                        Declaration {
+                            type_: TupleType(vec![TupleType(vec![TupleType(Vec::new()).into()]).into()]).into(),
+                            memory: Memory(Id::from("m3")),
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m3")),
+                            value: TupleExpression(vec![Memory(Id::from("m1")).into()]).into(),
+                        }.into(),
+                        Declaration {
+                            type_: FnType(Vec::new(), Box::new(TupleType(vec![TupleType(Vec::new()).into()]).into())).into(),
+                            memory: Memory(Id::from("m4")),
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m4")),
+                            value: ClosureInstantiation{
+                                name: Name::from("F0"),
+                                env: Some(Memory(Id::from("m3")).into())
+                            }.into()
+                        }.into(),
+                        Await(vec![Memory(Id::from("m4"))]).into(),
+                        Assignment {
+                            target: Memory(Id::from("m5")),
+                            value: FnCall{
+                                fn_type: FnType(
+                                    Vec::new(),
+                                    Box::new(TupleType(vec![TupleType(Vec::new()).into()]).into())
+                                ).into(),
+                                fn_: Memory(Id::from("m4")).into(),
+                                args: Vec::new()
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: (Memory(Id::from("m5")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
+                    env: None,
+                    allocations: vec![
+                        Declaration {
+                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
+                            memory: Memory(Id::from("m5"))
+                        }
+                    ]
+                },
+            ]
+        };
+        "double tuple program"
     )]
     #[test_case(
         {
