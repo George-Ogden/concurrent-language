@@ -28,6 +28,7 @@ $(LAST_FILE):
 all: $(PIPELINE) $(BACKEND)
 
 FILE := samples/samples.txt
+USER_FLAG := 0
 
 run: build
 	sudo make -C backend run --quiet
@@ -63,7 +64,7 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	touch $@
 
 $(BACKEND):
-	make -C backend
+	make -C backend USER_FLAG=$(USER_FLAG)
 
 $(PARSER): $(GRAMMAR)
 	touch $@
@@ -74,9 +75,6 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: build
-	for sample in benchmark/**/main.txt; do \
-		make build FILE=$$sample || exit 1; \
-	done;
 	pytest . -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
@@ -90,6 +88,10 @@ test: build
 		if [ "$$sample" != "samples/grammar.txt" ]; then \
 			make build FILE=$$sample || exit 1; \
 		fi \
+	done;
+	for sample in benchmark/**; do \
+		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
+		cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
 	done;
 
 clean:
