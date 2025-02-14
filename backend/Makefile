@@ -8,6 +8,7 @@ BUILD_DIR := build_
 WRAP_DIR := wrap
 WRAP_FILE := $(BUILD_DIR)/wrap.hpp
 WRAP_FILES := $(wildcard $(WRAP_DIR)/*.hpp)
+USER_FILE := include/main/user.hpp
 WRAP := -Wl,--wrap=sysconf,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
 
 TARGET_DIR := bin
@@ -23,7 +24,6 @@ ifeq ($(USER_FLAG), 1)
 endif
 
 USER := $(shell user=$$(who -m | awk '{print $$1}'); [ -z "$$user" ] && whoami || echo $$user)
-USER_FILE := include/main/user.hpp
 COMPILER_PREFIX := $(BUILD_DIR)/.compiled-with-
 COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)$(USER_FLAG)
 
