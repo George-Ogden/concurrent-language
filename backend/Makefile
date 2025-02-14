@@ -8,13 +8,14 @@ BUILD_DIR := build_
 WRAP_DIR := wrap
 WRAP_FILE := $(BUILD_DIR)/wrap.hpp
 WRAP_FILES := $(wildcard $(WRAP_DIR)/*.hpp)
+USER_FILE := include/main/user.hpp
 WRAP := -Wl,--wrap=sysconf,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
 
 TARGET_DIR := bin
 SRC_DIR := src
 TARGET := $(TARGET_DIR)/main
 TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*.cpp))
-HEADERS := $(wildcard include/*.hpp include/**/*.hpp)
+HEADERS := $(wildcard include/*.hpp include/**/*.hpp) $(USER_FILE)
 
 ifeq ($(USER_FLAG), 1)
 	CXXFLAGS += $(WRAP)
@@ -53,9 +54,8 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 		done; \
 	fi
 
-include/main/include.hpp: $(WRAP_FILE) $(COMPILER_FILE)
-	git restore $@
-	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" >> $@,)
+$(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
+	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@,)
 	touch $@
 
 $(WRAP_FILE): $(WRAP_FILES) | $(BUILD_DIR)
