@@ -53,9 +53,8 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 		done; \
 	fi
 
-include/main/include.hpp: $(WRAP_FILE) $(COMPILER_FILE)
-	git restore $@
-	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" >> $@,)
+include/main/user.hpp: $(WRAP_FILE) $(COMPILER_FILE)
+	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@,)
 	touch $@
 
 $(WRAP_FILE): $(WRAP_FILES) | $(BUILD_DIR)
