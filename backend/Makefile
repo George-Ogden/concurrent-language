@@ -14,7 +14,7 @@ TARGET_DIR := bin
 SRC_DIR := src
 TARGET := $(TARGET_DIR)/main
 TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*.cpp))
-HEADERS := $(wildcard include/*.hpp include/**/*.hpp)
+HEADERS := $(wildcard include/*.hpp include/**/*.hpp) $(USER_FILE)
 
 ifeq ($(USER_FLAG), 1)
 	CXXFLAGS += $(WRAP)
@@ -23,6 +23,7 @@ ifeq ($(USER_FLAG), 1)
 endif
 
 USER := $(shell user=$$(who -m | awk '{print $$1}'); [ -z "$$user" ] && whoami || echo $$user)
+USER_FILE := include/main/user.hpp
 COMPILER_PREFIX := $(BUILD_DIR)/.compiled-with-
 COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)$(USER_FLAG)
 
@@ -53,7 +54,7 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 		done; \
 	fi
 
-include/main/user.hpp: $(WRAP_FILE) $(COMPILER_FILE)
+$(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
 	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@,)
 	touch $@
 
