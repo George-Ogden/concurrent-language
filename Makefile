@@ -28,6 +28,7 @@ $(LAST_FILE):
 all: $(PIPELINE) $(BACKEND)
 
 FILE := samples/samples.txt
+USER_FLAG := 0
 
 run: build
 	sudo make -C backend run --quiet
@@ -40,24 +41,30 @@ $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
+	touch $@
 
 $(LOWERER): $(wildcard lowering/src/*) $(TYPE_CHECKER)
 	cargo build --manifest-path $(LOWERER_MANIFEST)
+	touch $@
 
 $(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
 	cargo build --manifest-path $(COMPILER_MANIFEST)
+	touch $@
 
 $(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
 	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
+	touch $@
 
 $(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
 	cargo build --manifest-path $(OPTIMIZER_MANIFEST)
+	touch $@
 
 $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST)
+	touch $@
 
 $(BACKEND):
-	make -C backend
+	make -C backend USER_FLAG=$(USER_FLAG)
 
 $(PARSER): $(GRAMMAR)
 	touch $@
@@ -82,6 +89,10 @@ test: build
 			make build FILE=$$sample || exit 1; \
 		fi \
 	done;
+	for sample in benchmark/**; do \
+		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
+		cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
+	done;
 
 clean:
 	rm -rf $(GRAMMAR)
@@ -89,4 +100,29 @@ clean:
 	make -C backend clean
 	find -path '*/__pycache__*' -delete
 
-.PHONY: all clean parse type-check
+LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
+REPEATS := 10
+
+$(LOG_DIR):
+	mkdir -p $@
+
+benchmark: $(LOG_DIR)
+	git log --format="%H" -n 1 > $^/git
+	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
+		for i in `seq 1 $(REPEATS)`; do \
+	for program in benchmark/**; do \
+		make build FILE=$$program/main.txt; \
+			while read input; do  \
+				echo $$program $$input; \
+				sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null \
+				| { if read -r output; then echo "$$output"; else echo "nan"; fi; } \
+				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
+				| xargs printf '%s\t' \
+					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
+					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
+				| xargs -0 echo  >> $(LOG_DIR)/log.tsv; \
+			done < $$program/input.txt; \
+		done; \
+	done;
+
+.PHONY: all benchmark clean run

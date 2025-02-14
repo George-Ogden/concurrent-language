@@ -1,0 +1,42 @@
+typedef Tree{T} {Node(Tree{T}, T, Tree{T}) | Leaf};
+
+// modified from https://stackoverflow.com/a/8831937/12103577
+hash = (hash: int, n: int) -> int {
+    (hash << 5) - hash + n
+};
+
+gen_tree = (n: int) -> Tree{int} {
+    gen_tree_inner = (n: int, m: int, h: int) -> Tree{int}{
+        if (n <= 0) {
+            Leaf{int}{}
+        } else {
+            Node{int}{
+                (
+                    gen_tree_inner(n-1, 2 * m, hash(h, m)),
+                    h,
+                    gen_tree_inner(n-1, 2 * m + 1, hash(h, m)),
+                )
+            }
+        }
+    };
+    gen_tree_inner(n, 0, 0)
+};
+
+tree_xor = (tree: Tree{int}) -> int {
+    match (tree) {
+        Leaf: {
+            0
+        },
+        Node x: {
+            l = x.0;
+            r = x.2;
+            v = x.1;
+            (tree_xor(l) << 1) ^ v ^ (tree_xor(r) << 2)
+        }
+    }
+};
+
+main = (n: int) -> int {
+    tree = gen_tree(n);
+    tree_xor(tree)
+};
