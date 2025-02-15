@@ -1,7 +1,6 @@
 #pragma once
 
-#include "data_structures/lazy.hpp"
-#include "types/compound.hpp"
+#include "types/compound.tpp"
 #include "types/utils.hpp"
 
 #include <iostream>

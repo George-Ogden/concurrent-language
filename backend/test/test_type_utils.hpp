@@ -1,7 +1,7 @@
 #pragma once
 
 #include "types/builtin.hpp"
-#include "types/compound.hpp"
+#include "types/compound.tpp"
 
 #include <gtest/gtest.h>
 

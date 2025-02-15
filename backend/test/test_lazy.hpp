@@ -1,12 +1,12 @@
 #pragma once
 
-#include "data_structures/lazy.hpp"
-#include "data_structures/lock.hpp"
-#include "fn/continuation.hpp"
+#include "data_structures/lazy.tpp"
+#include "data_structures/lock.tpp"
+#include "fn/continuation.tpp"
 #include "fn/operators.hpp"
-#include "system/thread_manager.hpp"
+#include "system/thread_manager.tpp"
 #include "types/builtin.hpp"
-#include "types/compound.hpp"
+#include "types/compound.tpp"
 
 #include <gtest/gtest.h>
 

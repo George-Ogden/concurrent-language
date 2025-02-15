@@ -1,8 +1,8 @@
 #pragma once
 
-#include "fn/fn.hpp"
+#include "fn/fn.tpp"
 #include "fn/operators.hpp"
-#include "system/work_manager.hpp"
+#include "system/work_manager.tpp"
 #include "types/compound.hpp"
 
 #include <gtest/gtest.h>

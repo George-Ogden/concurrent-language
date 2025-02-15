@@ -10,7 +10,7 @@ template <typename... Types> struct VariantT;
 #include <string_view>
 #include <type_traits>
 
-struct Fn;
+class Fn;
 template <typename> struct Lazy;
 
 template <typename> struct is_tuple : std::false_type {};

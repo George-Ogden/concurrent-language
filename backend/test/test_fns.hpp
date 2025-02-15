@@ -1,11 +1,11 @@
 #pragma once
 
-#include "data_structures/lazy.hpp"
-#include "fn/fn.hpp"
+#include "data_structures/lazy.tpp"
+#include "fn/fn.tpp"
 #include "fn/operators.hpp"
-#include "system/work_manager.hpp"
+#include "system/work_manager.tpp"
 #include "types/builtin.hpp"
-#include "types/compound.hpp"
+#include "types/compound.tpp"
 #include "types/utils.hpp"
 
 #include <gtest/gtest.h>

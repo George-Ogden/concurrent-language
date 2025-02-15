@@ -1,9 +1,10 @@
 #pragma once
 
-#include "data_structures/lazy.hpp"
-#include "fn/fn.hpp"
+#include "data_structures/lazy.tpp"
+#include "fn/fn.tpp"
 #include "system/work_manager.hpp"
 #include "types/builtin.hpp"
+#include "types/utils.hpp"
 
 #include <compare>
 
