@@ -22,7 +22,7 @@ class Work {
     virtual ~Work();
     bool done() const;
     template <typename Ret, typename... Args>
-    static std::pair<std::shared_ptr<Work>, LazyT<TupleT<Args...>>>
+    static std::pair<std::shared_ptr<Work>, Ret>
     fn_call(TypedFn<Ret, Args...> f, Args... args);
     void add_continuation(Continuation c);
     static void update_continuation(Continuation c);

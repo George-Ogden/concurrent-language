@@ -26,9 +26,8 @@ class WorkTest : public ::testing::Test {
     void SetUp() override {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
-        // WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
-        auto results = std::tie(result);
-        std::tie(work, results) = Work::fn_call(inc_fn, make_lazy<Int>(4));
+        WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
+        std::tie(work, result) = Work::fn_call(inc_fn, make_lazy<Int>(4));
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };

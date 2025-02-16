@@ -16,7 +16,7 @@ bool Work::done() const {
 }
 
 template <typename Ret, typename ...Args>
-std::pair<std::shared_ptr<Work>, LazyT<TupleT<Args...>>> Work::fn_call(TypedFn<Ret, Args...> f, Args...args){
+std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Args...args){
     using RetT = remove_lazy_t<Ret>;
     Ret targets = lazy_map([](const auto& target){
         return std::make_shared<remove_shared_ptr_t<std::decay_t<decltype(target)>>>();

@@ -3,16 +3,28 @@
 #include "fn/fn.tpp"
 #include "system/thread_manager.tpp"
 #include "system/work_manager.hpp"
+#include "data_structures/lazy.tpp"
+#include "time/sleep.hpp"
 
 #include <atomic>
 #include <memory>
 #include <utility>
 #include <vector>
+#include <chrono>
 
-std::shared_ptr<Fn> WorkManager::finish_work = std::make_shared<FinishWork>();
+using namespace std::chrono_literals;
 
-void WorkManager::run(std::shared_ptr<Fn> fn) {
-    std::atomic<std::shared_ptr<Fn>> ref{fn};
+void FinishWork::run()
+{
+    throw finished{};
+}
+std::shared_ptr<Work> WorkManager::finish_work = std::make_shared<FinishWork>();
+
+template <typename Ret, typename... Args>
+Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args)
+{
+    auto [work, result] = Work::fn_call(fn, args...);
+    std::atomic<std::shared_ptr<Work>> ref{work};
     ThreadManager::RunConfig config{ThreadManager::available_concurrency(),
                                     false};
     WorkManager::queue->clear();
@@ -20,36 +32,48 @@ void WorkManager::run(std::shared_ptr<Fn> fn) {
         ThreadManager::available_concurrency());
     ThreadManager::run_multithreaded(main, &ref, config);
     WorkManager::queue->clear();
+    return result;
 }
 
-void WorkManager::call(std::shared_ptr<Fn> fn) {
+void WorkManager::enqueue(std::shared_ptr<Work> work)
+{
     WorkManager::queue.acquire();
-    WorkManager::queue->push_back(fn);
+    WorkManager::queue->push_back(work);
     WorkManager::queue.release();
 }
 
-std::monostate WorkManager::main(std::atomic<std::shared_ptr<Fn>> *ref) {
+std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
+{
     {
-        std::shared_ptr<Fn> fn =
+        std::shared_ptr<Work> work =
             ref->exchange(nullptr, std::memory_order_relaxed);
-        if (fn != nullptr) {
-            fn->run();
-            fn->await_all();
-            call(WorkManager::finish_work);
-        } else {
-            while (1) {
-                fn = get_work();
-                if (fn == nullptr) {
+        if (work != nullptr)
+        {
+            work->run();
+            // work->await_all();
+            enqueue(WorkManager::finish_work);
+        }
+        else
+        {
+            while (1)
+            {
+                work = get_work();
+                if (work == nullptr)
+                {
                     sleep(1us);
                     continue;
                 }
-                if (dynamic_cast<FinishWork *>(fn.get()) != nullptr) {
-                    call(fn);
+                if (dynamic_cast<FinishWork *>(work.get()) != nullptr)
+                {
+                    enqueue(work);
                     break;
                 }
-                try {
-                    fn->run();
-                } catch (finished &e) {
+                try
+                {
+                    work->run();
+                }
+                catch (finished &e)
+                {
                     break;
                 }
             }
@@ -58,60 +82,79 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Fn>> *ref) {
     return std::monostate{};
 }
 
-std::shared_ptr<Fn> WorkManager::get_work() {
+std::shared_ptr<Work> WorkManager::get_work()
+{
     WorkManager::queue.acquire();
-    if (WorkManager::queue->empty()) {
+    if (WorkManager::queue->empty())
+    {
         WorkManager::queue.release();
         return nullptr;
     }
 
-    std::shared_ptr<Fn> fn = WorkManager::queue->front().lock();
+    std::shared_ptr<Work> work = WorkManager::queue->front().lock();
     WorkManager::queue->pop_front();
     WorkManager::queue.release();
-    return fn;
+    return work;
 }
-template <typename T> constexpr auto filter_awaitable(T &v) {
+template <typename T>
+constexpr auto filter_awaitable(T &v)
+{
     return std::tuple<std::decay_t<T>>(v);
 }
 
 template <typename... Ts>
-constexpr auto filter_awaitable(std::tuple<Ts...> &v) {
+constexpr auto filter_awaitable(std::tuple<Ts...> &v)
+{
     return std::tuple<>{};
 }
 
-template <typename... Vs> void WorkManager::await(Vs &...vs) {
-    std::apply([&](auto &&...ts) { await_restricted(ts...); },
+template <typename... Vs>
+void WorkManager::await(Vs &...vs)
+{
+    std::apply([&](auto &&...ts)
+               { await_restricted(ts...); },
                std::tuple_cat(filter_awaitable(vs)...));
 }
 
-template <typename T> void await_variants(T &v) {}
+template <typename T>
+void await_variants(T &v) {}
 
 template <typename... Ts>
-void await_variants(std::shared_ptr<Lazy<VariantT<Ts...>>> &l) {
+void await_variants(std::shared_ptr<Lazy<VariantT<Ts...>>> &l)
+{
     auto v = l->value();
     std::size_t idx = v.tag;
-    using AwaitFn = void (*)(std::aligned_union_t<0, Ts...> &);
+    using AwaitWork = void (*)(std::aligned_union_t<0, Ts...> &);
 
-    static constexpr AwaitFn waiters[sizeof...(Ts)] = {[](auto &storage) {
-        WorkManager::await_all(
-            std::launder(reinterpret_cast<Ts *>(&storage))->value);
-    }...};
+    static constexpr AwaitWork waiters[sizeof...(Ts)] = {[](auto &storage)
+                                                         {
+                                                             WorkManager::await_all(
+                                                                 std::launder(reinterpret_cast<Ts *>(&storage))->value);
+                                                         }...};
 
     waiters[idx](v.value);
 }
 
-template <typename... Vs> void WorkManager::await_all(Vs &...vs) {
-    if constexpr (sizeof...(vs) != 0) {
+template <typename... Vs>
+void WorkManager::await_all(Vs &...vs)
+{
+    if constexpr (sizeof...(vs) != 0)
+    {
         auto flat_types = flatten(std::make_tuple(vs...));
-        std::apply([&](auto &&...ts) { await_restricted(ts...); }, flat_types);
-        std::apply([&](auto &&...ts) { (await_variants(ts), ...); },
+        std::apply([&](auto &&...ts)
+                   { await_restricted(ts...); }, flat_types);
+        std::apply([&](auto &&...ts)
+                   { (await_variants(ts), ...); },
                    flat_types);
     }
 }
 
-template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
+template <typename... Vs>
+void WorkManager::await_restricted(Vs &...vs)
+{
     unsigned n = sizeof...(vs);
-    if (n == 0) {
+    if (n == 0)
+    {
         return;
     }
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{n};
@@ -119,42 +162,57 @@ template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
     Locked<bool> *valid = new Locked<bool>{true};
     Continuation c{remaining, counter, valid};
     (vs->add_continuation(c), ...);
-    if (all_done(vs...)) {
+    if (all_done(vs...))
+    {
         delete valid;
-        if (counter.fetch_sub(1, std::memory_order_relaxed) == 1) {
+        if (counter.fetch_sub(1, std::memory_order_relaxed) == 1)
+        {
             return;
-        } else {
+        }
+        else
+        {
             throw stack_inversion{};
         }
     }
-    while (true) {
-        std::shared_ptr<Fn> fn = get_work();
-        if (dynamic_cast<FinishWork *>(fn.get()) != nullptr) {
-            call(fn);
+    while (true)
+    {
+        std::shared_ptr<Work> work = get_work();
+        if (dynamic_cast<FinishWork *>(work.get()) != nullptr)
+        {
+            enqueue(work);
             throw finished{};
         }
-        try {
-            if (counter.load(std::memory_order_relaxed) > 0) {
+        try
+        {
+            if (counter.load(std::memory_order_relaxed) > 0)
+            {
                 throw stack_inversion{};
             }
-            if (fn != nullptr) {
-                fn->run();
+            if (work != nullptr)
+            {
+                work->run();
             }
-        } catch (stack_inversion &e) {
+        }
+        catch (stack_inversion &e)
+        {
             valid->acquire();
             bool was_valid = **valid;
             **valid = false;
             valid->release();
-            if (fn != nullptr && !fn->done()) {
-                call(fn);
+            if (work != nullptr && !work->done())
+            {
+                enqueue(work);
             }
-            if (!was_valid) {
+            if (!was_valid)
+            {
                 delete valid;
             }
             counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
 
-            if (!was_valid && counter.load(std::memory_order_relaxed) == 0) {
-                while (!all_done(vs...)) {
+            if (!was_valid && counter.load(std::memory_order_relaxed) == 0)
+            {
+                while (!all_done(vs...))
+                {
                 }
                 return;
             }
@@ -164,6 +222,7 @@ template <typename... Vs> void WorkManager::await_restricted(Vs &...vs) {
 };
 
 template <typename... Vs>
-bool WorkManager::all_done(Vs &&...vs) {
-        return (... && vs->done());
-    }
+bool WorkManager::all_done(Vs &&...vs)
+{
+    return (... && vs->done());
+}

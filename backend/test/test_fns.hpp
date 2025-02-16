@@ -46,15 +46,15 @@ struct FourWayPlusV1 : Closure<FourWayPlusV1, Empty, Int, Int, Int, Int, Int> {
                     LazyT<Int> &d) override {
         if (call1 == decltype(call1){}) {
             call1 = std::make_shared<Plus__BuiltIn_Fn>(a, b);
-            WorkManager::call(call1);
+            WorkManager::enqueue(call1);
         }
         if (call2 == decltype(call2){}) {
             call2 = std::make_shared<Plus__BuiltIn_Fn>(c, d);
-            WorkManager::call(call2);
+            WorkManager::enqueue(call2);
         }
         if (call3 == decltype(call3){}) {
             call3 = std::make_shared<Plus__BuiltIn_Fn>(call1, call2);
-            WorkManager::call(call3);
+            WorkManager::enqueue(call3);
         }
         return call3;
     }
@@ -68,15 +68,15 @@ struct FourWayPlusV2 : Closure<FourWayPlusV2, Empty, Int, Int, Int, Int, Int> {
                     LazyT<Int> &d) override {
         if (call1 == decltype(call1){}) {
             call1 = std::make_shared<Plus__BuiltIn_Fn>(a, b);
-            WorkManager::call(call1);
+            WorkManager::enqueue(call1);
         }
         if (call2 == decltype(call2){}) {
             call2 = std::make_shared<Plus__BuiltIn_Fn>(call1, c);
-            WorkManager::call(call2);
+            WorkManager::enqueue(call2);
         }
         if (call3 == decltype(call3){}) {
             call3 = std::make_shared<Plus__BuiltIn_Fn>(call2, d);
-            WorkManager::call(call3);
+            WorkManager::enqueue(call3);
         }
         return call3;
     }
@@ -115,26 +115,26 @@ struct BranchingExample : EasyCloneFn<BranchingExample, Int, Int, Int, Int> {
         if (call1 == decltype(call1){}) {
             call1 = std::make_shared<Comparison_GE__BuiltIn_Fn>(
                 x, std::make_shared<LazyConstant<Int>>(0));
-            WorkManager::call(call1);
+            WorkManager::enqueue(call1);
         }
         WorkManager::await(call1);
         if (call1->value()) {
             if (call2 == decltype(call2){}) {
                 call2 = std::make_shared<Plus__BuiltIn_Fn>(
                     y, std::make_shared<LazyConstant<Int>>(1));
-                WorkManager::call(call2);
+                WorkManager::enqueue(call2);
             }
         } else {
             if (call2 == decltype(call2){}) {
                 call2 = std::make_shared<Plus__BuiltIn_Fn>(
                     z, std::make_shared<LazyConstant<Int>>(1));
-                WorkManager::call(call2);
+                WorkManager::enqueue(call2);
             }
         }
         if (call3 == decltype(call3){}) {
             call3 = std::make_shared<Minus__BuiltIn_Fn>(
                 call2, std::make_shared<LazyConstant<Int>>(2));
-            WorkManager::call(call3);
+            WorkManager::enqueue(call3);
         }
         return call3;
     }
@@ -168,11 +168,11 @@ struct FlatBlockExample : EasyCloneFn<FlatBlockExample, Int, Int> {
                 if (call1 == decltype(call1){}) {
                     call1 = std::make_shared<Increment__BuiltIn_Fn>();
                     call1->args = std::make_tuple(x);
-                    WorkManager::call(call1);
+                    WorkManager::enqueue(call1);
                 }
                 return call1;
             });
-            WorkManager::call(block1);
+            WorkManager::enqueue(block1);
         }
         block1->args = std::make_tuple();
         return block1;
@@ -198,14 +198,14 @@ struct NestedBlockExample : EasyCloneFn<NestedBlockExample, Int, Int> {
             block1 = std::make_shared<BlockFn<Int>>([&]() {
                 if (call1 == decltype(call1){}) {
                     call1 = std::make_shared<Increment__BuiltIn_Fn>(x);
-                    WorkManager::call(call1);
+                    WorkManager::enqueue(call1);
                 }
                 if (block2 == decltype(block2){}) {
                     block2 = std::make_shared<BlockFn<Int>>([&]() {
                         if (call2 == decltype(call2){}) {
                             call2 =
                                 std::make_shared<Increment__BuiltIn_Fn>(call1);
-                            WorkManager::call(call2);
+                            WorkManager::enqueue(call2);
                         }
                         if (block3 == decltype(block3){}) {
                             block3 = std::make_shared<BlockFn<Int>>([&] {
@@ -213,19 +213,19 @@ struct NestedBlockExample : EasyCloneFn<NestedBlockExample, Int, Int> {
                                     call3 =
                                         std::make_shared<Increment__BuiltIn_Fn>(
                                             call2);
-                                    WorkManager::call(call3);
+                                    WorkManager::enqueue(call3);
                                 }
                                 return call3;
                             });
-                            WorkManager::call(block3);
+                            WorkManager::enqueue(block3);
                         }
                         return block3;
                     });
-                    WorkManager::call(block2);
+                    WorkManager::enqueue(block2);
                 }
                 return block2;
             });
-            WorkManager::call(block1);
+            WorkManager::enqueue(block1);
         }
         return block1;
     }
@@ -266,7 +266,7 @@ struct NestedFnExample : EasyCloneFn<NestedFnExample, Int, Int> {
             WorkManager::await(closure);
             FnT<Int, Int> fn;
             std::tie(fn, res) = closure->value()->clone_with_args(x);
-            WorkManager::call(fn);
+            WorkManager::enqueue(fn);
         }
         return res;
     }
@@ -294,7 +294,7 @@ struct IfStatementExample
                 if (call2_1 == decltype(call2_1){}) {
                     call2_1 = std::make_shared<Plus__BuiltIn_Fn>(
                         y, std::make_shared<LazyConstant<Int>>(1));
-                    WorkManager::call(call2_1);
+                    WorkManager::enqueue(call2_1);
                 }
                 return call2_1;
             });
@@ -304,7 +304,7 @@ struct IfStatementExample
                 if (call2_2 == decltype(call2_2){}) {
                     call2_2 = std::make_shared<Plus__BuiltIn_Fn>(
                         z, std::make_shared<LazyConstant<Int>>(1));
-                    WorkManager::call(call2_2);
+                    WorkManager::enqueue(call2_2);
                 }
                 return call2_2;
             });
@@ -316,12 +316,12 @@ struct IfStatementExample
         if (comparison->value()) {
             if (branch == decltype(branch){}) {
                 branch = branch1;
-                WorkManager::call(branch);
+                WorkManager::enqueue(branch);
             }
         } else {
             if (branch == decltype(branch){}) {
                 branch = branch2;
-                WorkManager::call(branch);
+                WorkManager::enqueue(branch);
             };
         }
         ret = Minus__BuiltIn(branch, std::make_shared<LazyConstant<Int>>(2));
@@ -380,7 +380,7 @@ struct RecursiveDouble : EasyCloneFn<RecursiveDouble, Int, Int> {
             if (recursive_call == decltype(recursive_call){}) {
                 auto arg = Decrement__BuiltIn(x);
                 recursive_call = std::make_shared<RecursiveDouble>(arg);
-                WorkManager::call(dynamic_fn_cast(recursive_call));
+                WorkManager::enqueue(dynamic_fn_cast(recursive_call));
             }
 
             if (extra_call == decltype(extra_call){}) {
@@ -432,7 +432,7 @@ struct ApplyIntBool : EasyCloneFn<ApplyIntBool, Bool, FnT<Bool, Int>, Int> {
         WorkManager::await(f);
         auto g = f->value()->clone();
         g->args = std::make_tuple(x);
-        WorkManager::call(g);
+        WorkManager::enqueue(g);
         return g;
     }
 };
@@ -478,12 +478,12 @@ struct HigherOrderReuse
         if (call1 == decltype(call1){}) {
             call1 = f->value()->clone();
             call1->args = std::make_tuple(x);
-            WorkManager::call(call1);
+            WorkManager::enqueue(call1);
         }
         if (call2 == decltype(call2){}) {
             call2 = f->value()->clone();
             call2->args = std::make_tuple(y);
-            WorkManager::call(call2);
+            WorkManager::enqueue(call2);
         }
         if (ret == decltype(ret){}) {
             ret = Plus__BuiltIn(call1, call2);
@@ -679,7 +679,7 @@ struct ListIntSum : EasyCloneFn<ListIntSum, Int, ListInt> {
             if (call == decltype(call){}) {
                 call = std::make_shared<ListIntSum>();
                 call->args = std::make_tuple(tail);
-                WorkManager::call(call);
+                WorkManager::enqueue(call);
             }
 
             if (ret == decltype(ret){}) {
@@ -782,7 +782,7 @@ struct SelfRecursiveFn : Closure<SelfRecursiveFn, F, Int, Int> {
                 g = f->clone();
                 auto y = std::make_shared<LazyConstant<Int>>(x->value() - 1);
                 g->args = std::make_tuple(y);
-                WorkManager::call(g);
+                WorkManager::enqueue(g);
             }
             return g;
         } else {
@@ -835,7 +835,7 @@ struct PairSumFn : Closure<PairSumFn, Empty, Int, Int, Int> {
         if (pair == decltype(pair){}) {
             std::shared_ptr<Fn> fn;
             std::tie(fn, pair) = make_pair->value()->clone_with_args(x, y);
-            WorkManager::call(fn);
+            WorkManager::enqueue(fn);
         }
         LazyT<Int> a = std::get<0>(pair);
         LazyT<Int> b = std::get<1>(pair);
@@ -868,12 +868,12 @@ struct TupleAddFn : Closure<TupleAddFn, Empty, TupleT<Int, Int>, Int, Int> {
         if (plus == decltype(plus){}) {
             plus = std::make_shared<Plus__BuiltIn_Fn>();
             plus->args = std::make_tuple(x, y);
-            WorkManager::call(plus);
+            WorkManager::enqueue(plus);
         }
         if (minus == decltype(minus){}) {
             minus = std::make_shared<Minus__BuiltIn_Fn>();
             minus->args = std::make_tuple(x, y);
-            WorkManager::call(minus);
+            WorkManager::enqueue(minus);
         }
         return std::make_tuple(plus, minus);
     }
