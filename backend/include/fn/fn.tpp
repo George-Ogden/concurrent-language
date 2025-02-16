@@ -37,3 +37,20 @@ template <typename E, typename R, typename ...Args>
 E &TypedClosure<E,R,Args...>::env() {
     return *std::reinterpret_pointer_cast<E>(this->_env);
 }
+
+WeakFn::WeakFn(Fn f):_fn(f._fn),_env(f._env){}
+WeakFn::WeakFn() = default;
+
+Fn WeakFn::lock() const {
+    return Fn{_fn, _env.lock()};
+}
+
+template <typename R, typename... Args>
+TypedWeakFn<R, Args...>::TypedWeakFn(TypedFn<R, Args...> f):WeakFn(f){}
+template <typename R, typename... Args>
+TypedWeakFn<R, Args...>::TypedWeakFn():WeakFn(){}
+
+template <typename R, typename... Args>
+TypedFn<R, Args...> TypedWeakFn<R, Args...>::lock() const {
+    return TypedFn<R, Args...>{std::bit_cast<typename TypedFn<R,Args...>::T>(_fn), _env.lock()};
+}

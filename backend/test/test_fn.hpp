@@ -43,19 +43,17 @@ TEST(TestClosure, TestFnCast) {
     ASSERT_EQ(call_closure(adder_fn, 7), 11);
 }
 
-template <typename... Ts> using WeakFn = TypedFn<Ts...>;
-
-Int foo(Int x, std::shared_ptr<WeakFn<Int, Int>> env) {
+Int foo(Int x, std::shared_ptr<TypedWeakFn<Int, Int>> env) {
     if (x <= 0) {
         return 0;
     } else {
-        return env->call(x - 1);
+        return env->lock().call(x - 1);
     }
 }
 
 TEST(TestClosure, TestRecursiveClosure) {
-    TypedClosure<WeakFn<Int, Int>, Int, Int> foo_fn(foo);
-    foo_fn.env() = foo_fn;
+    TypedClosure<TypedWeakFn<Int, Int>, Int, Int> foo_fn(foo);
+    foo_fn.env() = TypedWeakFn<Int, Int>(foo_fn);
 
     ASSERT_EQ(call_closure(foo_fn, 3), 0);
 }

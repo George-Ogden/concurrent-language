@@ -3,7 +3,10 @@
 #include <memory>
 #include <type_traits>
 
+struct WeakFn;
 class Fn {
+    friend class WeakFn;
+
   protected:
     void *_fn = nullptr;
     std::shared_ptr<void> _env;
@@ -15,7 +18,9 @@ class Fn {
     virtual ~Fn();
 };
 
+template <typename R, typename... Args> struct TypedWeakFn;
 template <typename R, typename... Args> struct TypedFn : public Fn {
+    friend class TypedWeakFn<R, Args...>;
     using T = R (*)(Args..., const std::shared_ptr<void>);
     TypedFn(T fn, const std::shared_ptr<void> env);
     explicit TypedFn(T fn);
@@ -30,4 +35,21 @@ struct TypedClosure : public TypedFn<R, Args...> {
     TypedClosure(T fn, E env);
     explicit TypedClosure(T fn);
     E &env();
+};
+
+class WeakFn {
+  protected:
+    void *_fn = nullptr;
+    std::weak_ptr<void> _env;
+
+  public:
+    explicit WeakFn(Fn f);
+    WeakFn();
+    Fn lock() const;
+};
+
+template <typename R, typename... Args> struct TypedWeakFn : public WeakFn {
+    explicit TypedWeakFn(TypedFn<R, Args...> f);
+    TypedWeakFn();
+    TypedFn<R, Args...> lock() const;
 };
