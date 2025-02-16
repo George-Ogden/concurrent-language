@@ -18,20 +18,20 @@ class Fn {
     virtual ~Fn();
 };
 
-template <typename R, typename... Args> struct TypedWeakFn;
-template <typename R, typename... Args> struct TypedFn : public Fn {
-    friend class TypedWeakFn<R, Args...>;
-    using T = R (*)(Args..., const std::shared_ptr<void>);
+template <typename Ret, typename... Args> struct TypedWeakFn;
+template <typename Ret, typename... Args> struct TypedFn : public Fn {
+    friend class TypedWeakFn<Ret, Args...>;
+    using T = Ret (*)(Args..., const std::shared_ptr<void>);
     TypedFn(T fn, const std::shared_ptr<void> env);
     explicit TypedFn(T fn);
     TypedFn();
     T fn() const;
-    R call(Args... args) const;
+    Ret call(Args... args) const;
 };
 
-template <typename E, typename R, typename... Args>
-struct TypedClosure : public TypedFn<R, Args...> {
-    using T = R (*)(Args..., std::shared_ptr<E>);
+template <typename E, typename Ret, typename... Args>
+struct TypedClosure : public TypedFn<Ret, Args...> {
+    using T = Ret (*)(Args..., std::shared_ptr<E>);
     TypedClosure(T fn, E env);
     explicit TypedClosure(T fn);
     E &env();
@@ -48,8 +48,8 @@ class WeakFn {
     Fn lock() const;
 };
 
-template <typename R, typename... Args> struct TypedWeakFn : public WeakFn {
-    explicit TypedWeakFn(TypedFn<R, Args...> f);
+template <typename Ret, typename... Args> struct TypedWeakFn : public WeakFn {
+    explicit TypedWeakFn(TypedFn<Ret, Args...> f);
     TypedWeakFn();
-    TypedFn<R, Args...> lock() const;
+    TypedFn<Ret, Args...> lock() const;
 };

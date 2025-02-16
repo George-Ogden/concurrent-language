@@ -71,4 +71,4 @@ template <typename... Types> struct VariantT {
 };
 
 template <typename R, typename... As>
-using FnT = std::shared_ptr<ParametricFn<R, As...>>;
+using FnT = TypedFn<LazyT<R>, LazyT<As>...>;
