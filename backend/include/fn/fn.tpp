@@ -16,3 +16,8 @@ template <typename R, typename ...Args>
 typename TypedFn<R,Args...>::T TypedFn<R,Args...>::fn() const {
     return std::bit_cast<T>(_fn);
 }
+
+template <typename R, typename ...Args>
+R TypedFn<R,Args...>::call(Args...args) const {
+    return fn()(args..., _env);
+}

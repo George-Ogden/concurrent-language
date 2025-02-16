@@ -5,7 +5,7 @@
 
 class Fn {
   protected:
-    const void *_fn;
+    const void *_fn = nullptr;
     const std::shared_ptr<void> _env;
     Fn(void *fn, std::shared_ptr<void> env);
 
@@ -15,7 +15,8 @@ class Fn {
 };
 
 template <typename R, typename... Args> struct TypedFn : public Fn {
-    using T = R (*)(Args...);
+    using T = R (*)(Args..., std::shared_ptr<void>);
     TypedFn(T fn, std::shared_ptr<void> env);
     T fn() const;
+    R call(Args... args) const;
 };
