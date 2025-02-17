@@ -1,8 +1,8 @@
 #pragma once
 
-#include "data_structures/lazy.tpp"
 #include "fn/fn.tpp"
 #include "fn/operators.hpp"
+#include "lazy/lazy.tpp"
 #include "system/work_manager.tpp"
 #include "types/compound.hpp"
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "data_structures/lazy.tpp"
 #include "fn/fn.tpp"
+#include "lazy/lazy.tpp"
 #include "system/work_manager.tpp"
 #include "types/builtin.hpp"
 #include "types/utils.hpp"

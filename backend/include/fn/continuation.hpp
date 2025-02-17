@@ -10,4 +10,5 @@ struct Continuation {
     Locked<bool> *valid;
     Continuation(std::atomic<unsigned> *remaining,
                  std::atomic<unsigned> &counter, Locked<bool> *valid);
+    void update();
 };

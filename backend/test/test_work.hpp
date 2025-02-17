@@ -1,9 +1,11 @@
 #pragma once
 
-#include "data_structures/lazy.tpp"
 #include "data_structures/lock.tpp"
 #include "fn/continuation.tpp"
 #include "fn/fn.tpp"
+#include "lazy/lazy.tpp"
+#include "system/thread_manager.tpp"
+#include "system/work_manager.tpp"
 #include "types/compound.hpp"
 #include "work/work.tpp"
 
@@ -12,6 +14,7 @@
 #include <atomic>
 #include <memory>
 #include <tuple>
+#include <vector>
 
 LazyT<Int> inc(LazyT<Int> x, std::shared_ptr<void> env = nullptr) {
     return make_lazy<Int>(x->value() + 1);

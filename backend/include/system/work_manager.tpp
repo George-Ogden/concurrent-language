@@ -3,8 +3,11 @@
 #include "fn/fn.tpp"
 #include "system/thread_manager.tpp"
 #include "system/work_manager.hpp"
-#include "data_structures/lazy.tpp"
+#include "lazy/lazy.tpp"
+#include "lazy/types.hpp"
+#include "lazy/fns.hpp"
 #include "time/sleep.hpp"
+#include "work/work.tpp"
 
 #include <atomic>
 #include <memory>
@@ -14,10 +17,6 @@
 
 using namespace std::chrono_literals;
 
-void FinishWork::run()
-{
-    throw finished{};
-}
 std::shared_ptr<Work> WorkManager::finish_work = std::make_shared<FinishWork>();
 
 template <typename Ret, typename... Args>
@@ -50,7 +49,7 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
         if (work != nullptr)
         {
             work->run();
-            // work->await_all();
+            work->await_all();
             enqueue(WorkManager::finish_work);
         }
         else

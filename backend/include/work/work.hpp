@@ -1,8 +1,8 @@
 #pragma once
 
-#include "data_structures/lazy.hpp"
 #include "data_structures/lock.hpp"
 #include "fn/continuation.hpp"
+#include "lazy/types.hpp"
 #include "types/compound.hpp"
 #include "types/utils.hpp"
 
@@ -18,22 +18,29 @@ class Work {
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
-    virtual void run() = 0;
     virtual ~Work();
+    virtual void run() = 0;
+    virtual void await_all() = 0;
     bool done() const;
     template <typename Ret, typename... Args>
     static std::pair<std::shared_ptr<Work>, Ret>
     fn_call(TypedFn<Ret, Args...> f, Args... args);
     void add_continuation(Continuation c);
-    static void update_continuation(Continuation c);
 };
 
 template <typename Ret, typename... Args> class TypedWork : public Work {
     friend class Work;
-    WeakLazyT<Ret> targets;
+    WeakLazyPlaceholdersT<Ret> targets;
     LazyT<TupleT<Args...>> args;
-    TypedFn<LazyT<Ret>, LazyT<Args>...> fn;
+    FnT<Ret, Args...> fn;
 
   public:
     void run() override;
+    void await_all() override;
+};
+
+struct FinishWork : public Work {
+    FinishWork();
+    void run() override;
+    void await_all() override;
 };

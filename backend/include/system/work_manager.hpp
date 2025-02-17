@@ -8,7 +8,6 @@
 #include <atomic>
 #include <deque>
 #include <exception>
-#include <utility>
 #include <vector>
 
 struct WorkManager {
@@ -33,7 +32,3 @@ struct stack_inversion : public std::exception {
     const char *what() const noexcept override { return "Stack inversion"; }
 };
 struct finished : public std::exception {};
-
-struct FinishWork : public Work {
-    void run() override;
-};

@@ -2,8 +2,11 @@
 
 #include "work/work.hpp"
 #include "fn/continuation.tpp"
-#include "data_structures/lazy.tpp"
+#include "lazy/lazy.tpp"
+#include "lazy/types.hpp"
+#include "lazy/fns.hpp"
 #include "types/utils.hpp"
+#include "system/work_manager.tpp"
 
 #include <atomic>
 #include <memory>
@@ -11,27 +14,32 @@
 
 Work::~Work() = default;
 
-bool Work::done() const {
+bool Work::done() const
+{
     return done_flag.load(std::memory_order_relaxed);
 }
 
-template <typename Ret, typename ...Args>
-std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Args...args){
-    using RetT = remove_lazy_t<Ret>;
-    Ret targets = lazy_map([](const auto& target){
-        return std::make_shared<remove_shared_ptr_t<std::decay_t<decltype(target)>>>();
-    }, Ret{});
-    WeakLazyT<RetT> weak_targets = lazy_map([](const auto& target){
-        return std::weak_ptr(target);
-    }, targets);
-    std::shared_ptr<TypedWork<RetT, remove_lazy_t<Args>...>> work = std::make_shared<TypedWork<RetT, remove_lazy_t<Args>...>>();
-    work->targets = weak_targets;
+FinishWork::FinishWork() = default;
+
+void FinishWork::run()
+{
+    throw finished{};
+}
+
+void FinishWork::await_all() {}
+
+template <typename Ret, typename... Args>
+std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Args... args)
+{
+    std::shared_ptr<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>> work = std::make_shared<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>>();
+    auto placeholders = make_lazy_placeholders<Ret>(work);
+    work->targets = lazy_map([](const auto &t)
+                             {
+                                return std::weak_ptr(t);
+                            }, placeholders);
     work->args = std::make_tuple(args...);
     work->fn = f;
-    lazy_map([&work](const auto& target){
-        target->work = work;
-    }, targets);
-    return std::make_pair(work, targets);
+    return std::make_pair(work, placeholders);
 }
 
 void Work::add_continuation(Continuation c)
@@ -40,7 +48,7 @@ void Work::add_continuation(Continuation c)
     if (done())
     {
         continuations.release();
-        update_continuation(c);
+        c.update();
     }
     else
     {
@@ -49,42 +57,41 @@ void Work::add_continuation(Continuation c)
     }
 }
 
-void Work::update_continuation(Continuation c) {
-    if (c.remaining->fetch_sub(1, std::memory_order_relaxed) == 1) {
-        delete c.remaining;
-        c.valid->acquire();
-        if (**c.valid) {
-            **c.valid = false;
-            c.counter.fetch_add(1, std::memory_order_relaxed);
-            c.valid->release();
-        } else {
-            c.valid->release();
-            delete c.valid;
-        }
-    }
-}
-
 template <typename T, typename U>
-void Work::assign(T &targets, U &results){
-    lazy_dual_map([](auto target, auto result){
-    target.lock()->_value = result->value();
-        },
-    targets, results);
+void Work::assign(T &targets, U &results)
+{
+    lazy_dual_map([](auto target, auto result)
+                  {
+        auto placeholder = target.lock();
+        if (placeholder != nullptr){
+            placeholder->assign(result);
+}},
+                  targets, results);
 }
 
-template <typename Ret, typename ...Args>
-void TypedWork<Ret,Args...>::run() {
+template <typename Ret, typename... Args>
+void TypedWork<Ret, Args...>::run()
+{
     if (!this->done_flag.load(std::memory_order_acquire))
     {
-        LazyT<Ret> results = std::apply([this](auto&&...args){return fn.call(std::forward<decltype(args)>(args)...);}, args);
+        LazyT<Ret> results = std::apply([this](auto &&...args)
+                                        { return fn.call(std::forward<decltype(args)>(args)...); }, args);
         assign(targets, results);
     }
     this->continuations.acquire();
-    for (const Continuation &c : *this->continuations)
+    for (Continuation &c : *this->continuations)
     {
-        Work::update_continuation(c);
+        c.update();
     }
     this->continuations->clear();
     this->done_flag.store(true, std::memory_order_release);
     this->continuations.release();
+}
+
+template <typename Ret, typename... Args>
+void TypedWork<Ret, Args...>::await_all()
+{
+    auto vs = lazy_map([](auto target)
+                       { return target.lock(); }, targets);
+    WorkManager::await_all(vs);
 }

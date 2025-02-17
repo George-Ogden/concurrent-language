@@ -12,7 +12,6 @@
 template <typename... Types> struct VariantT;
 
 class Fn;
-template <typename> struct Lazy;
 
 template <typename> struct is_tuple : std::false_type {};
 
@@ -64,92 +63,11 @@ template <typename> struct is_shared_ptr : std::false_type {};
 template <typename... T>
 struct is_shared_ptr<std::shared_ptr<T...>> : std::true_type {};
 
+template <typename... T>
+struct is_shared_ptr<std::weak_ptr<T...>> : std::true_type {};
+
 template <typename T>
 inline constexpr bool is_shared_ptr_v = is_shared_ptr<T>::value;
-
-template <typename T> struct remove_lazy { using type = T; };
-
-template <typename T> struct remove_lazy<std::shared_ptr<Lazy<T>>> {
-    using type = T;
-};
-
-template <typename T> using remove_lazy_t = typename remove_lazy<T>::type;
-
-template <typename... Ts> struct remove_lazy<std::tuple<Ts...>> {
-    using type = std::tuple<remove_lazy_t<Ts>...>;
-};
-
-template <typename> struct is_lazy : std::false_type {};
-
-template <typename T>
-struct is_lazy<std::shared_ptr<Lazy<T>>> : std::true_type {};
-
-template <typename T> inline constexpr bool is_lazy_v = is_lazy<T>::value;
-
-template <typename T> struct lazy_type {
-    using type = std::shared_ptr<Lazy<T>>;
-};
-
-template <typename T> using LazyT = typename lazy_type<T>::type;
-
-template <typename T> struct lazy_type<std::shared_ptr<Lazy<T>>> {
-    using type = std::shared_ptr<Lazy<T>>;
-};
-
-template <typename... Ts> struct lazy_type<std::tuple<Ts...>> {
-    using type = std::tuple<LazyT<Ts>...>;
-};
-
-template <typename T> struct weak_lazy_type {
-    using type = std::weak_ptr<Lazy<T>>;
-};
-
-template <typename T> using WeakLazyT = typename weak_lazy_type<T>::type;
-
-template <typename T> struct weak_lazy_type<std::weak_ptr<Lazy<T>>> {
-    using type = std::weak_ptr<Lazy<T>>;
-};
-
-template <typename... Ts> struct weak_lazy_type<std::tuple<Ts...>> {
-    using type = std::tuple<WeakLazyT<Ts>...>;
-};
-
-template <typename F, typename T>
-auto lazy_map(F f, std::shared_ptr<Lazy<T>> t) {
-    if constexpr (std::is_void_v<
-                      std::invoke_result_t<F, std::shared_ptr<Lazy<T>>>>) {
-        f(t);
-        return std::monostate{};
-    } else {
-        return f(t);
-    }
-}
-
-template <typename F, typename... Ts> auto lazy_map(F f, std::tuple<Ts...> t) {
-    return std::apply(
-        [&f](auto... ts) { return std::tuple(lazy_map(f, ts)...); }, t);
-}
-
-template <typename F, typename T>
-auto lazy_dual_map(F f, std::weak_ptr<Lazy<T>> t, std::shared_ptr<Lazy<T>> u) {
-    if constexpr (std::is_void_v<std::invoke_result_t<
-                      F, std::weak_ptr<Lazy<T>>, std::shared_ptr<Lazy<T>>>>) {
-        f(t, u);
-        return std::monostate{};
-    } else {
-        return f(t, u);
-    }
-}
-
-template <typename F, typename... Ts, typename... Us>
-auto lazy_dual_map(F f, std::tuple<Ts...> t, std::tuple<Us...> u) {
-    static_assert(sizeof...(Ts) == sizeof...(Us));
-    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return std::tuple(
-            lazy_dual_map(f, std::get<Is>(t), std::get<Is>(u))...);
-    }
-    (std::index_sequence_for<Ts...>{});
-}
 
 template <typename T>
 Int convert_arg(char *&arg) requires std::same_as<T, Int> {

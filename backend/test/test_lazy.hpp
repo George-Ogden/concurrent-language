@@ -1,6 +1,6 @@
 #pragma once
 
-#include "data_structures/lazy.tpp"
+#include "lazy/lazy.tpp"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 
 class LazyConstantTest : public ::testing::Test {
   protected:
-    LazyT<Int> x = std::make_shared<Lazy<Int>>(3);
+    LazyT<Int> x = make_lazy<Int>(3);
     void SetUp() override { ThreadManager::register_self(0); }
 };
 
