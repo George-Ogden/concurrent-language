@@ -57,32 +57,31 @@ LazyPlaceholder<T>::LazyPlaceholder(std::shared_ptr<Work> work)
 
 template <typename T>
 void LazyPlaceholder<T>::add_continuation(Continuation c) {
-        continuations.acquire();
-        if (reference == nullptr) {
-            continuations->push_back(c);
-            continuations.release();
-        } else {
-            continuations.release();
-            reference->add_continuation(c);
-        }
-
+    continuations.acquire();
+    if (reference == nullptr) {
+        continuations->push_back(c);
+        continuations.release();
+    } else {
+        continuations.release();
+        reference->add_continuation(c);
+    }
 }
 
 template <typename T>
 void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
-        continuations.acquire();
-        for (Continuation &c : *continuations) {
-            value->add_continuation(c);
-        }
-        continuations->clear();
-        reference = value;
-        continuations.release();
-
+    continuations.acquire();
+    for (Continuation &c : *continuations) {
+        value->add_continuation(c);
+    }
+    continuations->clear();
+    reference = value;
+    work = nullptr;
+    continuations.release();
 }
 
 template <typename T>
 bool LazyPlaceholder<T>::done() const {
-    return work->done() && reference->done();
+    return reference != nullptr && reference->done();
 }
 
 template <typename T>
