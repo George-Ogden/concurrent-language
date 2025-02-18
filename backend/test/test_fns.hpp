@@ -180,6 +180,22 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
     ASSERT_EQ(res->value(), 0);
 }
 
+LazyT<TupleT<Int, TupleT<Bool>>>
+pair_int_bool(LazyT<Int> x, LazyT<Bool> y,
+              std::shared_ptr<void> env = nullptr) {
+    return std::make_tuple(x, std::make_tuple(y));
+}
+
+TEST_P(FnCorrectnessTest, TupleTest) {
+    Int x = 5;
+    Bool y = true;
+
+    FnT<TupleT<Int, TupleT<Bool>>, Int, Bool> pair_fn{pair_int_bool};
+    auto res = WorkManager::run(pair_fn, make_lazy<Int>(x), make_lazy<Bool>(y));
+    ASSERT_EQ(std::get<0>(res)->value(), 5);
+    ASSERT_EQ(std::get<0>(std::get<1>(res))->value(), true);
+}
+
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));
