@@ -55,8 +55,7 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 	fi
 
 $(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
-	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@,)
-	touch $@
+	$(if $(filter 1,$(VAR)), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
 
 $(WRAP_FILE): $(WRAP_FILES) | $(BUILD_DIR)
 	echo "" > $@; \

@@ -25,7 +25,9 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };
 
-LazyT<Int> identity_int(LazyT<Int> x, std::shared_ptr<void>) { return x; }
+LazyT<Int> identity_int(LazyT<Int> x, std::shared_ptr<void> env = nullptr) {
+    return x;
+}
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
     FnT<Int, Int> identity_int_fn{identity_int};
@@ -36,15 +38,27 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
 }
 
 LazyT<Int> four_way_plus_v1(LazyT<Int> a, LazyT<Int> b, LazyT<Int> c,
-                            LazyT<Int> d, std::shared_ptr<void>) {
-    auto [call1, res1] = Work::fn_call(Plus__BuiltIn_Fn, a, b);
-    WorkManager::enqueue(call1);
-    auto [call2, res2] = Work::fn_call(Plus__BuiltIn_Fn, c, d);
-    WorkManager::enqueue(call2);
-    auto [call3, res3] = Work::fn_call(Plus__BuiltIn_Fn, res1, res2);
-    WorkManager::enqueue(call3);
+                            LazyT<Int> d, std::shared_ptr<void> env = nullptr) {
+    LazyT<Int> res1;
+    {
+        WorkT work;
+        std::tie(work, res1) = Work::fn_call(Plus__BuiltIn_Fn, a, b);
+        WorkManager::enqueue(work);
+    }
+    LazyT<Int> res2;
+    {
+        WorkT work;
+        std::tie(work, res2) = Work::fn_call(Plus__BuiltIn_Fn, c, d);
+        WorkManager::enqueue(work);
+    }
+    LazyT<Int> res3;
+    {
+        WorkT work;
+        std::tie(work, res3) = Work::fn_call(Plus__BuiltIn_Fn, res1, res2);
+        WorkManager::enqueue(work);
+    }
     return res3;
-};
+}
 
 LazyT<Int> four_way_plus_v2(LazyT<Int> a, LazyT<Int> b, LazyT<Int> c,
                             LazyT<Int> d, std::shared_ptr<void>) {
