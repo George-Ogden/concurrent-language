@@ -11,7 +11,7 @@
 #include <vector>
 
 struct WorkManager {
-    static inline Locked<std::deque<std::weak_ptr<Work>>> queue;
+    static inline Locked<std::deque<std::weak_ptr<Work>>> work_queue;
     static std::shared_ptr<Work> finish_work;
     static inline std::vector<std::atomic<unsigned>> counters;
     static void enqueue(std::shared_ptr<Work> work);

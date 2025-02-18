@@ -26,19 +26,19 @@ Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args)
     std::atomic<std::shared_ptr<Work>> ref{work};
     ThreadManager::RunConfig config{ThreadManager::available_concurrency(),
                                     false};
-    WorkManager::queue->clear();
+    WorkManager::work_queue->clear();
     WorkManager::counters = std::vector<std::atomic<unsigned>>(
         ThreadManager::available_concurrency());
     ThreadManager::run_multithreaded(main, &ref, config);
-    WorkManager::queue->clear();
+    WorkManager::work_queue->clear();
     return result;
 }
 
 void WorkManager::enqueue(std::shared_ptr<Work> work)
 {
-    WorkManager::queue.acquire();
-    WorkManager::queue->push_back(work);
-    WorkManager::queue.release();
+    WorkManager::work_queue.acquire();
+    WorkManager::work_queue->push_back(work);
+    WorkManager::work_queue.release();
 }
 
 std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
@@ -83,16 +83,17 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
 
 std::shared_ptr<Work> WorkManager::get_work()
 {
-    WorkManager::queue.acquire();
-    if (WorkManager::queue->empty())
+
+    WorkManager::work_queue.acquire();
+    if (WorkManager::work_queue->empty())
     {
-        WorkManager::queue.release();
+        WorkManager::work_queue.release();
         return nullptr;
     }
 
-    std::shared_ptr<Work> work = WorkManager::queue->front().lock();
-    WorkManager::queue->pop_front();
-    WorkManager::queue.release();
+    std::shared_ptr<Work> work = WorkManager::work_queue->front().lock();
+    WorkManager::work_queue->pop_front();
+    WorkManager::work_queue.release();
     return work;
 }
 template <typename T>
