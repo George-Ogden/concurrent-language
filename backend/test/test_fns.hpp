@@ -81,7 +81,7 @@ LazyT<Int> branching_example(LazyT<Int> x, LazyT<Int> y, LazyT<Int> z,
         Work::fn_call(Comparison_GE__BuiltIn_Fn, x, make_lazy<Int>(0));
     WorkManager::enqueue(call1);
     WorkManager::await(res1);
-    std::shared_ptr<Work> call2;
+    WorkT call2;
     LazyT<Int> res2;
     if (res1->value()) {
         std::tie(call2, res2) =
@@ -116,6 +116,33 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
                                 make_lazy<Int>(y), make_lazy<Int>(z));
 
     ASSERT_EQ(res->value(), 21);
+}
+
+LazyT<Int> adder(LazyT<Int> x, std::shared_ptr<LazyT<TupleT<Int>>> env) {
+    LazyT<Int> y = std::get<0>(*env);
+    auto [call, res] = Work::fn_call(Plus__BuiltIn_Fn, x, y);
+    WorkManager::enqueue(call);
+    return res;
+}
+
+LazyT<Int> higher_order_call(LazyT<FnT<Int, Int>> f, LazyT<Int> x,
+                             std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(f);
+    auto [call, res] = Work::fn_call(f->value(), x);
+    WorkManager::enqueue(call);
+    return res;
+}
+
+TEST_P(FnCorrectnessTest, HigherOrderFnExampleTest) {
+    LazyT<TupleT<Int>> env = std::make_tuple(make_lazy<Int>(4));
+    ClosureT<TupleT<Int>, Int, Int> adder_closure(adder,
+                                                  LazyT<TupleT<Int>>(env));
+    LazyT<FnT<Int, Int>> adder_fn = make_lazy<FnT<Int, Int>>(adder_closure);
+    Int x = 5;
+    FnT<Int, FnT<Int, Int>, Int> higher_order_call_fn{higher_order_call};
+    auto res =
+        WorkManager::run(higher_order_call_fn, adder_fn, make_lazy<Int>(x));
+    ASSERT_EQ(res->value(), 9);
 }
 
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};

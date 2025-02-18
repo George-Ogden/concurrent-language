@@ -72,3 +72,6 @@ template <typename... Types> struct VariantT {
 
 template <typename R, typename... As>
 using FnT = TypedFn<LazyT<R>, LazyT<As>...>;
+
+template <typename E, typename R, typename... As>
+using ClosureT = TypedClosure<LazyT<E>, LazyT<R>, LazyT<As>...>;

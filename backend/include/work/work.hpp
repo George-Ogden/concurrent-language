@@ -28,6 +28,8 @@ class Work {
     void add_continuation(Continuation c);
 };
 
+using WorkT = std::shared_ptr<Work>;
+
 template <typename Ret, typename... Args> class TypedWork : public Work {
     friend class Work;
     WeakLazyPlaceholdersT<Ret> targets;

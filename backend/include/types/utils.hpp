@@ -54,10 +54,6 @@ template <typename T> struct remove_shared_ptr<std::shared_ptr<T>> {
 template <typename T>
 using remove_shared_ptr_t = typename remove_shared_ptr<T>::type;
 
-template <typename U = std::shared_ptr<Fn>, typename T> U dynamic_fn_cast(T f) {
-    return std::dynamic_pointer_cast<remove_shared_ptr_t<U>>(f);
-}
-
 template <typename> struct is_shared_ptr : std::false_type {};
 
 template <typename... T>
