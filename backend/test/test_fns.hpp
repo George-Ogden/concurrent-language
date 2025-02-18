@@ -196,6 +196,135 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     ASSERT_EQ(std::get<0>(std::get<1>(res))->value(), true);
 }
 
+struct Twoo;
+struct Faws;
+typedef VariantT<Twoo, Faws> Bull;
+struct Twoo {};
+struct Faws {};
+
+LazyT<Bool> bool_union(LazyT<Bull> x, std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(x);
+    return std::make_shared<LazyConstant<Bool>>(x->value().tag == 0);
+}
+
+TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
+    FnT<Bool, Bull> bool_union_fn{bool_union};
+    {
+        Bull bull{};
+        bull.tag = 0ULL;
+        auto res = WorkManager::run(bool_union_fn, make_lazy<Bull>(bull));
+        ASSERT_TRUE(res->value());
+    }
+
+    {
+        Bull bull{};
+        bull.tag = 1ULL;
+        auto res = WorkManager::run(bool_union_fn, make_lazy<Bull>(bull));
+        ASSERT_FALSE(res->value());
+    }
+}
+
+struct Left;
+struct Right;
+typedef VariantT<Left, Right> EitherIntBool;
+struct Left {
+    using type = LazyT<Int>;
+    type value;
+};
+struct Right {
+    using type = LazyT<Bool>;
+    type value;
+};
+
+LazyT<Bool> either_int_bool(LazyT<EitherIntBool> either,
+                            std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(either);
+    EitherIntBool x = either->value();
+    switch (x.tag) {
+    case 0ULL: {
+        auto left = reinterpret_cast<Left *>(&x.value)->value;
+        WorkManager::await(left);
+        return std::make_shared<LazyConstant<Bool>>(left->value() > 10);
+    }
+    case 1ULL: {
+        auto right = reinterpret_cast<Right *>(&x.value)->value;
+        WorkManager::await(right);
+        return std::make_shared<LazyConstant<Bool>>(right->value());
+    }
+    }
+    return 0;
+}
+
+TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
+    FnT<Bool, EitherIntBool> either_int_bool_fn{either_int_bool};
+    for (const auto &[tag, value, result] :
+         std::vector<std::tuple<int, int, bool>>{{1, 0, false},
+                                                 {1, 1, true},
+                                                 {0, 0, false},
+                                                 {0, 5, false},
+                                                 {0, 15, true}}) {
+        EitherIntBool either{};
+        either.tag = tag;
+        if (tag == 0) {
+            new (&either.value)
+                Left{std::make_shared<LazyConstant<Int>>(value)};
+        } else {
+            new (&either.value)
+                Right{std::make_shared<LazyConstant<Bool>>(value)};
+        }
+
+        auto res = WorkManager::run(either_int_bool_fn,
+                                    make_lazy<EitherIntBool>(either));
+        ASSERT_EQ(res->value(), result);
+    }
+}
+
+LazyT<Bool> either_int_bool_edge_case(LazyT<EitherIntBool> either,
+                                      std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(either);
+    EitherIntBool x = either->value();
+    LazyT<Bool> y;
+    switch (x.tag) {
+    case 0ULL: {
+        LazyT<Left::type> i = reinterpret_cast<Left *>(&x.value)->value;
+        LazyT<Int> z = std::make_shared<LazyConstant<Int>>(0);
+        y = Comparison_GT__BuiltIn(i, z);
+        break;
+    }
+    case 1ULL: {
+        LazyT<Right::type> b = reinterpret_cast<Right *>(&x.value)->value;
+        y = b;
+        break;
+    }
+    }
+    return y;
+}
+
+TEST_P(FnCorrectnessTest, EdgeCaseTest) {
+    FnT<Bool, EitherIntBool> either_int_bool_fn{either_int_bool_edge_case};
+    for (const auto &[tag, value, result] :
+         std::vector<std::tuple<int, int, bool>>{{1, 0, false},
+                                                 {1, 1, true},
+                                                 {0, 0, false},
+                                                 {0, -5, false},
+                                                 {0, 15, true}}) {
+        EitherIntBool either{};
+        either.tag = tag;
+        if (tag == 0) {
+
+            new (&either.value)
+                Left{std::make_shared<LazyConstant<Int>>(value)};
+        } else {
+            new (&either.value)
+                Right{std::make_shared<LazyConstant<Bool>>(value)};
+        }
+
+        auto res = WorkManager::run(either_int_bool_fn,
+                                    make_lazy<EitherIntBool>(either));
+        ASSERT_EQ(res->value(), result);
+    }
+}
+
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));
