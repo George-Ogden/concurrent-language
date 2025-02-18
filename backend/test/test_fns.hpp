@@ -445,6 +445,50 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
     ASSERT_EQ(res->value(), 0);
 }
 
+LazyT<Bool> is_even(LazyT<Int> x,
+                    std::shared_ptr<LazyT<TupleT<FnT<Bool, Int>>>> env) {
+    WorkManager::await(x);
+    if (x->value() > 0) {
+        auto lz = std::get<0>(*env);
+        auto is_odd_fn = lz->value();
+        auto y = Decrement__BuiltIn(x);
+        auto [call, res] = Work::fn_call(is_odd_fn, y);
+        WorkManager::enqueue(call);
+        return res;
+    } else {
+        return make_lazy<Bool>(true);
+    }
+}
+
+LazyT<Bool> is_odd(LazyT<Int> x,
+                   std::shared_ptr<LazyT<TupleT<FnT<Bool, Int>>>> env) {
+    WorkManager::await(x);
+    if (x->value() > 0) {
+        auto lz = std::get<0>(*env);
+        auto is_even_fn = lz->value();
+        auto y = Decrement__BuiltIn(x);
+        auto [call, res] = Work::fn_call(is_even_fn, y);
+        WorkManager::enqueue(call);
+        return res;
+    } else {
+        return make_lazy<Bool>(false);
+    }
+}
+
+TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsTest) {
+    ClosureT<TupleT<FnT<Bool, Int>>, Bool, Int> is_even_fn{is_even};
+    ClosureT<TupleT<FnT<Bool, Int>>, Bool, Int> is_odd_fn{is_odd};
+    is_even_fn.env() = std::make_tuple(make_lazy<FnT<Bool, Int>>(is_odd_fn));
+    is_odd_fn.env() = std::make_tuple(make_lazy<FnT<Bool, Int>>(is_even_fn));
+
+    for (auto x : {5, 10, 23, 0}) {
+        auto even = WorkManager::run(is_even_fn, make_lazy<Int>(x));
+        ASSERT_EQ(even->value(), x % 2 == 0);
+        auto odd = WorkManager::run(is_odd_fn, make_lazy<Int>(x));
+        ASSERT_EQ(odd->value(), x % 2 == 1);
+    }
+}
+
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));
