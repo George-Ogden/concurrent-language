@@ -135,14 +135,49 @@ LazyT<Int> higher_order_call(LazyT<FnT<Int, Int>> f, LazyT<Int> x,
 
 TEST_P(FnCorrectnessTest, HigherOrderFnExampleTest) {
     LazyT<TupleT<Int>> env = std::make_tuple(make_lazy<Int>(4));
-    ClosureT<TupleT<Int>, Int, Int> adder_closure(adder,
-                                                  LazyT<TupleT<Int>>(env));
+    ClosureT<TupleT<Int>, Int, Int> adder_closure{adder,
+                                                  LazyT<TupleT<Int>>(env)};
     LazyT<FnT<Int, Int>> adder_fn = make_lazy<FnT<Int, Int>>(adder_closure);
     Int x = 5;
     FnT<Int, FnT<Int, Int>, Int> higher_order_call_fn{higher_order_call};
     auto res =
         WorkManager::run(higher_order_call_fn, adder_fn, make_lazy<Int>(x));
     ASSERT_EQ(res->value(), 9);
+}
+
+LazyT<Int> recursive_double(LazyT<Int> x, std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(x);
+    if (x->value() > 0) {
+        auto arg = Decrement__BuiltIn(x);
+        auto [call1, res1] =
+            Work::fn_call(FnT<Int, Int>{recursive_double}, arg);
+        WorkManager::enqueue(call1);
+
+        auto [extra_call, _] =
+            Work::fn_call(FnT<Int, Int>{recursive_double}, arg);
+        WorkManager::enqueue(extra_call);
+
+        auto [call2, res2] =
+            Work::fn_call(Plus__BuiltIn_Fn, res1, make_lazy<Int>(2));
+        WorkManager::enqueue(call2);
+        return res2;
+    } else {
+        return std::make_shared<LazyConstant<Int>>(0);
+    }
+}
+
+TEST_P(FnCorrectnessTest, RecursiveDoubleTest1) {
+    Int x = 5;
+    FnT<Int, Int> recursive_double_fn{recursive_double};
+    auto res = WorkManager::run(recursive_double_fn, make_lazy<Int>(x));
+    ASSERT_EQ(res->value(), 10);
+}
+
+TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
+    Int x = -5;
+    FnT<Int, Int> recursive_double_fn{recursive_double};
+    auto res = WorkManager::run(recursive_double_fn, make_lazy<Int>(x));
+    ASSERT_EQ(res->value(), 0);
 }
 
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
