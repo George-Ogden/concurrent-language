@@ -489,6 +489,36 @@ TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsTest) {
     }
 }
 
+template <typename T, typename U>
+LazyT<TupleT<T, U>> make_pair(LazyT<T> x, LazyT<U> y,
+                              std::shared_ptr<void> env = nullptr) {
+    return std::make_tuple(x, y);
+}
+
+LazyT<Int> pair_sum(LazyT<Int> x, LazyT<Int> y,
+                    std::shared_ptr<void> env = nullptr) {
+    auto [call1, res1] = Work::fn_call(Increment__BuiltIn_Fn, y);
+    WorkManager::enqueue(call1);
+
+    FnT<TupleT<Int, Int>, Int, Int> make_pair_fn{make_pair<Int, Int>};
+    auto [call2, res2] = Work::fn_call(make_pair_fn, x, res1);
+    WorkManager::enqueue(call2);
+
+    LazyT<Int> a = std::get<0>(res2);
+    LazyT<Int> b = std::get<1>(res2);
+    auto [call3, res3] = Work::fn_call(Plus__BuiltIn_Fn, a, b);
+    WorkManager::enqueue(call3);
+    return res3;
+}
+
+TEST_P(FnCorrectnessTest, PairSumTest) {
+    FnT<Int, Int, Int> pair_sum_fn{pair_sum};
+    LazyT<Int> x = make_lazy<Int>(0), y = make_lazy<Int>(1);
+
+    auto res = WorkManager::run(pair_sum_fn, x, y);
+    ASSERT_EQ(res->value(), 2);
+}
+
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));
