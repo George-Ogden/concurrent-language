@@ -421,6 +421,30 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
               reinterpret_cast<Suc *>(&tmp)->value);
 }
 
+LazyT<Int> recursive(LazyT<Int> x,
+                     std::shared_ptr<LazyT<TupleT<FnT<Int, Int>>>> env) {
+    WorkManager::await(x);
+    if (x->value() > 0) {
+        auto lz = std::get<0>(*env);
+        auto f = lz->value();
+        auto y = make_lazy<Int>(x->value() - 1);
+        auto [call, res] = Work::fn_call(f, y);
+        WorkManager::enqueue(call);
+        return res;
+    } else {
+        return x;
+    }
+}
+
+TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
+    ClosureT<TupleT<FnT<Int, Int>>, Int, Int> closure{recursive};
+    closure.env() = std::make_tuple(make_lazy<FnT<Int, Int>>(closure));
+    LazyT<Int> x = make_lazy<Int>(5);
+
+    auto res = WorkManager::run(closure, x);
+    ASSERT_EQ(res->value(), 0);
+}
+
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
 INSTANTIATE_TEST_SUITE_P(FnCorrectnessTests, FnCorrectnessTest,
                          ::testing::ValuesIn(cpu_counts));
