@@ -162,7 +162,7 @@ LazyT<Int> recursive_double(LazyT<Int> x, std::shared_ptr<void> env = nullptr) {
         WorkManager::enqueue(call2);
         return res2;
     } else {
-        return std::make_shared<LazyConstant<Int>>(0);
+        return make_lazy<Int>(0);
     }
 }
 
@@ -204,7 +204,7 @@ struct Faws {};
 
 LazyT<Bool> bool_union(LazyT<Bull> x, std::shared_ptr<void> env = nullptr) {
     WorkManager::await(x);
-    return std::make_shared<LazyConstant<Bool>>(x->value().tag == 0);
+    return make_lazy<Bool>(x->value().tag == 0);
 }
 
 TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
@@ -244,12 +244,12 @@ LazyT<Bool> either_int_bool(LazyT<EitherIntBool> either,
     case 0ULL: {
         auto left = reinterpret_cast<Left *>(&x.value)->value;
         WorkManager::await(left);
-        return std::make_shared<LazyConstant<Bool>>(left->value() > 10);
+        return make_lazy<Bool>(left->value() > 10);
     }
     case 1ULL: {
         auto right = reinterpret_cast<Right *>(&x.value)->value;
         WorkManager::await(right);
-        return std::make_shared<LazyConstant<Bool>>(right->value());
+        return make_lazy<Bool>(right->value());
     }
     }
     return 0;
@@ -266,11 +266,9 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         EitherIntBool either{};
         either.tag = tag;
         if (tag == 0) {
-            new (&either.value)
-                Left{std::make_shared<LazyConstant<Int>>(value)};
+            new (&either.value) Left{make_lazy<Int>(value)};
         } else {
-            new (&either.value)
-                Right{std::make_shared<LazyConstant<Bool>>(value)};
+            new (&either.value) Right{make_lazy<Bool>(value)};
         }
 
         auto res = WorkManager::run(either_int_bool_fn,
@@ -287,7 +285,7 @@ LazyT<Bool> either_int_bool_edge_case(LazyT<EitherIntBool> either,
     switch (x.tag) {
     case 0ULL: {
         LazyT<Left::type> i = reinterpret_cast<Left *>(&x.value)->value;
-        LazyT<Int> z = std::make_shared<LazyConstant<Int>>(0);
+        LazyT<Int> z = make_lazy<Int>(0);
         y = Comparison_GT__BuiltIn(i, z);
         break;
     }
@@ -312,17 +310,115 @@ TEST_P(FnCorrectnessTest, EdgeCaseTest) {
         either.tag = tag;
         if (tag == 0) {
 
-            new (&either.value)
-                Left{std::make_shared<LazyConstant<Int>>(value)};
+            new (&either.value) Left{make_lazy<Int>(value)};
         } else {
-            new (&either.value)
-                Right{std::make_shared<LazyConstant<Bool>>(value)};
+            new (&either.value) Right{make_lazy<Bool>(value)};
         }
 
         auto res = WorkManager::run(either_int_bool_fn,
                                     make_lazy<EitherIntBool>(either));
         ASSERT_EQ(res->value(), result);
     }
+}
+
+struct Cons;
+struct Nil;
+typedef VariantT<Cons, Nil> ListInt;
+struct Cons {
+    using type = TupleT<Int, ListInt>;
+    LazyT<type> value;
+};
+struct Nil {
+    Empty value;
+};
+
+LazyT<Int> list_int_sum(LazyT<ListInt> lazy_list,
+                        std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(lazy_list);
+    ListInt list = lazy_list->value();
+    switch (list.tag) {
+    case 0: {
+        LazyT<Cons::type> cons = reinterpret_cast<Cons *>(&list.value)->value;
+        WorkManager::await(cons);
+        LazyT<Int> head = std::get<0ULL>(cons);
+        LazyT<ListInt> tail = std::get<1ULL>(cons);
+
+        auto [call1, res1] =
+            Work::fn_call(FnT<Int, ListInt>{list_int_sum}, tail);
+        WorkManager::enqueue(call1);
+
+        auto [call2, res2] = Work::fn_call(Plus__BuiltIn_Fn, res1, head);
+        WorkManager::enqueue(call2);
+        return res2;
+    }
+    case 1:
+        return make_lazy<Int>(0);
+    }
+    return nullptr;
+}
+
+TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
+    LazyT<ListInt> tail;
+    tail = make_lazy<remove_lazy_t<decltype(tail)>>(
+        std::integral_constant<std::size_t, 1>(), Nil{});
+    LazyT<ListInt> third;
+    third = make_lazy<remove_lazy_t<decltype(third)>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(make_lazy<Int>(8), tail)});
+    LazyT<ListInt> second;
+    second = make_lazy<remove_lazy_t<decltype(second)>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(make_lazy<Int>(4), third)});
+    LazyT<ListInt> first;
+    first = make_lazy<remove_lazy_t<decltype(first)>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(make_lazy<Int>(-9), second)});
+
+    FnT<Int, ListInt> summer{list_int_sum};
+    auto res = WorkManager::run(summer, first);
+    ASSERT_EQ(res->value(), 3);
+}
+
+struct Suc;
+typedef VariantT<Suc, Nil> Nat;
+struct Suc {
+    using type = Nat;
+    LazyT<type> value;
+};
+
+LazyT<VariantT<Suc, Nil>> pred(LazyT<VariantT<Suc, Nil>> nat,
+                               std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(nat);
+    VariantT<Suc, Nil> nat_ = nat->value();
+    switch (nat_.tag) {
+    case 0: {
+        LazyT<Suc::type> s = reinterpret_cast<Suc *>(&nat_.value)->value;
+        return s;
+    }
+    case 1: {
+        VariantT<Suc, Nil> n = {};
+        n.tag = 1ULL;
+        return make_lazy<VariantT<Suc, Nil>>(n);
+    }
+    }
+    return nullptr;
+}
+
+TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
+    LazyT<Nat> n = make_lazy<Nat>(std::integral_constant<std::size_t, 1>());
+    LazyT<Nat> inner =
+        make_lazy<Nat>(std::integral_constant<std::size_t, 0>(), Suc{n});
+    LazyT<Nat> outer =
+        make_lazy<Nat>(std::integral_constant<std::size_t, 0>(), Suc{inner});
+
+    FnT<Nat, Nat> pred_fn{pred};
+
+    auto res = WorkManager::run(pred_fn, outer)->value();
+
+    ASSERT_EQ(res.tag, inner->value().tag);
+    auto tmp = inner->value().value;
+    ASSERT_EQ(reinterpret_cast<Suc *>(&res.value)->value,
+              reinterpret_cast<Suc *>(&tmp)->value);
 }
 
 std::vector<unsigned> cpu_counts = {1, 2, 3, 4};
