@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fn/fn.hpp"
+#include "lazy/types.hpp"
 
 template <typename R, typename... As>
 using FnT = TypedFn<LazyT<R>, LazyT<As>...>;

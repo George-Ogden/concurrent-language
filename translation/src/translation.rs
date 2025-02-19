@@ -1463,7 +1463,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call; LazyT<Int> body() override { if (call == decltype(call){}){ call = Plus__BuiltIn(x,y); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main; LazyT<Int> body() override { x = make_lazy<Int>(9LL); y = make_lazy<Int>(5LL); if (main == decltype(main){}){ std::shared_ptr<Fn> fn; std::tie(fn,main) = Main->value()->clone_with_args(); WorkManager::call(fn);} return main; }};";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{ Empty value; }; struct Faws{ Empty value; }; LazyT<Int> Main(std::shared_ptr<void>env = nullptr){ LazyT<Int>call; call = Plus__BuiltIn(x,y); return call; } LazyT<Int>PreMain(std::shared_ptr<void> env = nullptr){ LazyT<Int>main; x = make_lazy<Int>(9LL); y = make_lazy<Int>(5LL); { WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); WorkManager::enqueue(work); } return main; }";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

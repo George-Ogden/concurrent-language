@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
 
     auto end = time_utils::now();
 
-    std::cout << result->value() << std::endl;
+    std::cout << result << std::endl;
 
     auto duration = time_utils::time_delta(start, end);
     std::cerr << "Execution time: " << duration << std::endl;
