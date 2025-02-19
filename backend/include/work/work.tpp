@@ -17,7 +17,7 @@ Work::~Work() = default;
 
 bool Work::done() const
 {
-    return done_flag.load(std::memory_order_relaxed);
+    return status.load(std::memory_order_relaxed).done();
 }
 
 FinishWork::FinishWork() = default;
@@ -71,7 +71,7 @@ void Work::assign(T &targets, U &results)
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run()
 {
-    if (!this->done_flag.load(std::memory_order_acquire))
+    if (!this->status.load(std::memory_order_acquire).done())
     {
         LazyT<Ret> results = std::apply([this](auto &&...args)
                                         { return fn.call(std::forward<decltype(args)>(args)...); }, args);
@@ -83,7 +83,7 @@ void TypedWork<Ret, Args...>::run()
         c.update();
     }
     this->continuations->clear();
-    this->done_flag.store(true, std::memory_order_release);
+    this->status.store(Status::finished, std::memory_order_release);
     this->continuations.release();
 }
 

@@ -6,6 +6,7 @@
 #include "lazy/types.hpp"
 #include "types/compound.hpp"
 #include "types/utils.hpp"
+#include "work/status.hpp"
 
 #include <atomic>
 #include <memory>
@@ -14,7 +15,7 @@
 
 class Work {
   protected:
-    std::atomic<bool> done_flag;
+    std::atomic<Status> status;
     Locked<std::vector<Continuation>> continuations;
     template <typename T, typename U> static void assign(T &targets, U &result);
 
