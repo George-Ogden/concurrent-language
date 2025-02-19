@@ -8,11 +8,13 @@
 #include "lazy/types.hpp"
 #include "system/thread_manager.tpp"
 #include "system/work_manager.tpp"
+#include "types/compound.hpp"
 #include "work/work.tpp"
 
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <vector>
@@ -57,6 +59,52 @@ TEST_F(StatusTest, QueuedStatus) {
     WorkManager::enqueue(work);
     ASSERT_EQ(work->status.load(), Status::queued);
     work->run();
+    ASSERT_EQ(work->status.load(), Status::finished);
+    WorkManager::work_queue->clear();
+    WorkManager::enqueue(work);
+    ASSERT_EQ(WorkManager::work_queue->size(), 0);
+    ASSERT_EQ(work->status.load(), Status::finished);
+}
+
+LazyT<TupleT<>> running_status_checker(
+    std::shared_ptr<std::tuple<std::shared_ptr<Work> *, Status *>> env) {
+    auto [work, running_status] = *env;
+    *running_status = (*work)->status.load();
+    return std::make_tuple();
+};
+
+TEST_F(StatusTest, RunningStatus) {
+    WorkT work;
+    Status running_status{Status::available};
+
+    TypedClosure<std::tuple<std::shared_ptr<Work> *, Status *>, LazyT<TupleT<>>>
+        running_status_checker_fn(running_status_checker,
+                                  std::make_tuple(&work, &running_status));
+
+    LazyT<TupleT<>> v;
+    std::tie(work, v) = Work::fn_call(running_status_checker_fn);
+
+    ASSERT_EQ(work->status.load(), Status::available);
+    work->run();
+    ASSERT_EQ(running_status, Status::active);
+    ASSERT_EQ(work->status.load(), Status::finished);
+}
+
+TEST_F(StatusTest, RunningFromQueueStatus) {
+    WorkT work;
+    Status running_status{Status::available};
+
+    TypedClosure<std::tuple<std::shared_ptr<Work> *, Status *>, LazyT<TupleT<>>>
+        running_status_checker_fn(running_status_checker,
+                                  std::make_tuple(&work, &running_status));
+
+    LazyT<TupleT<>> v;
+    std::tie(work, v) = Work::fn_call(running_status_checker_fn);
+
+    WorkManager::enqueue(work);
+    ASSERT_EQ(work->status.load(), Status::queued);
+    work->run();
+    ASSERT_EQ(running_status, Status::active);
     ASSERT_EQ(work->status.load(), Status::finished);
 }
 

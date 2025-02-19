@@ -5,7 +5,7 @@ struct Status {
         available,
         queued,
         // required,
-        // active,
+        active,
         finished
     };
     // cppcheck-suppress noExplicitConstructor
@@ -17,6 +17,7 @@ struct Status {
     friend bool operator==(const Value &lhs, const Status &rhs) {
         return lhs == rhs.value;
     }
+    Value operator*() const { return value; }
 
   private:
     Value value;

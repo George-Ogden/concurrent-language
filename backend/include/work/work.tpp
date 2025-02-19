@@ -14,7 +14,7 @@
 #include <utility>
 #include <type_traits>
 
-Work::Work():status(Status::available){}
+Work::Work() : status(Status::available) {}
 Work::~Work() = default;
 
 bool Work::done() const
@@ -22,7 +22,8 @@ bool Work::done() const
     return status.load(std::memory_order_relaxed).done();
 }
 
-FinishWork::FinishWork(){
+FinishWork::FinishWork()
+{
     status.store(Status::finished, std::memory_order_relaxed);
 };
 
@@ -75,26 +76,42 @@ void Work::assign(T &targets, U &results)
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run()
 {
-    if (!this->status.load(std::memory_order_acquire).done())
+    if (this->status.load(std::memory_order_relaxed).done())
     {
-        LazyT<Ret> results = std::apply([this](auto &&...args)
-                                        { return fn.call(std::forward<decltype(args)>(args)...); }, args);
-        assign(targets, results);
+        return;
     }
-    this->continuations.acquire();
-    for (Continuation &c : *this->continuations)
+    Status old_status = this->status.exchange(Status::active, std::memory_order_acquire);
+    switch (*old_status)
     {
-        c.update();
+        case Status::queued :
+        case Status::available:
+        {
+            LazyT<Ret> results = std::apply([this](auto &&...args)
+                                            { return fn.call(std::forward<decltype(args)>(args)...); }, args);
+            assign(targets, results);
+            this->continuations.acquire();
+            for (Continuation &c : *this->continuations)
+            {
+                c.update();
+            }
+            this->continuations->clear();
+            this->status.store(Status::finished, std::memory_order_release);
+            this->continuations.release();
+            break;
+        }
+        case Status::finished:
+        {
+            this->status.store(Status::finished, std::memory_order_release);
+            break;
+        }
+        case Status::active: {}
     }
-    this->continuations->clear();
-    this->status.store(Status::finished, std::memory_order_release);
-    this->continuations.release();
 }
 
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::await_all()
 {
-    auto vs = lazy_map([](auto target)->LazyT<remove_lazy_t<remove_shared_ptr_t<decltype(target)>>>
+    auto vs = lazy_map([](auto target) -> LazyT<remove_lazy_t<remove_shared_ptr_t<decltype(target)>>>
                        { return target.lock(); }, targets);
     WorkManager::await_all(vs);
 }
