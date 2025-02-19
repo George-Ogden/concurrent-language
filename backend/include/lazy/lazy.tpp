@@ -19,7 +19,7 @@ template <typename T>
 LazyWork<T>::LazyWork() = default;
 
 template <typename T>
-bool LazyWork<T>::done() const {
+bool LazyWork<T>::done() {
     return work == nullptr || work->done();
 }
 
@@ -42,7 +42,7 @@ template <typename ...Args>
 LazyConstant<T>::LazyConstant(Args&&...args):_value(std::forward<Args>(args)...){}
 
 template <typename T>
-bool LazyConstant<T>::done() const {
+bool LazyConstant<T>::done() {
     return true;
 }
 
@@ -91,8 +91,8 @@ void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
 }
 
 template <typename T>
-bool LazyPlaceholder<T>::done() const {
-    auto current_reference = reference.load(std::memory_order_relaxed);
+bool LazyPlaceholder<T>::done() {
+    auto current_reference = this->as_ref();
     return current_reference != nullptr && current_reference->done();
 }
 
