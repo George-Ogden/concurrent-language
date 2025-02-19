@@ -31,6 +31,7 @@ class WorkTest : public ::testing::Test {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
         WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
+        WorkManager::work_queue->clear();
         std::tie(work, result) = Work::fn_call(inc_fn, make_lazy<Int>(4));
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
@@ -47,6 +48,16 @@ TEST_F(WorkTest, DoneLater) {
 TEST_F(WorkTest, CorrectValue) {
     work->run();
     ASSERT_EQ(result->value(), 5);
+}
+
+class StatusTest : public WorkTest {};
+
+TEST_F(StatusTest, QueuedStatus) {
+    ASSERT_EQ(work->status.load(), Status::available);
+    WorkManager::enqueue(work);
+    ASSERT_EQ(work->status.load(), Status::queued);
+    work->run();
+    ASSERT_EQ(work->status.load(), Status::finished);
 }
 
 LazyT<TupleT<Int, Int>> pair(LazyT<Int> x, LazyT<Int> y,

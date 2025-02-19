@@ -15,11 +15,12 @@
 
 class Work {
   protected:
-    std::atomic<Status> status;
     Locked<std::vector<Continuation>> continuations;
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
+    std::atomic<Status> status;
+    Work();
     virtual ~Work();
     virtual void run() = 0;
     virtual void await_all() = 0;

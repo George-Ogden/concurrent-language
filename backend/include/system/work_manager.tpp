@@ -36,9 +36,12 @@ Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args)
 
 void WorkManager::enqueue(std::shared_ptr<Work> work)
 {
-    WorkManager::work_queue.acquire();
-    WorkManager::work_queue->push_back(work);
-    WorkManager::work_queue.release();
+    Status expected{Status::available};
+    if (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.compare_exchange_strong(expected, Status::queued, std::memory_order_acq_rel)){
+        WorkManager::work_queue.acquire();
+        WorkManager::work_queue->push_back(work);
+        WorkManager::work_queue.release();
+    }
 }
 
 std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
@@ -85,16 +88,18 @@ std::shared_ptr<Work> WorkManager::get_work()
 {
 
     WorkManager::work_queue.acquire();
-    if (WorkManager::work_queue->empty())
+    while (!WorkManager::work_queue->empty())
     {
-        WorkManager::work_queue.release();
-        return nullptr;
+        std::shared_ptr<Work> work = WorkManager::work_queue->front().lock();
+        WorkManager::work_queue->pop_front();
+        Status expected{Status::queued};
+        if (work != nullptr && (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.compare_exchange_strong(expected, Status::available, std::memory_order_acq_rel))){
+            WorkManager::work_queue.release();
+            return work;
+        }
     }
-
-    std::shared_ptr<Work> work = WorkManager::work_queue->front().lock();
-    WorkManager::work_queue->pop_front();
     WorkManager::work_queue.release();
-    return work;
+    return nullptr;
 }
 template <typename T>
 constexpr auto filter_awaitable(T &v)

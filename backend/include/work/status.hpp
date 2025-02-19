@@ -1,19 +1,23 @@
 #pragma once
 
-class Status {
-  public:
+struct Status {
     enum Value {
         available,
-        // queued,
+        queued,
         // required,
         // active,
         finished
     };
-    Status() = default;
     // cppcheck-suppress noExplicitConstructor
     Status(Value status) : value(status){};
-    bool done() const { return value == finished; }
+    bool done() const { return *this == finished; }
+    friend bool operator==(const Status &lhs, const Value &rhs) {
+        return lhs.value == rhs;
+    }
+    friend bool operator==(const Value &lhs, const Status &rhs) {
+        return lhs == rhs.value;
+    }
 
   private:
-    Value value = available;
+    Value value;
 };

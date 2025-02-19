@@ -1,6 +1,7 @@
 #pragma once
 
 #include "work/work.hpp"
+#include "work/status.hpp"
 #include "fn/continuation.tpp"
 #include "lazy/lazy.tpp"
 #include "lazy/types.hpp"
@@ -13,6 +14,7 @@
 #include <utility>
 #include <type_traits>
 
+Work::Work():status(Status::available){}
 Work::~Work() = default;
 
 bool Work::done() const
@@ -20,7 +22,9 @@ bool Work::done() const
     return status.load(std::memory_order_relaxed).done();
 }
 
-FinishWork::FinishWork() = default;
+FinishWork::FinishWork(){
+    status.store(Status::finished, std::memory_order_relaxed);
+};
 
 void FinishWork::run()
 {
