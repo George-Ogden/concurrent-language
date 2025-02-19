@@ -2,9 +2,9 @@
 
 #include "fn/fn.tpp"
 #include "fn/operators.hpp"
+#include "fn/types.hpp"
 #include "lazy/lazy.tpp"
 #include "system/work_manager.tpp"
-#include "types/compound.hpp"
 
 #include <gtest/gtest.h>
 

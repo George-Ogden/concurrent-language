@@ -3,10 +3,11 @@
 #include "data_structures/lock.tpp"
 #include "fn/continuation.tpp"
 #include "fn/fn.tpp"
+#include "fn/types.hpp"
 #include "lazy/lazy.tpp"
+#include "lazy/types.hpp"
 #include "system/thread_manager.tpp"
 #include "system/work_manager.tpp"
-#include "types/compound.hpp"
 #include "work/work.tpp"
 
 #include <gtest/gtest.h>

@@ -2,6 +2,7 @@
 
 #include "data_structures/lock.hpp"
 #include "fn/continuation.hpp"
+#include "fn/types.hpp"
 #include "lazy/types.hpp"
 #include "types/compound.hpp"
 #include "types/utils.hpp"
