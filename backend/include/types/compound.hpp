@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fn/fn.hpp"
+#include "types/utils.hpp"
 
 #include <iostream>
 #include <memory>
@@ -75,3 +76,12 @@ using FnT = TypedFn<LazyT<R>, LazyT<As>...>;
 
 template <typename E, typename R, typename... As>
 using ClosureT = TypedClosure<LazyT<E>, LazyT<R>, LazyT<As>...>;
+
+template <typename E, typename T> struct closure_fn {};
+
+template <typename E, typename R, typename... As>
+struct closure_fn<E, TypedFn<R, As...>> {
+    using type = TypedClosure<E, R, As...>;
+};
+
+template <typename E, typename T> using ClosureFnT = closure_fn<E, T>::type;

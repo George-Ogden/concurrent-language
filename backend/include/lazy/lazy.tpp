@@ -47,6 +47,11 @@ T LazyConstant<T>::value() const {
 }
 
 template <typename T>
+T& LazyConstant<T>::lvalue() {
+    return _value;
+}
+
+template <typename T>
 void LazyConstant<T>::add_continuation(Continuation c) {
     c.update();
 }
@@ -87,4 +92,9 @@ bool LazyPlaceholder<T>::done() const {
 template <typename T>
 T LazyPlaceholder<T>::value() const {
     return reference->value();
+}
+
+template <typename T>
+T& LazyPlaceholder<T>::lvalue() {
+    return reference->lvalue();
 }

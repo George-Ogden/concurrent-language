@@ -11,6 +11,7 @@ template <typename T> class Lazy {
   public:
     virtual bool done() const = 0;
     virtual T value() const = 0;
+    virtual T &lvalue() = 0;
     virtual void add_continuation(Continuation c) = 0;
     virtual ~Lazy();
 };
@@ -22,6 +23,7 @@ template <typename T> class LazyConstant : public Lazy<T> {
     template <typename... Args> LazyConstant(Args &&...);
     bool done() const override;
     T value() const override;
+    T &lvalue() override;
     void add_continuation(Continuation c) override;
 };
 
@@ -34,6 +36,7 @@ template <typename T> class LazyWork : public Lazy<T> {
     LazyWork();
     bool done() const override;
     T value() const override;
+    T &lvalue() override;
     void add_continuation(Continuation c) override;
 };
 
@@ -48,6 +51,7 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     void assign(std::shared_ptr<Lazy<T>> value);
     bool done() const override;
     T value() const override;
+    T &lvalue() override;
 };
 
 template <typename T, typename... Args>

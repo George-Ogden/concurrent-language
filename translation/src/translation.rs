@@ -101,17 +101,25 @@ impl Translator {
             itertools::join(constructor_definitions, "\n"),
         )
     }
+    fn translate_value_type(&self, value: &Value) -> Code {
+        match value {
+            Value::BuiltIn(BuiltIn::Boolean(_)) => Code::from("Bool"),
+            Value::BuiltIn(BuiltIn::Integer(_)) => Code::from("Int"),
+            Value::BuiltIn(BuiltIn::BuiltInFn(name)) => format!("decltype({name}_Fn)"),
+            Value::Memory(Memory(id)) => format!("decltype({id})"),
+        }
+    }
     fn translate_builtin(&self, value: BuiltIn) -> Code {
+        let value_type = self.translate_value_type(&value.clone().into());
         match value {
             BuiltIn::Integer(Integer { value }) => {
-                format!("make_lazy<Int>({value}LL)")
+                format!("make_lazy<{value_type}>({value}LL)")
             }
             BuiltIn::Boolean(Boolean { value }) => {
-                format!("make_lazy<Bool>({value})")
+                format!("make_lazy<{value_type}>({value})")
             }
             BuiltIn::BuiltInFn(name) => {
-                let name = format!("{name}_Fn");
-                format!("make_lazy<decltype({name})>({name})")
+                format!("make_lazy<{value_type}>({name}_Fn)")
             }
         }
     }
@@ -196,10 +204,10 @@ impl Translator {
                 self.translate_constructor_call(id.clone(), constructor_call)
             }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                return env.map_or_else(Code::new, |env| {
+                return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name});"), |env| {
+                    let value = self.translate_value(env);
                     format!(
-                        "std::dynamic_pointer_cast<{name}>({id}->value())->env = {};",
-                        self.translate_value(env)
+                        "std::bit_cast<ClosureFnT<LazyT<{name}_T>,remove_lazy_t<decltype({id})>>*>(&{id}->lvalue())->env() = {value};",
                     )
                 })
             }
@@ -270,11 +278,11 @@ impl Translator {
             .filter_map(|statement| {
                 if let Statement::Assignment(Assignment {
                     target,
-                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: _ }),
+                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: Some(_) }),
                 }) = statement
                 {
                     let id = self.translate_memory(target.clone());
-                    Some(format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>(std::make_shared<{name}>());"))
+                    Some(format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>(ClosureFnT<LazyT<{name}_T>,remove_lazy_t<decltype({id})>>({name}));"))
                 } else {
                     None
                 }
@@ -293,16 +301,19 @@ impl Translator {
         let return_type = fn_def.ret.1;
         let statements_code = self.translate_statements(fn_def.statements);
         let return_code = format!("return {};", self.translate_value(fn_def.ret.0));
-        let (env_code, enter_env_code) = match fn_def.env {
+        let (type_code, env_code, enter_env_code) = match fn_def.env {
             None => (
+                String::new(),
                 String::from("std::shared_ptr<void> env = nullptr"),
                 String::new(),
             ),
             Some(type_) => {
-                let env_type_code = self.translate_lazy_type(&type_);
+                let env_type_code = self.translate_type(&type_);
+                let type_name = format!("{name}_T");
                 (
-                    format!("std::shared_ptr<{}> _env_ptr", env_type_code),
-                    format!("{} env = *_env_ptr;", env_type_code),
+                    format!("using {type_name} = {env_type_code};"),
+                    format!("std::shared_ptr<LazyT<{type_name}>> _env_ptr"),
+                    format!("LazyT<{type_name}> env = *_env_ptr;"),
                 )
             }
         };
@@ -321,7 +332,9 @@ impl Translator {
                 .chain(std::iter::once(env_code))
                 .join(",")
         );
-        format!("{declaration_code} {{ {enter_env_code} {statements_code} {return_code} }}")
+        format!(
+            "{type_code} {declaration_code} {{ {enter_env_code} {statements_code} {return_code} }}"
+        )
     }
     fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
         fn_defs
@@ -717,6 +730,34 @@ mod tests {
 
     #[test_case(
         Memory(Id::from("baz")).into(),
+        "decltype(baz)";
+        "value memory type"
+    )]
+    #[test_case(
+        BuiltIn::BuiltInFn(
+            Name::from("Comparison_LT__BuiltIn"),
+        ).into(),
+        "decltype(Comparison_LT__BuiltIn_Fn)";
+        "builtin function type"
+    )]
+    #[test_case(
+        BuiltIn::Integer(Integer{value: -1}).into(),
+        "Int";
+        "builtin integer type"
+    )]
+    #[test_case(
+        BuiltIn::Boolean(Boolean{value: false}).into(),
+        "Bool";
+        "builtin boolean type"
+    )]
+    fn test_value_type(value: Value, expected: &str) {
+        let code = TRANSLATOR.translate_value_type(&value);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Memory(Id::from("baz")).into(),
         "baz";
         "value memory translation"
     )]
@@ -1098,7 +1139,7 @@ mod tests {
                 env: None
             }.into(),
         }.into()],
-        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(std::make_shared<Closure>());";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(Closure);";
         "closure without env assignment"
     )]
     #[test_case(
@@ -1109,8 +1150,28 @@ mod tests {
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
         }.into()],
-        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(std::make_shared<Adder>());  std::dynamic_pointer_cast<Adder>(closure->value())->env = x;";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<LazyT<Adder_T>, remove_lazy_t<decltype(closure)>>(Adder));  std::bit_cast<ClosureFnT<LazyT<Adder_T>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = x;";
         "closure assignment"
+    )]
+    #[test_case(
+            vec![
+            Assignment {
+                target: Memory(Id::from("foo")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("Foo"),
+                    env: Some(Memory(Id::from("bar")).into())
+                }.into(),
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("bar")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("Bar"),
+                    env: Some(Memory(Id::from("foo")).into())
+                }.into(),
+            }.into()
+        ],
+        "foo = make_lazy<remove_lazy_t<decltype(foo)>>(ClosureFnT<LazyT<Foo_T>,remove_lazy_t<decltype(foo)>>(Foo)); bar = make_lazy<remove_lazy_t<decltype(bar)>>(ClosureFnT<LazyT<Bar_T>,remove_lazy_t<decltype(bar)>>(Bar)); std::bit_cast<ClosureFnT<LazyT<Foo_T>,remove_lazy_t<decltype(foo)>>*>(&foo->lvalue())->env() = bar; std::bit_cast<ClosureFnT<LazyT<Bar_T>,remove_lazy_t<decltype(bar)>>*>(&bar->lvalue())->env() = foo;";
+        "mutually recursive closure assignment"
     )]
     #[test_case(
         vec![
@@ -1315,7 +1376,7 @@ mod tests {
             ],
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
         },
-        "LazyT<Int> adder(LazyT<Int> x, std::shared_ptr<Int> env) { LazyT<Int> inner_res; inner_res = Plus__BuiltIn(x, env); return inner_res; }";
+        "using adder_T = Int; LazyT<Int> adder(LazyT<Int> x, std::shared_ptr<LazyT<adder_T>> _env_ptr) { LazyT<adder_T> env = *_env_ptr; LazyT<Int> inner_res; inner_res = Plus__BuiltIn(x, env); return inner_res; }";
         "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {

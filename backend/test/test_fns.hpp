@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -204,8 +205,10 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     Int x = 5;
     Bool y = true;
 
-    FnT<TupleT<Int, TupleT<Bool>>, Int, Bool> pair_fn{pair_int_bool};
-    auto res = WorkManager::run(pair_fn, make_lazy<Int>(x), make_lazy<Bool>(y));
+    LazyT<FnT<TupleT<Int, TupleT<Bool>>, Int, Bool>> pair_fn;
+    pair_fn = make_lazy<remove_lazy_t<decltype(pair_fn)>>(pair_int_bool);
+    auto res = WorkManager::run(pair_fn->value(), make_lazy<Int>(x),
+                                make_lazy<Bool>(y));
     ASSERT_EQ(std::get<0>(res)->value(), 5);
     ASSERT_EQ(std::get<0>(std::get<1>(res))->value(), true);
 }
@@ -435,8 +438,8 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
               reinterpret_cast<Suc *>(&tmp)->value);
 }
 
-LazyT<Int> recursive(LazyT<Int> x,
-                     std::shared_ptr<LazyT<TupleT<FnT<Int, Int>>>> env) {
+using recursive_T = TupleT<FnT<Int, Int>>;
+LazyT<Int> recursive(LazyT<Int> x, std::shared_ptr<LazyT<recursive_T>> env) {
     WorkManager::await(x);
     if (x->value() > 0) {
         auto lz = std::get<0>(*env);
@@ -451,16 +454,23 @@ LazyT<Int> recursive(LazyT<Int> x,
 }
 
 TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
-    ClosureT<TupleT<FnT<Int, Int>>, Int, Int> closure{recursive};
-    closure.env() = std::make_tuple(make_lazy<FnT<Int, Int>>(closure));
+    LazyT<FnT<Int, Int>> fn;
+    fn = make_lazy<remove_lazy_t<decltype(fn)>>(
+        ClosureFnT<LazyT<recursive_T>, remove_lazy_t<decltype(fn)>>(recursive));
+    LazyT<TupleT<FnT<Int, Int>>> env =
+        std::make_tuple(make_lazy<FnT<Int, Int>>(fn->value()));
+    std::bit_cast<
+        ClosureFnT<LazyT<recursive_T>, remove_lazy_t<decltype(fn)>> *>(
+        &fn->lvalue())
+        ->env() = env;
     LazyT<Int> x = make_lazy<Int>(5);
 
-    auto res = WorkManager::run(closure, x);
+    auto res = WorkManager::run(fn->value(), x);
     ASSERT_EQ(res->value(), 0);
 }
 
-LazyT<Bool> is_even(LazyT<Int> x,
-                    std::shared_ptr<LazyT<TupleT<FnT<Bool, Int>>>> env) {
+using is_even_T = TupleT<FnT<Bool, Int>>;
+LazyT<Bool> is_even(LazyT<Int> x, std::shared_ptr<LazyT<is_even_T>> env) {
     WorkManager::await(x);
     if (x->value() > 0) {
         auto lz = std::get<0>(*env);
@@ -474,8 +484,8 @@ LazyT<Bool> is_even(LazyT<Int> x,
     }
 }
 
-LazyT<Bool> is_odd(LazyT<Int> x,
-                   std::shared_ptr<LazyT<TupleT<FnT<Bool, Int>>>> env) {
+using is_odd_T = TupleT<FnT<Bool, Int>>;
+LazyT<Bool> is_odd(LazyT<Int> x, std::shared_ptr<LazyT<is_odd_T>> env) {
     WorkManager::await(x);
     if (x->value() > 0) {
         auto lz = std::get<0>(*env);
@@ -490,15 +500,32 @@ LazyT<Bool> is_odd(LazyT<Int> x,
 }
 
 TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsTest) {
-    ClosureT<TupleT<FnT<Bool, Int>>, Bool, Int> is_even_fn{is_even};
-    ClosureT<TupleT<FnT<Bool, Int>>, Bool, Int> is_odd_fn{is_odd};
-    is_even_fn.env() = std::make_tuple(make_lazy<FnT<Bool, Int>>(is_odd_fn));
-    is_odd_fn.env() = std::make_tuple(make_lazy<FnT<Bool, Int>>(is_even_fn));
+    LazyT<FnT<Bool, Int>> is_even_fn;
+    LazyT<FnT<Bool, Int>> is_odd_fn;
+
+    is_even_fn = make_lazy<remove_lazy_t<decltype(is_even_fn)>>(
+        ClosureFnT<LazyT<is_even_T>, remove_lazy_t<decltype(is_even_fn)>>(
+            is_even));
+    is_odd_fn = make_lazy<remove_lazy_t<decltype(is_odd_fn)>>(
+        ClosureFnT<LazyT<is_odd_T>, remove_lazy_t<decltype(is_odd_fn)>>(
+            is_odd));
+
+    LazyT<TupleT<FnT<Bool, Int>>> is_odd_env = std::make_tuple(is_even_fn);
+    LazyT<TupleT<FnT<Bool, Int>>> is_even_env = std::make_tuple(is_odd_fn);
+
+    std::bit_cast<
+        ClosureFnT<LazyT<is_even_T>, remove_lazy_t<decltype(is_even_fn)>> *>(
+        &is_even_fn->lvalue())
+        ->env() = is_even_env;
+    std::bit_cast<
+        ClosureFnT<LazyT<is_odd_T>, remove_lazy_t<decltype(is_odd_fn)>> *>(
+        &is_odd_fn->lvalue())
+        ->env() = is_odd_env;
 
     for (auto x : {5, 10, 23, 0}) {
-        auto even = WorkManager::run(is_even_fn, make_lazy<Int>(x));
+        auto even = WorkManager::run(is_even_fn->value(), make_lazy<Int>(x));
         ASSERT_EQ(even->value(), x % 2 == 0);
-        auto odd = WorkManager::run(is_odd_fn, make_lazy<Int>(x));
+        auto odd = WorkManager::run(is_odd_fn->value(), make_lazy<Int>(x));
         ASSERT_EQ(odd->value(), x % 2 == 1);
     }
 }
