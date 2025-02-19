@@ -16,7 +16,6 @@ template <typename T> class Lazy {
     virtual T &lvalue() = 0;
     virtual void add_continuation(Continuation c) = 0;
     virtual ~Lazy();
-    virtual std::shared_ptr<Lazy<T>> as_ref();
 };
 
 template <typename T> class LazyConstant : public Lazy<T> {
@@ -55,7 +54,6 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     bool done() const override;
     T value() override;
     T &lvalue() override;
-    std::shared_ptr<Lazy<T>> as_ref() override;
 };
 
 template <typename T, typename... Args>
