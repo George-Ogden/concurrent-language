@@ -11,6 +11,11 @@ template <typename T>
 Lazy<T>::~Lazy() = default;
 
 template <typename T>
+std::shared_ptr<Lazy<T>> Lazy<T>::as_ref() {
+    return nullptr;
+}
+
+template <typename T>
 LazyWork<T>::LazyWork() = default;
 
 template <typename T>
@@ -19,7 +24,7 @@ bool LazyWork<T>::done() const {
 }
 
 template <typename T>
-T LazyWork<T>::value() const {
+T LazyWork<T>::value() {
     return _value;
 }
 
@@ -42,7 +47,7 @@ bool LazyConstant<T>::done() const {
 }
 
 template <typename T>
-T LazyConstant<T>::value() const {
+T LazyConstant<T>::value() {
     return _value;
 }
 
@@ -90,11 +95,25 @@ bool LazyPlaceholder<T>::done() const {
 }
 
 template <typename T>
-T LazyPlaceholder<T>::value() const {
-    return reference->value();
+T LazyPlaceholder<T>::value() {
+    return as_ref()->value();
 }
 
 template <typename T>
 T& LazyPlaceholder<T>::lvalue() {
     return reference->lvalue();
+}
+
+template <typename T>
+std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
+    if (reference == nullptr){
+        return nullptr;
+    }
+    std::shared_ptr<Lazy<T>> lazy = reference->as_ref();
+    if (lazy == nullptr){
+        return reference;
+    } else {
+        reference = lazy;
+        return lazy;
+    }
 }

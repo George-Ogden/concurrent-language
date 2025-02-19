@@ -4,16 +4,19 @@
 #include "fn/continuation.hpp"
 #include "types/utils.hpp"
 
+#include <memory>
 #include <utility>
+#include <vector>
 
 struct Work;
 template <typename T> class Lazy {
   public:
     virtual bool done() const = 0;
-    virtual T value() const = 0;
+    virtual T value() = 0;
     virtual T &lvalue() = 0;
     virtual void add_continuation(Continuation c) = 0;
     virtual ~Lazy();
+    virtual std::shared_ptr<Lazy<T>> as_ref();
 };
 
 template <typename T> class LazyConstant : public Lazy<T> {
@@ -22,7 +25,7 @@ template <typename T> class LazyConstant : public Lazy<T> {
   public:
     template <typename... Args> LazyConstant(Args &&...);
     bool done() const override;
-    T value() const override;
+    T value() override;
     T &lvalue() override;
     void add_continuation(Continuation c) override;
 };
@@ -35,7 +38,7 @@ template <typename T> class LazyWork : public Lazy<T> {
   public:
     LazyWork();
     bool done() const override;
-    T value() const override;
+    T value() override;
     T &lvalue() override;
     void add_continuation(Continuation c) override;
 };
@@ -50,8 +53,9 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     void add_continuation(Continuation c) override;
     void assign(std::shared_ptr<Lazy<T>> value);
     bool done() const override;
-    T value() const override;
+    T value() override;
     T &lvalue() override;
+    std::shared_ptr<Lazy<T>> as_ref() override;
 };
 
 template <typename T, typename... Args>
