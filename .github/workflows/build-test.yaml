@@ -46,7 +46,7 @@ jobs:
     - name: Temporary Script
       run: |
         echo '#include "main/include.hpp"' > backend/include/main/main.hpp
-        echo 'struct Main : Closure<Main, Empty, Int> {using Closure<Main, Empty, Int>::Closure; std::shared_ptr<Lazy<Int>> body() override { return std::make_shared<LazyConstant<Int>>(0LL); }};' >> backend/include/main/main.hpp
+        echo 'LazyT<Int> Main(std::shared_ptr<void> env = nullptr){ return make_lazy<Int>(0); }' >> backend/include/main/main.hpp
 
     - name: Build
       run: |
