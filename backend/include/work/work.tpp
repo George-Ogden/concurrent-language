@@ -11,6 +11,7 @@
 #include <atomic>
 #include <memory>
 #include <utility>
+#include <type_traits>
 
 Work::~Work() = default;
 
@@ -34,9 +35,7 @@ std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Arg
     std::shared_ptr<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>> work = std::make_shared<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>>();
     auto placeholders = make_lazy_placeholders<Ret>(work);
     work->targets = lazy_map([](const auto &t)
-                             {
-                                return std::weak_ptr(t);
-                            }, placeholders);
+                             { return std::weak_ptr(t); }, placeholders);
     work->args = std::make_tuple(args...);
     work->fn = f;
     return std::make_pair(work, placeholders);
@@ -65,7 +64,7 @@ void Work::assign(T &targets, U &results)
         auto placeholder = target.lock();
         if (placeholder != nullptr){
             placeholder->assign(result);
-}},
+} },
                   targets, results);
 }
 
@@ -91,7 +90,7 @@ void TypedWork<Ret, Args...>::run()
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::await_all()
 {
-    auto vs = lazy_map([](auto target)
+    auto vs = lazy_map([](auto target)->LazyT<remove_lazy_t<remove_shared_ptr_t<decltype(target)>>>
                        { return target.lock(); }, targets);
     WorkManager::await_all(vs);
 }

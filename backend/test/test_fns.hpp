@@ -374,7 +374,7 @@ LazyT<Int> list_int_sum(LazyT<ListInt> lazy_list,
     return nullptr;
 }
 
-TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
+TEST_P(FnCorrectnessTest, RecursiveTypeTest1) {
     LazyT<ListInt> tail;
     tail = make_lazy<remove_lazy_t<decltype(tail)>>(
         std::integral_constant<std::size_t, 1>(), Nil{});
@@ -394,6 +394,73 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest) {
     FnT<Int, ListInt> summer{list_int_sum};
     auto res = WorkManager::run(summer, first);
     ASSERT_EQ(res->value(), 3);
+}
+
+LazyT<ListInt> list_int_dec(LazyT<ListInt> lazy_list,
+                            std::shared_ptr<void> env = nullptr) {
+    WorkManager::await(lazy_list);
+    ListInt list = lazy_list->value();
+    switch (list.tag) {
+    case 0: {
+        LazyT<Cons::type> cons = reinterpret_cast<Cons *>(&list.value)->value;
+        WorkManager::await(cons);
+        LazyT<Int> head = std::get<0ULL>(cons);
+        LazyT<ListInt> tail = std::get<1ULL>(cons);
+
+        auto [call, res] =
+            Work::fn_call(FnT<ListInt, ListInt>{list_int_dec}, tail);
+        WorkManager::enqueue(call);
+
+        return make_lazy<ListInt>(
+            std::integral_constant<std::size_t, 0>(),
+            Cons{std::make_tuple(Decrement__BuiltIn(head), res)});
+    }
+    case 1:
+        return make_lazy<ListInt>(std::integral_constant<std::size_t, 1>(),
+                                  Nil{});
+    }
+    return nullptr;
+}
+
+TEST_P(FnCorrectnessTest, RecursiveTypeTest2) {
+    LazyT<ListInt> tail;
+    tail = make_lazy<remove_lazy_t<decltype(tail)>>(
+        std::integral_constant<std::size_t, 1>(), Nil{});
+    LazyT<ListInt> third;
+    third = make_lazy<remove_lazy_t<decltype(third)>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(make_lazy<Int>(8), tail)});
+    LazyT<ListInt> second;
+    second = make_lazy<remove_lazy_t<decltype(second)>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(make_lazy<Int>(4), third)});
+    LazyT<ListInt> first;
+    first = make_lazy<remove_lazy_t<decltype(first)>>(
+        std::integral_constant<std::size_t, 0>(),
+        Cons{std::make_tuple(make_lazy<Int>(-9), second)});
+
+    FnT<ListInt, ListInt> summer{list_int_dec};
+    auto res = WorkManager::run(summer, first);
+    ASSERT_TRUE(res->done());
+    ASSERT_EQ(res->value().tag, 0);
+    auto body = reinterpret_cast<Cons *>(&res->lvalue().value)->value;
+    ASSERT_EQ(std::get<0>(body)->value(), -10);
+
+    auto next = std::get<1>(body);
+    ASSERT_TRUE(next->done());
+    ASSERT_EQ(next->value().tag, 0);
+    body = reinterpret_cast<Cons *>(&next->lvalue().value)->value;
+    ASSERT_EQ(std::get<0>(body)->value(), 3);
+
+    next = std::get<1>(body);
+    ASSERT_TRUE(next->done());
+    ASSERT_EQ(next->value().tag, 0);
+    body = reinterpret_cast<Cons *>(&next->lvalue().value)->value;
+    ASSERT_EQ(std::get<0>(body)->value(), 7);
+
+    next = std::get<1>(body);
+    ASSERT_TRUE(next->done());
+    ASSERT_EQ(next->value().tag, 1);
 }
 
 struct Suc;

@@ -117,7 +117,8 @@ void WorkManager::await(Vs &...vs)
 }
 
 template <typename T>
-void await_variants(T &v) {}
+void await_variants(T &v) {
+}
 
 template <typename... Ts>
 void await_variants(std::shared_ptr<Lazy<VariantT<Ts...>>> &l)

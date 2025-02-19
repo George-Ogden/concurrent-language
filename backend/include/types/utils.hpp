@@ -45,6 +45,10 @@ template <typename T> constexpr auto flatten(T &&t) {
 }
 template <typename T> struct remove_shared_ptr { using type = T; };
 
+template <typename T> struct remove_shared_ptr<std::weak_ptr<T>> {
+    using type = T;
+};
+
 template <typename T> struct remove_shared_ptr<std::shared_ptr<T>> {
     using type = T;
 };
