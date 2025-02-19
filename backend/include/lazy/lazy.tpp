@@ -68,12 +68,13 @@ LazyPlaceholder<T>::LazyPlaceholder(std::shared_ptr<Work> work)
 template <typename T>
 void LazyPlaceholder<T>::add_continuation(Continuation c) {
     continuations.acquire();
-    if (reference == nullptr) {
+    auto current_reference = reference.load(std::memory_order_relaxed);
+    if (current_reference == nullptr) {
         continuations->push_back(c);
         continuations.release();
     } else {
         continuations.release();
-        reference->add_continuation(c);
+        current_reference->add_continuation(c);
     }
 }
 
@@ -84,14 +85,15 @@ void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
         value->add_continuation(c);
     }
     continuations->clear();
-    reference = value;
+    reference.store(value, std::memory_order_relaxed);
     work = nullptr;
     continuations.release();
 }
 
 template <typename T>
 bool LazyPlaceholder<T>::done() const {
-    return reference != nullptr && reference->done();
+    auto current_reference = reference.load(std::memory_order_relaxed);
+    return current_reference != nullptr && current_reference->done();
 }
 
 template <typename T>
@@ -101,19 +103,20 @@ T LazyPlaceholder<T>::value() {
 
 template <typename T>
 T& LazyPlaceholder<T>::lvalue() {
-    return reference->lvalue();
+    return reference.load(std::memory_order_relaxed)->lvalue();
 }
 
 template <typename T>
 std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
-    if (reference == nullptr){
+    auto current_reference = reference.load(std::memory_order_relaxed);
+    if (current_reference == nullptr){
         return nullptr;
     }
-    std::shared_ptr<Lazy<T>> lazy = reference->as_ref();
+    std::shared_ptr<Lazy<T>> lazy = current_reference->as_ref();
     if (lazy == nullptr){
-        return reference;
+        return current_reference;
     } else {
-        reference = lazy;
+        reference.compare_exchange_weak(current_reference, lazy, std::memory_order_relaxed);
         return lazy;
     }
 }

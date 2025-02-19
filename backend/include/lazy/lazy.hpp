@@ -4,6 +4,7 @@
 #include "fn/continuation.hpp"
 #include "types/utils.hpp"
 
+#include <atomic>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -44,7 +45,7 @@ template <typename T> class LazyWork : public Lazy<T> {
 };
 
 template <typename T> class LazyPlaceholder : public Lazy<T> {
-    std::shared_ptr<Lazy<T>> reference = nullptr;
+    std::atomic<std::shared_ptr<Lazy<T>>> reference = nullptr;
     std::shared_ptr<Work> work;
     Locked<std::vector<Continuation>> continuations;
 

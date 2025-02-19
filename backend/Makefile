@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors
+CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors -g -fsanitize=address
 OPTIMIZATION := -Ofast
 LIBS := -lpthread
 INCLUDE := -Iinclude
