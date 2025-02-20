@@ -120,3 +120,46 @@ TEST(ExecutionStatusTransition, DoneDequeueTest) {
     ASSERT_FALSE(status.queued());
     ASSERT_EQ(status.execution_status(), Status::finished);
 }
+
+TEST(ExecutionStatusTransition, SingleRequiredTest) {
+    Status status;
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_FALSE(status.queued());
+    ASSERT_FALSE(status.required());
+    status.enqueue();
+    ASSERT_TRUE(status.require());
+    ASSERT_TRUE(status.required());
+    ASSERT_FALSE(status.require());
+    ASSERT_TRUE(status.required());
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_TRUE(status.queued());
+}
+
+TEST(ExecutionStatusTransition, RequiredActiveTest) {
+    Status status;
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_FALSE(status.queued());
+    status.start_work();
+    ASSERT_FALSE(status.required());
+    ASSERT_TRUE(status.require());
+    ASSERT_TRUE(status.required());
+    ASSERT_FALSE(status.require());
+    ASSERT_TRUE(status.required());
+    ASSERT_EQ(status.execution_status(), Status::active);
+    ASSERT_FALSE(status.queued());
+}
+
+TEST(ExecutionStatusTransition, RequiredDoneTest) {
+    Status status;
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_FALSE(status.queued());
+    status.start_work();
+    status.finish_work();
+    ASSERT_FALSE(status.required());
+    ASSERT_FALSE(status.require());
+    ASSERT_TRUE(status.required());
+    ASSERT_FALSE(status.require());
+    ASSERT_TRUE(status.required());
+    ASSERT_EQ(status.execution_status(), Status::finished);
+    ASSERT_FALSE(status.queued());
+}
