@@ -40,7 +40,7 @@ template <std::size_t... Widths> class AtomicSharedEnum {
     AtomicSharedEnum() : bits(0){};
     template <std::size_t section>
     requires(section < sizeof...(Widths)) uint8_t
-        get(std::memory_order ordering = std::memory_order_relaxed)
+        load(std::memory_order ordering = std::memory_order_relaxed)
     const {
         return (bits.load(ordering) >> prefix_widths[section]) &
                ((1ULL << widths[section]) - 1);
@@ -50,6 +50,11 @@ template <std::size_t... Widths> class AtomicSharedEnum {
         std::memory_order ordering = std::memory_order_relaxed) {
         return bits.fetch_xor(1 << prefix_widths[section], ordering) >>
                prefix_widths[section];
+    }
+    template <std::size_t section>
+    requires(section < sizeof...(Widths)) void store(
+        uint8_t value, std::memory_order ordering = std::memory_order_relaxed) {
+        exchange<section>(value, ordering);
     }
     template <std::size_t section>
     requires(section < sizeof...(Widths)) bool compare_exchange(
