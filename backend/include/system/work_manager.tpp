@@ -47,7 +47,7 @@ void WorkManager::enqueue(WorkT work)
 
 void WorkManager::try_priority_enqueue(WorkT work)
 {
-    if (work->status.required()){
+    if (work->status.require()){
         priority_enqueue(work);
     }
 }
