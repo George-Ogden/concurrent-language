@@ -36,8 +36,7 @@ Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args)
 
 void WorkManager::enqueue(std::shared_ptr<Work> work)
 {
-    Status expected{Status::available};
-    if (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.compare_exchange_strong(expected, Status::queued, std::memory_order_acq_rel)){
+    if (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.enqueue()){
         WorkManager::work_queue.acquire();
         WorkManager::work_queue->push_back(work);
         WorkManager::work_queue.release();
@@ -92,8 +91,7 @@ std::shared_ptr<Work> WorkManager::get_work()
     {
         std::shared_ptr<Work> work = WorkManager::work_queue->front().lock();
         WorkManager::work_queue->pop_front();
-        Status expected{Status::queued};
-        if (work != nullptr && (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.compare_exchange_strong(expected, Status::available, std::memory_order_acq_rel))){
+        if (work != nullptr && (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.dequeue())){
             WorkManager::work_queue.release();
             return work;
         }
@@ -207,7 +205,7 @@ void WorkManager::await_restricted(Vs &...vs)
             valid->release();
             if (work != nullptr && !work->done())
             {
-                work->status.store(Status::available, std::memory_order_release);
+                work->status.cancel_work();
                 enqueue(work);
             }
             if (!was_valid)

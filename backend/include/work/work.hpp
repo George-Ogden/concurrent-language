@@ -19,7 +19,7 @@ class Work {
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
-    std::atomic<Status> status;
+    Status status;
     Work();
     virtual ~Work();
     virtual void run() = 0;

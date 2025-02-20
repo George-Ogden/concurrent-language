@@ -14,17 +14,17 @@
 #include <utility>
 #include <type_traits>
 
-Work::Work() : status(Status::available) {}
+Work::Work() = default;
 Work::~Work() = default;
 
 bool Work::done() const
 {
-    return status.load(std::memory_order_relaxed).done();
+    return status.done();
 }
 
 FinishWork::FinishWork()
 {
-    status.store(Status::finished, std::memory_order_relaxed);
+    status.finish_work();
 };
 
 void FinishWork::run()
@@ -76,16 +76,12 @@ void Work::assign(T &targets, U &results)
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run()
 {
-    if (this->status.load(std::memory_order_relaxed).done())
+    if (this->status.done())
     {
         return;
     }
-    Status old_status = this->status.exchange(Status::active, std::memory_order_acq_rel);
-    switch (*old_status)
+    if (this->status.start_work())
     {
-        case Status::queued:
-        case Status::available:
-        {
             LazyT<Ret> results = std::apply([this](auto &&...args)
                                             { return fn.call(std::forward<decltype(args)>(args)...); }, args);
             assign(targets, results);
@@ -95,16 +91,8 @@ void TypedWork<Ret, Args...>::run()
                 c.update();
             }
             this->continuations->clear();
-            this->status.store(Status::finished, std::memory_order_release);
+            this->status.finish_work();
             this->continuations.release();
-            break;
-        }
-        case Status::finished:
-        {
-            this->status.store(Status::finished, std::memory_order_release);
-            break;
-        }
-        case Status::active: {}
     }
 }
 

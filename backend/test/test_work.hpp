@@ -55,46 +55,53 @@ TEST_F(WorkTest, CorrectValue) {
 class StatusTest : public WorkTest {};
 
 TEST_F(StatusTest, QueuedStatus) {
-    ASSERT_EQ(work->status.load(), Status::available);
+    ASSERT_FALSE(work->status.queued());
     WorkManager::enqueue(work);
-    ASSERT_EQ(work->status.load(), Status::queued);
+    ASSERT_TRUE(work->status.queued());
     work->run();
-    ASSERT_EQ(work->status.load(), Status::finished);
+    ASSERT_TRUE(work->status.done());
     WorkManager::work_queue->clear();
+    work->status.dequeue();
+    ASSERT_FALSE(work->status.queued());
     WorkManager::enqueue(work);
     ASSERT_EQ(WorkManager::work_queue->size(), 0);
-    ASSERT_EQ(work->status.load(), Status::finished);
+    ASSERT_FALSE(work->status.queued());
+    ASSERT_TRUE(work->status.done());
 }
 
 LazyT<TupleT<>> running_status_checker(
-    std::shared_ptr<std::tuple<std::shared_ptr<Work> *, Status *>> env) {
+    std::shared_ptr<
+        std::tuple<std::shared_ptr<Work> *, Status::ExecutionStatus *>>
+        env) {
     auto [work, running_status] = *env;
-    *running_status = (*work)->status.load();
+    *running_status = (*work)->status.execution_status();
     return std::make_tuple();
 };
 
 TEST_F(StatusTest, RunningStatus) {
     WorkT work;
-    Status running_status{Status::available};
+    Status::ExecutionStatus running_status;
 
-    TypedClosure<std::tuple<std::shared_ptr<Work> *, Status *>, LazyT<TupleT<>>>
+    TypedClosure<std::tuple<std::shared_ptr<Work> *, Status::ExecutionStatus *>,
+                 LazyT<TupleT<>>>
         running_status_checker_fn(running_status_checker,
                                   std::make_tuple(&work, &running_status));
 
     LazyT<TupleT<>> v;
     std::tie(work, v) = Work::fn_call(running_status_checker_fn);
 
-    ASSERT_EQ(work->status.load(), Status::available);
+    ASSERT_EQ(work->status.execution_status(), Status::available);
     work->run();
     ASSERT_EQ(running_status, Status::active);
-    ASSERT_EQ(work->status.load(), Status::finished);
+    ASSERT_EQ(work->status.execution_status(), Status::finished);
 }
 
 TEST_F(StatusTest, RunningFromQueueStatus) {
     WorkT work;
-    Status running_status{Status::available};
+    Status::ExecutionStatus running_status;
 
-    TypedClosure<std::tuple<std::shared_ptr<Work> *, Status *>, LazyT<TupleT<>>>
+    TypedClosure<std::tuple<std::shared_ptr<Work> *, Status::ExecutionStatus *>,
+                 LazyT<TupleT<>>>
         running_status_checker_fn(running_status_checker,
                                   std::make_tuple(&work, &running_status));
 
@@ -102,10 +109,10 @@ TEST_F(StatusTest, RunningFromQueueStatus) {
     std::tie(work, v) = Work::fn_call(running_status_checker_fn);
 
     WorkManager::enqueue(work);
-    ASSERT_EQ(work->status.load(), Status::queued);
+    ASSERT_TRUE(work->status.queued());
     work->run();
     ASSERT_EQ(running_status, Status::active);
-    ASSERT_EQ(work->status.load(), Status::finished);
+    ASSERT_TRUE(work->status.done());
 }
 
 LazyT<TupleT<Int, Int>> pair(LazyT<Int> x, LazyT<Int> y,

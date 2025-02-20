@@ -94,25 +94,48 @@ template <std::size_t... Widths> class AtomicSharedEnum {
     }
 };
 
-struct Status {
-    enum Value {
-        available,
-        queued,
-        // required,
-        active,
-        finished
-    };
-    // cppcheck-suppress noExplicitConstructor
-    Status(Value status) : value(status){};
-    bool done() const { return *this == finished; }
-    friend bool operator==(const Status &lhs, const Value &rhs) {
-        return lhs.value == rhs;
-    }
-    friend bool operator==(const Value &lhs, const Status &rhs) {
-        return lhs == rhs.value;
-    }
-    Value operator*() const { return value; }
+class Status {
+    static inline constexpr std::size_t QUEUED_IDX = 0;
+    static inline constexpr std::size_t QUEUED_WIDTH = 1;
+    static inline constexpr std::size_t EXECUTION_IDX = 1;
+    static inline constexpr std::size_t EXECUTION_WIDTH = 2;
+    AtomicSharedEnum<QUEUED_WIDTH, EXECUTION_WIDTH> value;
 
-  private:
-    Value value;
+  public:
+    enum ExecutionStatus { available = 0, active, finished, MAX };
+    static_assert(ExecutionStatus::MAX <= (1 << EXECUTION_WIDTH));
+    Status() : value(){};
+    ExecutionStatus execution_status() const {
+        return static_cast<ExecutionStatus>(value.load<EXECUTION_IDX>());
+    }
+    bool done() const {
+        return value.load<EXECUTION_IDX>() == ExecutionStatus::finished;
+    }
+    bool start_work() {
+        return value.compare_exchange<EXECUTION_IDX>(ExecutionStatus::available,
+                                                     ExecutionStatus::active,
+                                                     std::memory_order_acquire);
+    }
+    bool cancel_work() {
+        return value.compare_exchange<EXECUTION_IDX>(ExecutionStatus::active,
+                                                     ExecutionStatus::available,
+                                                     std::memory_order_release);
+    }
+    void finish_work() {
+        value.store<EXECUTION_IDX>(ExecutionStatus::finished,
+                                   std::memory_order_release);
+    }
+    bool queued() const { return value.load<QUEUED_IDX>(); }
+    bool enqueue() {
+        if (execution_status() != ExecutionStatus::available) {
+            return false;
+        }
+        return value.compare_exchange<QUEUED_IDX>(false, true,
+                                                  std::memory_order_acq_rel);
+    }
+    bool dequeue() {
+        return value.compare_exchange<QUEUED_IDX>(true, false,
+                                                  std::memory_order_acq_rel) &&
+               execution_status() == ExecutionStatus::available;
+    }
 };
