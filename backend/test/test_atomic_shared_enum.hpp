@@ -5,6 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+
+TEST(PrefixSumTest, PrefixSum) {
+    ASSERT_EQ((prefix_sum_v<1, 3, 2, 2>),
+              (std::array<std::size_t, 5>{0, 1, 4, 6, 8}));
+}
+
 TEST(AtomicSharedEnumTest, BitFlip) {
     AtomicSharedEnum<1, 2, 1> byte_array;
     ASSERT_EQ(byte_array.load<0>(), 0);
@@ -25,51 +32,129 @@ TEST(AtomicSharedEnumTest, BitFlip) {
 }
 
 TEST(AtomicSharedEnumTest, CompareExchange) {
-    AtomicSharedEnum<2, 1> byte_array;
+    AtomicSharedEnum<2, 1, 2, 1> byte_array;
     ASSERT_EQ(byte_array.load<0>(), 0);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
     ASSERT_TRUE(byte_array.compare_exchange<0>(0, 3));
     ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
     ASSERT_FALSE(byte_array.compare_exchange<0>(2, 1));
     ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE(byte_array.compare_exchange<3>(0, 1));
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
     ASSERT_TRUE(byte_array.compare_exchange<1>(0, 1));
     ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 1);
-    ASSERT_FALSE(byte_array.compare_exchange<1>(0, 1));
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_FALSE(byte_array.compare_exchange<3>(0, 1));
     ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 1);
-    ASSERT_TRUE(byte_array.compare_exchange<0>(3, 2));
-    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_FALSE(byte_array.compare_exchange<0>(2, 1));
+    ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 1);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
     ASSERT_TRUE(byte_array.compare_exchange<1>(1, 0));
-    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_TRUE(byte_array.compare_exchange<0>(3, 1));
+    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_TRUE(byte_array.compare_exchange<3>(1, 0));
+    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE(byte_array.compare_exchange<2>(0, 3));
+    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 3);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE(byte_array.compare_exchange<2>(3, 2));
+    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 2);
+    ASSERT_EQ(byte_array.load<3>(), 0);
 }
 
 TEST(AtomicSharedEnumTest, Exchange) {
-    AtomicSharedEnum<2, 1> byte_array;
+    AtomicSharedEnum<2, 1, 2, 1> byte_array;
     ASSERT_EQ(byte_array.load<0>(), 0);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
     ASSERT_EQ(byte_array.exchange<0>(3), 0);
     ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 0);
-    ASSERT_EQ(byte_array.exchange<0>(1), 3);
-    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_EQ(byte_array.exchange<2>(1), 0);
+    ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_EQ(byte_array.exchange<3>(1), 0);
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_EQ(byte_array.exchange<2>(2), 1);
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 2);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_EQ(byte_array.exchange<3>(1), 1);
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 2);
+    ASSERT_EQ(byte_array.load<3>(), 1);
     ASSERT_EQ(byte_array.exchange<1>(1), 0);
-    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 1);
-    ASSERT_EQ(byte_array.exchange<1>(1), 1);
-    ASSERT_EQ(byte_array.load<0>(), 1);
+    ASSERT_EQ(byte_array.load<2>(), 2);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_EQ(byte_array.exchange<2>(0), 2);
+    ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 1);
-    ASSERT_EQ(byte_array.exchange<0>(2), 1);
-    ASSERT_EQ(byte_array.load<0>(), 2);
-    ASSERT_EQ(byte_array.load<1>(), 1);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
     ASSERT_EQ(byte_array.exchange<1>(0), 1);
-    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<0>(), 3);
     ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_EQ(byte_array.exchange<3>(0), 1);
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_EQ(byte_array.exchange<2>(3), 0);
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 3);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_EQ(byte_array.exchange<2>(2), 3);
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 2);
+    ASSERT_EQ(byte_array.load<3>(), 0);
 }
 
 TEST(AtomicSharedEnumTest, Store) {
