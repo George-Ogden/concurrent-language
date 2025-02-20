@@ -101,18 +101,24 @@ std::monostate WorkManager::main(std::atomic<WorkT> *ref)
 std::pair<WorkT,bool> WorkManager::get_work()
 {
     auto id = ThreadManager::get_id();
-    Locked<std::deque<WorkT>> &stack = WorkManager::private_work_stacks[id];
-    stack.acquire();
-    while (!stack->empty())
-    {
-        WorkT work = stack->back();
-        stack->pop_back();
-        if (work != nullptr){
+    for (std::size_t offset = 0; offset < ThreadManager::available_concurrency() << 1; offset ++){
+        std::size_t gray_code = (offset>>1)^offset;
+        ThreadManager::ThreadId idx = offset ^ gray_code;
+        if (idx < ThreadManager::available_concurrency()){
+            Locked<std::deque<WorkT>> &stack = WorkManager::private_work_stacks[id];
+            stack.acquire();
+            while (!stack->empty())
+            {
+                WorkT work = stack->back();
+                stack->pop_back();
+                if (work != nullptr){
+                    stack.release();
+                    return std::make_pair(work, true);
+                }
+            }
             stack.release();
-            return std::make_pair(work, true);
         }
     }
-    stack.release();
 
     Locked<std::deque<WeakWorkT>> &queue = WorkManager::work_queue;
     queue.acquire();
@@ -204,6 +210,7 @@ void WorkManager::await_restricted(Vs &...vs)
     for (WorkT& work: required_work){
         try_priority_enqueue(work);
     }
+    required_work.clear();
     while (true)
     {
         auto [work, high_priority] = get_work();
