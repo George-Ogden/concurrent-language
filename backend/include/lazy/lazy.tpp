@@ -20,7 +20,6 @@ template <typename T>
 void Lazy<T>::save_work(std::vector<std::shared_ptr<Work>>& works){
     auto work = get_work();
     if (work.has_value()){
-        assert (work.value() != nullptr);
         works.push_back(work.value());
     }
 }

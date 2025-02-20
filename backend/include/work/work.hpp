@@ -32,6 +32,7 @@ class Work {
 };
 
 using WorkT = std::shared_ptr<Work>;
+using WeakWorkT = std::weak_ptr<Work>;
 
 template <typename Ret, typename... Args> class TypedWork : public Work {
     friend class Work;

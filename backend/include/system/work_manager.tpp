@@ -6,7 +6,6 @@
 #include "lazy/lazy.tpp"
 #include "lazy/types.hpp"
 #include "lazy/fns.hpp"
-#include "time/sleep.hpp"
 #include "work/work.tpp"
 
 #include <atomic>
@@ -14,27 +13,30 @@
 #include <utility>
 #include <vector>
 #include <chrono>
+#include <deque>
 
 using namespace std::chrono_literals;
 
-std::shared_ptr<Work> WorkManager::finish_work = std::make_shared<FinishWork>();
+WorkT WorkManager::finish_work = std::make_shared<FinishWork>();
 
 template <typename Ret, typename... Args>
 Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args)
 {
     auto [work, result] = Work::fn_call(fn, args...);
-    std::atomic<std::shared_ptr<Work>> ref{work};
+    std::atomic<WorkT> ref{work};
     ThreadManager::RunConfig config{ThreadManager::available_concurrency(),
                                     false};
     WorkManager::work_queue->clear();
     WorkManager::counters = std::vector<std::atomic<unsigned>>(
+        ThreadManager::available_concurrency());
+    WorkManager::private_work_stacks = decltype(private_work_stacks)(
         ThreadManager::available_concurrency());
     ThreadManager::run_multithreaded(main, &ref, config);
     WorkManager::work_queue->clear();
     return result;
 }
 
-void WorkManager::enqueue(std::shared_ptr<Work> work)
+void WorkManager::enqueue(WorkT work)
 {
     if (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.enqueue()){
         WorkManager::work_queue.acquire();
@@ -43,11 +45,25 @@ void WorkManager::enqueue(std::shared_ptr<Work> work)
     }
 }
 
-std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
+void WorkManager::try_priority_enqueue(WorkT work)
+{
+    if (work->status.required()){
+        priority_enqueue(work);
+    }
+}
+
+void WorkManager::priority_enqueue(WorkT work)
+{
+    auto id = ThreadManager::get_id();
+    WorkManager::private_work_stacks[id].acquire();
+    WorkManager::private_work_stacks[id]->push_back(work);
+    WorkManager::private_work_stacks[id].release();
+}
+
+std::monostate WorkManager::main(std::atomic<WorkT> *ref)
 {
     {
-        std::shared_ptr<Work> work =
-            ref->exchange(nullptr, std::memory_order_relaxed);
+        WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
         if (work != nullptr)
         {
             work->run();
@@ -58,10 +74,9 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
         {
             while (1)
             {
-                work = get_work();
+                std::tie(work, std::ignore) = get_work();
                 if (work == nullptr)
                 {
-                    sleep(1us);
                     continue;
                 }
                 if (dynamic_cast<FinishWork *>(work.get()) != nullptr)
@@ -83,21 +98,34 @@ std::monostate WorkManager::main(std::atomic<std::shared_ptr<Work>> *ref)
     return std::monostate{};
 }
 
-std::shared_ptr<Work> WorkManager::get_work()
+std::pair<WorkT,bool> WorkManager::get_work()
 {
-
-    WorkManager::work_queue.acquire();
-    while (!WorkManager::work_queue->empty())
+    auto id = ThreadManager::get_id();
+    Locked<std::deque<WorkT>> &stack = WorkManager::private_work_stacks[id];
+    stack.acquire();
+    while (!stack->empty())
     {
-        std::shared_ptr<Work> work = WorkManager::work_queue->front().lock();
-        WorkManager::work_queue->pop_front();
-        if (work != nullptr && (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.dequeue())){
-            WorkManager::work_queue.release();
-            return work;
+        WorkT work = stack->back();
+        stack->pop_back();
+        if (work != nullptr){
+            stack.release();
+            return std::make_pair(work, true);
         }
     }
-    WorkManager::work_queue.release();
-    return nullptr;
+    stack.release();
+
+    Locked<std::deque<WeakWorkT>> &queue = WorkManager::work_queue;
+    queue.acquire();
+    while (!queue->empty()) {
+        WorkT work = queue->front().lock();
+        queue->pop_front();
+        if (work != nullptr && (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.dequeue())){
+            queue.release();
+            return std::make_pair(work, false);
+        }
+    }
+    queue.release();
+    return std::make_pair(nullptr, false);
 }
 template <typename T>
 constexpr auto filter_awaitable(T &v)
@@ -174,20 +202,17 @@ void WorkManager::await_restricted(Vs &...vs)
     required_work.reserve(sizeof...(vs));
     (vs->save_work(required_work), ...);
     for (WorkT& work: required_work){
-        if (break_on_work(work, c)){
-            while (!all_done(vs...)){}
-            return;
-        }
+        try_priority_enqueue(work);
     }
     while (true)
     {
-        std::shared_ptr<Work> work = get_work();
+        auto [work, high_priority] = get_work();
         if (dynamic_cast<FinishWork *>(work.get()) != nullptr)
         {
             enqueue(work);
             throw finished{};
         }
-        if (break_on_work(work, c)){
+        if (break_on_work(std::make_pair(work, high_priority), c)){
             while (!all_done(vs...)){}
             return;
         }
@@ -206,37 +231,34 @@ void WorkManager::exit_early(Continuation &c){
     }
 }
 
-bool WorkManager::break_on_work(WorkT &work, Continuation &c){
-    try
-    {
-        if (c.counter.load(std::memory_order_relaxed) > 0)
-        {
+bool WorkManager::break_on_work(std::pair<WorkT,bool> work_pair, Continuation &c){
+    auto &[work, high_priority] = work_pair;
+    try {
+        if (c.counter.load(std::memory_order_relaxed) > 0) {
             throw stack_inversion{};
         }
-        if (work != nullptr)
-        {
+        if (work != nullptr) {
             work->run();
         }
-    }
-    catch (stack_inversion &e)
-    {
+    } catch (stack_inversion &e) {
         c.valid->acquire();
         bool was_valid = **c.valid;
         **c.valid = false;
         c.valid->release();
-        if (work != nullptr && !work->done())
-        {
+        if (work != nullptr && !work->done()) {
             work->status.cancel_work();
-            enqueue(work);
+            if (high_priority){
+                priority_enqueue(work);
+            } else {
+                enqueue(work);
+            }
         }
-        if (!was_valid)
-        {
+        if (!was_valid) {
             delete c.valid;
         }
         c.counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
 
-        if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0)
-        {
+        if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0) {
             return true;
         }
         throw;
