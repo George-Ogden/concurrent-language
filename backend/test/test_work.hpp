@@ -129,7 +129,7 @@ TEST(TupleWorkTest, CorrectValue) {
     ASSERT_EQ(std::get<1>(results)->value(), -4);
 };
 
-class ContinuationTest : public WorkTest {};
+class WorkContinuationTest : public WorkTest {};
 
 TEST_F(WorkTest, IndirectContinuationAdded) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
@@ -151,7 +151,7 @@ TEST_F(WorkTest, IndirectContinuationApplied) {
     ASSERT_EQ(**valid, false);
 }
 
-TEST_F(ContinuationTest, DoneUnfinishedContinuationBehaviour) {
+TEST_F(WorkContinuationTest, DoneUnfinishedContinuationBehaviour) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{true};
@@ -163,7 +163,7 @@ TEST_F(ContinuationTest, DoneUnfinishedContinuationBehaviour) {
     delete remaining;
 }
 
-TEST_F(ContinuationTest, NotDoneUnfinishedContinuationBehaviour) {
+TEST_F(WorkContinuationTest, NotDoneUnfinishedContinuationBehaviour) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{true};
@@ -178,7 +178,7 @@ TEST_F(ContinuationTest, NotDoneUnfinishedContinuationBehaviour) {
     delete remaining;
 }
 
-TEST_F(ContinuationTest, DoneFinishedContinuationBehaviour) {
+TEST_F(WorkContinuationTest, DoneFinishedContinuationBehaviour) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{true};
@@ -189,7 +189,7 @@ TEST_F(ContinuationTest, DoneFinishedContinuationBehaviour) {
     ASSERT_EQ(**valid, false);
 }
 
-TEST_F(ContinuationTest, NotDoneFinishedContinuationBehaviour) {
+TEST_F(WorkContinuationTest, NotDoneFinishedContinuationBehaviour) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{true};
@@ -202,7 +202,7 @@ TEST_F(ContinuationTest, NotDoneFinishedContinuationBehaviour) {
     ASSERT_EQ(**valid, false);
 }
 
-TEST_F(ContinuationTest, DoneInvalidFinishedContinuationBehaviour) {
+TEST_F(WorkContinuationTest, DoneInvalidFinishedContinuationBehaviour) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{false};
@@ -212,7 +212,7 @@ TEST_F(ContinuationTest, DoneInvalidFinishedContinuationBehaviour) {
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
 }
 
-TEST_F(ContinuationTest, NotDoneInvalidFinishedContinuationBehaviour) {
+TEST_F(WorkContinuationTest, NotDoneInvalidFinishedContinuationBehaviour) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{false};
