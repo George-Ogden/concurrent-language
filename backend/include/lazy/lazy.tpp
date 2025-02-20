@@ -118,11 +118,11 @@ template <typename T>
 std::optional<WorkT> LazyPlaceholder<T>::get_work() {
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
-        WorkT curent_work = work;
-        if (work == nullptr){
+        WorkT current_work = work;
+        if (current_work == nullptr){
             return std::nullopt;
         } else {
-            return work;
+            return current_work;
         }
     } else {
         return current_reference->get_work();

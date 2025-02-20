@@ -168,14 +168,15 @@ void WorkManager::await_restricted(Vs &...vs)
     (vs->add_continuation(c), ...);
     if (all_done(vs...))
     {
-        delete valid;
-        if (counter.fetch_sub(1, std::memory_order_relaxed) == 1)
-        {
+        return exit_early(c);
+    }
+    std::vector<WorkT> required_work;
+    required_work.reserve(sizeof...(vs));
+    (vs->save_work(required_work), ...);
+    for (WorkT& work: required_work){
+        if (break_on_work(work, c)){
+            while (!all_done(vs...)){}
             return;
-        }
-        else
-        {
-            throw stack_inversion{};
         }
     }
     while (true)
@@ -186,45 +187,62 @@ void WorkManager::await_restricted(Vs &...vs)
             enqueue(work);
             throw finished{};
         }
-        try
-        {
-            if (counter.load(std::memory_order_relaxed) > 0)
-            {
-                throw stack_inversion{};
-            }
-            if (work != nullptr)
-            {
-                work->run();
-            }
-        }
-        catch (stack_inversion &e)
-        {
-            valid->acquire();
-            bool was_valid = **valid;
-            **valid = false;
-            valid->release();
-            if (work != nullptr && !work->done())
-            {
-                work->status.cancel_work();
-                enqueue(work);
-            }
-            if (!was_valid)
-            {
-                delete valid;
-            }
-            counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
-
-            if (!was_valid && counter.load(std::memory_order_relaxed) == 0)
-            {
-                while (!all_done(vs...))
-                {
-                }
-                return;
-            }
-            throw;
+        if (break_on_work(work, c)){
+            while (!all_done(vs...)){}
+            return;
         }
     }
 };
+
+void WorkManager::exit_early(Continuation &c){
+    delete c.valid;
+    if (c.counter.fetch_sub(1, std::memory_order_relaxed) == 1)
+    {
+        return;
+    }
+    else
+    {
+        throw stack_inversion{};
+    }
+}
+
+bool WorkManager::break_on_work(WorkT &work, Continuation &c){
+    try
+    {
+        if (c.counter.load(std::memory_order_relaxed) > 0)
+        {
+            throw stack_inversion{};
+        }
+        if (work != nullptr)
+        {
+            work->run();
+        }
+    }
+    catch (stack_inversion &e)
+    {
+        c.valid->acquire();
+        bool was_valid = **c.valid;
+        **c.valid = false;
+        c.valid->release();
+        if (work != nullptr && !work->done())
+        {
+            work->status.cancel_work();
+            enqueue(work);
+        }
+        if (!was_valid)
+        {
+            delete c.valid;
+        }
+        c.counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
+
+        if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0)
+        {
+            return true;
+        }
+        throw;
+    }
+    return false;
+}
 
 template <typename... Vs>
 bool WorkManager::all_done(Vs &&...vs)

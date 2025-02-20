@@ -24,6 +24,8 @@ struct WorkManager {
     template <typename... Vs> static void await_restricted(Vs &...vs);
     static std::monostate main(std::atomic<std::shared_ptr<Work>> *ref);
     static std::shared_ptr<Work> get_work();
+    static bool break_on_work(WorkT &work, Continuation &c);
+    static void exit_early(Continuation &c);
     template <typename... Vs> static bool all_done(Vs &&...vs);
 };
 
