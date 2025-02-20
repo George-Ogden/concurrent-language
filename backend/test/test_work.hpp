@@ -11,6 +11,8 @@
 #include "types/compound.hpp"
 #include "work/work.tpp"
 
+#include "test/inc.hpp"
+
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -18,12 +20,6 @@
 #include <memory>
 #include <tuple>
 #include <vector>
-
-LazyT<Int> inc(LazyT<Int> x, std::shared_ptr<void> env = nullptr) {
-    return make_lazy<Int>(x->value() + 1);
-}
-
-FnT<Int, Int> inc_fn{inc};
 
 class WorkTest : public ::testing::Test {
   protected:

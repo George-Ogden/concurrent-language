@@ -5,6 +5,7 @@
 #include "fn/continuation.tpp"
 #include "work/work.tpp"
 
+#include <optional>
 #include <memory>
 
 template <typename T>
@@ -13,6 +14,14 @@ Lazy<T>::~Lazy() = default;
 template <typename T>
 std::shared_ptr<Lazy<T>> Lazy<T>::as_ref() {
     return nullptr;
+}
+
+template <typename T>
+void Lazy<T>::save_work(std::vector<std::shared_ptr<Work>>& works){
+    auto work = get_work();
+    if (work.has_value()){
+        works.push_back(work.value());
+    }
 }
 
 template <typename T>
@@ -38,6 +47,11 @@ void LazyWork<T>::add_continuation(Continuation c) {
 }
 
 template <typename T>
+std::optional<WorkT> LazyWork<T>::get_work() {
+    return work;
+}
+
+template <typename T>
 template <typename ...Args>
 LazyConstant<T>::LazyConstant(Args&&...args):_value(std::forward<Args>(args)...){}
 
@@ -59,6 +73,11 @@ T& LazyConstant<T>::lvalue() {
 template <typename T>
 void LazyConstant<T>::add_continuation(Continuation c) {
     c.update();
+}
+
+template <typename T>
+std::optional<WorkT> LazyConstant<T>::get_work() {
+    return std::nullopt;
 }
 
 template <typename T>
@@ -118,5 +137,20 @@ std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
     } else {
         reference.compare_exchange_weak(current_reference, lazy, std::memory_order_relaxed);
         return lazy;
+    }
+}
+
+template <typename T>
+std::optional<WorkT> LazyPlaceholder<T>::get_work() {
+    auto current_reference = this->as_ref();
+    if (current_reference == nullptr) {
+        WorkT curent_work = work;
+        if (work == nullptr){
+            return std::nullopt;
+        } else {
+            return work;
+        }
+    } else {
+        return current_reference->get_work();
     }
 }
