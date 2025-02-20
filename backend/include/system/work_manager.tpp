@@ -207,6 +207,7 @@ void WorkManager::await_restricted(Vs &...vs)
             valid->release();
             if (work != nullptr && !work->done())
             {
+                work->status.store(Status::available, std::memory_order_release);
                 enqueue(work);
             }
             if (!was_valid)

@@ -80,10 +80,10 @@ void TypedWork<Ret, Args...>::run()
     {
         return;
     }
-    Status old_status = this->status.exchange(Status::active, std::memory_order_acquire);
+    Status old_status = this->status.exchange(Status::active, std::memory_order_acq_rel);
     switch (*old_status)
     {
-        case Status::queued :
+        case Status::queued:
         case Status::available:
         {
             LazyT<Ret> results = std::apply([this](auto &&...args)
