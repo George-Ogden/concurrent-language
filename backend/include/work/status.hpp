@@ -40,7 +40,7 @@ class Status {
     }
     bool queued() const { return value.load<QUEUED_IDX>(); }
     bool enqueue() {
-        if (execution_status() != ExecutionStatus::available) {
+        if (required() || execution_status() != ExecutionStatus::available) {
             return false;
         }
         return value.compare_exchange<QUEUED_IDX>(false, true,
@@ -49,7 +49,7 @@ class Status {
     bool dequeue() {
         return value.compare_exchange<QUEUED_IDX>(true, false,
                                                   std::memory_order_acq_rel) &&
-               execution_status() == ExecutionStatus::available;
+               !required() && execution_status() == ExecutionStatus::available;
     }
     bool required() const { return value.load<REQUIRED_IDX>(); }
     bool require() {

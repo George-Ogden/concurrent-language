@@ -95,6 +95,33 @@ TEST(ExecutionStatusTransition, ActiveQueueingTest) {
     ASSERT_EQ(status.execution_status(), Status::active);
 }
 
+TEST(ExecutionStatusTransition, RequiredEnqueueTest) {
+    Status status;
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_FALSE(status.required());
+    ASSERT_FALSE(status.queued());
+    status.require();
+    ASSERT_FALSE(status.queued());
+    ASSERT_FALSE(status.enqueue());
+    ASSERT_FALSE(status.queued());
+    ASSERT_TRUE(status.required());
+    ASSERT_EQ(status.execution_status(), Status::available);
+}
+
+TEST(ExecutionStatusTransition, RequiredDequeTest) {
+    Status status;
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_FALSE(status.required());
+    ASSERT_FALSE(status.queued());
+    ASSERT_TRUE(status.enqueue());
+    ASSERT_TRUE(status.queued());
+    status.require();
+    ASSERT_FALSE(status.dequeue());
+    ASSERT_FALSE(status.queued());
+    ASSERT_TRUE(status.required());
+    ASSERT_EQ(status.execution_status(), Status::available);
+}
+
 TEST(ExecutionStatusTransition, DoneEnqueueTest) {
     Status status;
     ASSERT_EQ(status.execution_status(), Status::available);
