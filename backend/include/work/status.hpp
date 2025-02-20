@@ -73,6 +73,20 @@ template <std::size_t... Widths> class AtomicSharedEnum {
             }
         };
     }
+    template <std::size_t section>
+    requires(section < sizeof...(Widths)) uint8_t
+        exchange(uint8_t value,
+                 std::memory_order ordering = std::memory_order_relaxed) {
+        uint8_t mask = ((1ULL << widths[section]) - 1)
+                       << prefix_widths[section];
+        uint8_t current_value, desired;
+        do {
+            current_value = bits.load(std::memory_order_relaxed);
+            desired =
+                ((~mask) & current_value) | (value << prefix_widths[section]);
+        } while (!bits.compare_exchange_weak(current_value, desired, ordering));
+        return (current_value & mask) >> prefix_widths[section];
+    }
 };
 
 struct Status {
