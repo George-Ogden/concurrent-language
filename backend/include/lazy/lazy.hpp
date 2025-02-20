@@ -35,20 +35,6 @@ template <typename T> class LazyConstant : public Lazy<T> {
     std::optional<std::shared_ptr<Work>> get_work() override;
 };
 
-template <typename T> class LazyWork : public Lazy<T> {
-    friend class Work;
-    T _value;
-    std::shared_ptr<Work> work;
-
-  public:
-    LazyWork();
-    bool done() override;
-    T value() override;
-    T &lvalue() override;
-    std::optional<std::shared_ptr<Work>> get_work() override;
-    void add_continuation(Continuation c) override;
-};
-
 template <typename T> class LazyPlaceholder : public Lazy<T> {
     std::atomic<std::shared_ptr<Lazy<T>>> reference = nullptr;
     std::shared_ptr<Work> work;

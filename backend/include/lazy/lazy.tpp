@@ -20,35 +20,9 @@ template <typename T>
 void Lazy<T>::save_work(std::vector<std::shared_ptr<Work>>& works){
     auto work = get_work();
     if (work.has_value()){
+        assert (work.value() != nullptr);
         works.push_back(work.value());
     }
-}
-
-template <typename T>
-LazyWork<T>::LazyWork() = default;
-
-template <typename T>
-bool LazyWork<T>::done() {
-    return work == nullptr || work->done();
-}
-
-template <typename T>
-T LazyWork<T>::value() {
-    return _value;
-}
-
-template <typename T>
-void LazyWork<T>::add_continuation(Continuation c) {
-    if (work == nullptr){
-        c.update();
-    } else {
-        work->add_continuation(c);
-    }
-}
-
-template <typename T>
-std::optional<WorkT> LazyWork<T>::get_work() {
-    return work;
 }
 
 template <typename T>
