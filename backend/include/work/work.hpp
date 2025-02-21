@@ -22,7 +22,7 @@ class Work {
     Status status;
     Work();
     virtual ~Work();
-    virtual void run() = 0;
+    virtual bool run() = 0;
     virtual void await_all() = 0;
     bool done() const;
     template <typename Ret, typename... Args>
@@ -41,12 +41,6 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
     FnT<Ret, Args...> fn;
 
   public:
-    void run() override;
-    void await_all() override;
-};
-
-struct FinishWork : public Work {
-    FinishWork();
-    void run() override;
+    bool run() override;
     void await_all() override;
 };

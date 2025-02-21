@@ -11,26 +11,22 @@
 
 using namespace std::chrono_literals;
 
-WorkRunner::WorkRunner(const unsigned &id):id(id){}
 WorkRunner::WorkRunner(const ThreadManager::ThreadId &id):id(id){}
-
-std::shared_ptr<Work> WorkRunner::finish_work = std::make_shared<FinishWork>();
 
 void WorkRunner::main(std::atomic<WorkT> *ref){
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
     if (work != nullptr) {
+        priority_mode = true;
+        work->status.require();
         work->run();
+        priority_mode = true;
         work->await_all();
-        enqueue(finish_work);
+        done_flag.store(true, std::memory_order_release);
     } else {
-        while (1) {
-            std::tie(work, std::ignore) = get_work();
+        while (!done_flag.load(std::memory_order_acquire)) {
+            std::tie(work, priority_mode) = get_work();
             if (work == nullptr) {
                 continue;
-            }
-            if (dynamic_cast<FinishWork *>(work.get()) != nullptr) {
-                enqueue(work);
-                break;
             }
             try {
                 work->run();
@@ -43,7 +39,7 @@ void WorkRunner::main(std::atomic<WorkT> *ref){
 }
 
 void WorkRunner::enqueue(WorkT work) {
-    if (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.enqueue()){
+    if (work->status.enqueue()){
         WorkRunner::shared_work_queue.acquire();
         WorkRunner::shared_work_queue->push_back(work);
         WorkRunner::shared_work_queue.release();
@@ -63,31 +59,29 @@ void WorkRunner::priority_enqueue(WorkT work) {
 }
 
 std::pair<WorkT,bool> WorkRunner::get_work() {
-    for (std::size_t offset = 0; offset < ThreadManager::available_concurrency() << 1; offset ++){
+    for (std::size_t offset = 0; offset < (ThreadManager::available_concurrency() << 1); offset ++){
         std::size_t gray_code = (offset>>1)^offset;
         ThreadManager::ThreadId idx = offset ^ gray_code;
-        if (idx < ThreadManager::available_concurrency()){
+        if (idx < num_cpus){
             Locked<std::deque<WorkT>> &stack = offset == 0 ? private_work_stack : WorkManager::runners[idx]->private_work_stack;
             stack.acquire();
-            while (!stack->empty())
-            {
+            if (stack->empty()) {
+                stack.release();
+            } else {
                 WorkT work = stack->back();
                 stack->pop_back();
-                if (work != nullptr){
-                    stack.release();
-                    return std::make_pair(work, true);
-                }
+                stack.release();
+                return std::make_pair(work, true);
             }
-            stack.release();
         }
     }
 
-    Locked<std::deque<WeakWorkT>> &queue = WorkRunner::shared_work_queue;
+    Locked<std::deque<WeakWorkT>> &queue = shared_work_queue;
     queue.acquire();
     while (!queue->empty()) {
         WorkT work = queue->front().lock();
         queue->pop_front();
-        if (work != nullptr && (dynamic_cast<FinishWork*>(work.get()) != nullptr || work->status.dequeue())){
+        if (work != nullptr && work->status.dequeue()){
             queue.release();
             return std::make_pair(work, false);
         }
@@ -147,30 +141,28 @@ void WorkRunner::await_restricted(Vs &...vs) {
     Locked<bool> *valid = new Locked<bool>{true};
     Continuation c{remaining, counter, valid};
     (vs->add_continuation(c), ...);
-    if (all_done(vs...))
-    {
+    if (all_done(vs...)) {
         return exit_early(c);
     }
-    std::vector<WorkT> required_work;
-    required_work.reserve(sizeof...(vs));
-    (vs->save_work(required_work), ...);
-    for (WorkT& work: required_work){
-        try_priority_enqueue(work);
-    }
-    required_work.clear();
-    while (true)
+    while (!done_flag.load(std::memory_order_acquire))
     {
-        auto [work, high_priority] = get_work();
-        if (dynamic_cast<FinishWork *>(work.get()) != nullptr)
-        {
-            enqueue(work);
-            throw finished{};
+        if (priority_mode){
+            std::vector<WorkT> required_work;
+            required_work.reserve(sizeof...(vs));
+            (vs->save_work(required_work), ...);
+            for (WorkT& work: required_work){
+                try_priority_enqueue(work);
+            }
         }
-        if (break_on_work(std::make_pair(work, high_priority), c)){
-            while (!all_done(vs...)){}
+        auto [work, work_priority] = get_work();
+        if (break_on_work(std::make_pair(work, work_priority), c)){
+            if (done_flag.load(std::memory_order_acquire)){
+                break;
+            }
             return;
         }
     }
+    throw finished{};
 };
 
 void WorkRunner::exit_early(Continuation &c){
@@ -183,22 +175,27 @@ void WorkRunner::exit_early(Continuation &c){
 }
 
 bool WorkRunner::break_on_work(std::pair<WorkT,bool> work_pair, Continuation &c){
-    auto &[work, high_priority] = work_pair;
+    const bool prev_priority = priority_mode;
+    auto &[work, work_priority] = work_pair;
     try {
         if (c.counter.load(std::memory_order_relaxed) > 0) {
             throw stack_inversion{};
         }
         if (work != nullptr) {
-            work->run();
+            priority_mode = work_priority;
+            if (!work->run() && work_priority){
+                priority_enqueue(work);
+            }
+            priority_mode = prev_priority;
         }
     } catch (stack_inversion &e) {
         c.valid->acquire();
         bool was_valid = **c.valid;
         **c.valid = false;
         c.valid->release();
-        if (work != nullptr && !work->done()) {
+        if (work != nullptr && !work->done()){
             work->status.cancel_work();
-            if (high_priority){
+            if (work_priority){
                 priority_enqueue(work);
             } else {
                 enqueue(work);
@@ -209,6 +206,7 @@ bool WorkRunner::break_on_work(std::pair<WorkT,bool> work_pair, Continuation &c)
         }
         c.counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
 
+        priority_mode = prev_priority;
         if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0) {
             return true;
         }

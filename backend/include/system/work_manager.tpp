@@ -18,21 +18,22 @@ template <typename Ret, typename... Args>
 Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args) {
     auto [work, result] = Work::fn_call(fn, args...);
     std::atomic<WorkT> ref{work};
-    ThreadManager::RunConfig config{ThreadManager::available_concurrency(),
-                                    false};
+    WorkRunner::num_cpus = ThreadManager::available_concurrency();
+    ThreadManager::RunConfig config{WorkRunner::num_cpus, false};
     WorkRunner::shared_work_queue->clear();
 
-    runners = ranges::iota_view(static_cast<unsigned>(0), ThreadManager::available_concurrency())
+    runners = ranges::iota_view(static_cast<unsigned>(0), WorkRunner::num_cpus)
           | ranges::views::transform([](auto thread_id) { return std::make_unique<WorkRunner>(thread_id); })
           | ranges::to<std::vector>();
 
 
+    WorkRunner::done_flag.store(false, std::memory_order_release);
     ThreadManager::run_multithreaded(main, &ref, config);
     return result;
 }
 
 void WorkManager::enqueue(WorkT work) {
-    WorkRunner::enqueue(work);
+    runners[ThreadManager::get_id()]->enqueue(work);
 }
 
 std::monostate WorkManager::main(std::atomic<WorkT> *ref) {

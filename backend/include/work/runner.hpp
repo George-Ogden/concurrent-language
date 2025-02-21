@@ -9,23 +9,26 @@
 #include <deque>
 #include <exception>
 
+class StackSeparation;
 struct WorkRunner {
     friend class WorkManager;
+    friend class StackSeparation;
     explicit WorkRunner(const ThreadManager::ThreadId &id);
-    explicit WorkRunner(const unsigned &id);
 
+    static inline unsigned num_cpus;
     ThreadManager::ThreadId id;
     static inline Locked<std::deque<WeakWorkT>> shared_work_queue;
+    static inline std::atomic<bool> done_flag;
 
   protected:
-    static WorkT finish_work;
     std::atomic<unsigned> counter;
     Locked<std::deque<WorkT>> private_work_stack;
+    bool priority_mode = false;
 
     void main(std::atomic<WorkT> *ref);
 
     std::pair<WorkT, bool> get_work();
-    static void enqueue(WorkT work);
+    void enqueue(WorkT work);
     void priority_enqueue(WorkT work);
     void try_priority_enqueue(WorkT work);
     bool break_on_work(std::pair<WorkT, bool> work, Continuation &c);

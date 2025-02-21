@@ -17,88 +17,63 @@
 Work::Work() = default;
 Work::~Work() = default;
 
-bool Work::done() const
-{
+bool Work::done() const {
     return status.done();
 }
 
-FinishWork::FinishWork()
-{
-    status.finish_work();
-};
-
-void FinishWork::run()
-{
-    throw finished{};
-}
-
-void FinishWork::await_all() {}
-
 template <typename Ret, typename... Args>
-std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Args... args)
-{
+std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Args... args) {
     std::shared_ptr<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>> work = std::make_shared<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>>();
     auto placeholders = make_lazy_placeholders<Ret>(work);
-    work->targets = lazy_map([](const auto &t)
-                             { return std::weak_ptr(t); }, placeholders);
+    work->targets = lazy_map([](const auto &t) { return std::weak_ptr(t); }, placeholders);
     work->args = std::make_tuple(args...);
     work->fn = f;
     return std::make_pair(work, placeholders);
 }
 
-void Work::add_continuation(Continuation c)
-{
+void Work::add_continuation(Continuation c) {
     continuations.acquire();
-    if (done())
-    {
+    if (done()) {
         continuations.release();
         c.update();
-    }
-    else
-    {
+    } else {
         continuations->push_back(c);
         continuations.release();
     }
 }
 
 template <typename T, typename U>
-void Work::assign(T &targets, U &results)
-{
-    lazy_dual_map([](auto target, auto result)
-                  {
+void Work::assign(T &targets, U &results) {
+    lazy_dual_map([](auto target, auto result) {
         auto placeholder = target.lock();
         if (placeholder != nullptr){
             placeholder->assign(result);
-} },
-                  targets, results);
+        } }, targets, results);
 }
 
 template <typename Ret, typename... Args>
-void TypedWork<Ret, Args...>::run()
-{
-    if (this->status.done())
-    {
-        return;
+bool TypedWork<Ret, Args...>::run() {
+    if (this->status.done()) {
+            return true;
     }
-    if (this->status.start_work())
-    {
-            LazyT<Ret> results = std::apply([this](auto &&...args)
-                                            { return fn.call(std::forward<decltype(args)>(args)...); }, args);
-            assign(targets, results);
-            this->continuations.acquire();
-            for (Continuation &c : *this->continuations)
-            {
-                c.update();
-            }
-            this->continuations->clear();
-            this->status.finish_work();
-            this->continuations.release();
+    if (this->status.start_work()) {
+        LazyT<Ret> results = std::apply([this](auto &&...args) { return fn.call(std::forward<decltype(args)>(args)...); }, args);
+        assign(targets, results);
+        this->continuations.acquire();
+        for (Continuation &c : *this->continuations) {
+            c.update();
+        }
+        this->continuations->clear();
+        this->status.finish_work();
+        this->continuations.release();
+        return true;
+    } else {
+        return false;
     }
 }
 
 template <typename Ret, typename... Args>
-void TypedWork<Ret, Args...>::await_all()
-{
+void TypedWork<Ret, Args...>::await_all() {
     auto vs = lazy_map([](auto target) -> LazyT<remove_lazy_t<remove_shared_ptr_t<decltype(target)>>>
                        { return target.lock(); }, targets);
     WorkManager::await_all(vs);

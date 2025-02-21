@@ -30,6 +30,7 @@ class WorkTest : public ::testing::Test {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
         WorkManager::runners.clear();
+        WorkManager::runners.emplace_back(std::make_unique<WorkRunner>(0));
         std::tie(work, result) = Work::fn_call(inc_fn, make_lazy<Int>(4));
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
