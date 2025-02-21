@@ -59,7 +59,7 @@ void WorkRunner::priority_enqueue(WorkT work) {
 }
 
 std::pair<WorkT,bool> WorkRunner::get_work() {
-    for (std::size_t offset = 0; offset < (ThreadManager::available_concurrency() << 1); offset ++){
+    for (std::size_t offset = 0; offset < (num_cpus << 1); offset ++){
         std::size_t gray_code = (offset>>1)^offset;
         ThreadManager::ThreadId idx = offset ^ gray_code;
         if (idx < num_cpus){
@@ -144,16 +144,11 @@ void WorkRunner::await_restricted(Vs &...vs) {
     if (all_done(vs...)) {
         return exit_early(c);
     }
+    if (priority_mode){
+        (vs->prioritize(), ...);
+    }
     while (!done_flag.load(std::memory_order_acquire))
     {
-        if (priority_mode){
-            std::vector<WorkT> required_work;
-            required_work.reserve(sizeof...(vs));
-            (vs->save_work(required_work), ...);
-            for (WorkT& work: required_work){
-                try_priority_enqueue(work);
-            }
-        }
         auto [work, work_priority] = get_work();
         if (break_on_work(std::make_pair(work, work_priority), c)){
             if (done_flag.load(std::memory_order_acquire)){
