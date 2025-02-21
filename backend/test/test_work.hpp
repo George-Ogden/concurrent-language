@@ -9,6 +9,7 @@
 #include "system/thread_manager.tpp"
 #include "system/work_manager.tpp"
 #include "types/compound.hpp"
+#include "work/runner.tpp"
 #include "work/work.tpp"
 
 #include "test/inc.hpp"
@@ -28,8 +29,7 @@ class WorkTest : public ::testing::Test {
     void SetUp() override {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
-        WorkManager::counters = std::vector<std::atomic<unsigned>>(1);
-        WorkManager::work_queue->clear();
+        WorkManager::runners.clear();
         std::tie(work, result) = Work::fn_call(inc_fn, make_lazy<Int>(4));
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
@@ -56,11 +56,11 @@ TEST_F(StatusTest, QueuedStatus) {
     ASSERT_TRUE(work->status.queued());
     work->run();
     ASSERT_TRUE(work->status.done());
-    WorkManager::work_queue->clear();
+    WorkRunner::shared_work_queue->clear();
     work->status.dequeue();
     ASSERT_FALSE(work->status.queued());
     WorkManager::enqueue(work);
-    ASSERT_EQ(WorkManager::work_queue->size(), 0);
+    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
     ASSERT_FALSE(work->status.queued());
     ASSERT_TRUE(work->status.done());
 }
