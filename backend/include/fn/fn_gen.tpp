@@ -19,7 +19,7 @@ template <typename Ret, typename ...Args>
 TypedFnG<Ret,Args...>::TypedFnG():FnG(){}
 
 template <typename Ret, typename ...Args>
-typename TypedFnG<Ret,Args...>::U TypedFnG<Ret,Args...>::init(LazyT<Args>...args) const {
+typename TypedFnG<Ret,Args...>::U TypedFnG<Ret,Args...>::init(LazyT<std::decay_t<Args>>...args) const {
     return std::bit_cast<T>(_fn)(std::make_tuple(args...), _env);
 }
 
