@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fn/fn.tpp"
+#include "fn/fn_gen.tpp"
 #include "system/thread_manager.tpp"
 #include "system/work_manager.hpp"
 #include "work/work.tpp"
@@ -15,7 +15,7 @@
 #include <utility>
 
 template <typename Ret, typename... Args>
-Ret WorkManager::run(TypedFn<Ret, Args...> fn, Args...args) {
+LazyT<Ret> WorkManager::run(TypedFnG<Ret, Args...> fn, LazyT<Args>...args) {
     auto [work, result] = Work::fn_call(fn, args...);
     std::atomic<WorkT> ref{work};
     WorkRunner::num_cpus = ThreadManager::available_concurrency();

@@ -1,6 +1,6 @@
 CXX := g++
-CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors -pg -g
-OPTIMIZATION := -O2
+CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors
+OPTIMIZATION := -Ofast
 LIBS := -lpthread
 INCLUDE := -Iinclude
 
