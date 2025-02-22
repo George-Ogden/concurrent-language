@@ -2,6 +2,7 @@
 
 #include "fn/fn_inst.hpp"
 #include "lazy/types.hpp"
+#include "types/builtin.hpp"
 #include "types/compound.hpp"
 
 #include <memory>

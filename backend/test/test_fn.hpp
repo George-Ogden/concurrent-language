@@ -10,8 +10,8 @@
 #include <bit>
 #include <memory>
 
-class PlusFn : public TypedFnI<Int, Int, Int> {
-    using TypedFnI<Int, Int, Int>::TypedFnI;
+class PlusFn : public TypedClosureI<Empty, Int, Int, Int> {
+    using TypedClosureI<Empty, Int, Int, Int>::TypedClosureI;
     LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b) override {
         return make_lazy<Int>(a->value() + b->value());
     }

@@ -31,3 +31,13 @@ class TypedClosureI : public TypedFnI<Ret, Args...> {
   public:
     TypedClosureI(const ArgsT &, EnvT);
 };
+
+template <typename Ret, typename... Args>
+class TypedClosureI<Empty, Ret, Args...> : public TypedFnI<Ret, Args...> {
+  protected:
+    using typename TypedFnI<Ret, Args...>::ArgsT;
+    using typename TypedFnI<Ret, Args...>::RetT;
+
+  public:
+    using TypedFnI<Ret, Args...>::TypedFnI;
+};
