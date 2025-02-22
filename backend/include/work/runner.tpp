@@ -64,29 +64,42 @@ std::pair<WorkT,bool> WorkRunner::get_work() {
         ThreadManager::ThreadId idx = offset ^ gray_code;
         if (idx < num_cpus){
             Locked<std::deque<WorkT>> &stack = offset == 0 ? private_work_stack : WorkManager::runners[idx]->private_work_stack;
-            stack.acquire();
-            if (stack->empty()) {
-                stack.release();
-            } else {
-                WorkT work = stack->back();
-                stack->pop_back();
-                stack.release();
-                return std::make_pair(work, true);
+            if (offset == 0){
+                stack.acquire();
+                if (stack->empty()) {
+                    stack.release();
+                } else {
+                    WorkT work = stack->back();
+                    stack->pop_back();
+                    stack.release();
+                    return std::make_pair(work, true);
+                }
+            } else if (!stack->empty() && stack.try_acquire()){
+                if (stack->empty()) {
+                    stack.release();
+                } else {
+                    WorkT work = stack->back();
+                    stack->pop_back();
+                    stack.release();
+                    return std::make_pair(work, true);
+                }
             }
         }
     }
 
     Locked<std::deque<WeakWorkT>> &queue = shared_work_queue;
-    queue.acquire();
-    while (!queue->empty()) {
-        WorkT work = queue->front().lock();
-        queue->pop_front();
-        if (work != nullptr && work->status.dequeue()){
-            queue.release();
-            return std::make_pair(work, false);
+    if (!queue->empty()){
+        queue.acquire();
+        while (!queue->empty()) {
+            WorkT work = queue->front().lock();
+            queue->pop_front();
+            if (work != nullptr && work->status.dequeue()){
+                queue.release();
+                return std::make_pair(work, false);
+            }
         }
+        queue.release();
     }
-    queue.release();
     return std::make_pair(nullptr, false);
 }
 
