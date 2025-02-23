@@ -1,0 +1,19 @@
+name	args	duration
+fn100	1	100
+fn100	2	200
+fn100	3	300
+fn100	1	101
+fn100	2	202
+fn100	3	303
+fn100	1	110
+fn100	2	220
+fn100	3	330
+fn100	1	nan
+fn100	3	nan
+fn1000	1,1	101
+fn1000	2,3	203
+fn1000	1,1	111
+fn1000	2,3	213
+fn1000	1,1	121
+fn1000	2,3	223
+fn1000	2,3	nan some error occurred
