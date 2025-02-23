@@ -30,30 +30,32 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };
 
-class IdentityInFn : public TypedClosureI<Empty, Int, Int> {
+struct IdentityInt : TypedClosureI<Empty, Int, Int> {
     using TypedClosureI<Empty, Int, Int>::TypedClosureI;
-    LazyT<Int> body(LazyT<Int> &a) override { return a; }
+    LazyT<Int> body(LazyT<Int> &x) override { return x; }
 
   public:
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
                                                     std::shared_ptr<void>) {
-        return std::make_unique<IdentityInFn>(args);
+        return std::make_unique<IdentityInt>(args);
     }
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
-    FnT<Int, Int> identity_int{IdentityInFn::init};
+    FnT<Int, Int> identity_int{IdentityInt::init};
 
     LazyT<Int> x = make_lazy<Int>(5);
     LazyT<Int> y = WorkManager::run(identity_int, x);
     ASSERT_EQ(y->value(), 5);
 }
 
-struct FourWayPlusV1 : public TypedClosureI<Empty, Int, Int, Int, Int, Int> {
+struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> {
     using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI;
-    LazyT<Int> res1 = nullptr, res2 = nullptr, res3 = nullptr;
+    LazyT<Int> res1;
+    LazyT<Int> res2;
+    LazyT<Int> res3;
     LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
-                    LazyT<Int> &d) {
+                    LazyT<Int> &d) override {
         if (res1 == decltype(res1){}) {
             WorkT work;
             std::tie(work, res1) = Work::fn_call(Plus__BuiltIn_G, a, b);
@@ -73,12 +75,12 @@ struct FourWayPlusV1 : public TypedClosureI<Empty, Int, Int, Int, Int, Int> {
     }
     static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>>
     init(const ArgsT &args, std::shared_ptr<void>) {
-        return std::make_unique<FourWayPlusV1>(args);
+        return std::make_unique<FourWayPlus>(args);
     }
 };
 
-TEST_P(FnCorrectnessTest, FourWayPlusV1Test) {
-    FnT<Int, Int, Int, Int, Int> plus_fn{FourWayPlusV1::init};
+TEST_P(FnCorrectnessTest, FourWayPlusTest) {
+    FnT<Int, Int, Int, Int, Int> plus_fn{FourWayPlus::init};
     Int w = 11, x = 5, y = 10, z = 22;
     auto res = WorkManager::run(plus_fn, make_lazy<Int>(w), make_lazy<Int>(x),
                                 make_lazy<Int>(y), make_lazy<Int>(z));
@@ -685,20 +687,20 @@ TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsTest) {
     LazyT<FnT<Bool, Int>> is_odd_fn;
 
     is_even_fn = make_lazy<remove_lazy_t<decltype(is_even_fn)>>(
-        ClosureFnT<LazyT<typename IsEven::EnvT>,
+        ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
                    remove_lazy_t<decltype(is_even_fn)>>(IsEven::init));
     is_odd_fn = make_lazy<remove_lazy_t<decltype(is_odd_fn)>>(
-        ClosureFnT<LazyT<typename IsOdd::EnvT>,
+        ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
                    remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init));
 
     LazyT<TupleT<FnT<Bool, Int>>> is_odd_env = std::make_tuple(is_even_fn);
     LazyT<TupleT<FnT<Bool, Int>>> is_even_env = std::make_tuple(is_odd_fn);
 
-    std::bit_cast<ClosureFnT<LazyT<typename IsEven::EnvT>,
+    std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
                              remove_lazy_t<decltype(is_even_fn)>> *>(
         &is_even_fn->lvalue())
         ->env() = is_even_env;
-    std::bit_cast<ClosureFnT<LazyT<typename IsOdd::EnvT>,
+    std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
                              remove_lazy_t<decltype(is_odd_fn)>> *>(
         &is_odd_fn->lvalue())
         ->env() = is_odd_env;
