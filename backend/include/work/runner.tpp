@@ -167,6 +167,7 @@ void WorkRunner::await_restricted(Vs &...vs) {
             if (done_flag.load(std::memory_order_acquire)){
                 break;
             }
+            while (!all_done(vs...)) {}
             return;
         }
     }
