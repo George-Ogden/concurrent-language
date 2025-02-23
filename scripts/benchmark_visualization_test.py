@@ -1,7 +1,7 @@
 import os.path
 
 import pandas as pd
-from benchmark_visualization import load_directory
+from benchmark_visualization import load_directory, merge_logs
 
 
 def test_load_directory():
@@ -32,3 +32,58 @@ def test_load_directory():
     print(df)
     print(target_df)
     assert df.equals(target_df)
+
+
+def test_merge_logs():
+    df1 = pd.DataFrame(
+        [
+            {"function": "fn100(1)", "duration": 100.0, "title": "df1"},
+            {"function": "fn100(2)", "duration": 200.0, "title": "df1"},
+            {"function": "fn100(3)", "duration": 300.0, "title": "df1"},
+            {"function": "fn100(1)", "duration": 101.0, "title": "df1"},
+            {"function": "fn100(2)", "duration": 202.0, "title": "df1"},
+            {"function": "fn100(3)", "duration": 303.0, "title": "df1"},
+        ]
+    )
+    df2 = pd.DataFrame(
+        [
+            {"function": "fn100(1)", "duration": 1000.0, "title": "df2"},
+            {"function": "fn100(2)", "duration": 2000.0, "title": "df2"},
+            {"function": "fn100(3)", "duration": 3000.0, "title": "df2"},
+            {"function": "fn100(1)", "duration": 1010.0, "title": "df2"},
+            {"function": "fn100(2)", "duration": 2020.0, "title": "df2"},
+            {"function": "fn100(3)", "duration": 3030.0, "title": "df2"},
+        ]
+    )
+    df3 = pd.DataFrame(
+        [
+            {"function": "fn100(1)", "duration": 1000.0, "title": "df3"},
+            {"function": "fn100(2)", "duration": 2000.0, "title": "df3"},
+            {"function": "fn100(1)", "duration": float("nan"), "title": "df3"},
+            {"function": "fn100(2)", "duration": float("nan"), "title": "df3"},
+        ]
+    )
+    target_df = pd.DataFrame(
+        [
+            {"function": "fn100(1)", "duration": 100.0, "title": "df1"},
+            {"function": "fn100(2)", "duration": 200.0, "title": "df1"},
+            {"function": "fn100(3)", "duration": 300.0, "title": "df1"},
+            {"function": "fn100(1)", "duration": 101.0, "title": "df1"},
+            {"function": "fn100(2)", "duration": 202.0, "title": "df1"},
+            {"function": "fn100(3)", "duration": 303.0, "title": "df1"},
+            {"function": "fn100(1)", "duration": 1000.0, "title": "df2"},
+            {"function": "fn100(2)", "duration": 2000.0, "title": "df2"},
+            {"function": "fn100(3)", "duration": 3000.0, "title": "df2"},
+            {"function": "fn100(1)", "duration": 1010.0, "title": "df2"},
+            {"function": "fn100(2)", "duration": 2020.0, "title": "df2"},
+            {"function": "fn100(3)", "duration": 3030.0, "title": "df2"},
+            {"function": "fn100(1)", "duration": 1000.0, "title": "df3"},
+            {"function": "fn100(2)", "duration": 2000.0, "title": "df3"},
+            {"function": "fn100(1)", "duration": float("nan"), "title": "df3"},
+            {"function": "fn100(2)", "duration": float("nan"), "title": "df3"},
+        ]
+    )
+    merged_df = merge_logs(df1, df2, df3)
+    print(merged_df)
+    print(target_df)
+    assert merged_df.equals(target_df)

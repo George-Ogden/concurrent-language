@@ -24,3 +24,7 @@ def load_directory(directory: str) -> pd.DataFrame:
     df["title"] = title
 
     return df[["function", "duration", "title"]]
+
+
+def merge_logs(*logs: pd.DataFrame) -> pd.DataFrame:
+    return pd.concat(logs, ignore_index=True)
