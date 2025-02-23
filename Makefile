@@ -108,6 +108,7 @@ $(LOG_DIR):
 
 benchmark: $(LOG_DIR)
 	git log --format="%H" -n 1 > $^/git
+	touch $^/title.txt
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 		for i in `seq 1 $(REPEATS)`; do \
 	for program in benchmark/**; do \
