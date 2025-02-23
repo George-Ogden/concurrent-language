@@ -5,7 +5,7 @@ from benchmark_visualization import load_directory, merge_logs, normalize
 
 
 def test_load_directory():
-    df = load_directory(os.path.join(os.path.dirname(__file__), "test"))
+    df = load_directory(os.path.join(os.path.dirname(__file__), "test_data"))
     target_df = pd.DataFrame(
         [
             {"function": "fn100(1)", "duration": 100},
