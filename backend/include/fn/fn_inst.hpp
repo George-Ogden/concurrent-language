@@ -34,11 +34,8 @@ struct TypedClosureI : public TypedFnI<Ret, Args...> {
 };
 
 template <typename Ret, typename... Args>
-class TypedClosureI<Empty, Ret, Args...> : public TypedFnI<Ret, Args...> {
-  protected:
+struct TypedClosureI<Empty, Ret, Args...> : public TypedFnI<Ret, Args...> {
     using typename TypedFnI<Ret, Args...>::ArgsT;
     using typename TypedFnI<Ret, Args...>::RetT;
-
-  public:
     using TypedFnI<Ret, Args...>::TypedFnI;
 };
