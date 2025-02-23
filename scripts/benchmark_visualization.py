@@ -38,13 +38,13 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     df["log_duration"] = np.log10(df.duration)
     grouped_df = df.groupby("function").log_duration
     mean = grouped_df.transform("mean")
-    df["normalized_performance"] = mean - df["log_duration"]
+    df["normalized_performance"] = 10 ** (mean - df["log_duration"])
     del df["log_duration"]
     return df
 
 
 def plot(data: pd.DataFrame) -> go.Figure:
-    return px.strip(data, x="function", color="title", y="normalized_performance")
+    return px.strip(data, x="function", color="title", y="normalized_performance", log_y=True)
 
 
 def parse_args() -> argparse.Namespace:
