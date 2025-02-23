@@ -3,12 +3,19 @@
 #include "fn/fn_gen.hpp"
 #include "lazy/types.hpp"
 
+template <typename E, typename T> struct closure_fn {};
+
+template <typename E, typename R, typename... As>
+struct closure_fn<E, TypedFnG<R, As...>> {
+    using type = TypedClosureG<E, R, As...>;
+};
+
+template <typename E, typename T> using ClosureFnT = closure_fn<E, T>::type;
+
 template <typename R, typename... As> using FnT = TypedFnG<R, As...>;
 
 template <typename E, typename R, typename... As>
 using ClosureT = TypedClosureG<E, R, As...>;
-
-template <typename E, typename T> struct closure_fn {};
 
 template <typename T> struct function_traits {};
 
