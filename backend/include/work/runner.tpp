@@ -29,7 +29,9 @@ void WorkRunner::main(std::atomic<WorkT> *ref){
                 continue;
             }
             try {
-                work->run();
+                if (!work->run() && priority_mode && !work->status.wait()){
+                    priority_enqueue(work);
+                }
             } catch (finished &e) {
                 break;
             }
@@ -193,10 +195,12 @@ bool WorkRunner::break_on_work(std::pair<WorkT,bool> work_pair, Continuation &c)
         if (work != nullptr) {
             priority_mode = work_priority;
             if (!work->run() && work_priority){
-                priority_enqueue(work);
+                if (!work->status.wait())
+                    priority_enqueue(work);
             }
             priority_mode = prev_priority;
         }
+        return false;
     } catch (stack_inversion &e) {
         c.valid->acquire();
         bool was_valid = **c.valid;
@@ -205,6 +209,9 @@ bool WorkRunner::break_on_work(std::pair<WorkT,bool> work_pair, Continuation &c)
         if (work != nullptr && !work->done()){
             work->status.cancel_work();
             if (work_priority){
+                priority_enqueue(work);
+            } else if (work->status.waiting()){
+                work->status.unwait();
                 priority_enqueue(work);
             } else {
                 enqueue(work);
@@ -221,7 +228,6 @@ bool WorkRunner::break_on_work(std::pair<WorkT,bool> work_pair, Continuation &c)
         }
         throw;
     }
-    return false;
 }
 
 template <typename... Vs>
