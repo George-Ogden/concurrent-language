@@ -311,6 +311,7 @@ pub struct FnDef {
     pub statements: Vec<Statement>,
     pub ret: (Value, MachineType),
     pub env: Option<MachineType>,
+    pub allocations: Vec<Declaration>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
