@@ -15,7 +15,7 @@ TARGET_DIR := bin
 SRC_DIR := src
 TARGET := $(TARGET_DIR)/main
 TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*.cpp))
-HEADERS := $(wildcard include/*.hpp include/**/*.hpp) $(USER_FILE)
+HEADERS := $(wildcard include/*.hpp include/**/*.hpp include/**/*.tpp) $(USER_FILE)
 
 ifeq ($(USER_FLAG), 1)
 	CXXFLAGS += $(WRAP)
@@ -30,7 +30,7 @@ COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)$(USER_FLAG)
 TEST_DIR := test
 TEST_LIBS := -lgtest -lgtest_main
 TEST_BUILDDIR := $(BUILD_DIR)/test
-USER_FLAGS := -g -fsanitize=address $(WRAP)
+TEST_FLAGS := -g -fsanitize=address $(WRAP)
 TEST_INCLUDE := $(wildcard $(TEST_DIR)/*.hpp) $(WRAP_FILE)
 TEST_FILE := $(TEST_BUILDDIR)/test.cpp
 TEST_EXECS := $(patsubst $(TEST_DIR)/test_%.hpp, $(TARGET_DIR)/test_%, $(filter $(TEST_DIR)/test_%.hpp, $(TEST_INCLUDE)))
@@ -55,8 +55,7 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 	fi
 
 $(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
-	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@,)
-	touch $@
+	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
 
 $(WRAP_FILE): $(WRAP_FILES) | $(BUILD_DIR)
 	echo "" > $@; \
@@ -86,10 +85,10 @@ $(TEST_BUILDDIR)/test_%.cpp: $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
 	done
 
 $(TEST_EXEC)_%: $(TEST_BUILDDIR)/test_%.cpp | $(TARGET_DIR)
-	$(CXX) $^ $(CXXFLAGS) $(USER_FLAGS) -I. $(INCLUDE) $(LIBS) -o $@ $(TEST_LIBS)
+	$(CXX) $^ $(CXXFLAGS) $(TEST_FLAGS) -I. $(INCLUDE) $(LIBS) -o $@ $(TEST_LIBS)
 
 $(TEST_EXEC): $(TEST_FILE) | $(TARGET_DIR)
-	$(CXX) $^ $(CXXFLAGS) $(USER_FLAGS) -I. $(INCLUDE) $(LIBS) -o $@ $(TEST_LIBS)
+	$(CXX) $^ $(CXXFLAGS) $(TEST_FLAGS) -I. $(INCLUDE) $(LIBS) -o $@ $(TEST_LIBS)
 
 clean:
 	rm -rf $(TARGET) $(BUILD_DIR) $(TARGET_DIR)
@@ -111,4 +110,4 @@ run: build
 
 .PHONY: all build clean default run
 
-.PRECIOUS: $(TEST_BUILDDIR)/test_%.cpp
+.PRECIOUS: $(TEST_BUILDDIR)/test_%.cpp $(BUILD_DIR)/%.o

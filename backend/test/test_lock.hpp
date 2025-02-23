@@ -1,6 +1,6 @@
 #pragma once
 
-#include "data_structures/lock.hpp"
+#include "data_structures/lock.tpp"
 #include "system/thread_manager.hpp"
 
 #include <gtest/gtest.h>

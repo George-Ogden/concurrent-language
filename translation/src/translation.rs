@@ -101,19 +101,25 @@ impl Translator {
             itertools::join(constructor_definitions, "\n"),
         )
     }
+    fn translate_value_type(&self, value: &Value) -> Code {
+        match value {
+            Value::BuiltIn(BuiltIn::Boolean(_)) => Code::from("Bool"),
+            Value::BuiltIn(BuiltIn::Integer(_)) => Code::from("Int"),
+            Value::BuiltIn(BuiltIn::BuiltInFn(name)) => format!("decltype({name}_Fn)"),
+            Value::Memory(Memory(id)) => format!("decltype({id})"),
+        }
+    }
     fn translate_builtin(&self, value: BuiltIn) -> Code {
+        let value_type = self.translate_value_type(&value.clone().into());
         match value {
             BuiltIn::Integer(Integer { value }) => {
-                format!("std::make_shared<LazyConstant<Int>>({value}LL)")
+                format!("make_lazy<{value_type}>({value}LL)")
             }
             BuiltIn::Boolean(Boolean { value }) => {
-                format!("std::make_shared<LazyConstant<Bool>>({value})")
+                format!("make_lazy<{value_type}>({value})")
             }
             BuiltIn::BuiltInFn(name) => {
-                let name = format!("{name}_Fn");
-                format!(
-                "std::make_shared<LazyConstant<typename {name}::T>>(std::make_shared<{name}>())"
-            )
+                format!("make_lazy<{value_type}>({name}_Fn)")
             }
         }
     }
@@ -152,26 +158,24 @@ impl Translator {
             .join(",");
         format!("WorkManager::await({arguments});")
     }
-    fn check_nullptr(&self, target: &Id, code: Code) -> Code {
-        format!("if ({target} == decltype({target}){{}}) {{ {code} }}")
-    }
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
         let args_code = self.translate_value_list(fn_call.args);
-        self.check_nullptr(&target,
         match fn_call.fn_ {
             Value::BuiltIn(built_in) => {
                 let BuiltIn::BuiltInFn(name) = built_in else {
                     panic!("Attempt to call non-fn built-in.")
                 };
-                format!(
-                    "{target} = {name}({args_code});",
-                )
+                format!("{target} = {name}({args_code});",)
             }
             Value::Memory(memory) => {
-                let memory_code = self.translate_memory(memory);
-                format!("std::shared_ptr<Fn> fn; std::tie(fn, {target}) = {memory_code}->value()->clone_with_args({args_code}); WorkManager::call(fn);",)
+                let call_code = if args_code.len() == 0 {
+                    format!("{}->value()", self.translate_memory(memory))
+                } else {
+                    format!("{}->value(),{}", self.translate_memory(memory), args_code)
+                };
+                format!("{{ WorkT work; std::tie(work, {target}) = Work::fn_call({call_code}); WorkManager::enqueue(work); }}")
             }
-        })
+        }
     }
     fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
         let indexing_code = format!(
@@ -182,7 +186,7 @@ impl Translator {
             None => Code::new(),
             Some((name, value)) => format!(", {name}{{{}}}", self.translate_value(value)),
         };
-        format!("std::make_shared<LazyConstant<remove_lazy_t<decltype({target})>>>({indexing_code}{value_code})")
+        format!("make_lazy<remove_lazy_t<decltype({target})>>({indexing_code}{value_code})")
     }
     fn translate_declaration(&self, declaration: Declaration) -> Code {
         let Declaration { type_, memory } = declaration;
@@ -200,10 +204,10 @@ impl Translator {
                 self.translate_constructor_call(id.clone(), constructor_call)
             }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                return env.map_or_else(Code::new, |env| {
+                return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name});"), |env| {
+                    let value = self.translate_value(env);
                     format!(
-                        "std::dynamic_pointer_cast<{name}>({id}->value())->env = {};",
-                        self.translate_value(env)
+                        "std::bit_cast<ClosureFnT<LazyT<{name}_T>,remove_lazy_t<decltype({id})>>*>(&{id}->lvalue())->env() = {value};",
                     )
                 })
             }
@@ -274,11 +278,11 @@ impl Translator {
             .filter_map(|statement| {
                 if let Statement::Assignment(Assignment {
                     target,
-                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: _ }),
+                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: Some(_) }),
                 }) = statement
                 {
                     let id = self.translate_memory(target.clone());
-                    Some(format!("{id} = std::make_shared<LazyConstant<remove_lazy_t<decltype({id})>>>(std::make_shared<{name}>());"))
+                    Some(format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>(ClosureFnT<LazyT<{name}_T>,remove_lazy_t<decltype({id})>>({name}));"))
                 } else {
                     None
                 }
@@ -292,60 +296,45 @@ impl Translator {
 
         format!("{declarations_code}\n{closure_predefinitions}\n{other_code}")
     }
-    fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
-        let Declaration { memory, type_ } = memory_allocation;
-        format!(
-            "{} {};",
-            self.translate_lazy_type(&type_),
-            self.translate_memory(memory)
-        )
-    }
-    fn translate_memory_allocations(&self, memory_allocations: Vec<Declaration>) -> Code {
-        memory_allocations
-            .into_iter()
-            .map(|memory_allocation| self.translate_memory_allocation(memory_allocation))
-            .join("\n")
-    }
     fn translate_fn_def(&self, fn_def: FnDef) -> Code {
         let name = fn_def.name;
         let return_type = fn_def.ret.1;
-        let raw_argument_types = fn_def
-            .arguments
-            .iter()
-            .map(|(_, type_)| type_.clone())
-            .collect_vec();
-        let base_name = "Closure";
-        let memory_allocations = fn_def.allocations;
-        let memory_allocations_code = self.translate_memory_allocations(memory_allocations);
         let statements_code = self.translate_statements(fn_def.statements);
         let return_code = format!("return {};", self.translate_value(fn_def.ret.0));
-        let base = format!(
-            "{base_name}<{name},{},{}>",
-            fn_def
-                .env
-                .map_or_else(|| Code::from("Empty"), |type_| self.translate_type(&type_)),
-            TypesFormatter(
-                &std::iter::once(return_type.clone())
-                    .chain(raw_argument_types.into_iter())
-                    .collect_vec()
-            )
-        );
-        let declaration = format!("struct {name} : {base}");
-        let constructor_code = format!("using {base}::{base_name};");
-        let header_code = format!(
-            "{} body({}) override",
+        let (type_code, env_code, enter_env_code) = match fn_def.env {
+            None => (
+                String::new(),
+                String::from("std::shared_ptr<void> env = nullptr"),
+                String::new(),
+            ),
+            Some(type_) => {
+                let env_type_code = self.translate_type(&type_);
+                let type_name = format!("{name}_T");
+                (
+                    format!("using {type_name} = {env_type_code};"),
+                    format!("std::shared_ptr<LazyT<{type_name}>> _env_ptr"),
+                    format!("LazyT<{type_name}> env = *_env_ptr;"),
+                )
+            }
+        };
+        let declaration_code = format!(
+            "{} {}({})",
             self.translate_lazy_type(&return_type),
+            name,
             fn_def
                 .arguments
                 .into_iter()
                 .map(|(memory, type_)| format!(
-                    "{} &{}",
+                    "{} {}",
                     self.translate_lazy_type(&type_),
                     self.translate_memory(memory)
                 ))
+                .chain(std::iter::once(env_code))
                 .join(",")
         );
-        format!("{declaration} {{ {constructor_code} {memory_allocations_code} {header_code} {{ {statements_code} {return_code} }} }};")
+        format!(
+            "{type_code} {declaration_code} {{ {enter_env_code} {statements_code} {return_code} }}"
+        )
     }
     fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
         fn_defs
@@ -682,46 +671,46 @@ mod tests {
 
     #[test_case(
         Integer{value: 24}.into(),
-        "std::make_shared<LazyConstant<Int>>(24LL)";
+        "make_lazy<Int>(24LL)";
         "integer translation"
     )]
     #[test_case(
         Integer{value: -24}.into(),
-        "std::make_shared<LazyConstant<Int>>(-24LL)";
+        "make_lazy<Int>(-24LL)";
         "negative integer translation"
     )]
     #[test_case(
         Integer{value: 0}.into(),
-        "std::make_shared<LazyConstant<Int>>(0LL)";
+        "make_lazy<Int>(0LL)";
         "zero translation"
     )]
     #[test_case(
         Integer{value: 10000000000009}.into(),
-        "std::make_shared<LazyConstant<Int>>(10000000000009LL)";
+        "make_lazy<Int>(10000000000009LL)";
         "large integer translation"
     )]
     #[test_case(
         Boolean{value: true}.into(),
-        "std::make_shared<LazyConstant<Bool>>(true)";
+        "make_lazy<Bool>(true)";
         "true translation"
     )]
     #[test_case(
         Boolean{value: false}.into(),
-        "std::make_shared<LazyConstant<Bool>>(false)";
+        "make_lazy<Bool>(false)";
         "false translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
-        "std::make_shared<LazyConstant<typename Plus__BuiltIn_Fn::T>>(std::make_shared<Plus__BuiltIn_Fn>())";
+        "make_lazy<decltype(Plus__BuiltIn_Fn)>(Plus__BuiltIn_Fn)";
         "builtin plus translation"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
         ),
-        "std::make_shared<LazyConstant<typename Comparison_GE__BuiltIn_Fn::T>>(std::make_shared<Comparison_GE__BuiltIn_Fn>())";
+        "make_lazy<decltype(Comparison_GE__BuiltIn_Fn)>(Comparison_GE__BuiltIn_Fn)";
         "builtin greater than or equal to translation"
     )]
     fn test_builtin_translation(value: BuiltIn, expected: &str) {
@@ -741,6 +730,34 @@ mod tests {
 
     #[test_case(
         Memory(Id::from("baz")).into(),
+        "decltype(baz)";
+        "value memory type"
+    )]
+    #[test_case(
+        BuiltIn::BuiltInFn(
+            Name::from("Comparison_LT__BuiltIn"),
+        ).into(),
+        "decltype(Comparison_LT__BuiltIn_Fn)";
+        "builtin function type"
+    )]
+    #[test_case(
+        BuiltIn::Integer(Integer{value: -1}).into(),
+        "Int";
+        "builtin integer type"
+    )]
+    #[test_case(
+        BuiltIn::Boolean(Boolean{value: false}).into(),
+        "Bool";
+        "builtin boolean type"
+    )]
+    fn test_value_type(value: Value, expected: &str) {
+        let code = TRANSLATOR.translate_value_type(&value);
+        let expected_code = Code::from(expected);
+        assert_eq_code(code, expected_code);
+    }
+
+    #[test_case(
+        Memory(Id::from("baz")).into(),
         "baz";
         "value memory translation"
     )]
@@ -748,12 +765,12 @@ mod tests {
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
-        "std::make_shared<LazyConstant<typename Comparison_LT__BuiltIn_Fn::T>>(std::make_shared<Comparison_LT__BuiltIn_Fn>())";
+        "make_lazy<decltype(Comparison_LT__BuiltIn_Fn)>(Comparison_LT__BuiltIn_Fn)";
         "builtin function translation"
     )]
     #[test_case(
         BuiltIn::Integer(Integer{value: -1}).into(),
-        "std::make_shared<LazyConstant<Int>>(-1LL)";
+        "make_lazy<Int>(-1LL)";
         "builtin integer translation"
     )]
     fn test_value_translation(value: Value, expected: &str) {
@@ -764,7 +781,7 @@ mod tests {
 
     #[test_case(
         Value::BuiltIn(BuiltIn::Integer(Integer{value: -1}).into()).into(),
-        "std::make_shared<LazyConstant<Int>>(-1LL)";
+        "make_lazy<Int>(-1LL)";
         "integer"
     )]
     #[test_case(
@@ -788,7 +805,7 @@ mod tests {
             target: Memory(Id::from("x")).into(),
             value: Value::BuiltIn(Integer{value: 5}.into()).into(),
         },
-        "x = std::make_shared<LazyConstant<Int>>(5LL);";
+        "x = make_lazy<Int>(5LL);";
         "integer assignment"
     )]
     #[test_case(
@@ -809,7 +826,7 @@ mod tests {
             target: Memory(Id::from("y")).into(),
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
         },
-        "y = std::make_shared<LazyConstant<Bool>>(true);";
+        "y = make_lazy<Bool>(true);";
         "boolean assignment"
     )]
     #[test_case(
@@ -832,8 +849,23 @@ mod tests {
                 ]
             }.into(),
         },
-        "if (call == decltype(call){}) { call = Plus__BuiltIn(arg1, arg2); }";
+        "call = Plus__BuiltIn(arg1, arg2);";
         "built-in fn call"
+    )]
+    #[test_case(
+        Assignment {
+            target: Memory(Id::from("res")),
+            value: FnCall{
+                fn_: Memory(Name::from("call")).into(),
+                args: Vec::new(),
+                fn_type: FnType(
+                    Vec::new(),
+                    Box::new(AtomicType(AtomicTypeEnum::INT).into()),
+                ).into()
+            }.into(),
+        },
+        "{ WorkT work; std::tie(work, res) = Work::fn_call(call->value()); WorkManager::enqueue(work); }";
+        "custom fn call no args"
     )]
     #[test_case(
         Assignment {
@@ -853,7 +885,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (call2 == decltype(call2){}) { std::shared_ptr<Fn> fn; std::tie(fn, call2) = call1->value()->clone_with_args(arg1, arg2); WorkManager::call(fn); }";
+        "{ WorkT work; std::tie(work, call2) = Work::fn_call(call1->value(), arg1, arg2); WorkManager::enqueue(work); }";
         "custom fn call"
     )]
     #[test_case(
@@ -871,7 +903,7 @@ mod tests {
                 Value::BuiltIn(Integer{value: 5}.into())
             ]).into(),
         },
-        "t = std::make_tuple(std::make_shared<LazyConstant<Int>>(5LL));";
+        "t = std::make_tuple(make_lazy<Int>(5LL));";
         "singleton tuple assignment"
     )]
     #[test_case(
@@ -882,7 +914,7 @@ mod tests {
                 Memory(Id::from("y")).into()
             ]).into(),
         },
-        "t = std::make_tuple(std::make_shared<LazyConstant<Int>>(-4LL),y);";
+        "t = std::make_tuple(make_lazy<Int>(-4LL),y);";
         "double tuple assignment"
     )]
     #[test_case(
@@ -893,7 +925,7 @@ mod tests {
                 data: None
             }.into(),
         },
-        "bull = std::make_shared<LazyConstant<remove_lazy_t<decltype(bull)>>>(std::integral_constant<std::size_t,1>());";
+        "bull = make_lazy<remove_lazy_t<decltype(bull)>>(std::integral_constant<std::size_t,1>());";
         "empty constructor assignment"
     )]
     #[test_case(
@@ -904,7 +936,7 @@ mod tests {
                 data: Some((Name::from("Wrapper"), Value::BuiltIn(Integer{value: 4}.into())))
             }.into(),
         },
-        "wrapper = std::make_shared<LazyConstant<remove_lazy_t<decltype(wrapper)>>>(std::integral_constant<std::size_t,0>(), Wrapper{std::make_shared<LazyConstant<Int>>(4LL)});";
+        "wrapper = make_lazy<remove_lazy_t<decltype(wrapper)>>(std::integral_constant<std::size_t,0>(), Wrapper{make_lazy<Int>(4LL)});";
         "wrapper constructor assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
@@ -938,7 +970,7 @@ mod tests {
                 }
             ]
         },
-        "auto tmp = bull->value(); switch (tmp.tag) { case 0ULL: { r = std::make_shared<LazyConstant<Bool>>(true); break; } case 1ULL: { r = std::make_shared<LazyConstant<Bool>>(false); break; }}";
+        "auto tmp = bull->value(); switch (tmp.tag) { case 0ULL: { r = make_lazy<Bool>(true); break; } case 1ULL: { r = make_lazy<Bool>(false); break; }}";
         "match statement no values"
     )]
     #[test_case(
@@ -984,7 +1016,7 @@ mod tests {
                 }
             ]
         },
-        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; if (call == decltype(call){}){ call = Comparison_GE__BuiltIn(x,y); } break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
+        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = Comparison_GE__BuiltIn(x,y); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1048,7 +1080,7 @@ mod tests {
                 }.into()],
             )
         }.into(),
-        "if (z->value()) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); }";
+        "if (z->value()) { x = make_lazy<Int>(1LL); } else { x = make_lazy<Int>(-1LL); }";
         "if-else statement"
     )]
     #[test_case(
@@ -1090,7 +1122,7 @@ mod tests {
                 ],
             )
         }.into(),
-        "if (z->value()) { if (y->value()) { x = std::make_shared<LazyConstant<Int>>(1LL); } else { x = std::make_shared<LazyConstant<Int>>(-1LL); } r = std::make_shared<LazyConstant<Bool>>(true); } else { x = std::make_shared<LazyConstant<Int>>(0LL); r = std::make_shared<LazyConstant<Bool>>(false); }";
+        "if (z->value()) { if (y->value()) { x = make_lazy<Int>(1LL); } else { x = make_lazy<Int>(-1LL); } r = make_lazy<Bool>(true); } else { x = make_lazy<Int>(0LL); r = make_lazy<Bool>(false); }";
         "nested if-else statement"
     )]
     fn test_statement_translation(statement: Statement, expected: &str) {
@@ -1107,7 +1139,7 @@ mod tests {
                 env: None
             }.into(),
         }.into()],
-        "closure = std::make_shared<LazyConstant<remove_lazy_t<decltype(closure)>>>(std::make_shared<Closure>());";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(Closure);";
         "closure without env assignment"
     )]
     #[test_case(
@@ -1118,8 +1150,28 @@ mod tests {
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
         }.into()],
-        "closure = std::make_shared<LazyConstant<remove_lazy_t<decltype(closure)>>>(std::make_shared<Adder>());  std::dynamic_pointer_cast<Adder>(closure->value())->env = x;";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<LazyT<Adder_T>, remove_lazy_t<decltype(closure)>>(Adder));  std::bit_cast<ClosureFnT<LazyT<Adder_T>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = x;";
         "closure assignment"
+    )]
+    #[test_case(
+            vec![
+            Assignment {
+                target: Memory(Id::from("foo")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("Foo"),
+                    env: Some(Memory(Id::from("bar")).into())
+                }.into(),
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("bar")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("Bar"),
+                    env: Some(Memory(Id::from("foo")).into())
+                }.into(),
+            }.into()
+        ],
+        "foo = make_lazy<remove_lazy_t<decltype(foo)>>(ClosureFnT<LazyT<Foo_T>,remove_lazy_t<decltype(foo)>>(Foo)); bar = make_lazy<remove_lazy_t<decltype(bar)>>(ClosureFnT<LazyT<Bar_T>,remove_lazy_t<decltype(bar)>>(Bar)); std::bit_cast<ClosureFnT<LazyT<Foo_T>,remove_lazy_t<decltype(foo)>>*>(&foo->lvalue())->env() = bar; std::bit_cast<ClosureFnT<LazyT<Bar_T>,remove_lazy_t<decltype(bar)>>*>(&bar->lvalue())->env() = foo;";
+        "mutually recursive closure assignment"
     )]
     #[test_case(
         vec![
@@ -1186,7 +1238,7 @@ mod tests {
                 }.into(),
             }.into(),
         ],
-        "LazyT<VariantT<Suc, Nil>> n; LazyT<VariantT<Suc, Nil>> s; n = std::make_shared<LazyConstant<remove_lazy_t<decltype(n)>>>(std::integral_constant<std::size_t,1>()); s = std::make_shared<LazyConstant<remove_lazy_t<decltype(s)>>>(std::integral_constant<std::size_t,0>(), Suc{n});";
+        "LazyT<VariantT<Suc, Nil>> n; LazyT<VariantT<Suc, Nil>> s; n = make_lazy<remove_lazy_t<decltype(n)>>(std::integral_constant<std::size_t,1>()); s = make_lazy<remove_lazy_t<decltype(s)>>(std::integral_constant<std::size_t,0>(), Suc{n});";
         "simple recursive type instantiation"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
@@ -1198,19 +1250,18 @@ mod tests {
     #[test_case(
         FnDef {
             env: None,
-            name: Name::from("IdentityInt"),
+            name: Name::from("identity_int"),
             arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: Vec::new(),
             ret: (Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: Vec::new()
         },
-        "struct IdentityInt : Closure<IdentityInt, Empty, Int, Int> { using Closure<IdentityInt, Empty, Int, Int>::Closure; LazyT<Int> body(LazyT<Int> &x) override { return x; } };";
+        "LazyT<Int> identity_int(LazyT<Int> x, std::shared_ptr<void> env = nullptr) { return x; }";
         "identity int"
     )]
     #[test_case(
         FnDef {
             env: None,
-            name: Name::from("FourWayPlus"),
+            name: Name::from("four_way_plus"),
             arguments: vec![
                 (Memory(Id::from("a")), AtomicType(AtomicTypeEnum::INT).into()),
                 (Memory(Id::from("b")), AtomicType(AtomicTypeEnum::INT).into()),
@@ -1218,8 +1269,12 @@ mod tests {
                 (Memory(Id::from("d")), AtomicType(AtomicTypeEnum::INT).into()),
             ],
             statements: vec![
+                Declaration {
+                    memory: Memory(Id::from("res1")),
+                    type_: AtomicTypeEnum::INT.into()
+                }.into(),
                 Assignment {
-                    target: Memory(Id::from("call1")),
+                    target: Memory(Id::from("res1")),
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
@@ -1237,8 +1292,12 @@ mod tests {
                         ]
                     }.into()
                 }.into(),
+                Declaration {
+                    memory: Memory(Id::from("res2")),
+                    type_: AtomicTypeEnum::INT.into()
+                }.into(),
                 Assignment {
-                    target: Memory(Id::from("call2")),
+                    target: Memory(Id::from("res2")),
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
@@ -1256,8 +1315,12 @@ mod tests {
                         ]
                     }.into()
                 }.into(),
+                Declaration {
+                    memory: Memory(Id::from("res3")),
+                    type_: AtomicTypeEnum::INT.into()
+                }.into(),
                 Assignment {
-                    target: Memory(Id::from("call3")),
+                    target: Memory(Id::from("res3")),
                     value: FnCall{
                         fn_: BuiltIn::BuiltInFn(
                             Name::from("Plus__BuiltIn"),
@@ -1270,37 +1333,27 @@ mod tests {
                             Box::new(AtomicType(AtomicTypeEnum::INT).into()),
                         ),
                         args: vec![
-                            Memory(Id::from("call1")).into(),
-                            Memory(Id::from("call2")).into(),
+                            Memory(Id::from("res1")).into(),
+                            Memory(Id::from("res2")).into(),
                         ]
                     }.into()
                 }.into(),
             ],
-            ret: (Memory(Id::from("call3")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: vec![
-                Declaration {
-                    memory: Memory(Id::from("call1")),
-                    type_: AtomicTypeEnum::INT.into()
-                },
-                Declaration {
-                    memory: Memory(Id::from("call2")),
-                    type_: AtomicTypeEnum::INT.into()
-                },
-                Declaration {
-                    memory: Memory(Id::from("call3")),
-                    type_: AtomicTypeEnum::INT.into()
-                }
-            ]
+            ret: (Memory(Id::from("res3")).into(), AtomicType(AtomicTypeEnum::INT).into()),
         },
-        "struct FourWayPlus : Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int> { using Closure<FourWayPlus, Empty, Int, Int, Int, Int, Int>::Closure; LazyT<Int> call1; LazyT<Int> call2; LazyT<Int> call3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { if (call1 == decltype(call1){}) { call1 = Plus__BuiltIn(a, b); } if (call2 == decltype(call2){}) { call2 = Plus__BuiltIn(c, d); } if (call3 == decltype(call3){}) { call3 = Plus__BuiltIn(call1,call2); } return call3;} };";
+        "LazyT<Int> four_way_plus(LazyT<Int> a, LazyT<Int> b, LazyT<Int> c, LazyT<Int> d, std::shared_ptr<void> env = nullptr) { LazyT<Int> res1; LazyT<Int> res2; LazyT<Int> res3; res1 = Plus__BuiltIn(a, b); res2 = Plus__BuiltIn(c, d); res3 = Plus__BuiltIn(res1, res2); return res3; }";
         "four way plus int"
     )]
     #[test_case(
         FnDef{
             env: Some(AtomicType(AtomicTypeEnum::INT).into()),
-            name: Name::from("Adder"),
+            name: Name::from("adder"),
             arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: vec![
+                Declaration{
+                    memory: Memory(Id::from("inner_res")),
+                    type_: AtomicType(AtomicTypeEnum::INT).into(),
+                }.into(),
                 Assignment {
                     target: Memory(Id::from("inner_res")),
                     value: FnCall{
@@ -1322,15 +1375,9 @@ mod tests {
                 }.into()
             ],
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: vec![
-                Declaration{
-                    memory: Memory(Id::from("inner_res")),
-                    type_: AtomicType(AtomicTypeEnum::INT).into(),
-                }
-            ]
         },
-    "struct Adder : Closure<Adder, Int, Int, Int> { using Closure<Adder, Int, Int, Int>::Closure; LazyT<Int> inner_res; LazyT<Int> body(LazyT<Int> &x) override { if (inner_res == decltype(inner_res){}) { inner_res = Plus__BuiltIn(x, env); } return inner_res; } };";
-    "adder closure"
+        "using adder_T = Int; LazyT<Int> adder(LazyT<Int> x, std::shared_ptr<LazyT<adder_T>> _env_ptr) { LazyT<adder_T> env = *_env_ptr; LazyT<Int> inner_res; inner_res = Plus__BuiltIn(x, env); return inner_res; }";
+        "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
         let code = TRANSLATOR.translate_fn_def(fn_def);
@@ -1355,6 +1402,10 @@ mod tests {
                     name: Name::from("Main"),
                     arguments: Vec::new(),
                     statements: vec![
+                        Declaration{
+                            memory: Memory(Id::from("call")),
+                            type_: AtomicType(AtomicTypeEnum::INT).into()
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("call")),
                             value: FnCall{
@@ -1376,12 +1427,6 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("call")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                    allocations: vec![
-                        Declaration{
-                            memory: Memory(Id::from("call")),
-                            type_: AtomicType(AtomicTypeEnum::INT).into()
-                        }
-                    ]
                 },
                 FnDef {
                     env: None,
@@ -1395,6 +1440,10 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("y")).into(),
                             value: Expression::Value(Value::BuiltIn(Integer{value: 5}.into())),
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("main")),
+                            type_: AtomicType(AtomicTypeEnum::INT).into()
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("main")),
@@ -1411,16 +1460,10 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("main")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                    allocations: vec![
-                        Declaration{
-                            memory: Memory(Id::from("main")),
-                            type_: AtomicType(AtomicTypeEnum::INT).into()
-                        }
-                    ]
                 }
             ],
         },
-        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{Empty value;}; struct Faws{Empty value;}; struct Main : Closure<Main,Empty,Int>{using Closure<Main,Empty,Int>::Closure; LazyT<Int> call; LazyT<Int> body() override { if (call == decltype(call){}){ call = Plus__BuiltIn(x,y); } return call; }}; struct PreMain : Closure<PreMain,Empty,Int>{ using Closure<PreMain,Empty,Int>::Closure; LazyT<Int> main; LazyT<Int> body() override { x = std::make_shared<LazyConstant<Int>>(9LL); y = std::make_shared<LazyConstant<Int>>(5LL); if (main == decltype(main){}){ std::shared_ptr<Fn> fn; std::tie(fn,main) = Main->value()->clone_with_args(); WorkManager::call(fn);} return main; }};";
+        "#include \"main/include.hpp\"\nstruct Twoo; struct Faws; typedef VariantT<Twoo,Faws> Bull; struct Twoo{ Empty value; }; struct Faws{ Empty value; }; LazyT<Int> Main(std::shared_ptr<void>env = nullptr){ LazyT<Int>call; call = Plus__BuiltIn(x,y); return call; } LazyT<Int>PreMain(std::shared_ptr<void> env = nullptr){ LazyT<Int>main; x = make_lazy<Int>(9LL); y = make_lazy<Int>(5LL); { WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); WorkManager::enqueue(work); } return main; }";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

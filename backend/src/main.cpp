@@ -1,12 +1,13 @@
 #include "main/main.hpp"
 #include "system/work_manager.hpp"
 #include "time/utils.hpp"
+#include "types/utils.hpp"
 
 #include <iostream>
 
 int main(int argc, char *argv[]) {
     auto start = time_utils::now();
-    using ArgsT = remove_lazy_t<Main::ArgsT>;
+    using ArgsT = function_args_t<decltype(&Main)>;
     argc--;
     argv++;
     constexpr auto N = std::tuple_size_v<ArgsT>;
@@ -18,20 +19,20 @@ int main(int argc, char *argv[]) {
 
     ArgsT args = [&argv]<std::size_t... Is>(std::index_sequence<Is...>) {
         return std::make_tuple(
-            std::make_shared<
-                LazyConstant<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>>(
+            make_lazy<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>(
                 convert_arg<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>(
                     argv[Is]))...);
     }
     (std::make_index_sequence<N>{});
 
-    std::shared_ptr<Main> main = std::make_shared<Main>();
-    main->args = args;
-    WorkManager::run(main);
+    function_equivalent_t<decltype(&Main)> main{Main};
+    auto result = std::apply(
+        [&main](auto &...args) { return WorkManager::run(main, args...); },
+        args);
 
     auto end = time_utils::now();
 
-    std::cout << main->value() << std::endl;
+    std::cout << result << std::endl;
 
     auto duration = time_utils::time_delta(start, end);
     std::cerr << "Execution time: " << duration << std::endl;

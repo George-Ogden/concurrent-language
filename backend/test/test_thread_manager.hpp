@@ -1,6 +1,6 @@
 #pragma once
 
-#include "system/thread_manager.hpp"
+#include "system/thread_manager.tpp"
 
 #include <gtest/gtest.h>
 

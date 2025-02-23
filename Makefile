@@ -125,4 +125,4 @@ benchmark: $(LOG_DIR)
 		done; \
 	done;
 
-.PHONY: all benchmark clean run
+.PHONY: all benchmark build clean run

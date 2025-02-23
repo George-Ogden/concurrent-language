@@ -1,7 +1,6 @@
 #pragma once
 
-#include "data_structures/lazy.hpp"
-#include "fn/fn.hpp"
+#include "types/utils.hpp"
 
 #include <iostream>
 #include <memory>
@@ -23,8 +22,7 @@ template <typename... Types> struct VariantT {
 
     template <std::size_t Index>
     requires(Index < sizeof...(Types)) explicit constexpr VariantT(
-        std::integral_constant<std::size_t, Index>)
-        : tag(static_cast<TagType>(Index)) {}
+        std::integral_constant<std::size_t, Index>);
 
     template <std::size_t Index, typename T>
     requires(Index < sizeof...(Types)) &&
@@ -34,63 +32,26 @@ template <typename... Types> struct VariantT {
                                                              integral_constant<
                                                                  std::size_t,
                                                                  Index>,
-                                                         T &&value)
-        : tag(static_cast<TagType>(Index)) {
-        new (std::launder(
-            reinterpret_cast<std::decay_t<T> *>(std::addressof(this->value))))
-            std::remove_reference_t<T>(std::forward<T>(value));
-    }
+                                                         T &&value);
 
     VariantT() = default;
-    VariantT(const VariantT &other) { copy(*this, other); }
-    VariantT &operator=(const VariantT &other) {
-        if (this != &other) {
-            destroy();
-            copy(*this, other);
-        }
-        return *this;
-    }
-    ~VariantT() { destroy(); }
+    VariantT(const VariantT &other);
+    VariantT &operator=(const VariantT &other);
+    ~VariantT();
 
-    static void copy(VariantT &target, const VariantT &source) {
-        using CopyFn = void (*)(std::aligned_union_t<0, Types...> &,
-                                const std::aligned_union_t<0, Types...> &);
+    static void copy(VariantT &target, const VariantT &source);
 
-        static constexpr CopyFn copiers[sizeof...(Types)] = {
-            &copy_impl<Types>...};
-
-        target.tag = source.tag;
-        if (source.tag < sizeof...(Types)) {
-            CopyFn copier = copiers[source.tag];
-            copier(target.value, source.value);
-        }
-    }
     template <typename T>
     static void copy_impl(std::aligned_union_t<0, Types...> &target,
-                          const std::aligned_union_t<0, Types...> &source) {
-        new (&target) T{*reinterpret_cast<const T *>(&source)};
-    }
+                          const std::aligned_union_t<0, Types...> &source);
 
-    void destroy() {
-        using DestructorFn = void (*)(std::aligned_union_t<0, Types...> &);
+    void destroy();
 
-        static constexpr DestructorFn destructors[sizeof...(Types)] = {
-            &destroy_impl<Types>...};
-
-        if (tag < sizeof...(Types)) {
-            DestructorFn destructor = destructors[tag];
-            destructor(value);
-            tag = sizeof...(Types);
-        }
-    }
     template <typename T>
-    static void destroy_impl(std::aligned_union_t<0, Types...> &data) {
-        reinterpret_cast<T *>(&data)->~T();
-    }
+    static void destroy_impl(std::aligned_union_t<0, Types...> &data);
 
-    friend std::ostream &operator<<(std::ostream &os,
-                                    const VariantT<Types...> &variant) {
-        os << '[' << static_cast<Int>(variant.tag) << "; ";
+    friend std::ostream &operator<<(std::ostream &os, const VariantT &variant) {
+        os << '[' << static_cast<int>(variant.tag) << "; ";
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             ((variant.tag == Is
                   ? (os << reinterpret_cast<const std::tuple_element_t<
@@ -108,6 +69,3 @@ template <typename... Types> struct VariantT {
         return os;
     }
 };
-
-template <typename R, typename... As>
-using FnT = std::shared_ptr<ParametricFn<R, As...>>;
