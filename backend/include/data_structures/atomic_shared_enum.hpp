@@ -64,14 +64,20 @@ template <std::size_t... Widths> class AtomicSharedEnum {
         uint8_t value, std::memory_order ordering = std::memory_order_relaxed) {
         exchange<section>(value, ordering);
     }
-    template <std::size_t section>
-    requires(section < sizeof...(Widths)) bool compare_exchange(
-        uint8_t expected, uint8_t desired,
-        std::memory_order ordering = std::memory_order_relaxed) {
+    template <std::size_t compare_section,
+              std::size_t exchange_section = compare_section>
+    requires(
+        compare_section < sizeof...(Widths) &&
+        exchange_section <
+            sizeof...(
+                Widths)) bool compare_exchange(uint8_t expected,
+                                               uint8_t desired,
+                                               std::memory_order ordering =
+                                                   std::memory_order_relaxed) {
         while (1) {
             uint8_t current_value = value();
-            uint8_t expected_value = insert<section>(expected);
-            uint8_t desired_value = insert<section>(desired);
+            uint8_t expected_value = insert<compare_section>(expected);
+            uint8_t desired_value = insert<exchange_section>(desired);
             if (bits.compare_exchange_weak(expected_value, desired_value,
                                            ordering)) {
                 return true;
