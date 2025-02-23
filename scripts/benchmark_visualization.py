@@ -1,7 +1,10 @@
+import argparse
 import os.path
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 
 
 def convert_float_or_nan(x: str) -> float:
@@ -38,3 +41,26 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     df["normalized_performance"] = mean - df["log_duration"]
     del df["log_duration"]
     return df
+
+
+def plot(data: pd.DataFrame) -> go.Figure:
+    return px.strip(data, x="function", color="title", y="normalized_performance")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("directories", nargs="+")
+    return parser.parse_args()
+
+
+def main(args: argparse.Namespace):
+    directories = args.directories
+    data = normalize(merge_logs(*(load_directory(directory) for directory in directories)))
+
+    fig = plot(data)
+    fig.show()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)
