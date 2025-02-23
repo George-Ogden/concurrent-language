@@ -1,10 +1,14 @@
 import argparse
 import os.path
+import warnings
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
+
+pio.kaleido.scope.mathjax = None
 
 
 def convert_float_or_nan(x: str) -> float:
@@ -44,21 +48,56 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def plot(data: pd.DataFrame) -> go.Figure:
-    return px.strip(data, x="function", color="title", y="normalized_performance", log_y=True)
+    fig = px.strip(
+        data,
+        x="function",
+        y="normalized_performance",
+        color="title",
+        log_y=True,
+        title="Normalized Function Performance across Versions",
+        labels={
+            "function": "Function and Arguments",
+            "normalized_performance": "Normalized Performance",
+            "title": "Version",
+        },
+    )
+    fig.update_layout(legend_title_text="Version")
+    return fig
+
+
+def save_plot(fig: go.Figure, filepath: str) -> str:
+    if not filepath.endswith(".pdf"):
+        filepath += ".pdf"
+    fig.write_image(file=filepath, height=1080, width=1920, format="pdf")
+    return filepath
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("directories", nargs="+")
+    parser.add_argument("--output-filename", "-o", required=False)
+    parser.add_argument("--show-web-version", "-w", action="store_true")
     return parser.parse_args()
 
 
 def main(args: argparse.Namespace):
     directories = args.directories
+    show_web_version = args.show_web_version
+    output_filename = args.output_filename
+
+    if output_filename is None and not show_web_version:
+        warnings.warn(
+            "--output-filename and --show-web-version are False - this script will produce no output"
+        )
+
     data = normalize(merge_logs(*(load_directory(directory) for directory in directories)))
 
     fig = plot(data)
-    fig.show()
+    if show_web_version:
+        fig.show()
+    if output_filename is not None:
+        save_plot(fig, output_filename)
+        print(output_filename)
 
 
 if __name__ == "__main__":
