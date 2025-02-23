@@ -7,7 +7,7 @@
 
 int main(int argc, char *argv[]) {
     auto start = time_utils::now();
-    using ArgsT = function_args_t<decltype(&Main)>;
+    using ArgsT = typename Main::ArgsT;
     argc--;
     argv++;
     constexpr auto N = std::tuple_size_v<ArgsT>;
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
     }
     (std::make_index_sequence<N>{});
 
-    function_equivalent_t<decltype(&Main)> main{Main};
+    function_equivalent_t<Main> main{Main::init};
     auto result = std::apply(
         [&main](auto &...args) { return WorkManager::run(main, args...); },
         args);

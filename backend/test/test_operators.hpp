@@ -1,6 +1,7 @@
 #pragma once
 
-#include "fn/fn.tpp"
+#include "fn/fn_gen.tpp"
+#include "fn/fn_inst.tpp"
 #include "fn/operators.hpp"
 #include "fn/types.hpp"
 #include "lazy/lazy.tpp"
@@ -33,11 +34,11 @@ TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
 INSTANTIATE_TEST_SUITE_P(
     BinaryOperators, BinaryOperatorsTests,
     ::testing::Values(
-        std::make_tuple(Plus__BuiltIn_Fn, std::plus<Int>()),
-        std::make_tuple(Minus__BuiltIn_Fn, std::minus<Int>()),
-        std::make_tuple(Multiply__BuiltIn_Fn, std::multiplies<Int>()),
-        std::make_tuple(Divide__BuiltIn_Fn, std::divides<Int>()),
-        std::make_tuple(Exponentiate__BuiltIn_Fn,
+        std::make_tuple(Plus__BuiltIn_G, std::plus<Int>()),
+        std::make_tuple(Minus__BuiltIn_G, std::minus<Int>()),
+        std::make_tuple(Multiply__BuiltIn_G, std::multiplies<Int>()),
+        std::make_tuple(Divide__BuiltIn_G, std::divides<Int>()),
+        std::make_tuple(Exponentiate__BuiltIn_G,
                         [](Int x, Int y) {
                             if (y < 0)
                                 return static_cast<Int>(0);
@@ -47,12 +48,12 @@ INSTANTIATE_TEST_SUITE_P(
                             }
                             return res;
                         }),
-        std::make_tuple(Modulo__BuiltIn_Fn, std::modulus<Int>()),
-        std::make_tuple(Left_Shift__BuiltIn_Fn,
+        std::make_tuple(Modulo__BuiltIn_G, std::modulus<Int>()),
+        std::make_tuple(Left_Shift__BuiltIn_G,
                         [](Int x, Int y) { return x << y; }),
-        std::make_tuple(Right_Shift__BuiltIn_Fn,
+        std::make_tuple(Right_Shift__BuiltIn_G,
                         [](Int x, Int y) { return x >> y; }),
-        std::make_tuple(Spaceship__BuiltIn_Fn,
+        std::make_tuple(Spaceship__BuiltIn_G,
                         [](Int x, Int y) {
                             const auto o = std::compare_three_way()(x, y);
                             if (o == std::strong_ordering::less)
@@ -63,9 +64,9 @@ INSTANTIATE_TEST_SUITE_P(
                                 return 0;
                             return 2;
                         }),
-        std::make_tuple(Bitwise_And__BuiltIn_Fn, std::bit_and<Int>()),
-        std::make_tuple(Bitwise_Or__BuiltIn_Fn, std::bit_or<Int>()),
-        std::make_tuple(Bitwise_Xor__BuiltIn_Fn, std::bit_xor<Int>())));
+        std::make_tuple(Bitwise_And__BuiltIn_G, std::bit_and<Int>()),
+        std::make_tuple(Bitwise_Or__BuiltIn_G, std::bit_or<Int>()),
+        std::make_tuple(Bitwise_Xor__BuiltIn_G, std::bit_xor<Int>())));
 
 class UnaryOperatorsTests
     : public ::testing::TestWithParam<
@@ -85,8 +86,8 @@ TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
 INSTANTIATE_TEST_SUITE_P(
     UnaryOperators, UnaryOperatorsTests,
     ::testing::Values(
-        std::make_tuple(Increment__BuiltIn_Fn, [](Int x) { return ++x; }),
-        std::make_tuple(Decrement__BuiltIn_Fn, [](Int x) { return --x; })));
+        std::make_tuple(Increment__BuiltIn_G, [](Int x) { return ++x; }),
+        std::make_tuple(Decrement__BuiltIn_G, [](Int x) { return --x; })));
 
 class BinaryComparisonsTests
     : public ::testing::TestWithParam<
@@ -110,15 +111,15 @@ TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
 INSTANTIATE_TEST_SUITE_P(
     BinaryComparisons, BinaryComparisonsTests,
     ::testing::Values(
-        std::make_tuple(Comparison_LT__BuiltIn_Fn, std::less<Int>()),
-        std::make_tuple(Comparison_GT__BuiltIn_Fn, std::greater<Int>()),
-        std::make_tuple(Comparison_LE__BuiltIn_Fn, std::less_equal<Int>()),
-        std::make_tuple(Comparison_GE__BuiltIn_Fn, std::greater_equal<Int>()),
-        std::make_tuple(Comparison_EQ__BuiltIn_Fn, std::equal_to<Int>()),
-        std::make_tuple(Comparison_NE__BuiltIn_Fn, std::not_equal_to<Int>())));
+        std::make_tuple(Comparison_LT__BuiltIn_G, std::less<Int>()),
+        std::make_tuple(Comparison_GT__BuiltIn_G, std::greater<Int>()),
+        std::make_tuple(Comparison_LE__BuiltIn_G, std::less_equal<Int>()),
+        std::make_tuple(Comparison_GE__BuiltIn_G, std::greater_equal<Int>()),
+        std::make_tuple(Comparison_EQ__BuiltIn_G, std::equal_to<Int>()),
+        std::make_tuple(Comparison_NE__BuiltIn_G, std::not_equal_to<Int>())));
 
 TEST(NegationTests, OperatorCorrectness) {
-    auto fn = Negation__BuiltIn_Fn;
+    auto fn = Negation__BuiltIn_G;
     {
         auto result = WorkManager::run(fn, make_lazy<Bool>(true));
         ASSERT_EQ(result->value(), false);

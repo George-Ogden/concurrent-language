@@ -79,7 +79,8 @@ template <std::size_t... Widths> class AtomicSharedEnum {
             uint8_t expected_value = insert<compare_section>(expected);
             uint8_t desired_value = insert<exchange_section>(desired);
             if (bits.compare_exchange_weak(expected_value, desired_value,
-                                           ordering)) {
+                                           ordering,
+                                           std::memory_order_relaxed)) {
                 return true;
                 // cppcheck-suppress knownConditionTrueFalse
             } else if (value() != current_value) {
@@ -97,7 +98,8 @@ template <std::size_t... Widths> class AtomicSharedEnum {
         do {
             current_value = this->value();
             desired = insert<section>(value);
-        } while (!bits.compare_exchange_weak(current_value, desired, ordering));
+        } while (!bits.compare_exchange_weak(current_value, desired, ordering,
+                                             std::memory_order_relaxed));
         return (current_value & mask<section>()) >> prefix_widths[section];
     }
 };

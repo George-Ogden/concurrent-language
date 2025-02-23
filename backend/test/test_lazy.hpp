@@ -3,8 +3,6 @@
 #include "lazy/lazy.tpp"
 #include "work/work.tpp"
 
-#include "test/inc.hpp"
-
 #include <gtest/gtest.h>
 
 #include <atomic>

@@ -3,6 +3,8 @@
 #include "work/work.hpp"
 #include "work/status.hpp"
 #include "fn/continuation.tpp"
+#include "fn/types.hpp"
+#include "fn/fn_inst.tpp"
 #include "lazy/lazy.tpp"
 #include "lazy/types.hpp"
 #include "lazy/fns.hpp"
@@ -22,12 +24,11 @@ bool Work::done() const {
 }
 
 template <typename Ret, typename... Args>
-std::pair<std::shared_ptr<Work>, Ret> Work::fn_call(TypedFn<Ret, Args...> f, Args... args) {
-    std::shared_ptr<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>> work = std::make_shared<TypedWork<remove_lazy_t<Ret>, remove_lazy_t<Args>...>>();
-    auto placeholders = make_lazy_placeholders<Ret>(work);
+std::pair<std::shared_ptr<Work>, LazyT<Ret>> Work::fn_call(FnT<Ret, Args...> f, LazyT<Args>... args) {
+    std::shared_ptr<TypedWork<Ret, Args...>> work = std::make_shared<TypedWork<Ret, Args...>>();
+    auto placeholders = make_lazy_placeholders<LazyT<Ret>>(work);
     work->targets = lazy_map([](const auto &t) { return std::weak_ptr(t); }, placeholders);
-    work->args = std::make_tuple(args...);
-    work->fn = f;
+    work->fn = f.init(args...);
     return std::make_pair(work, placeholders);
 }
 
@@ -57,7 +58,7 @@ bool TypedWork<Ret, Args...>::run() {
             return true;
     }
     if (this->status.start_work()) {
-        LazyT<Ret> results = std::apply([this](auto &&...args) { return fn.call(std::forward<decltype(args)>(args)...); }, args);
+        LazyT<Ret> results = fn->run();
         assign(targets, results);
         this->continuations.acquire();
         for (Continuation &c : *this->continuations) {

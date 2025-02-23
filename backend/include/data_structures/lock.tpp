@@ -41,13 +41,13 @@ bool ExchangeLock::held() const {
 bool ExchangeLock::try_acquire_internal(ThreadManager::ThreadId thread_id) {
     ThreadManager::ThreadId expected = 0;
     return holder.compare_exchange_weak(expected, thread_id + 1,
-                                        std::memory_order_acquire);
+                                        std::memory_order_acquire, std::memory_order_relaxed);
 }
 
 bool ExchangeLock::release_internal(ThreadManager::ThreadId thread_id) {
     ThreadManager::ThreadId expected = thread_id + 1;
     return holder.compare_exchange_weak(expected, 0,
-                                        std::memory_order_release);
+                                        std::memory_order_release, std::memory_order_relaxed);
 }
 
 Lock::LockType MutexLock::type() const {
