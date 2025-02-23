@@ -12,7 +12,11 @@ class Status {
     static inline constexpr std::size_t EXECUTION_WIDTH = 2;
     static inline constexpr std::size_t REQUIRED_IDX = 2;
     static inline constexpr std::size_t REQUIRED_WIDTH = 1;
-    AtomicSharedEnum<QUEUED_WIDTH, EXECUTION_WIDTH, REQUIRED_WIDTH> value;
+    static inline constexpr std::size_t WAITING_IDX = 3;
+    static inline constexpr std::size_t WAITING_WIDTH = 1;
+    AtomicSharedEnum<QUEUED_WIDTH, EXECUTION_WIDTH, REQUIRED_WIDTH,
+                     WAITING_WIDTH>
+        value;
 
   public:
     enum ExecutionStatus { available = 0, active, finished, MAX };
@@ -57,4 +61,10 @@ class Status {
                    false, true, std::memory_order_release) &&
                !done();
     }
+    bool waiting() const { return value.load<WAITING_IDX>(); }
+    bool wait() {
+        return value.compare_exchange<EXECUTION_IDX, WAITING_IDX>(
+            ExecutionStatus::active, true);
+    }
+    bool unwait() { return value.compare_exchange<WAITING_IDX>(true, false); }
 };

@@ -190,3 +190,38 @@ TEST(ExecutionStatusTransition, RequiredDoneTest) {
     ASSERT_EQ(status.execution_status(), Status::finished);
     ASSERT_FALSE(status.queued());
 }
+
+TEST(ExecutionStatusTransition, Waiting) {
+    Status status;
+    ASSERT_EQ(status.execution_status(), Status::available);
+    ASSERT_FALSE(status.queued());
+    ASSERT_FALSE(status.required());
+    ASSERT_FALSE(status.waiting());
+    ASSERT_FALSE(status.unwait());
+    ASSERT_FALSE(status.waiting());
+    ASSERT_FALSE(status.wait());
+    ASSERT_FALSE(status.waiting());
+    status.start_work();
+    ASSERT_FALSE(status.waiting());
+    status.cancel_work();
+    ASSERT_FALSE(status.waiting());
+    status.require();
+    ASSERT_FALSE(status.waiting());
+    ASSERT_FALSE(status.wait());
+    ASSERT_FALSE(status.waiting());
+    ASSERT_FALSE(status.unwait());
+    ASSERT_FALSE(status.waiting());
+    status.start_work();
+    ASSERT_TRUE(status.wait());
+    ASSERT_TRUE(status.waiting());
+    status.cancel_work();
+    ASSERT_TRUE(status.waiting());
+    ASSERT_TRUE(status.unwait());
+    ASSERT_FALSE(status.waiting());
+    status.start_work();
+    status.finish_work();
+    ASSERT_FALSE(status.wait());
+    ASSERT_FALSE(status.waiting());
+    ASSERT_FALSE(status.unwait());
+    ASSERT_FALSE(status.wait());
+}
