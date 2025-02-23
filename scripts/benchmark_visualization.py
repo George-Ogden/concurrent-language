@@ -1,5 +1,7 @@
+import functools
 import os.path
 
+import numpy as np
 import pandas as pd
 
 
@@ -28,3 +30,10 @@ def load_directory(directory: str) -> pd.DataFrame:
 
 def merge_logs(*logs: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(logs, ignore_index=True)
+
+
+def normalize(df: pd.DataFrame) -> pd.DataFrame:
+    mean = df.groupby("function").duration.transform("mean")
+    std = df.groupby("function").duration.transform(functools.partial(np.nanstd, ddof=0))
+    df["normalized_duration"] = (df["duration"] - mean) / std
+    return df
