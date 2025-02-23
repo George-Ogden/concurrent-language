@@ -29,9 +29,7 @@ def test_load_directory():
         ]
     )
     target_df["title"] = "test example"
-    print(target_df)
-    print(df)
-    assert df.equals(target_df)
+    pd.testing.assert_frame_equal(df, target_df)
 
 
 def test_merge_logs():
@@ -84,9 +82,7 @@ def test_merge_logs():
         ]
     )
     merged_df = merge_logs(df1, df2, df3)
-    print(target_df)
-    print(merged_df)
-    assert merged_df.equals(target_df)
+    pd.testing.assert_frame_equal(merged_df, target_df)
 
 
 def test_normalize():
@@ -162,6 +158,4 @@ def test_normalize():
         ]
     )
     normalized_df = normalize(df)
-    print(target_df)
-    print(normalized_df)
     pd.testing.assert_frame_equal(normalized_df, target_df)

@@ -21,7 +21,7 @@ def load_directory(directory: str) -> pd.DataFrame:
     df = pd.read_csv(
         log_filename, sep="\t", index_col=False, converters={"duration": convert_float_or_nan}
     )
-    df["function"] = df["name"] + "(" + df["args"] + ")"
+    df["function"] = df.name + "(" + df.args + ")"
 
     with open(title_filename) as f:
         title = f.read().strip()
@@ -38,7 +38,7 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     df["log_duration"] = np.log10(df.duration)
     grouped_df = df.groupby("function").log_duration
     mean = grouped_df.transform("mean")
-    df["normalized_performance"] = 10 ** (mean - df["log_duration"])
+    df["normalized_performance"] = 10 ** (mean - df.log_duration)
     del df["log_duration"]
     return df
 
