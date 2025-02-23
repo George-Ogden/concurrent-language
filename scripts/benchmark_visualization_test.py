@@ -1,4 +1,3 @@
-import math
 import os.path
 
 import pandas as pd
@@ -93,13 +92,13 @@ def test_merge_logs():
 def test_normalize():
     df = pd.DataFrame(
         [
+            {"function": "fn100(1)", "duration": 10.0, "title": "title"},
+            {"function": "fn100(2)", "duration": 20.0, "title": "title"},
+            {"function": "fn100(3)", "duration": 3.0, "title": "title"},
             {"function": "fn100(1)", "duration": 100.0, "title": "title"},
-            {"function": "fn100(2)", "duration": 200.0, "title": "title"},
-            {"function": "fn100(3)", "duration": 300.0, "title": "title"},
-            {"function": "fn100(1)", "duration": 101.0, "title": "title"},
-            {"function": "fn100(2)", "duration": 202.0, "title": "title"},
-            {"function": "fn100(3)", "duration": 303.0, "title": "title2"},
-            {"function": "fn100(1)", "duration": 102.0, "title": "title2"},
+            {"function": "fn100(2)", "duration": 20.0, "title": "title"},
+            {"function": "fn100(3)", "duration": 3000.0, "title": "title2"},
+            {"function": "fn100(1)", "duration": 1000.0, "title": "title2"},
             {"function": "fn100(2)", "duration": float("nan"), "title": "title2"},
             {"function": "fn100(3)", "duration": float("nan"), "title": "title2"},
         ]
@@ -108,61 +107,61 @@ def test_normalize():
         [
             {
                 "function": "fn100(1)",
+                "duration": 10.0,
+                "title": "title",
+                "normalized_performance": 1.0,
+            },
+            {
+                "function": "fn100(2)",
+                "duration": 20.0,
+                "title": "title",
+                "normalized_performance": 0.0,
+            },
+            {
+                "function": "fn100(3)",
+                "duration": 3.0,
+                "title": "title",
+                "normalized_performance": 1.5,
+            },
+            {
+                "function": "fn100(1)",
                 "duration": 100.0,
                 "title": "title",
-                "normalized_duration": -math.sqrt(3) / math.sqrt(2),
+                "normalized_performance": 0.0,
             },
             {
                 "function": "fn100(2)",
-                "duration": 200.0,
+                "duration": 20.0,
                 "title": "title",
-                "normalized_duration": -1.0,
+                "normalized_performance": 0.0,
             },
             {
                 "function": "fn100(3)",
-                "duration": 300.0,
-                "title": "title",
-                "normalized_duration": -1.0,
+                "duration": 3000.0,
+                "title": "title2",
+                "normalized_performance": -1.5,
             },
             {
                 "function": "fn100(1)",
-                "duration": 101.0,
-                "title": "title",
-                "normalized_duration": 0.0,
-            },
-            {
-                "function": "fn100(2)",
-                "duration": 202.0,
-                "title": "title",
-                "normalized_duration": 1.0,
-            },
-            {
-                "function": "fn100(3)",
-                "duration": 303.0,
+                "duration": 1000.0,
                 "title": "title2",
-                "normalized_duration": 1.0,
-            },
-            {
-                "function": "fn100(1)",
-                "duration": 102.0,
-                "title": "title2",
-                "normalized_duration": math.sqrt(3) / math.sqrt(2),
+                "normalized_performance": -1.0,
             },
             {
                 "function": "fn100(2)",
                 "duration": float("nan"),
                 "title": "title2",
-                "normalized_duration": float("nan"),
+                "normalized_performance": float("nan"),
             },
             {
                 "function": "fn100(3)",
                 "duration": float("nan"),
                 "title": "title2",
-                "normalized_duration": float("nan"),
+                "normalized_performance": float("nan"),
             },
         ]
     )
     normalized_df = normalize(df)
     print(target_df)
     print(normalized_df)
-    assert normalized_df.equals(target_df)
+    pd.testing.assert_frame_equal(normalized_df, target_df)

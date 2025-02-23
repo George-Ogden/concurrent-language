@@ -1,4 +1,3 @@
-import functools
 import os.path
 
 import numpy as np
@@ -33,7 +32,9 @@ def merge_logs(*logs: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize(df: pd.DataFrame) -> pd.DataFrame:
-    mean = df.groupby("function").duration.transform("mean")
-    std = df.groupby("function").duration.transform(functools.partial(np.nanstd, ddof=0))
-    df["normalized_duration"] = (df["duration"] - mean) / std
+    df["log_duration"] = np.log10(df.duration)
+    grouped_df = df.groupby("function").log_duration
+    mean = grouped_df.transform("mean")
+    df["normalized_performance"] = mean - df["log_duration"]
+    del df["log_duration"]
     return df
