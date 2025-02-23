@@ -75,7 +75,7 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: build
-	pytest . -vv
+	pytest parsing -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
@@ -93,6 +93,7 @@ test: build
 		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
 		cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
 	done;
+	pytest scripts -vv
 
 clean:
 	rm -rf $(GRAMMAR)
