@@ -31,7 +31,7 @@ FILE := samples/samples.txt
 USER_FLAG := 0
 
 run: build
-	sudo make -C backend run --quiet
+	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend run --quiet
 
 build: $(TARGET)
 	make -C backend build
