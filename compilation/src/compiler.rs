@@ -429,7 +429,14 @@ impl Compiler {
         let type_ = self.compile_type(&expression.type_());
         let (mut statements, value) = self.compile_expression(expression);
         let memory = self.compile_location(&location);
-        if matches!(&value, Expression::FnCall(_)) {
+        if matches!(
+            &value,
+            Expression::FnCall(FnCall {
+                fn_: Value::Memory(_),
+                fn_type: _,
+                args: _
+            })
+        ) {
             statements.push(
                 Assignment {
                     target: memory,
@@ -1084,6 +1091,10 @@ mod tests {
             }.into()
         ],
         vec![
+            Declaration{
+                memory: Memory(Id::from("m0")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
             Assignment {
                 target: Memory(Id::from("m0")),
                 value: FnCall{
@@ -1098,7 +1109,7 @@ mod tests {
                 }.into(),
             }.into(),
         ];
-        "fn call"
+        "built-in fn call"
     )]
     #[test_case(
         {
@@ -1222,13 +1233,13 @@ mod tests {
                                 location: location.clone(),
                                 expression:
                                     IntermediateFnCall{
-                                        fn_: BuiltInFn(
-                                            Name::from("++"),
-                                            IntermediateFnType(
+                                        fn_: IntermediateMemory{
+                                            location: Location::new(),
+                                            type_: IntermediateFnType(
                                                 vec![AtomicTypeEnum::INT.into()],
                                                 Box::new(AtomicTypeEnum::INT.into())
                                             ).into()
-                                        ).into(),
+                                        }.into(),
                                         args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
                                     }.into()
                             }.into()
@@ -1249,12 +1260,11 @@ mod tests {
                 condition: BuiltIn::from(Boolean{value: true}).into(),
                 branches: (
                     vec![
+                        Await(vec![Memory(Id::from("m0"))]).into(),
                         Assignment {
-                            target: Memory(Id::from("m0")),
+                            target: Memory(Id::from("m1")),
                             value: FnCall{
-                                fn_: BuiltIn::BuiltInFn(
-                                    Name::from("Increment__BuiltIn"),
-                                ).into(),
+                                fn_: Memory(Id::from("m0")).into(),
                                 fn_type: FnType(
                                     vec![AtomicTypeEnum::INT.into()],
                                     Box::new(AtomicTypeEnum::INT.into())
@@ -1265,7 +1275,7 @@ mod tests {
                     ],
                     vec![
                         Assignment {
-                            target: Memory(Id::from("m0")),
+                            target: Memory(Id::from("m1")),
                             value: Expression::Value(BuiltIn::from(Integer{value: 0}).into()),
                         }.into(),
                     ],
@@ -1293,13 +1303,13 @@ mod tests {
                                 location: memory.location.clone(),
                                 expression:
                                     IntermediateFnCall{
-                                        fn_: BuiltInFn(
-                                            Name::from("++"),
-                                            IntermediateFnType(
+                                        fn_: IntermediateMemory{
+                                            location: Location::new(),
+                                            type_: IntermediateFnType(
                                                 vec![AtomicTypeEnum::INT.into()],
                                                 Box::new(AtomicTypeEnum::INT.into())
                                             ).into()
-                                        ).into(),
+                                        }.into(),
                                         args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
                                     }.into()
                             }.into()
@@ -1326,12 +1336,11 @@ mod tests {
                         }.into(),
                     ],
                     vec![
+                        Await(vec![Memory(Id::from("m1"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m0")),
                             value: FnCall{
-                                fn_: BuiltIn::BuiltInFn(
-                                    Name::from("Increment__BuiltIn"),
-                                ).into(),
+                                fn_: Memory(Id::from("m1")).into(),
                                 fn_type: FnType(
                                     vec![AtomicTypeEnum::INT.into()],
                                     Box::new(AtomicTypeEnum::INT.into())
@@ -1344,10 +1353,10 @@ mod tests {
             }.into(),
             Declaration {
                 type_: TupleType(vec![AtomicTypeEnum::INT.into()]).into(),
-                memory: Memory(Id::from("m1"))
+                memory: Memory(Id::from("m2"))
             }.into(),
             Assignment {
-                target: Memory(Id::from("m1")),
+                target: Memory(Id::from("m2")),
                 value: TupleExpression(
                     vec![Memory(Id::from("m0")).into()]
                 ).into(),
@@ -1526,6 +1535,10 @@ mod tests {
         },
         vec![
             Await(vec![Memory(Id::from("m0"))]).into(),
+            Declaration{
+                memory: Memory(Id::from("m2")),
+                type_: AtomicTypeEnum::BOOL.into()
+            }.into(),
             MatchStatement {
                 expression: (
                     Memory(Id::from("m0")).into(),
@@ -1637,6 +1650,10 @@ mod tests {
         },
         vec![
             Await(vec![Memory(Id::from("m0"))]).into(),
+            Declaration{
+                memory: Memory(Id::from("m2")),
+                type_: AtomicTypeEnum::BOOL.into()
+            }.into(),
             MatchStatement {
                 expression: (
                     Memory(Id::from("m0")).into(),
@@ -1761,6 +1778,10 @@ mod tests {
                 ],
                 env: None,
                 statements: vec![
+                    Declaration {
+                        memory: Memory(Id::from("m2")),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
@@ -1785,12 +1806,7 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: vec![
-                    Declaration {
-                        memory: Memory(Id::from("m2")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
-                ]
+                allocations: Vec::new()
             }
         );
         "env-free closure"
@@ -1875,6 +1891,10 @@ mod tests {
                             idx: 1
                         }.into()
                     }.into(),
+                    Declaration {
+                        memory: Memory(Id::from("m2")),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
@@ -1899,12 +1919,7 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: vec![
-                    Declaration {
-                        memory: Memory(Id::from("m2")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
-                ]
+                allocations: Vec::new()
             }
         );
         "env closure"
@@ -1975,6 +1990,10 @@ mod tests {
                             idx: 0
                         }.into()
                     }.into(),
+                    Declaration {
+                        memory: Memory(Id::from("m2")),
+                        type_: AtomicTypeEnum::INT.into()
+                    }.into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
@@ -1999,12 +2018,7 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: vec![
-                    Declaration {
-                        memory: Memory(Id::from("m2")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
-                ]
+                allocations: Vec::new()
             }
         );
         "env and argument"
