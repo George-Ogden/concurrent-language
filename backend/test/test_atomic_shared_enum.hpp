@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <type_traits>
 
 TEST(PrefixSumTest, PrefixSum) {
     ASSERT_EQ((prefix_sum_v<1, 3, 2, 2>),
@@ -250,4 +251,40 @@ TEST(AtomicSharedEnumTest, CompareExchangeIndirect) {
     ASSERT_EQ(byte_array.load<1>(), 0);
     ASSERT_EQ(byte_array.load<2>(), 0);
     ASSERT_EQ(byte_array.load<3>(), 0);
+}
+
+TEST(AtomicSharedEnumTest, TwoByteEnum) {
+    AtomicSharedEnum<7, 9> byte_array;
+    ASSERT_EQ(byte_array.load<0>(), 0);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    byte_array.store<0>((1 << 7) - 1);
+    ASSERT_EQ(byte_array.load<0>(), (1 << 7) - 1);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_TRUE(byte_array.compare_exchange<1>(0, (1 << 9) - 1));
+    ASSERT_EQ(byte_array.load<0>(), (1 << 7) - 1);
+    ASSERT_EQ(byte_array.load<1>(), (1 << 9) - 1);
+    ASSERT_EQ(byte_array.exchange<0>(0), (1 << 7) - 1);
+    ASSERT_EQ(byte_array.load<0>(), 0);
+    ASSERT_EQ(byte_array.load<1>(), (1 << 9) - 1);
+    ASSERT_FALSE((byte_array.compare_exchange<1, 0>((1 << 8) - 1, 0)));
+    ASSERT_EQ(byte_array.load<0>(), 0);
+    ASSERT_EQ(byte_array.load<1>(), (1 << 9) - 1);
+    byte_array.store<1>(0);
+    ASSERT_EQ(byte_array.load<0>(), 0);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+}
+
+TEST(AtomicSharedEnumTest, SizeTest) {
+    static_assert(
+        std::is_same_v<AtomicSharedEnum<1, 2, 1, 2>::T, std::uint8_t>);
+    static_assert(
+        std::is_same_v<AtomicSharedEnum<1, 2, 1, 2, 2>::T, std::uint8_t>);
+    static_assert(
+        std::is_same_v<AtomicSharedEnum<1, 2, 1, 2, 1, 2>::T, std::uint16_t>);
+    static_assert(
+        std::is_same_v<AtomicSharedEnum<1, 2, 1, 2, 1, 2>::T, std::uint16_t>);
+    static_assert(std::is_same_v<AtomicSharedEnum<8, 8>::T, std::uint16_t>);
+    static_assert(std::is_same_v<AtomicSharedEnum<8, 1, 8>::T, std::uint32_t>);
+    static_assert(
+        std::is_same_v<AtomicSharedEnum<8, 8, 8, 8>::T, std::uint32_t>);
 }
