@@ -35,7 +35,7 @@ template <typename T> class LazyConstant : public Lazy<T> {
 
 template <typename T> class LazyPlaceholder : public Lazy<T> {
     std::atomic<std::shared_ptr<Lazy<T>>> reference = nullptr;
-    std::shared_ptr<Work> work;
+    std::atomic<std::shared_ptr<Work>> work;
     bool required = false;
     Locked<std::vector<Continuation>> continuations;
 

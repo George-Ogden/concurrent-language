@@ -72,7 +72,7 @@ void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
     }
     continuations->clear();
     reference.store(value, std::memory_order_relaxed);
-    work = nullptr;
+    work.store(nullptr, std::memory_order_relaxed);
     continuations.release();
 }
 
@@ -112,7 +112,7 @@ void LazyPlaceholder<T>::prioritize() {
     required = true;
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
-        WorkT current_work = work;
+        WorkT current_work = work.load(std::memory_order_relaxed);
         if (current_work != nullptr){
             WorkManager::priority_enqueue(current_work);
         }
