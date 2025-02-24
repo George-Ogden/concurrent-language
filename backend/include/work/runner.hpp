@@ -27,11 +27,9 @@ struct WorkRunner {
 
     void main(std::atomic<WorkT> *ref);
 
-    std::pair<WorkT, bool> get_work();
+    WorkT get_work();
     void enqueue(WorkT work);
-    void priority_enqueue(WorkT work);
-    void try_priority_enqueue(WorkT work);
-    bool break_on_work(std::pair<WorkT, bool> work, Continuation &c);
+    bool break_on_work(WorkT &work, Continuation &c);
     void exit_early(Continuation &c);
 
     template <typename... Vs> void await_restricted(Vs &...vs);

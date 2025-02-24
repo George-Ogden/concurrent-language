@@ -52,69 +52,32 @@ TEST_F(WorkTest, CorrectValue) {
 class StatusTest : public WorkTest {};
 
 TEST_F(StatusTest, QueuedStatus) {
-    ASSERT_FALSE(work->status.queued());
-    WorkManager::enqueue(work);
-    ASSERT_TRUE(work->status.queued());
-    work->run();
-    ASSERT_TRUE(work->status.done());
     WorkRunner::shared_work_queue->clear();
-    work->status.dequeue();
-    ASSERT_FALSE(work->status.queued());
+    ASSERT_TRUE(work->status.acquire());
+    auto n = work.use_count();
+    WorkManager::enqueue(work);
+    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 1);
+    ASSERT_EQ(work.use_count(), n);
+}
+
+TEST_F(StatusTest, RequiredAcquiredQueuedStatus) {
+    WorkRunner::shared_work_queue->clear();
+    ASSERT_TRUE(work->status.require());
+    ASSERT_TRUE(work->status.acquire());
+    auto n = work.use_count();
     WorkManager::enqueue(work);
     ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
-    ASSERT_FALSE(work->status.queued());
-    ASSERT_TRUE(work->status.done());
+    ASSERT_EQ(work.use_count(), n + 1);
 }
 
-class RunningStatusChecker
-    : public TypedClosureI<TupleT<WorkT *, Status::ExecutionStatus>, TupleT<>> {
-    using TypedClosureI<TupleT<WorkT *, Status::ExecutionStatus>,
-                        TupleT<>>::TypedClosureI;
-    LazyT<TupleT<>> body() override {
-        auto [work, running_status] = env;
-        running_status->lvalue() = (*work->value())->status.execution_status();
-        return std::make_tuple();
-    }
-
-  public:
-    static std::unique_ptr<TypedFnI<TupleT<>>> init(const ArgsT &args,
-                                                    std::shared_ptr<EnvT> env) {
-        return std::make_unique<RunningStatusChecker>(args, *env);
-    }
-};
-
-TEST_F(StatusTest, RunningStatus) {
-    WorkT work;
-    auto env = std::make_tuple(make_lazy<WorkT *>(&work),
-                               make_lazy<Status::ExecutionStatus>());
-
-    LazyT<TupleT<>> v;
-    std::tie(work, v) = Work::fn_call(
-        TypedClosureG<typename RunningStatusChecker::EnvT, TupleT<>>{
-            RunningStatusChecker::init, env});
-
-    ASSERT_EQ(work->status.execution_status(), Status::available);
-    work->run();
-    ASSERT_EQ(std::get<1>(env)->value(), Status::active);
-    ASSERT_EQ(work->status.execution_status(), Status::finished);
-}
-
-TEST_F(StatusTest, RunningFromQueueStatus) {
-    WorkT work;
-    auto env = std::make_tuple(make_lazy<WorkT *>(&work),
-                               make_lazy<Status::ExecutionStatus>());
-
-    LazyT<TupleT<>> v;
-    std::tie(work, v) = Work::fn_call(
-        TypedClosureG<typename RunningStatusChecker::EnvT, TupleT<>>{
-            RunningStatusChecker::init, env});
-
+TEST_F(StatusTest, AcquiredRequiredQueuedStatus) {
+    WorkRunner::shared_work_queue->clear();
+    ASSERT_TRUE(work->status.acquire());
+    ASSERT_TRUE(work->status.require());
+    auto n = work.use_count();
     WorkManager::enqueue(work);
-    ASSERT_TRUE(work->status.queued());
-    ASSERT_EQ(work->status.execution_status(), Status::available);
-    work->run();
-    ASSERT_EQ(std::get<1>(env)->value(), Status::active);
-    ASSERT_TRUE(work->status.done());
+    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
+    ASSERT_EQ(work.use_count(), n + 1);
 }
 
 class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
@@ -145,7 +108,7 @@ TEST(TupleWorkTest, CorrectValue) {
 
 class WorkContinuationTest : public WorkTest {};
 
-TEST_F(WorkTest, IndirectContinuationAdded) {
+TEST_F(WorkContinuationTest, IndirectContinuationAdded) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{true};
@@ -155,7 +118,7 @@ TEST_F(WorkTest, IndirectContinuationAdded) {
     ASSERT_EQ(**valid, false);
 }
 
-TEST_F(WorkTest, IndirectContinuationApplied) {
+TEST_F(WorkContinuationTest, IndirectContinuationApplied) {
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
     std::atomic<unsigned> counter{1};
     Locked<bool> *valid = new Locked<bool>{true};

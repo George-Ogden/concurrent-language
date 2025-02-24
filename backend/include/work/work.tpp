@@ -1,7 +1,7 @@
 #pragma once
 
 #include "work/work.hpp"
-#include "work/status.hpp"
+#include "work/status.tpp"
 #include "fn/continuation.tpp"
 #include "fn/types.hpp"
 #include "fn/fn_inst.tpp"
@@ -53,24 +53,19 @@ void Work::assign(T &targets, U &results) {
 }
 
 template <typename Ret, typename... Args>
-bool TypedWork<Ret, Args...>::run() {
+void TypedWork<Ret, Args...>::run() {
     if (this->status.done()) {
-            return true;
+        return;
     }
-    if (this->status.start_work()) {
-        LazyT<Ret> results = fn->run();
-        assign(targets, results);
-        this->continuations.acquire();
-        for (Continuation &c : *this->continuations) {
-            c.update();
-        }
-        this->continuations->clear();
-        this->status.finish_work();
-        this->continuations.release();
-        return true;
-    } else {
-        return false;
+    LazyT<Ret> results = fn->run();
+    assign(targets, results);
+    this->continuations.acquire();
+    for (Continuation &c : *this->continuations) {
+        c.update();
     }
+    this->continuations->clear();
+    this->status.finish();
+    this->continuations.release();
 }
 
 template <typename Ret, typename... Args>

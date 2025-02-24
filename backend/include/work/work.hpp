@@ -23,7 +23,7 @@ class Work {
     Status status;
     Work();
     virtual ~Work();
-    virtual bool run() = 0;
+    virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
     template <typename Ret, typename... Args>
@@ -41,6 +41,6 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
     std::unique_ptr<TypedFnI<Ret, Args...>> fn;
 
   public:
-    bool run() override;
+    void run() override;
     void await_all() override;
 };
