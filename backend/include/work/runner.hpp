@@ -23,7 +23,7 @@ struct WorkRunner {
   protected:
     std::atomic<unsigned> counter;
     Locked<std::deque<WorkT>> private_work_stack;
-    bool priority_mode = false;
+    WorkT current_work;
 
     void main(std::atomic<WorkT> *ref);
 

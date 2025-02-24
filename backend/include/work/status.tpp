@@ -8,12 +8,11 @@
 Status::Status() = default;
 
 bool Status::acquire(){
-    auto id = ThreadManager::get_id();;
-    return value.compare_exchange<OWNER_IDX>(0, id + 1, std::memory_order_acquire);
+    return value.compare_exchange<OWNED_IDX>(false, true, std::memory_order_acquire);
 }
 
 bool Status::release(){
-    return value.compare_exchange<REQUIRED_IDX,OWNER_IDX>(0, 0, std::memory_order_acquire);
+    return value.compare_exchange<REQUIRED_IDX,OWNED_IDX>(false, false, std::memory_order_acquire);
 }
 
 bool Status::require(){

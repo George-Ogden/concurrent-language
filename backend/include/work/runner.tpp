@@ -16,10 +16,9 @@ WorkRunner::WorkRunner(const ThreadManager::ThreadId &id):id(id){}
 void WorkRunner::main(std::atomic<WorkT> *ref){
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
     if (work != nullptr) {
-        priority_mode = true;
+        current_work = work;
         work->status.require();
         work->run();
-        priority_mode = true;
         work->await_all();
         done_flag.store(true, std::memory_order_release);
     } else {
@@ -28,6 +27,7 @@ void WorkRunner::main(std::atomic<WorkT> *ref){
             if (work == nullptr) {
                 continue;
             }
+            current_work = work;
             try {
                 work->run();
             } catch (finished &e) {
@@ -64,6 +64,7 @@ WorkT WorkRunner::get_work() {
                     WorkT work = stack->back();
                     stack->pop_back();
                     stack.release();
+                    std::cerr << "H";
                     return work;
                 }
             } else if (!stack->empty() && stack.try_acquire()){
@@ -73,6 +74,7 @@ WorkT WorkRunner::get_work() {
                     WorkT work = stack->back();
                     stack->pop_back();
                     stack.release();
+                    std::cerr << "h";
                     return work;
                 }
             }
@@ -87,6 +89,7 @@ WorkT WorkRunner::get_work() {
             queue->pop_front();
             if (work != nullptr && work->status.acquire()){
                 queue.release();
+                std::cerr << "l";
                 return work;
             }
         }
@@ -149,7 +152,7 @@ void WorkRunner::await_restricted(Vs &...vs) {
     if (all_done(vs...)) {
         return exit_early(c);
     }
-    if (priority_mode){
+    if (current_work->status.required()){
         (vs->prioritize(), ...);
     }
     while (!done_flag.load(std::memory_order_acquire))
@@ -176,15 +179,15 @@ void WorkRunner::exit_early(Continuation &c){
 }
 
 bool WorkRunner::break_on_work(WorkT &work, Continuation &c){
-    const bool prev_priority = priority_mode;
+    const WorkT prev_work = current_work;
     try {
         if (c.counter.load(std::memory_order_relaxed) > 0) {
             throw stack_inversion{};
         }
         if (work != nullptr) {
-            priority_mode = work->status.required();
+            current_work = work;
             work->run();
-            priority_mode = prev_priority;
+            current_work = prev_work;
         }
         return false;
     } catch (stack_inversion &e) {
@@ -200,7 +203,7 @@ bool WorkRunner::break_on_work(WorkT &work, Continuation &c){
         }
         c.counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
 
-        priority_mode = prev_priority;
+        current_work = prev_work;
         if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0) {
             return true;
         }
