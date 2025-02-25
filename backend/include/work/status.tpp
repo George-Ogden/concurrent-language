@@ -12,15 +12,15 @@ bool Status::acquire(){
 }
 
 bool Status::release(){
-    return value.compare_exchange<REQUIRED_IDX,OWNED_IDX>(false, false, std::memory_order_acquire);
+    return value.compare_exchange<PRIORITY_IDX,OWNED_IDX>(false, false, std::memory_order_acquire);
 }
 
-bool Status::require(){
-    return value.compare_exchange<REQUIRED_IDX>(false, true);
+bool Status::prioritize(){
+    return value.compare_exchange<PRIORITY_IDX>(false, true);
 }
 
-bool Status::required() const{
-    return value.load<REQUIRED_IDX>();
+bool Status::priority() const{
+    return value.load<PRIORITY_IDX>();
 }
 
 void Status::finish(){

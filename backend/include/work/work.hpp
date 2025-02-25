@@ -10,6 +10,7 @@
 #include "work/status.hpp"
 
 #include <atomic>
+#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -17,6 +18,7 @@
 class Work {
   protected:
     Locked<std::vector<Continuation>> continuations;
+    Locked<std::vector<std::weak_ptr<LazyValue>>> dependencies;
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
@@ -30,6 +32,9 @@ class Work {
     static std::pair<std::shared_ptr<Work>, LazyT<Ret>>
     fn_call(FnT<Ret, Args...> f, LazyT<Args>... args);
     void add_continuation(Continuation c);
+    void add_dependencies(
+        std::initializer_list<std::shared_ptr<LazyValue>> &&dependencies);
+    bool prioritize();
 };
 
 using WorkT = std::shared_ptr<Work>;

@@ -11,14 +11,17 @@
 #include <vector>
 
 struct Work;
-template <typename T> class Lazy {
-  public:
+struct LazyValue {
+    virtual void require() = 0;
+    virtual ~LazyValue();
+};
+
+template <typename T> struct Lazy : LazyValue {
     virtual bool done() = 0;
     virtual T value() = 0;
     virtual T &lvalue() = 0;
     virtual void add_continuation(Continuation c) = 0;
-    virtual void prioritize();
-    virtual ~Lazy();
+    virtual void require() override;
     virtual std::shared_ptr<Lazy<T>> as_ref();
 };
 
@@ -46,7 +49,7 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     bool done() override;
     T value() override;
     T &lvalue() override;
-    void prioritize() override;
+    void require() override;
     std::shared_ptr<Lazy<T>> as_ref() override;
 };
 

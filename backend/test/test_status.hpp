@@ -28,11 +28,11 @@ TEST_F(StatusTransitionTest, AcquireRelease) {
 TEST_F(StatusTransitionTest, RequiredUnheld) {
     Status status;
     ASSERT_FALSE(status.done());
-    ASSERT_FALSE(status.required());
-    ASSERT_TRUE(status.require());
-    ASSERT_TRUE(status.required());
-    ASSERT_FALSE(status.require());
-    ASSERT_TRUE(status.required());
+    ASSERT_FALSE(status.priority());
+    ASSERT_TRUE(status.prioritize());
+    ASSERT_TRUE(status.priority());
+    ASSERT_FALSE(status.prioritize());
+    ASSERT_TRUE(status.priority());
     ASSERT_TRUE(status.acquire());
     ASSERT_FALSE(status.release());
     ASSERT_FALSE(status.done());
@@ -42,11 +42,11 @@ TEST_F(StatusTransitionTest, RequiredHeld) {
     Status status;
     ASSERT_FALSE(status.done());
     ASSERT_TRUE(status.acquire());
-    ASSERT_FALSE(status.required());
-    ASSERT_TRUE(status.require());
-    ASSERT_TRUE(status.required());
-    ASSERT_FALSE(status.require());
-    ASSERT_TRUE(status.required());
+    ASSERT_FALSE(status.priority());
+    ASSERT_TRUE(status.prioritize());
+    ASSERT_TRUE(status.priority());
+    ASSERT_FALSE(status.prioritize());
+    ASSERT_TRUE(status.priority());
     ASSERT_FALSE(status.release());
     ASSERT_FALSE(status.done());
 }
