@@ -310,7 +310,7 @@ pub struct FnDef {
     pub arguments: Vec<(Memory, MachineType)>,
     pub statements: Vec<Statement>,
     pub ret: (Value, MachineType),
-    pub env: Option<MachineType>,
+    pub env: Vec<MachineType>,
     pub allocations: Vec<Declaration>,
 }
 
