@@ -5,22 +5,18 @@
 #include <bit>
 #include <memory>
 
-FnG::FnG() = default;
-FnG::~FnG() = default;
-
-FnG::FnG(void * fn, std::shared_ptr<void> env):_fn(fn),_env(env){}
-FnG::FnG(void * fn):FnG(fn, nullptr){}
-
 template <typename Ret, typename ...Args>
-TypedFnG<Ret,Args...>::TypedFnG(T fn, std::shared_ptr<void> env):FnG(std::bit_cast<void*>(fn), env){}
+TypedFnG<Ret,Args...>::TypedFnG(T fn, std::shared_ptr<void> env):_fn(fn), _env(std::reinterpret_pointer_cast<void>(env)){}
 template <typename Ret, typename ...Args>
-TypedFnG<Ret,Args...>::TypedFnG(T fn):FnG(std::bit_cast<void*>(fn)){}
+TypedFnG<Ret,Args...>::TypedFnG(T fn):TypedFnG(fn, nullptr){}
 template <typename Ret, typename ...Args>
-TypedFnG<Ret,Args...>::TypedFnG():FnG(){}
+TypedFnG<Ret,Args...>::TypedFnG() = default;
+template <typename Ret, typename ...Args>
+TypedFnG<Ret,Args...>::~TypedFnG() = default;
 
 template <typename Ret, typename ...Args>
 typename TypedFnG<Ret,Args...>::U TypedFnG<Ret,Args...>::init(LazyT<std::decay_t<Args>>...args) const {
-    return std::bit_cast<T>(_fn)(std::make_tuple(args...), _env);
+    return _fn(std::make_tuple(args...), _env);
 }
 
 template <typename E, typename Ret, typename ...Args>
