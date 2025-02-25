@@ -113,7 +113,7 @@ void LazyPlaceholder<T>::require() {
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
         WorkT current_work = work.load(std::memory_order_relaxed);
-        if (current_work != nullptr && current_work->status.prioritize() && current_work->status.acquire()){
+        if (current_work != nullptr && current_work->prioritize() && current_work->status.acquire()){
             WorkManager::enqueue(current_work);
         }
     } else {

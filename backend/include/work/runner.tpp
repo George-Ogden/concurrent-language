@@ -17,7 +17,7 @@ void WorkRunner::main(std::atomic<WorkT> *ref){
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
     if (work != nullptr) {
         current_work = work;
-        work->status.prioritize();
+        work->prioritize();
         work->run();
         work->await_all();
         done_flag.store(true, std::memory_order_release);
