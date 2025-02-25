@@ -37,7 +37,11 @@ impl Lowerer {
         };
         let scope = DEFAULT_CONTEXT.with(|context| {
             Scope::from_iter(context.iter().map(|(id, var)| {
-                let type_ = lowerer.lower_type(&var.type_.type_);
+                let IntermediateType::IntermediateFnType(type_) =
+                    lowerer.lower_type(&var.type_.type_)
+                else {
+                    panic!("Default functions have incorrect types.")
+                };
                 let variable = var.variable.clone();
                 ((variable, Vec::new()), BuiltInFn(id.clone(), type_).into())
             }))

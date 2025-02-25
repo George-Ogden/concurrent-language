@@ -1,3 +1,4 @@
+mod code_size;
 mod compiler;
 mod machine_nodes;
 

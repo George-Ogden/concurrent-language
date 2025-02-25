@@ -226,13 +226,13 @@ impl IntermediateBuiltIn {
         match self {
             IntermediateBuiltIn::Integer(_) => AtomicTypeEnum::INT.into(),
             IntermediateBuiltIn::Boolean(_) => AtomicTypeEnum::BOOL.into(),
-            IntermediateBuiltIn::BuiltInFn(BuiltInFn(_, type_)) => type_.clone(),
+            IntermediateBuiltIn::BuiltInFn(BuiltInFn(_, type_)) => type_.clone().into(),
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct BuiltInFn(pub Id, pub IntermediateType);
+pub struct BuiltInFn(pub Id, pub IntermediateFnType);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateAssignment {
