@@ -320,21 +320,23 @@ impl Translator {
             .chain(fn_def.arguments.iter().map(|(_, type_)| type_.clone()))
             .map(|type_| self.translate_type(&type_))
             .join(",");
-        let (env_ptr, replication_args) = match &fn_def.env {
-            None => (String::from("std::shared_ptr<void>"), String::from("args")),
-            Some(_) => (
+        let base_name = "TypedClosureI";
+        let (env_ptr, replication_args, base) = if fn_def.env.len() == 0 {
+            (
+                String::from("std::shared_ptr<void>"),
+                String::from("args"),
+                format!("{base_name}<Empty,{external_types}>"),
+            )
+        } else {
+            (
                 String::from("std::shared_ptr<EnvT> env"),
                 String::from("args, *env"),
-            ),
+                format!(
+                    "{base_name}<{},{external_types}>",
+                    self.translate_type(&TupleType(fn_def.env).into()),
+                ),
+            )
         };
-        let base_name = "TypedClosureI";
-        let base = format!(
-            "{base_name}<{},{}>",
-            fn_def
-                .env
-                .map_or_else(|| Code::from("Empty"), |type_| self.translate_type(&type_)),
-            external_types
-        );
 
         let declaration_code = format!("struct {name} : {base}");
         let constructor_code = format!("using {base}::{base_name};");
@@ -1174,7 +1176,7 @@ mod tests {
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
         }.into()],
-            "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>(Adder::init));  std::bit_cast<ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = x;";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>(Adder::init));  std::bit_cast<ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = x;";
         "closure assignment"
     )]
     #[test_case(
@@ -1273,7 +1275,7 @@ mod tests {
 
     #[test_case(
         FnDef {
-            env: None,
+            env: Vec::new(),
             name: Name::from("IdentityInt"),
             arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: Vec::new(),
@@ -1285,7 +1287,7 @@ mod tests {
     )]
     #[test_case(
         FnDef {
-            env: None,
+            env: Vec::new(),
             name: Name::from("FourWayPlus"),
             arguments: vec![
                 (Memory(Id::from("a")), AtomicType(AtomicTypeEnum::INT).into()),
@@ -1373,10 +1375,21 @@ mod tests {
     )]
     #[test_case(
         FnDef{
-            env: Some(AtomicType(AtomicTypeEnum::INT).into()),
+            env: vec![AtomicType(AtomicTypeEnum::INT).into()],
             name: Name::from("Adder"),
             arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: vec![
+                Declaration{
+                    memory: Memory(Id::from("y")),
+                    type_: AtomicType(AtomicTypeEnum::INT).into(),
+                }.into(),
+                Assignment {
+                    target: Memory(Id::from("y")),
+                    value: ElementAccess{
+                        idx: 0,
+                        value: Memory(Id::from("env")).into()
+                    }.into(),
+                }.into(),
                 Declaration{
                     memory: Memory(Id::from("inner_res")),
                     type_: AtomicType(AtomicTypeEnum::INT).into(),
@@ -1396,21 +1409,15 @@ mod tests {
                         ),
                         args: vec![
                             Memory(Id::from("x")).into(),
-                            Memory(Id::from("env")).into(),
+                            Memory(Id::from("y")).into(),
                         ]
                     }.into(),
-                }.into()
+                }.into(),
             ],
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: Vec::new()
         },
-        "struct Adder : TypedClosureI<Int, Int, Int> {
-        using TypedClosureI<Int, Int, Int>::TypedClosureI;
-        LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> inner_res; inner_res = Plus__BuiltIn(x, env); return inner_res; }
-            static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
-                                                    std::shared_ptr<EnvT> env) {
-        return std::make_unique<Adder>(args, *env);
-    }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> y; LazyT<Int> inner_res; y = std::get<0ULL>(env); inner_res = Plus__BuiltIn(x, y); return inner_res; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, std::shared_ptr<EnvT> env) { return std::make_unique<Adder>(args, *env); }};";
         "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1432,7 +1439,7 @@ mod tests {
             ],
             fn_defs: vec![
                 FnDef {
-                    env: None,
+                    env: Vec::new(),
                     name: Name::from("Main"),
                     arguments: Vec::new(),
                     statements: vec![
@@ -1465,7 +1472,7 @@ mod tests {
                     ]
                 },
                 FnDef {
-                    env: None,
+                    env: Vec::new(),
                     name: Name::from("PreMain"),
                     arguments: Vec::new(),
                     statements: vec![
