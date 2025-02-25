@@ -9,8 +9,8 @@
 #include <optional>
 #include <memory>
 
-template <typename T>
-Lazy<T>::~Lazy() = default;
+LazyValue::~LazyValue() = default;
+
 
 template <typename T>
 std::shared_ptr<Lazy<T>> Lazy<T>::as_ref() {
@@ -18,7 +18,7 @@ std::shared_ptr<Lazy<T>> Lazy<T>::as_ref() {
 }
 
 template <typename T>
-void Lazy<T>::prioritize(){}
+void Lazy<T>::require(){}
 
 template <typename T>
 template <typename ...Args>
@@ -64,7 +64,7 @@ void LazyPlaceholder<T>::add_continuation(Continuation c) {
 template <typename T>
 void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
     if (required){
-        value->prioritize();
+        value->require();
     }
     continuations.acquire();
     for (Continuation &c : *continuations) {
@@ -72,7 +72,7 @@ void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
     }
     continuations->clear();
     reference.store(value, std::memory_order_relaxed);
-    work = nullptr;
+    work.store(nullptr, std::memory_order_relaxed);
     continuations.release();
 }
 
@@ -108,15 +108,15 @@ std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
 }
 
 template <typename T>
-void LazyPlaceholder<T>::prioritize() {
+void LazyPlaceholder<T>::require() {
     required = true;
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
-        WorkT current_work = work;
-        if (current_work != nullptr){
-            WorkManager::priority_enqueue(current_work);
+        WorkT current_work = work.load(std::memory_order_relaxed);
+        if (current_work != nullptr && current_work->prioritize() && current_work->status.acquire()){
+            WorkManager::enqueue(current_work);
         }
     } else {
-        current_reference->prioritize();
+        current_reference->require();
     }
 }

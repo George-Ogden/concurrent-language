@@ -10,6 +10,7 @@
 #include "work/status.hpp"
 
 #include <atomic>
+#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -17,19 +18,23 @@
 class Work {
   protected:
     Locked<std::vector<Continuation>> continuations;
+    Locked<std::vector<std::weak_ptr<LazyValue>>> dependencies;
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
     Status status;
     Work();
     virtual ~Work();
-    virtual bool run() = 0;
+    virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
     template <typename Ret, typename... Args>
     static std::pair<std::shared_ptr<Work>, LazyT<Ret>>
     fn_call(FnT<Ret, Args...> f, LazyT<Args>... args);
     void add_continuation(Continuation c);
+    void add_dependencies(
+        std::initializer_list<std::shared_ptr<LazyValue>> &&dependencies);
+    bool prioritize();
 };
 
 using WorkT = std::shared_ptr<Work>;
@@ -41,6 +46,6 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
     std::unique_ptr<TypedFnI<Ret, Args...>> fn;
 
   public:
-    bool run() override;
+    void run() override;
     void await_all() override;
 };
