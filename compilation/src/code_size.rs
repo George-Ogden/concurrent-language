@@ -5,6 +5,7 @@ use gcollections::ops::*;
 use interval::ops::*;
 use interval::Interval;
 use lowering::IntermediateIfStatement;
+use lowering::IntermediateLambda;
 use lowering::IntermediateMatchBranch;
 use lowering::IntermediateMatchStatement;
 use lowering::IntermediateStatement;
@@ -73,7 +74,7 @@ const CODE_SIZE_CONSTANTS: Lazy<CodeSizeConstants> = Lazy::new(|| CodeSizeConsta
     ),
 });
 
-struct CodeSizeEstimator {}
+pub struct CodeSizeEstimator {}
 
 impl CodeSizeEstimator {
     fn builtin_size(built_in: &IntermediateBuiltIn) -> usize {
@@ -167,6 +168,11 @@ impl CodeSizeEstimator {
             .iter()
             .map(Self::statement_size)
             .fold(Interval::singleton(0), Interval::add)
+    }
+    fn lambda_size(lambda: &IntermediateLambda) -> (usize, usize) {
+        let size_interval =
+            Self::statements_size(&lambda.statements) + Self::value_size(&lambda.ret);
+        (size_interval.lower(), size_interval.upper())
     }
 }
 
@@ -559,6 +565,75 @@ mod tests {
     fn test_statement_size(statement_size: (IntermediateStatement, Interval<usize>)) {
         let (statement, expected_size) = statement_size;
         let size = CodeSizeEstimator::statement_size(&statement);
+        assert_eq!(size, expected_size)
+    }
+
+    #[test_case(
+        (
+            {
+                let arg = IntermediateArg{
+                    type_: AtomicTypeEnum::INT.into(),
+                    location: Location::new()
+                };
+                IntermediateLambda {
+                    args: vec![arg.clone()],
+                    statements: Vec::new(),
+                    ret: arg.clone().into()
+                }.into()
+            },
+            (*MAS, *MAS)
+        );
+        "lambda no statements"
+    )]
+    #[test_case(
+        {
+            let arg = IntermediateArg{
+                type_: AtomicTypeEnum::BOOL.into(),
+                location: Location::new()
+            };
+            let target = IntermediateMemory{
+                type_: AtomicTypeEnum::INT.into(),
+                location: Location::new()
+            };
+            let statement = IntermediateIfStatement{
+                condition: arg.clone().into(),
+                branches:(
+                    vec![
+                        IntermediateAssignment{
+                            location: target.location.clone(),
+                            expression: IntermediateValue::from(Integer{ value: 1 }).into(),
+                        }.into()
+                    ],
+                    vec![
+                        IntermediateAssignment{
+                            location: target.location.clone(),
+                            expression: IntermediateValue::from(IntermediateMemory{
+                                location: Location::new(),
+                                type_: AtomicTypeEnum::INT.into()
+                            }).into(),
+                        }.into()
+                    ]
+                )
+            };
+            let range = CodeSizeEstimator::if_statement_size(&statement);
+            let lower_bound = range.lower() + *MAS;
+            let upper_bound = range.upper() + *MAS;
+            (
+                IntermediateLambda {
+                    args: vec![arg.clone()],
+                    statements: vec![
+                        statement.into()
+                    ],
+                    ret: target.into()
+                }.into(),
+                (lower_bound, upper_bound)
+            )
+        };
+        "lambda if statement"
+    )]
+    fn test_lambda_size(lambda_size: (IntermediateLambda, (usize, usize))) {
+        let (lambda, expected_size) = lambda_size;
+        let size = CodeSizeEstimator::lambda_size(&lambda);
         assert_eq!(size, expected_size)
     }
 }
