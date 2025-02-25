@@ -1,7 +1,7 @@
 #pragma once
 
 #include "work/work.hpp"
-#include "work/status.hpp"
+#include "work/status.tpp"
 #include "fn/continuation.tpp"
 #include "fn/types.hpp"
 #include "fn/fn_inst.tpp"
@@ -43,6 +43,44 @@ void Work::add_continuation(Continuation c) {
     }
 }
 
+bool Work::prioritize(){
+    if (status.priority()) return false;
+    dependencies.acquire();
+    if (status.prioritize()){
+        for (std::weak_ptr<LazyValue> weak_dependency : *dependencies){
+            std::shared_ptr<LazyValue> dependency = weak_dependency.lock();
+            if (dependency != nullptr){
+                dependency->require();
+            }
+        }
+        dependencies.release();
+        return true;
+    } else {
+        dependencies.release();
+        return false;
+    }
+}
+
+void Work::add_dependencies(std::initializer_list<std::shared_ptr<LazyValue>>&& dependencies){
+    if (status.priority()) {
+        for (std::shared_ptr<LazyValue> dependency: dependencies){
+            dependency->require();
+        }
+    } else {
+        this->dependencies.acquire();
+        if (status.priority()){
+            for (std::shared_ptr<LazyValue> dependency : dependencies){
+                dependency->require();
+            }
+        } else {
+            for (std::shared_ptr<LazyValue> dependency: dependencies){
+                this->dependencies->push_back(dependency);
+            }
+        }
+        this->dependencies.release();
+    }
+}
+
 template <typename T, typename U>
 void Work::assign(T &targets, U &results) {
     lazy_dual_map([](auto target, auto result) {
@@ -53,24 +91,19 @@ void Work::assign(T &targets, U &results) {
 }
 
 template <typename Ret, typename... Args>
-bool TypedWork<Ret, Args...>::run() {
+void TypedWork<Ret, Args...>::run() {
     if (this->status.done()) {
-            return true;
+        return;
     }
-    if (this->status.start_work()) {
-        LazyT<Ret> results = fn->run();
-        assign(targets, results);
-        this->continuations.acquire();
-        for (Continuation &c : *this->continuations) {
-            c.update();
-        }
-        this->continuations->clear();
-        this->status.finish_work();
-        this->continuations.release();
-        return true;
-    } else {
-        return false;
+    LazyT<Ret> results = fn->run();
+    assign(targets, results);
+    this->continuations.acquire();
+    for (Continuation &c : *this->continuations) {
+        c.update();
     }
+    this->continuations->clear();
+    this->status.finish();
+    this->continuations.release();
 }
 
 template <typename Ret, typename... Args>

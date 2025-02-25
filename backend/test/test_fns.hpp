@@ -119,7 +119,6 @@ TEST_P(FnCorrectnessTest, PersistenceTest) {
     EXPECT_THROW({ work->run(); }, stack_inversion);
     ASSERT_FALSE(res->done());
     DelayedIncrement::finish = true;
-    work->status.cancel_work();
     work->run();
     ASSERT_EQ(WorkRunner::shared_work_queue->size(), 1);
     auto internal_work = WorkRunner::shared_work_queue->front().lock();

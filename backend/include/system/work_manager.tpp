@@ -36,10 +36,6 @@ void WorkManager::enqueue(WorkT work) {
     runners[ThreadManager::get_id()]->enqueue(work);
 }
 
-void WorkManager::priority_enqueue(WorkT work) {
-    runners[ThreadManager::get_id()]->try_priority_enqueue(work);
-}
-
 std::monostate WorkManager::main(std::atomic<WorkT> *ref) {
     runners[ThreadManager::get_id()]->main(ref);
     return std::monostate{};
