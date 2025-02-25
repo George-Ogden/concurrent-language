@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
-use lowering::{BuiltInFn, Id, IntermediateBuiltIn, IntermediateExpression, IntermediateValue};
+use lowering::{
+    BuiltInFn, Id, IntermediateBuiltIn, IntermediateExpression, IntermediateFnCall,
+    IntermediateValue,
+};
 use once_cell::sync::Lazy;
 
 struct CodeSizeConstants {
     builtin_bool_size: usize,
     builtin_int_size: usize,
+    builtin_fn_size: usize,
     memory_access_size: usize,
     tuple_expression_size: usize,
     element_access_size: usize,
@@ -19,6 +23,7 @@ struct CodeSizeConstants {
 const CODE_SIZE_CONSTANTS: Lazy<CodeSizeConstants> = Lazy::new(|| CodeSizeConstants {
     builtin_bool_size: 3,
     builtin_int_size: 8,
+    builtin_fn_size: 11,
     memory_access_size: 38,
     tuple_expression_size: 2,
     element_access_size: 7,
@@ -61,7 +66,7 @@ impl CodeSizeEstimator {
         match built_in {
             IntermediateBuiltIn::Integer(_) => CODE_SIZE_CONSTANTS.builtin_int_size,
             IntermediateBuiltIn::Boolean(_) => CODE_SIZE_CONSTANTS.builtin_bool_size,
-            IntermediateBuiltIn::BuiltInFn(BuiltInFn(id, _)) => CODE_SIZE_CONSTANTS.operators[id],
+            IntermediateBuiltIn::BuiltInFn(_) => CODE_SIZE_CONSTANTS.builtin_fn_size,
         }
     }
     fn value_size(value: &IntermediateValue) -> usize {
@@ -88,6 +93,14 @@ impl CodeSizeEstimator {
             IntermediateExpression::IntermediateTupleExpression(_) => {
                 CODE_SIZE_CONSTANTS.tuple_expression_size + values_size
             }
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                fn_:
+                    IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(BuiltInFn(
+                        id,
+                        _,
+                    ))),
+                args,
+            }) => CODE_SIZE_CONSTANTS.operators[id] + Self::values_size(args),
             IntermediateExpression::IntermediateFnCall(_) => {
                 CODE_SIZE_CONSTANTS.fn_call_size + values_size
             }
@@ -116,6 +129,7 @@ mod tests {
     const CSC: Lazy<CodeSizeConstants> = CODE_SIZE_CONSTANTS;
     const BBS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_bool_size);
     const BIS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_int_size);
+    const BFS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_fn_size);
     const MAS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.memory_access_size);
     const TES: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.tuple_expression_size);
     const EAS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.element_access_size);
@@ -150,41 +164,8 @@ mod tests {
                 Box::new(AtomicTypeEnum::INT.into())
             )
         ))),
-        CSC.operators[&Id::from("+")];
-        "plus"
-    )]
-    #[test_case(
-        IntermediateValue::from(IntermediateBuiltIn::from(BuiltInFn(
-            Id::from("=="),
-            IntermediateFnType(
-                vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
-                Box::new(AtomicTypeEnum::BOOL.into())
-            )
-        ))),
-        CSC.operators[&Id::from("==")];
-        "equality"
-    )]
-    #[test_case(
-        IntermediateValue::from(IntermediateBuiltIn::from(BuiltInFn(
-            Id::from("/"),
-            IntermediateFnType(
-                vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
-                Box::new(AtomicTypeEnum::INT.into())
-            )
-        ))),
-        CSC.operators[&Id::from("/")];
-        "division"
-    )]
-    #[test_case(
-        IntermediateValue::from(IntermediateBuiltIn::from(BuiltInFn(
-            Id::from("**"),
-            IntermediateFnType(
-                vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
-                Box::new(AtomicTypeEnum::INT.into())
-            )
-        ))),
-        CSC.operators[&Id::from("**")];
-        "exponentiation"
+        *BFS;
+        "built-in function"
     )]
     #[test_case(
         IntermediateValue::from(IntermediateArg{
@@ -269,6 +250,56 @@ mod tests {
         }.into(),
         *FCS + *MAS + *BIS + *MAS;
         "user-defined fn-call"
+    )]
+    #[test_case(
+        IntermediateFnCall{
+            fn_: IntermediateValue::from(IntermediateBuiltIn::from(BuiltInFn(
+                Id::from("=="),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::BOOL.into()],
+                    Box::new(AtomicTypeEnum::BOOL.into())
+                )
+            ))),
+            args: vec![
+                IntermediateArg{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+            ]
+        }.into(),
+        CSC.operators[&Id::from("!")] + *MAS;
+        "negation operator call"
+    )]
+    #[test_case(
+        IntermediateFnCall{
+            fn_: IntermediateValue::from(IntermediateBuiltIn::from(BuiltInFn(
+                Id::from("/"),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                )
+            ))),
+            args: vec![
+                IntermediateMemory{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
+                Integer{ value: -5}.into(),
+            ]
+        }.into(),
+        CSC.operators[&Id::from("/")] + *BIS + *MAS;
+        "division operator call"
+    )]
+    #[test_case(
+        IntermediateFnCall{
+            fn_: IntermediateValue::from(IntermediateBuiltIn::from(BuiltInFn(
+                Id::from("**"),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                )
+            ))),
+            args: vec![
+                Integer{ value: 21}.into(),
+                IntermediateArg{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
+            ]
+        }.into(),
+        CSC.operators[&Id::from("**")] + *BIS + *MAS;
+        "exponentiation operator call"
     )]
     #[test_case(
         IntermediateCtorCall{
