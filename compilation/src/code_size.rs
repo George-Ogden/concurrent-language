@@ -6,12 +6,14 @@ use once_cell::sync::Lazy;
 struct CodeSizeConstants {
     builtin_bool_size: usize,
     builtin_int_size: usize,
+    memory_access_size: usize,
     operators: HashMap<Id, usize>,
 }
 
 const CODE_SIZE_CONSTANTS: Lazy<CodeSizeConstants> = Lazy::new(|| CodeSizeConstants {
     builtin_bool_size: 3,
     builtin_int_size: 8,
+    memory_access_size: 38,
     operators: HashMap::from(
         [
             ("**", 10),
@@ -46,8 +48,9 @@ impl CodeSizeEstimator {
     fn value_size(value: &IntermediateValue) -> usize {
         match value {
             IntermediateValue::IntermediateBuiltIn(built_in) => Self::builtin_size(built_in),
-            IntermediateValue::IntermediateMemory(intermediate_memory) => todo!(),
-            IntermediateValue::IntermediateArg(intermediate_arg) => todo!(),
+            IntermediateValue::IntermediateMemory(_) | IntermediateValue::IntermediateArg(_) => {
+                CODE_SIZE_CONSTANTS.memory_access_size
+            }
         }
     }
 
@@ -67,13 +70,15 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateFnType, DEFAULT_CONTEXT,
+        AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateArg, IntermediateFnType,
+        IntermediateMemory, Location, DEFAULT_CONTEXT,
     };
     use test_case::test_case;
 
     const CSC: Lazy<CodeSizeConstants> = CODE_SIZE_CONSTANTS;
     const BBS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_bool_size);
     const BIS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_int_size);
+    const MAS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.memory_access_size);
 
     #[test]
     fn exhaustive_operator_test() {
@@ -136,6 +141,22 @@ mod tests {
         ))),
         CSC.operators[&Id::from("**")];
         "exponentiation"
+    )]
+    #[test_case(
+        IntermediateValue::from(IntermediateArg{
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new()
+        }),
+        *MAS;
+        "argument"
+    )]
+    #[test_case(
+        IntermediateValue::from(IntermediateMemory{
+            type_: AtomicTypeEnum::BOOL.into(),
+            location: Location::new()
+        }),
+        *MAS;
+        "memory"
     )]
     fn test_value_size(value: IntermediateValue, expected_size: usize) {
         let size = CodeSizeEstimator::value_size(&value);
