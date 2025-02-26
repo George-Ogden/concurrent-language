@@ -8,7 +8,10 @@
 #include <memory>
 #include <type_traits>
 
+template <typename Ret, typename... Args> struct WeakTypedFnG;
+
 template <typename Ret, typename... Args> struct TypedFnG {
+    friend class WeakTypedFnG<Ret, Args...>;
     using RetT = LazyT<std::decay_t<Ret>>;
     using ArgsT = LazyT<TupleT<std::decay_t<Args>...>>;
     using T = std::unique_ptr<TypedFnI<Ret, Args...>> (*)(
@@ -21,6 +24,19 @@ template <typename Ret, typename... Args> struct TypedFnG {
     TypedFnG();
     virtual ~TypedFnG();
     virtual U init(LazyT<std::decay_t<Args>>... args) const;
+    explicit TypedFnG(WeakTypedFnG<Ret, Args...> f);
+};
+
+template <typename Ret, typename... Args> struct WeakTypedFnG {
+    friend class TypedFnG<Ret, Args...>;
+    using RetT = typename TypedFnG<Ret, Args...>::RetT;
+    using ArgsT = typename TypedFnG<Ret, Args...>::ArgsT;
+    using T = typename TypedFnG<Ret, Args...>::T;
+    using U = std::unique_ptr<TypedFnI<Ret, Args...>>;
+    T _fn = nullptr;
+    std::weak_ptr<void> _env;
+    WeakTypedFnG();
+    explicit WeakTypedFnG(TypedFnG<Ret, Args...> f);
 };
 
 template <typename E, typename Ret, typename... Args>

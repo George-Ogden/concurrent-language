@@ -4,6 +4,7 @@
 #include "fn/fn_inst.tpp"
 #include "fn/operators.hpp"
 #include "fn/types.hpp"
+#include "lazy/fns.hpp"
 #include "lazy/lazy.tpp"
 #include "system/work_manager.tpp"
 #include "types/builtin.hpp"
@@ -25,6 +26,7 @@ class FnCorrectnessTest : public ::testing::TestWithParam<unsigned> {
     void SetUp() override {
         auto num_cpus = GetParam();
         ThreadManager::override_concurrency(num_cpus);
+        ThreadManager::register_self(0);
     }
 
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
@@ -605,15 +607,15 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
               reinterpret_cast<Suc *>(&tmp)->value);
 }
 
-struct RecursiveFn : public TypedClosureI<TupleT<FnT<Int, Int>>, Int, Int> {
-    using TypedClosureI<TupleT<FnT<Int, Int>>, Int, Int>::TypedClosureI;
+struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
+    using TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int>::TypedClosureI;
     LazyT<Int> res;
     LazyT<Int> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
             auto arg = Decrement__BuiltIn(x);
             WorkT work;
-            LazyT<FnT<Int, Int>> call_fn = std::get<0>(env);
+            LazyT<FnT<Int, Int>> call_fn = load_env(std::get<0>(env));
             std::tie(work, res) = Work::fn_call(call_fn->value(), arg);
             WorkManager::enqueue(work);
             return res;
@@ -636,20 +638,21 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
         std::make_tuple(make_lazy<FnT<Int, Int>>(fn->value()));
     std::bit_cast<ClosureFnT<remove_lazy_t<typename RecursiveFn::EnvT>,
                              remove_lazy_t<decltype(fn)>> *>(&fn->lvalue())
-        ->env() = env;
+        ->env() = store_env<typename RecursiveFn::EnvT>(env);
     LazyT<Int> x = make_lazy<Int>(5);
 
     auto res = WorkManager::run(fn->value(), x);
     ASSERT_EQ(res->value(), 0);
 }
 
-struct IsEven : public TypedClosureI<TupleT<FnT<Bool, Int>>, Bool, Int> {
-    using TypedClosureI<TupleT<FnT<Bool, Int>>, Bool, Int>::TypedClosureI;
+struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
+    using TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int>::TypedClosureI;
     LazyT<Bool> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
             auto y = Decrement__BuiltIn(x);
-            auto [call, res] = Work::fn_call(std::get<0>(env)->value(), y);
+            auto [call, res] =
+                Work::fn_call(load_env(std::get<0>(env))->value(), y);
             WorkManager::enqueue(call);
             return res;
         } else {
@@ -662,13 +665,14 @@ struct IsEven : public TypedClosureI<TupleT<FnT<Bool, Int>>, Bool, Int> {
     }
 };
 
-struct IsOdd : public TypedClosureI<TupleT<FnT<Bool, Int>>, Bool, Int> {
-    using TypedClosureI<TupleT<FnT<Bool, Int>>, Bool, Int>::TypedClosureI;
+struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
+    using TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int>::TypedClosureI;
     LazyT<Bool> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
             auto y = Decrement__BuiltIn(x);
-            auto [call, res] = Work::fn_call(std::get<0>(env)->value(), y);
+            auto [call, res] =
+                Work::fn_call(load_env(std::get<0>(env))->value(), y);
             WorkManager::enqueue(call);
             return res;
         } else {
@@ -681,32 +685,41 @@ struct IsOdd : public TypedClosureI<TupleT<FnT<Bool, Int>>, Bool, Int> {
     }
 };
 
-TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsTest) {
-    LazyT<FnT<Bool, Int>> is_even_fn;
-    LazyT<FnT<Bool, Int>> is_odd_fn;
+TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {
+    std::shared_ptr<LazyConstant<FnT<Bool, Int>>[]> allocator(
+        new LazyConstant<FnT<Bool, Int>>[2],
+        std::default_delete<LazyConstant<FnT<Bool, Int>>[]>());
 
-    is_even_fn = make_lazy<remove_lazy_t<decltype(is_even_fn)>>(
-        ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
-                   remove_lazy_t<decltype(is_even_fn)>>(IsEven::init));
-    is_odd_fn = make_lazy<remove_lazy_t<decltype(is_odd_fn)>>(
-        ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
-                   remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init));
+    LazyT<FnT<Bool, Int>> is_odd_fn(allocator, &allocator[0]);
 
-    LazyT<TupleT<FnT<Bool, Int>>> is_odd_env = std::make_tuple(is_even_fn);
-    LazyT<TupleT<FnT<Bool, Int>>> is_even_env = std::make_tuple(is_odd_fn);
+    {
+        LazyT<FnT<Bool, Int>> is_even_fn(allocator, &allocator[1]);
 
-    std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
-                             remove_lazy_t<decltype(is_even_fn)>> *>(
-        &is_even_fn->lvalue())
-        ->env() = is_even_env;
-    std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
-                             remove_lazy_t<decltype(is_odd_fn)>> *>(
-        &is_odd_fn->lvalue())
-        ->env() = is_odd_env;
+        *std::dynamic_pointer_cast<
+            LazyConstant<remove_lazy_t<decltype(is_even_fn)>>>(is_even_fn) =
+            LazyConstant<remove_lazy_t<decltype(is_even_fn)>>(
+                ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
+                           remove_lazy_t<decltype(is_even_fn)>>(IsEven::init));
+        *std::dynamic_pointer_cast<
+            LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>>(is_odd_fn) =
+            LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>(
+                ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
+                           remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init));
+
+        LazyT<TupleT<FnT<Bool, Int>>> is_odd_env = std::make_tuple(is_even_fn);
+        LazyT<TupleT<FnT<Bool, Int>>> is_even_env = std::make_tuple(is_odd_fn);
+
+        std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
+                                 remove_lazy_t<decltype(is_even_fn)>> *>(
+            &is_even_fn->lvalue())
+            ->env() = store_env<typename IsEven::EnvT>(is_even_env);
+        std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
+                                 remove_lazy_t<decltype(is_odd_fn)>> *>(
+            &is_odd_fn->lvalue())
+            ->env() = store_env<typename IsOdd::EnvT>(is_odd_env);
+    }
 
     for (auto x : {5, 10, 23, 0}) {
-        auto even = WorkManager::run(is_even_fn->value(), make_lazy<Int>(x));
-        ASSERT_EQ(even->value(), x % 2 == 0);
         auto odd = WorkManager::run(is_odd_fn->value(), make_lazy<Int>(x));
         ASSERT_EQ(odd->value(), x % 2 == 1);
     }

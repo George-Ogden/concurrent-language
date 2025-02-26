@@ -1,7 +1,10 @@
 #pragma once
 
+#include "fn/fn_inst.tpp"
+#include "fn/types.hpp"
 #include "lazy/lazy.hpp"
 #include "lazy/types.hpp"
+#include "system/work_manager.hpp"
 #include "types/utils.hpp"
 
 #include <type_traits>
@@ -58,4 +61,39 @@ template <typename T> auto make_lazy_placeholders(std::shared_ptr<Work> work) {
                 work);
         },
         T{});
+}
+
+template <typename T> T load_env(T env) { return env; }
+
+template <typename R, typename... A>
+LazyT<FnT<R, A...>> load_env(std::shared_ptr<Lazy<WeakFnT<R, A...>>> f) {
+    WorkManager::await(f);
+    return make_lazy<FnT<R, A...>>(f->value());
+}
+
+template <typename T, typename U> struct StoreEnv {
+    static T store(U env) { return env; }
+};
+
+template <typename... Ts, typename U> struct StoreEnv<std::tuple<Ts...>, U> {
+    static std::tuple<Ts...> store(U env) {
+        return std::apply(
+            [](auto &...args) {
+                return std::make_tuple(
+                    StoreEnv<Ts, decltype(args)>::store(args)...);
+            },
+            env);
+    }
+};
+
+template <typename R, typename... A, typename U>
+struct StoreEnv<std::shared_ptr<Lazy<WeakFnT<R, A...>>>, U> {
+    static LazyT<WeakFnT<R, A...>> store(U f) {
+        WorkManager::await(f);
+        return make_lazy<WeakFnT<R, A...>>(f->value());
+    }
+};
+
+template <typename T, typename U> T store_env(U env) {
+    return StoreEnv<T, U>::store(env);
 }
