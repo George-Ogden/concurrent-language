@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    Assignment, ClosureInstantiation, Declaration, Expression, MachineType, Memory, Name,
+    Assignment, ClosureInstantiation, Expression, IfStatement, MatchStatement, Memory, Name,
     Statement, TupleExpression, Value,
 };
 
@@ -45,8 +45,7 @@ impl WeakReferrer {
         let mut translation = Translation::new();
         for statement in statements {
             match statement {
-                Statement::Await(_) => {}
-                Statement::Declaration(declaration) => {}
+                Statement::Await(_) | Statement::Declaration(_) => {}
                 Statement::Assignment(Assignment {
                     target,
                     value: expression,
@@ -74,8 +73,27 @@ impl WeakReferrer {
                         .or_default()
                         .extend(memory_values.cloned());
                 }
-                Statement::IfStatement(if_statement) => todo!(),
-                Statement::MatchStatement(match_statement) => todo!(),
+                Statement::IfStatement(IfStatement {
+                    condition: _,
+                    branches,
+                }) => {
+                    for statements in [&branches.0, &branches.1] {
+                        let graph_translation = self.construct_graph(statements);
+                        graph.extend(graph_translation.0);
+                        translation.extend(graph_translation.1);
+                    }
+                }
+                Statement::MatchStatement(MatchStatement {
+                    expression: _,
+                    branches,
+                    auxiliary_memory: _,
+                }) => {
+                    for branch in branches {
+                        let graph_translation = self.construct_graph(&branch.statements);
+                        graph.extend(graph_translation.0);
+                        translation.extend(graph_translation.1);
+                    }
+                }
             }
         }
         (graph, translation)
@@ -106,6 +124,7 @@ impl WeakReferrer {
         order.reverse();
         self.graph = self.transpose(&self.graph);
         visited = HashSet::new();
+        let fns: HashSet<Memory> = HashSet::from_iter(cycles.fn_translation.values().cloned());
 
         for node in order {
             if !visited.contains(&node) {
@@ -119,6 +138,11 @@ impl WeakReferrer {
                         .unwrap_or_default()
                         .contains(&node)
                 {
+                    let nodes = nodes
+                        .iter()
+                        .filter(|&node| fns.contains(node))
+                        .cloned()
+                        .collect_vec();
                     let cycle = Rc::new(RefCell::new(HashSet::from_iter(nodes.clone())));
                     for node in nodes {
                         cycles.cycles.insert(node.clone(), cycle.clone());
@@ -126,7 +150,7 @@ impl WeakReferrer {
                 }
             }
         }
-        self.remove_non_fns(cycles, statements)
+        cycles
     }
     fn topsort(&self, node: &Node, visited: &mut HashSet<Node>, order: &mut Vec<Node>) {
         visited.insert(node.clone());
@@ -137,53 +161,13 @@ impl WeakReferrer {
         }
         order.push(node.clone());
     }
-    fn remove_non_fns(
-        &self,
-        ClosureCycles {
-            fn_translation,
-            cycles,
-        }: ClosureCycles,
-        statements: &Vec<Statement>,
-    ) -> ClosureCycles {
-        let fns = statements
-            .iter()
-            .filter_map(|statement| match statement {
-                Statement::Declaration(Declaration {
-                    type_: MachineType::FnType(_),
-                    memory,
-                }) => Some(memory),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-        let mut filtered = HashSet::new();
-        ClosureCycles {
-            cycles: HashMap::from_iter(cycles.into_iter().filter_map(|(id, cycle)| {
-                if fns.contains(&id) {
-                    if !filtered.contains(&cycle.as_ptr()) {
-                        filtered.insert(cycle.as_ptr());
-                        let filtered_cycle = cycle
-                            .borrow()
-                            .clone()
-                            .into_iter()
-                            .filter(|id| fns.contains(id))
-                            .collect::<HashSet<_>>();
-                        *cycle.borrow_mut() = filtered_cycle;
-                    };
-                    Some((id, cycle))
-                } else {
-                    None
-                }
-            })),
-            fn_translation,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Assignment, ClosureInstantiation, Declaration, FnType, Id, Memory, Name, Statement,
-        TupleExpression, TupleType,
+        Assignment, Await, ClosureInstantiation, Declaration, FnType, Id, IfStatement, MatchBranch,
+        MatchStatement, Memory, Name, Statement, TupleExpression, TupleType, UnionType,
     };
 
     use super::*;
@@ -728,6 +712,185 @@ mod tests {
             }
         };
         "overlapping cycles"
+    )]
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("condition"))]).into(),
+            IfStatement {
+                condition: Memory(Id::from("condition")).into(),
+                branches: (
+                    vec![
+                        Declaration{
+                            memory: Memory(Id::from("closure0")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            ).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("closure1")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            ).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("env0")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("env1")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("env0")),
+                            value: TupleExpression(
+                                vec![Memory(Id::from("closure1")).into()]
+                            ).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("env1")),
+                            value: TupleExpression(
+                                vec![Memory(Id::from("closure0")).into()]
+                            ).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("closure0")),
+                            value: ClosureInstantiation{
+                                name: Name::from("f0"),
+                                env: Some(Memory(Id::from("env0")).into())
+                            }.into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("closure1")),
+                            value: ClosureInstantiation{
+                                name: Name::from("f1"),
+                                env: Some(Memory(Id::from("env1")).into())
+                            }.into()
+                        }.into(),
+                    ],
+                    Vec::new()
+                )
+            }.into(),
+        ],
+        ClosureCycles{
+            fn_translation: HashMap::from([
+                (Name::from("f0"), Memory(Id::from("closure0"))),
+                (Name::from("f1"), Memory(Id::from("closure1"))),
+            ]),
+            cycles: {
+                let cycles = Rc::new(RefCell::new(HashSet::from([
+                    Memory(Id::from("closure0")),
+                    Memory(Id::from("closure1")),
+                ])));
+                HashMap::from([
+                    (Memory(Id::from("closure0")), cycles.clone()),
+                    (Memory(Id::from("closure1")), cycles.clone()),
+                ])
+            }
+        };
+        "if statement cycle"
+    )]
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("subject"))]).into(),
+            MatchStatement {
+                expression: (Memory(Id::from("subject")).into(), UnionType(vec![Name::from("S0")])),
+                auxiliary_memory: Memory(Id::from("extra")),
+                branches: vec![
+                    MatchBranch{
+                        target: None,
+                        statements: vec![
+                            Declaration{
+                                memory: Memory(Id::from("closure0")),
+                                type_: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("closure1")),
+                                type_: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("env0")),
+                                type_: TupleType(vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    ).into()
+                                ]).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("env1")),
+                                type_: TupleType(vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    ).into()
+                                ]).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("env0")),
+                                value: TupleExpression(
+                                    vec![Memory(Id::from("closure1")).into()]
+                                ).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("env1")),
+                                value: TupleExpression(
+                                    vec![Memory(Id::from("closure0")).into()]
+                                ).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("closure0")),
+                                value: ClosureInstantiation{
+                                    name: Name::from("f0"),
+                                    env: Some(Memory(Id::from("env0")).into())
+                                }.into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("closure1")),
+                                value: ClosureInstantiation{
+                                    name: Name::from("f1"),
+                                    env: Some(Memory(Id::from("env1")).into())
+                                }.into()
+                            }.into(),
+                        ]
+                    }
+                ]
+            }.into(),
+        ],
+        ClosureCycles{
+            fn_translation: HashMap::from([
+                (Name::from("f0"), Memory(Id::from("closure0"))),
+                (Name::from("f1"), Memory(Id::from("closure1"))),
+            ]),
+            cycles: {
+                let cycles = Rc::new(RefCell::new(HashSet::from([
+                    Memory(Id::from("closure0")),
+                    Memory(Id::from("closure1")),
+                ])));
+                HashMap::from([
+                    (Memory(Id::from("closure0")), cycles.clone()),
+                    (Memory(Id::from("closure1")), cycles.clone()),
+                ])
+            }
+        };
+        "match statement cycle"
     )]
     fn test_detect_cycles(statements: Vec<Statement>, expected_cycles: ClosureCycles) {
         let mut referrer = WeakReferrer::new();
