@@ -1,6 +1,6 @@
 mod compiler;
 mod machine_nodes;
-mod weak_referrer;
+mod weakener;
 
 pub use compiler::Compiler;
 pub use lowering::{AtomicTypeEnum, Boolean, Integer};

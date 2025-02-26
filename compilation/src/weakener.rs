@@ -36,22 +36,14 @@ impl ClosureCycles {
     }
 }
 
-struct WeakReferrer {
-    graph: Graph,
-}
+struct Weakener {}
 
-impl WeakReferrer {
-    fn new() -> Self {
-        WeakReferrer {
-            graph: Graph::new(),
-        }
-    }
+impl Weakener {
     fn weaken(program: Program) -> Program {
-        let mut referrer = WeakReferrer::new();
         let Program { type_defs, fn_defs } = program;
         let mut closure_cycles = ClosureCycles::new();
         for fn_def in &fn_defs {
-            closure_cycles.update(referrer.detect_closure_cycles(&fn_def.statements));
+            closure_cycles.update(Self::detect_closure_cycles(&fn_def.statements));
         }
         let (fn_defs, weak_fns): (Vec<_>, Vec<_>) = fn_defs
             .into_iter()
@@ -64,8 +56,7 @@ impl WeakReferrer {
                      env,
                      allocations,
                  }| {
-                    let (statements, weak_fns) =
-                        referrer.add_allocations(statements, &closure_cycles);
+                    let (statements, weak_fns) = Self::add_allocations(statements, &closure_cycles);
                     (
                         FnDef {
                             name,
@@ -83,14 +74,11 @@ impl WeakReferrer {
         let weak_fns = weak_fns.into_iter().flatten().collect();
         let fn_defs = fn_defs
             .into_iter()
-            .map(|fn_def| referrer.weaken_fn_def(fn_def, &weak_fns))
+            .map(|fn_def| Self::weaken_fn_def(fn_def, &weak_fns))
             .collect();
         Program { type_defs, fn_defs }
     }
-    fn construct_graph(
-        &self,
-        statements: &Vec<Statement>,
-    ) -> (Graph, HashSet<Memory>, Translation) {
+    fn construct_graph(statements: &Vec<Statement>) -> (Graph, HashSet<Memory>, Translation) {
         let mut graph = Graph::new();
         let mut fns = HashSet::new();
         let mut translation = Translation::new();
@@ -135,7 +123,7 @@ impl WeakReferrer {
                     branches,
                 }) => {
                     for statements in [&branches.0, &branches.1] {
-                        let graph_fns_translation = self.construct_graph(statements);
+                        let graph_fns_translation = Self::construct_graph(statements);
                         graph.extend(graph_fns_translation.0);
                         fns.extend(graph_fns_translation.1);
                         translation.extend(graph_fns_translation.2);
@@ -147,7 +135,7 @@ impl WeakReferrer {
                     auxiliary_memory: _,
                 }) => {
                     for branch in branches {
-                        let graph_fns_translation = self.construct_graph(&branch.statements);
+                        let graph_fns_translation = Self::construct_graph(&branch.statements);
                         graph.extend(graph_fns_translation.0);
                         fns.extend(graph_fns_translation.1);
                         translation.extend(graph_fns_translation.2);
@@ -157,7 +145,7 @@ impl WeakReferrer {
         }
         (graph, fns, translation)
     }
-    fn transpose(&self, graph: &Graph) -> Graph {
+    fn transpose(graph: &Graph) -> Graph {
         let mut transpose = Graph::new();
         for node in graph.keys() {
             for neighbor in graph.get(node).cloned().unwrap_or_default() {
@@ -169,29 +157,29 @@ impl WeakReferrer {
         }
         transpose
     }
-    fn detect_closure_cycles(&mut self, statements: &Vec<Statement>) -> ClosureCycles {
+    fn detect_closure_cycles(statements: &Vec<Statement>) -> ClosureCycles {
         let mut cycles = ClosureCycles::new();
+        let graph;
         let fns;
-        (self.graph, fns, cycles.fn_translation) = self.construct_graph(statements);
+        (graph, fns, cycles.fn_translation) = Self::construct_graph(statements);
         let mut visited = HashSet::new();
         let mut order = Vec::new();
-        for node in self.graph.keys().cloned().collect_vec() {
+        for node in graph.keys().cloned().collect_vec() {
             if !visited.contains(&node) {
-                self.topsort(&node, &mut visited, &mut order);
+                Self::topsort(&graph, &node, &mut visited, &mut order);
             }
         }
 
         order.reverse();
-        self.graph = self.transpose(&self.graph);
+        let graph = Self::transpose(&graph);
         visited = HashSet::new();
 
         for node in order {
             if !visited.contains(&node) {
                 let mut nodes = Vec::new();
-                self.topsort(&node, &mut visited, &mut nodes);
+                Self::topsort(&graph, &node, &mut visited, &mut nodes);
                 if nodes.len() > 1
-                    || self
-                        .graph
+                    || graph
                         .get(&node)
                         .cloned()
                         .unwrap_or_default()
@@ -213,18 +201,17 @@ impl WeakReferrer {
         }
         cycles
     }
-    fn topsort(&self, node: &Node, visited: &mut HashSet<Node>, order: &mut Vec<Node>) {
+    fn topsort(graph: &Graph, node: &Node, visited: &mut HashSet<Node>, order: &mut Vec<Node>) {
         visited.insert(node.clone());
-        for neighbor in self.graph.get(&node).cloned().unwrap_or_default() {
+        for neighbor in graph.get(&node).cloned().unwrap_or_default() {
             if !visited.contains(&neighbor) {
-                self.topsort(&neighbor, visited, order);
+                Self::topsort(graph, &neighbor, visited, order);
             }
         }
         order.push(node.clone());
     }
 
     fn add_allocations(
-        &self,
         statements: Vec<Statement>,
         closure_cycles: &ClosureCycles,
     ) -> (Vec<Statement>, HashSet<(Name, usize)>) {
@@ -284,7 +271,7 @@ impl WeakReferrer {
                 }) => {
                     let (branches, extra_fns) = [branches.0, branches.1]
                         .into_iter()
-                        .map(|branch| self.add_allocations(branch, &closure_cycles))
+                        .map(|branch| Self::add_allocations(branch, &closure_cycles))
                         .collect::<(Vec<_>, Vec<_>)>();
                     for fns in extra_fns {
                         weak_fns.extend(fns.into_iter());
@@ -305,7 +292,7 @@ impl WeakReferrer {
                         .into_iter()
                         .map(|MatchBranch { target, statements }| {
                             let (statements, weak_fns) =
-                                self.add_allocations(statements, &closure_cycles);
+                                Self::add_allocations(statements, &closure_cycles);
                             (MatchBranch { target, statements }, weak_fns)
                         })
                         .collect::<(Vec<_>, Vec<_>)>();
@@ -325,7 +312,7 @@ impl WeakReferrer {
         (statements, weak_fns)
     }
 
-    fn weaken_fn_def(&self, fn_def: FnDef, weak_fns: &HashSet<(Name, usize)>) -> FnDef {
+    fn weaken_fn_def(fn_def: FnDef, weak_fns: &HashSet<(Name, usize)>) -> FnDef {
         let FnDef {
             name,
             arguments,
@@ -1234,8 +1221,7 @@ mod tests {
         "separate cycles"
     )]
     fn test_detect_cycles(statements: Vec<Statement>, expected_cycles: ClosureCycles) {
-        let mut referrer = WeakReferrer::new();
-        let cycles = referrer.detect_closure_cycles(&statements);
+        let cycles = Weakener::detect_closure_cycles(&statements);
         assert_eq!(cycles, expected_cycles)
     }
 
@@ -2265,9 +2251,8 @@ mod tests {
         expected_statements: Vec<Statement>,
         expected_weak_fns: HashSet<(Name, usize)>,
     ) {
-        let mut referrer = WeakReferrer::new();
-        let cycles = referrer.detect_closure_cycles(&statements);
-        let (statements, weak_fns) = referrer.add_allocations(statements, &cycles);
+        let cycles = Weakener::detect_closure_cycles(&statements);
+        let (statements, weak_fns) = Weakener::add_allocations(statements, &cycles);
         assert_eq!(statements, expected_statements);
         assert_eq!(weak_fns, expected_weak_fns);
     }
@@ -2370,8 +2355,7 @@ mod tests {
         weak_fns: HashSet<(Name, usize)>,
         expected_env: Vec<MachineType>,
     ) {
-        let referrer = WeakReferrer::new();
-        let weak_fn_def = referrer.weaken_fn_def(fn_def.clone(), &weak_fns);
+        let weak_fn_def = Weakener::weaken_fn_def(fn_def.clone(), &weak_fns);
         assert_eq!(fn_def.name, weak_fn_def.name);
         assert_eq!(fn_def.arguments, weak_fn_def.arguments);
         assert_eq!(fn_def.statements, weak_fn_def.statements);
@@ -2977,7 +2961,7 @@ mod tests {
         "extra self cycle"
     )]
     fn test_weaken_program(program: Program, expected_fn_defs: Vec<FnDef>) {
-        let weak_program = WeakReferrer::weaken(program.clone());
+        let weak_program = Weakener::weaken(program.clone());
         assert_eq!(weak_program.fn_defs, expected_fn_defs);
         assert_eq!(weak_program.type_defs, program.type_defs);
     }
