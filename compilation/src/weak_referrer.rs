@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
-    Allocation, Assignment, ClosureInstantiation, Declaration, Expression, IfStatement,
-    MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression, Value,
+    Allocation, Assignment, ClosureInstantiation, Declaration, Expression, FnDef, IfStatement,
+    MachineType, MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression, Value,
 };
 
 type Node = Memory;
@@ -272,14 +272,48 @@ impl WeakReferrer {
 
         (statements, weak_fns)
     }
+
+    fn weaken_fn_def(&self, fn_def: FnDef, weak_fns: &HashSet<(Name, usize)>) -> FnDef {
+        let FnDef {
+            name,
+            arguments,
+            statements,
+            ret,
+            env,
+            allocations,
+        } = fn_def;
+        let env = env
+            .into_iter()
+            .enumerate()
+            .map(|(i, type_)| {
+                if let MachineType::FnType(fn_type) = type_ {
+                    if weak_fns.contains(&(name.clone(), i)) {
+                        MachineType::WeakFnType(fn_type)
+                    } else {
+                        fn_type.into()
+                    }
+                } else {
+                    type_
+                }
+            })
+            .collect();
+        FnDef {
+            name,
+            arguments,
+            statements,
+            ret,
+            env,
+            allocations,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Allocation, Assignment, Await, BuiltIn, ClosureInstantiation, Declaration, FnType, Id,
-        IfStatement, MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression,
-        TupleType, UnionType,
+        Allocation, Assignment, Await, BuiltIn, ClosureInstantiation, Declaration, FnDef, FnType,
+        Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Statement,
+        TupleExpression, TupleType, UnionType,
     };
 
     use super::*;
@@ -2058,5 +2092,113 @@ mod tests {
         let (statements, weak_fns) = referrer.add_allocations(statements, &cycles);
         assert_eq!(statements, expected_statements);
         assert_eq!(weak_fns, expected_weak_fns);
+    }
+
+    #[test_case(
+        FnDef {
+            name: Name::from("f"),
+            statements: vec![
+                Assignment {
+                    target: Memory(Id::from("x")),
+                    value: Value::from(Memory(Id::from("arg"))).into()
+                }.into()
+            ],
+            arguments: vec![
+                (Memory(Id::from("arg")), AtomicTypeEnum::INT.into())
+            ],
+            ret: (Memory(Id::from("x")).into(), AtomicTypeEnum::INT.into()),
+            allocations: vec![
+                Declaration {
+                    memory: Memory(Id::from("x")),
+                    type_: AtomicTypeEnum::INT.into()
+                }
+            ],
+            env: vec![
+                AtomicTypeEnum::BOOL.into(),
+                FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            ]
+        },
+        HashSet::from([
+            (Name::from("g"), 0),
+        ]),
+        vec![
+            AtomicTypeEnum::BOOL.into(),
+            FnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into()),
+            ).into()
+        ];
+        "no replacement"
+    )]
+    #[test_case(
+        FnDef {
+            name: Name::from("f"),
+            statements: vec![
+                Assignment {
+                    target: Memory(Id::from("x")),
+                    value: Value::from(Memory(Id::from("arg"))).into()
+                }.into()
+            ],
+            arguments: vec![
+                (Memory(Id::from("arg")), AtomicTypeEnum::INT.into())
+            ],
+            ret: (Memory(Id::from("x")).into(), AtomicTypeEnum::INT.into()),
+            allocations: vec![
+                Declaration {
+                    memory: Memory(Id::from("x")),
+                    type_: AtomicTypeEnum::INT.into()
+                }
+            ],
+            env: vec![
+                FnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::BOOL.into()),
+                ).into(),
+                FnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::BOOL.into()),
+                ).into(),
+                FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            ]
+        },
+        HashSet::from([
+            (Name::from("f"), 1),
+            (Name::from("f"), 2),
+        ]),
+        vec![
+            FnType(
+                Vec::new(),
+                Box::new(AtomicTypeEnum::BOOL.into()),
+            ).into(),
+            MachineType::WeakFnType(FnType(
+                Vec::new(),
+                Box::new(AtomicTypeEnum::BOOL.into()),
+            )),
+            MachineType::WeakFnType(FnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into()),
+            ))
+        ];
+        "replacement"
+    )]
+    fn test_fn_weakening(
+        fn_def: FnDef,
+        weak_fns: HashSet<(Name, usize)>,
+        expected_env: Vec<MachineType>,
+    ) {
+        let referrer = WeakReferrer::new();
+        let weak_fn_def = referrer.weaken_fn_def(fn_def.clone(), &weak_fns);
+        assert_eq!(fn_def.name, weak_fn_def.name);
+        assert_eq!(fn_def.arguments, weak_fn_def.arguments);
+        assert_eq!(fn_def.statements, weak_fn_def.statements);
+        assert_eq!(fn_def.ret, weak_fn_def.ret);
+        assert_eq!(fn_def.allocations, weak_fn_def.allocations);
+        assert_eq!(expected_env, weak_fn_def.env);
     }
 }
