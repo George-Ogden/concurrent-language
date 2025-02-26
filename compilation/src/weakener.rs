@@ -36,10 +36,10 @@ impl ClosureCycles {
     }
 }
 
-struct Weakener {}
+pub struct Weakener {}
 
 impl Weakener {
-    fn weaken(program: Program) -> Program {
+    pub fn weaken(program: Program) -> Program {
         let Program { type_defs, fn_defs } = program;
         let mut closure_cycles = ClosureCycles::new();
         for fn_def in &fn_defs {

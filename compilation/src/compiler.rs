@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation, ConstructorCall,
-    Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType,
-    MatchBranch, MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType,
-    TypeDef, UnionType, Value,
+    weakener::Weakener, AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation,
+    ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
+    IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -595,10 +595,11 @@ impl Compiler {
         let (statements, _) = self.compile_lambda(main);
         assert_eq!(statements.len(), 0);
         self.fn_defs.last_mut().unwrap().name = Name::from("Main");
-        Program {
+        let program = Program {
             fn_defs: self.fn_defs.clone(),
             type_defs,
-        }
+        };
+        Weakener::weaken(program)
     }
     pub fn compile(program: IntermediateProgram) -> Program {
         let mut compiler = Compiler::new();
@@ -2589,10 +2590,10 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
                     env: vec![
-                        FnType(
+                        MachineType::WeakFnType(FnType(
                             vec![AtomicTypeEnum::INT.into()],
                             Box::new(AtomicTypeEnum::INT.into())
-                        ).into()
+                        ))
                     ].into(),
                     allocations: vec![
                         Declaration {
