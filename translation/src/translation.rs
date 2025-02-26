@@ -139,7 +139,15 @@ impl Translator {
     fn translate_expression(&self, expression: Expression) -> Code {
         match expression {
             Expression::ElementAccess(ElementAccess { value, idx }) => {
-                format!("std::get<{idx}ULL>({})", self.translate_value(value))
+                let code = format!(
+                    "std::get<{idx}ULL>({})",
+                    self.translate_value(value.clone())
+                );
+                if Value::Memory(Memory(Id::from("env"))) == value {
+                    format!("load_env({code})")
+                } else {
+                    code
+                }
             }
             Expression::Value(value) => self.translate_value(value),
             Expression::TupleExpression(TupleExpression(values)) => {
@@ -206,7 +214,7 @@ impl Translator {
                 return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::init);"), |env| {
                     let value = self.translate_value(env);
                     format!(
-                        "std::bit_cast<ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_lazy_t<decltype({id})>>*>(&{id}->lvalue())->env() = {value};",
+                        "std::bit_cast<ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_lazy_t<decltype({id})>>*>(&{id}->lvalue())->env() = store_env<typename {name}::EnvT>({value});",
                     )
                 })
             }
@@ -1140,7 +1148,7 @@ mod tests {
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
         }.into()],
-        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>(Adder::init));  std::bit_cast<ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = x;";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>(Adder::init));  std::bit_cast<ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = store_env<typename Adder::EnvT>(x);";
         "closure assignment"
     )]
     #[test_case(
@@ -1160,7 +1168,7 @@ mod tests {
                 }.into(),
             }.into()
         ],
-        "is_even_fn = make_lazy<remove_lazy_t<decltype(is_even_fn)>>(ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>>(IsEven::init)); is_odd_fn = make_lazy<remove_lazy_t<decltype(is_odd_fn)>>(ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>> *>(&is_even_fn->lvalue())->env() = is_even_env; std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>> *>(&is_odd_fn->lvalue())->env() = is_odd_env;";
+        "is_even_fn = make_lazy<remove_lazy_t<decltype(is_even_fn)>>(ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>>(IsEven::init)); is_odd_fn = make_lazy<remove_lazy_t<decltype(is_odd_fn)>>(ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>> *>(&is_even_fn->lvalue())->env() = store_env<typename IsEven::EnvT>(is_even_env); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>> *>(&is_odd_fn->lvalue())->env() = store_env<typename IsOdd::EnvT>(is_odd_env);";
         "mutually recursive closure assignment"
     )]
     #[test_case(
@@ -1182,6 +1190,19 @@ mod tests {
         ],
         "LazyT<Int> x; WorkManager::await(t); x = std::get<1ULL>(tuple);";
         "tuple access"
+    )]
+    #[test_case(
+        vec![
+            Assignment {
+                target: Memory(Id::from("f")),
+                value: ElementAccess{
+                    value: Memory(Id::from("env")).into(),
+                    idx: 1
+                }.into(),
+            }.into()
+        ],
+        "f = load_env(std::get<1ULL>(env));";
+        "env access"
     )]
     #[test_case(
         vec![
@@ -1381,7 +1402,7 @@ mod tests {
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: Vec::new()
         },
-        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> y; LazyT<Int> inner_res; y = std::get<0ULL>(env); inner_res = Plus__BuiltIn(x, y); return inner_res; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, std::shared_ptr<EnvT> env) { return std::make_unique<Adder>(args, *env); }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> y; LazyT<Int> inner_res; y = load_env(std::get<0ULL>(env)); inner_res = Plus__BuiltIn(x, y); return inner_res; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, std::shared_ptr<EnvT> env) { return std::make_unique<Adder>(args, *env); }};";
         "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
