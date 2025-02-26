@@ -305,6 +305,7 @@ TEST_F(WorkContinuationTest, IndirectContinuationAdded) {
     work->run();
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(**valid, false);
+    delete valid;
 }
 
 TEST_F(WorkContinuationTest, IndirectContinuationApplied) {
@@ -315,6 +316,7 @@ TEST_F(WorkContinuationTest, IndirectContinuationApplied) {
     result->add_continuation(Continuation{remaining, counter, valid});
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(**valid, false);
+    delete valid;
 }
 
 TEST_F(WorkContinuationTest, DoneUnfinishedContinuationBehaviour) {
@@ -327,6 +329,7 @@ TEST_F(WorkContinuationTest, DoneUnfinishedContinuationBehaviour) {
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(**valid, true);
     delete remaining;
+    delete valid;
 }
 
 TEST_F(WorkContinuationTest, NotDoneUnfinishedContinuationBehaviour) {
@@ -342,6 +345,7 @@ TEST_F(WorkContinuationTest, NotDoneUnfinishedContinuationBehaviour) {
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(**valid, true);
     delete remaining;
+    delete valid;
 }
 
 TEST_F(WorkContinuationTest, DoneFinishedContinuationBehaviour) {
@@ -353,6 +357,7 @@ TEST_F(WorkContinuationTest, DoneFinishedContinuationBehaviour) {
     work->add_continuation(Continuation{remaining, counter, valid});
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(**valid, false);
+    delete valid;
 }
 
 TEST_F(WorkContinuationTest, NotDoneFinishedContinuationBehaviour) {
@@ -366,6 +371,7 @@ TEST_F(WorkContinuationTest, NotDoneFinishedContinuationBehaviour) {
     work->run();
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(**valid, false);
+    delete valid;
 }
 
 TEST_F(WorkContinuationTest, DoneInvalidFinishedContinuationBehaviour) {

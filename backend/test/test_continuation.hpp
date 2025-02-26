@@ -22,6 +22,7 @@ TEST_F(ContinuationTest, UnfinishedContinuationBehaviour) {
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(**valid, true);
     delete remaining;
+    delete valid;
 }
 
 TEST_F(ContinuationTest, FinishedContinuationBehaviour) {
@@ -32,6 +33,7 @@ TEST_F(ContinuationTest, FinishedContinuationBehaviour) {
     c.update();
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(**valid, false);
+    delete valid;
 }
 
 TEST_F(ContinuationTest, InvalidFinishedContinuationBehaviour) {
