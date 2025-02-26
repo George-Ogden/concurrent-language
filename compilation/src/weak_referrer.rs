@@ -6,12 +6,12 @@ use std::{
 };
 
 use crate::{
-    Assignment, ClosureInstantiation, Expression, IfStatement, MatchStatement, Memory, Name,
-    Statement, TupleExpression, Value,
+    Allocation, Assignment, ClosureInstantiation, Declaration, Expression, IfStatement,
+    MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression, Value,
 };
 
 type Node = Memory;
-type Cycles = HashMap<Node, Rc<RefCell<HashSet<Node>>>>;
+type Cycles = HashMap<Node, Rc<RefCell<Vec<Node>>>>;
 type Graph = HashMap<Node, Vec<Node>>;
 type Translation = HashMap<Name, Node>;
 
@@ -45,7 +45,7 @@ impl WeakReferrer {
         let mut translation = Translation::new();
         for statement in statements {
             match statement {
-                Statement::Await(_) | Statement::Declaration(_) => {}
+                Statement::Allocation(_) | Statement::Await(_) | Statement::Declaration(_) => {}
                 Statement::Assignment(Assignment {
                     target,
                     value: expression,
@@ -143,7 +143,9 @@ impl WeakReferrer {
                         .filter(|&node| fns.contains(node))
                         .cloned()
                         .collect_vec();
-                    let cycle = Rc::new(RefCell::new(HashSet::from_iter(nodes.clone())));
+                    let cycle = Rc::new(RefCell::new(
+                        nodes.clone().into_iter().sorted().collect_vec(),
+                    ));
                     for node in nodes {
                         cycles.cycles.insert(node.clone(), cycle.clone());
                     }
@@ -161,13 +163,83 @@ impl WeakReferrer {
         }
         order.push(node.clone());
     }
+
+    fn add_allocations(
+        &self,
+        statements: Vec<Statement>,
+        cycles: &ClosureCycles,
+    ) -> (Vec<Statement>, HashSet<(Name, usize)>) {
+        let mut cyclic_closures: HashSet<_> = cycles.cycles.keys().cloned().collect();
+        let statements = statements
+            .into_iter()
+            .flat_map(|statement| match statement {
+                Statement::Await(await_) => vec![await_.into()],
+                Statement::Allocation(allocation) => vec![allocation.into()],
+                Statement::Assignment(assignment) => vec![assignment.into()],
+                Statement::Declaration(Declaration { type_, memory }) => {
+                    let mut statements = if cyclic_closures.contains(&memory) {
+                        let cycle = cycles.cycles[&memory].borrow().clone();
+                        for memory in &cycle {
+                            cyclic_closures.remove(&memory);
+                        }
+                        if cycle.len() > 1 {
+                            vec![Allocation(cycle).into()]
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    statements.push(Declaration { type_, memory }.into());
+                    statements
+                }
+                Statement::IfStatement(IfStatement {
+                    condition,
+                    branches,
+                }) => {
+                    let (branches, _) = [branches.0, branches.1]
+                        .into_iter()
+                        .map(|branch| self.add_allocations(branch, &cycles))
+                        .collect::<(Vec<_>, Vec<_>)>();
+                    let branches: [Vec<Statement>; 2] = branches.try_into().unwrap();
+                    vec![IfStatement {
+                        condition,
+                        branches: branches.into(),
+                    }
+                    .into()]
+                }
+                Statement::MatchStatement(MatchStatement {
+                    expression,
+                    branches,
+                    auxiliary_memory,
+                }) => {
+                    let (branches, _) = branches
+                        .into_iter()
+                        .map(|MatchBranch { target, statements }| {
+                            let (statements, weak_fns) = self.add_allocations(statements, &cycles);
+                            (MatchBranch { target, statements }, weak_fns)
+                        })
+                        .collect::<(Vec<_>, Vec<_>)>();
+                    vec![MatchStatement {
+                        branches,
+                        expression,
+                        auxiliary_memory,
+                    }
+                    .into()]
+                }
+            })
+            .collect_vec();
+
+        (statements, HashSet::new())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Assignment, Await, ClosureInstantiation, Declaration, FnType, Id, IfStatement, MatchBranch,
-        MatchStatement, Memory, Name, Statement, TupleExpression, TupleType, UnionType,
+        Allocation, Assignment, Await, ClosureInstantiation, Declaration, FnType, Id, IfStatement,
+        MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression, TupleType,
+        UnionType,
     };
 
     use super::*;
@@ -258,7 +330,7 @@ mod tests {
                 (Name::from("f"), Memory(Id::from("closure")))
             ]),
             cycles: HashMap::from([
-                (Memory(Id::from("closure")), Rc::new(RefCell::new(HashSet::from([Memory(Id::from("closure"))]))))
+                (Memory(Id::from("closure")), Rc::new(RefCell::new(vec![Memory(Id::from("closure"))])))
             ])
         };
         "self cycle"
@@ -330,9 +402,9 @@ mod tests {
                 (Name::from("f1"), Memory(Id::from("closure1"))),
             ]),
             cycles: {
-                let cycles = Rc::new(RefCell::new(HashSet::from([
+                let cycles = Rc::new(RefCell::new(vec![
                     Memory(Id::from("closure1")),
-                ])));
+                ]));
                 HashMap::from([
                     (Memory(Id::from("closure1")), cycles.clone()),
                 ])
@@ -438,11 +510,11 @@ mod tests {
                 (Name::from("f2"), Memory(Id::from("closure2"))),
             ]),
             cycles: {
-                let cycles = Rc::new(RefCell::new(HashSet::from([
+                let cycles = Rc::new(RefCell::new(vec![
                     Memory(Id::from("closure0")),
                     Memory(Id::from("closure1")),
                     Memory(Id::from("closure2")),
-                ])));
+                ]));
                 HashMap::from([
                     (Memory(Id::from("closure0")), cycles.clone()),
                     (Memory(Id::from("closure1")), cycles.clone()),
@@ -554,10 +626,10 @@ mod tests {
                 (Name::from("f2"), Memory(Id::from("closure2"))),
             ]),
             cycles: {
-                let cycles = Rc::new(RefCell::new(HashSet::from([
+                let cycles = Rc::new(RefCell::new(vec![
                     Memory(Id::from("closure0")),
                     Memory(Id::from("closure1")),
-                ])));
+                ]));
                 HashMap::from([
                     (Memory(Id::from("closure0")), cycles.clone()),
                     (Memory(Id::from("closure1")), cycles.clone()),
@@ -697,12 +769,12 @@ mod tests {
                 (Name::from("f3"), Memory(Id::from("closure3"))),
             ]),
             cycles: {
-                let cycles = Rc::new(RefCell::new(HashSet::from([
+                let cycles = Rc::new(RefCell::new(vec![
                     Memory(Id::from("closure0")),
                     Memory(Id::from("closure1")),
                     Memory(Id::from("closure2")),
                     Memory(Id::from("closure3")),
-                ])));
+                ]));
                 HashMap::from([
                     (Memory(Id::from("closure0")), cycles.clone()),
                     (Memory(Id::from("closure1")), cycles.clone()),
@@ -789,10 +861,10 @@ mod tests {
                 (Name::from("f1"), Memory(Id::from("closure1"))),
             ]),
             cycles: {
-                let cycles = Rc::new(RefCell::new(HashSet::from([
+                let cycles = Rc::new(RefCell::new(vec![
                     Memory(Id::from("closure0")),
                     Memory(Id::from("closure1")),
-                ])));
+                ]));
                 HashMap::from([
                     (Memory(Id::from("closure0")), cycles.clone()),
                     (Memory(Id::from("closure1")), cycles.clone()),
@@ -880,10 +952,10 @@ mod tests {
                 (Name::from("f1"), Memory(Id::from("closure1"))),
             ]),
             cycles: {
-                let cycles = Rc::new(RefCell::new(HashSet::from([
+                let cycles = Rc::new(RefCell::new(vec![
                     Memory(Id::from("closure0")),
                     Memory(Id::from("closure1")),
-                ])));
+                ]));
                 HashMap::from([
                     (Memory(Id::from("closure0")), cycles.clone()),
                     (Memory(Id::from("closure1")), cycles.clone()),
@@ -892,9 +964,1034 @@ mod tests {
         };
         "match statement cycle"
     )]
+    #[test_case(
+        vec![
+            Declaration{
+                memory: Memory(Id::from("closure0")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure1")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env0")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env1")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env0")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure1")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env1")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure0")),
+                value: ClosureInstantiation{
+                    name: Name::from("f0"),
+                    env: Some(Memory(Id::from("env0")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure1")),
+                value: ClosureInstantiation{
+                    name: Name::from("f1"),
+                    env: Some(Memory(Id::from("env1")).into())
+                }.into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure2")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure3")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env2")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env3")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env2")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure3")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env3")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure2")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure2")),
+                value: ClosureInstantiation{
+                    name: Name::from("f2"),
+                    env: Some(Memory(Id::from("env2")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure3")),
+                value: ClosureInstantiation{
+                    name: Name::from("f3"),
+                    env: Some(Memory(Id::from("env3")).into())
+                }.into()
+            }.into(),
+        ],
+        ClosureCycles{
+            fn_translation: HashMap::from([
+                (Name::from("f0"), Memory(Id::from("closure0"))),
+                (Name::from("f1"), Memory(Id::from("closure1"))),
+                (Name::from("f2"), Memory(Id::from("closure2"))),
+                (Name::from("f3"), Memory(Id::from("closure3"))),
+            ]),
+            cycles: {
+                let cycle0 = Rc::new(RefCell::new(vec![
+                    Memory(Id::from("closure0")),
+                    Memory(Id::from("closure1")),
+                ]));
+                let cycle1 = Rc::new(RefCell::new(vec![
+                    Memory(Id::from("closure2")),
+                    Memory(Id::from("closure3")),
+                ]));
+                HashMap::from([
+                    (Memory(Id::from("closure0")), cycle0.clone()),
+                    (Memory(Id::from("closure1")), cycle0.clone()),
+                    (Memory(Id::from("closure2")), cycle1.clone()),
+                    (Memory(Id::from("closure3")), cycle1.clone()),
+                ])
+            }
+        };
+        "separate cycles"
+    )]
     fn test_detect_cycles(statements: Vec<Statement>, expected_cycles: ClosureCycles) {
         let mut referrer = WeakReferrer::new();
         let cycles = referrer.detect_closure_cycles(&statements);
         assert_eq!(cycles, expected_cycles)
+    }
+
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("condition"))]).into(),
+            IfStatement {
+                condition: Memory(Id::from("condition")).into(),
+                branches: (
+                    vec![
+                        Declaration{
+                            memory: Memory(Id::from("closure0")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            ).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("closure1")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            ).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("env0")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("env1")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("env0")),
+                            value: TupleExpression(
+                                vec![Memory(Id::from("closure1")).into()]
+                            ).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("env1")),
+                            value: TupleExpression(
+                                vec![Memory(Id::from("closure0")).into()]
+                            ).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("closure0")),
+                            value: ClosureInstantiation{
+                                name: Name::from("f0"),
+                                env: Some(Memory(Id::from("env0")).into())
+                            }.into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("closure1")),
+                            value: ClosureInstantiation{
+                                name: Name::from("f1"),
+                                env: Some(Memory(Id::from("env1")).into())
+                            }.into()
+                        }.into(),
+                    ],
+                    Vec::new()
+                )
+            }.into(),
+        ],
+        vec![
+            Await(vec![Memory(Id::from("condition"))]).into(),
+            IfStatement {
+                condition: Memory(Id::from("condition")).into(),
+                branches: (
+                    vec![
+                        Allocation(vec![
+                            Memory(Id::from("closure0")),
+                            Memory(Id::from("closure1")),
+                        ]).into(),
+                        Declaration{
+                            memory: Memory(Id::from("closure0")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            ).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("closure1")),
+                            type_: FnType(
+                                vec![AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            ).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("env0")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("env1")),
+                            type_: TupleType(vec![
+                                FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            ]).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("env0")),
+                            value: TupleExpression(
+                                vec![Memory(Id::from("closure1")).into()]
+                            ).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("env1")),
+                            value: TupleExpression(
+                                vec![Memory(Id::from("closure0")).into()]
+                            ).into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("closure0")),
+                            value: ClosureInstantiation{
+                                name: Name::from("f0"),
+                                env: Some(Memory(Id::from("env0")).into())
+                            }.into()
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("closure1")),
+                            value: ClosureInstantiation{
+                                name: Name::from("f1"),
+                                env: Some(Memory(Id::from("env1")).into())
+                            }.into()
+                        }.into(),
+                    ],
+                    Vec::new()
+                )
+            }.into(),
+        ],
+        HashSet::new();
+        "if statement"
+    )]
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("subject"))]).into(),
+            MatchStatement {
+                expression: (Memory(Id::from("subject")).into(), UnionType(vec![Name::from("S0")])),
+                auxiliary_memory: Memory(Id::from("extra")),
+                branches: vec![
+                    MatchBranch{
+                        target: None,
+                        statements: vec![
+                            Declaration{
+                                memory: Memory(Id::from("closure0")),
+                                type_: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("closure1")),
+                                type_: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("env0")),
+                                type_: TupleType(vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    ).into()
+                                ]).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("env1")),
+                                type_: TupleType(vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    ).into()
+                                ]).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("env0")),
+                                value: TupleExpression(
+                                    vec![Memory(Id::from("closure1")).into()]
+                                ).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("env1")),
+                                value: TupleExpression(
+                                    vec![Memory(Id::from("closure0")).into()]
+                                ).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("closure0")),
+                                value: ClosureInstantiation{
+                                    name: Name::from("f0"),
+                                    env: Some(Memory(Id::from("env0")).into())
+                                }.into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("closure1")),
+                                value: ClosureInstantiation{
+                                    name: Name::from("f1"),
+                                    env: Some(Memory(Id::from("env1")).into())
+                                }.into()
+                            }.into(),
+                        ]
+                    }
+                ]
+            }.into(),
+        ],
+        vec![
+            Await(vec![Memory(Id::from("subject"))]).into(),
+            MatchStatement {
+                expression: (Memory(Id::from("subject")).into(), UnionType(vec![Name::from("S0")])),
+                auxiliary_memory: Memory(Id::from("extra")),
+                branches: vec![
+                    MatchBranch{
+                        target: None,
+                        statements: vec![
+                            Allocation(vec![
+                                Memory(Id::from("closure0")),
+                                Memory(Id::from("closure1")),
+                            ]).into(),
+                            Declaration{
+                                memory: Memory(Id::from("closure0")),
+                                type_: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("closure1")),
+                                type_: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                ).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("env0")),
+                                type_: TupleType(vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    ).into()
+                                ]).into()
+                            }.into(),
+                            Declaration{
+                                memory: Memory(Id::from("env1")),
+                                type_: TupleType(vec![
+                                    FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    ).into()
+                                ]).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("env0")),
+                                value: TupleExpression(
+                                    vec![Memory(Id::from("closure1")).into()]
+                                ).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("env1")),
+                                value: TupleExpression(
+                                    vec![Memory(Id::from("closure0")).into()]
+                                ).into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("closure0")),
+                                value: ClosureInstantiation{
+                                    name: Name::from("f0"),
+                                    env: Some(Memory(Id::from("env0")).into())
+                                }.into()
+                            }.into(),
+                            Assignment{
+                                target: Memory(Id::from("closure1")),
+                                value: ClosureInstantiation{
+                                    name: Name::from("f1"),
+                                    env: Some(Memory(Id::from("env1")).into())
+                                }.into()
+                            }.into(),
+                        ]
+                    }
+                ]
+            }.into(),
+        ],
+        HashSet::new();
+        "match statement"
+    )]
+    #[test_case(
+        vec![
+            Declaration{
+                memory: Memory(Id::from("closure")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env")),
+                type_: TupleType(vec![
+                    AtomicTypeEnum::INT.into(),
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("x")).into(), Memory(Id::from("closure")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure")),
+                value: ClosureInstantiation{
+                    name: Name::from("f"),
+                    env: Some(Memory(Id::from("env")).into())
+                }.into()
+            }.into(),
+        ],
+        vec![
+            Declaration{
+                memory: Memory(Id::from("closure")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env")),
+                type_: TupleType(vec![
+                    AtomicTypeEnum::INT.into(),
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("x")).into(), Memory(Id::from("closure")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure")),
+                value: ClosureInstantiation{
+                    name: Name::from("f"),
+                    env: Some(Memory(Id::from("env")).into())
+                }.into()
+            }.into(),
+        ],
+        HashSet::new();
+        "self cycle"
+    )]
+    #[test_case(
+        vec![
+            Declaration{
+                memory: Memory(Id::from("closure0")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure1")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env0")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env1")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env0")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure1")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env1")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure0")),
+                value: ClosureInstantiation{
+                    name: Name::from("f0"),
+                    env: Some(Memory(Id::from("env0")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure1")),
+                value: ClosureInstantiation{
+                    name: Name::from("f1"),
+                    env: Some(Memory(Id::from("env1")).into())
+                }.into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure2")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure3")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env2")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env3")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env2")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure3")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env3")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure2")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure2")),
+                value: ClosureInstantiation{
+                    name: Name::from("f2"),
+                    env: Some(Memory(Id::from("env2")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure3")),
+                value: ClosureInstantiation{
+                    name: Name::from("f3"),
+                    env: Some(Memory(Id::from("env3")).into())
+                }.into()
+            }.into(),
+        ],
+        vec![
+            Allocation(vec![
+                Memory(Id::from("closure0")),
+                Memory(Id::from("closure1")),
+            ]).into(),
+            Declaration{
+                memory: Memory(Id::from("closure0")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure1")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env0")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env1")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env0")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure1")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env1")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure0")),
+                value: ClosureInstantiation{
+                    name: Name::from("f0"),
+                    env: Some(Memory(Id::from("env0")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure1")),
+                value: ClosureInstantiation{
+                    name: Name::from("f1"),
+                    env: Some(Memory(Id::from("env1")).into())
+                }.into()
+            }.into(),
+            Allocation(vec![
+                Memory(Id::from("closure2")),
+                Memory(Id::from("closure3")),
+            ]).into(),
+            Declaration{
+                memory: Memory(Id::from("closure2")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure3")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env2")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env3")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env2")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure3")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env3")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure2")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure2")),
+                value: ClosureInstantiation{
+                    name: Name::from("f2"),
+                    env: Some(Memory(Id::from("env2")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure3")),
+                value: ClosureInstantiation{
+                    name: Name::from("f3"),
+                    env: Some(Memory(Id::from("env3")).into())
+                }.into()
+            }.into(),
+        ],
+        HashSet::new();
+        "separate cycles"
+    )]
+    #[test_case(
+        vec![
+            Declaration{
+                memory: Memory(Id::from("closure0")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure1")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure2")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure3")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env0")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env1")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env2")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env3")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env0")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure1")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env1")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure2")).into(),Memory(Id::from("closure3")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env2")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env3")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure0")),
+                value: ClosureInstantiation{
+                    name: Name::from("f0"),
+                    env: Some(Memory(Id::from("env0")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure1")),
+                value: ClosureInstantiation{
+                    name: Name::from("f1"),
+                    env: Some(Memory(Id::from("env1")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure2")),
+                value: ClosureInstantiation{
+                    name: Name::from("f2"),
+                    env: Some(Memory(Id::from("env2")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure3")),
+                value: ClosureInstantiation{
+                    name: Name::from("f3"),
+                    env: Some(Memory(Id::from("env3")).into())
+                }.into()
+            }.into(),
+        ],
+        vec![
+            Allocation(vec![
+                Memory(Id::from("closure0")),
+                Memory(Id::from("closure1")),
+                Memory(Id::from("closure2")),
+                Memory(Id::from("closure3")),
+            ]).into(),
+            Declaration{
+                memory: Memory(Id::from("closure0")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure1")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure2")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("closure3")),
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env0")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env1")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into()
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env2")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                ]).into()
+            }.into(),
+            Declaration{
+                memory: Memory(Id::from("env3")),
+                type_: TupleType(vec![
+                    FnType(
+                        vec![AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into()),
+                    ).into(),
+                ]).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env0")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure1")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env1")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure2")).into(),Memory(Id::from("closure3")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env2")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("env3")),
+                value: TupleExpression(
+                    vec![Memory(Id::from("closure0")).into()]
+                ).into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure0")),
+                value: ClosureInstantiation{
+                    name: Name::from("f0"),
+                    env: Some(Memory(Id::from("env0")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure1")),
+                value: ClosureInstantiation{
+                    name: Name::from("f1"),
+                    env: Some(Memory(Id::from("env1")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure2")),
+                value: ClosureInstantiation{
+                    name: Name::from("f2"),
+                    env: Some(Memory(Id::from("env2")).into())
+                }.into()
+            }.into(),
+            Assignment{
+                target: Memory(Id::from("closure3")),
+                value: ClosureInstantiation{
+                    name: Name::from("f3"),
+                    env: Some(Memory(Id::from("env3")).into())
+                }.into()
+            }.into(),
+        ],
+        HashSet::new();
+        "overlapping cycles"
+    )]
+    fn test_add_allocations(
+        statements: Vec<Statement>,
+        expected_statements: Vec<Statement>,
+        expected_weak_fns: HashSet<(Name, usize)>,
+    ) {
+        let mut referrer = WeakReferrer::new();
+        let cycles = referrer.detect_closure_cycles(&statements);
+        let (statements, weak_fns) = referrer.add_allocations(statements, &cycles);
+        assert_eq!(statements, expected_statements);
+        assert_eq!(weak_fns, expected_weak_fns);
     }
 }

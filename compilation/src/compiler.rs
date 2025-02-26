@@ -274,6 +274,7 @@ impl Compiler {
     ) -> Vec<Statement> {
         match statement {
             Statement::Await(await_) => vec![await_.into()],
+            Statement::Allocation(allocation) => vec![allocation.into()],
             Statement::Assignment(assignment) => vec![assignment.into()],
             Statement::Declaration(Declaration { type_: _, memory })
                 if declarations.contains_key(&memory) =>

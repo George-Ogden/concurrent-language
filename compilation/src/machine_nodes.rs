@@ -79,7 +79,7 @@ pub enum Value {
     Memory(Memory),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Memory(pub Id);
 
 #[derive(Clone, Debug, FromVariants, PartialEq)]
@@ -131,6 +131,7 @@ pub struct ClosureInstantiation {
 pub enum Statement {
     Await(Await),
     Declaration(Declaration),
+    Allocation(Allocation),
     Assignment(Assignment),
     IfStatement(IfStatement),
     MatchStatement(MatchStatement),
@@ -210,7 +211,7 @@ impl Statement {
     }
     fn get_declarations(&self) -> Declarations {
         match self {
-            Statement::Await(_) => HashMap::new(),
+            Statement::Await(_) | Statement::Allocation(_) => HashMap::new(),
             Statement::Assignment(Assignment {
                 target,
                 value:
@@ -279,6 +280,9 @@ pub struct Declaration {
     pub type_: MachineType,
     pub memory: Memory,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Allocation(pub Vec<Memory>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Assignment {
