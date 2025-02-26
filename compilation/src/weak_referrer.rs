@@ -13,7 +13,7 @@ use crate::{
 type Node = Memory;
 type Cycles = HashMap<Node, Rc<RefCell<Vec<Node>>>>;
 type Graph = HashMap<Node, Vec<Node>>;
-type Translation = HashMap<Name, Node>;
+type Translation = HashMap<Memory, Name>;
 
 #[derive(Debug, Clone, PartialEq)]
 struct ClosureCycles {
@@ -40,8 +40,12 @@ impl WeakReferrer {
             graph: Graph::new(),
         }
     }
-    fn construct_graph(&self, statements: &Vec<Statement>) -> (Graph, Translation) {
+    fn construct_graph(
+        &self,
+        statements: &Vec<Statement>,
+    ) -> (Graph, HashSet<Memory>, Translation) {
         let mut graph = Graph::new();
+        let mut fns = HashSet::new();
         let mut translation = Translation::new();
         for statement in statements {
             match statement {
@@ -56,9 +60,14 @@ impl WeakReferrer {
                             values.iter().collect()
                         }
                         Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                            translation.insert(name.clone(), target.clone());
                             match env {
-                                Some(value) => vec![value],
+                                Some(value) => {
+                                    if let Value::Memory(memory) = value {
+                                        translation.insert(memory.clone(), name.clone());
+                                    }
+                                    fns.insert(target.clone());
+                                    vec![value]
+                                }
                                 None => Vec::new(),
                             }
                         }
@@ -78,9 +87,10 @@ impl WeakReferrer {
                     branches,
                 }) => {
                     for statements in [&branches.0, &branches.1] {
-                        let graph_translation = self.construct_graph(statements);
-                        graph.extend(graph_translation.0);
-                        translation.extend(graph_translation.1);
+                        let graph_fns_translation = self.construct_graph(statements);
+                        graph.extend(graph_fns_translation.0);
+                        fns.extend(graph_fns_translation.1);
+                        translation.extend(graph_fns_translation.2);
                     }
                 }
                 Statement::MatchStatement(MatchStatement {
@@ -89,14 +99,15 @@ impl WeakReferrer {
                     auxiliary_memory: _,
                 }) => {
                     for branch in branches {
-                        let graph_translation = self.construct_graph(&branch.statements);
-                        graph.extend(graph_translation.0);
-                        translation.extend(graph_translation.1);
+                        let graph_fns_translation = self.construct_graph(&branch.statements);
+                        graph.extend(graph_fns_translation.0);
+                        fns.extend(graph_fns_translation.1);
+                        translation.extend(graph_fns_translation.2);
                     }
                 }
             }
         }
-        (graph, translation)
+        (graph, fns, translation)
     }
     fn transpose(&self, graph: &Graph) -> Graph {
         let mut transpose = Graph::new();
@@ -112,7 +123,8 @@ impl WeakReferrer {
     }
     fn detect_closure_cycles(&mut self, statements: &Vec<Statement>) -> ClosureCycles {
         let mut cycles = ClosureCycles::new();
-        (self.graph, cycles.fn_translation) = self.construct_graph(statements);
+        let fns;
+        (self.graph, fns, cycles.fn_translation) = self.construct_graph(statements);
         let mut visited = HashSet::new();
         let mut order = Vec::new();
         for node in self.graph.keys().cloned().collect_vec() {
@@ -124,7 +136,6 @@ impl WeakReferrer {
         order.reverse();
         self.graph = self.transpose(&self.graph);
         visited = HashSet::new();
-        let fns: HashSet<Memory> = HashSet::from_iter(cycles.fn_translation.values().cloned());
 
         for node in order {
             if !visited.contains(&node) {
@@ -167,18 +178,40 @@ impl WeakReferrer {
     fn add_allocations(
         &self,
         statements: Vec<Statement>,
-        cycles: &ClosureCycles,
+        closure_cycles: &ClosureCycles,
     ) -> (Vec<Statement>, HashSet<(Name, usize)>) {
-        let mut cyclic_closures: HashSet<_> = cycles.cycles.keys().cloned().collect();
+        let ClosureCycles {
+            fn_translation,
+            cycles,
+        } = &closure_cycles;
+        let mut cyclic_closures: HashSet<_> = cycles.keys().cloned().collect();
+        let mut weak_fns = HashSet::new();
         let statements = statements
             .into_iter()
             .flat_map(|statement| match statement {
                 Statement::Await(await_) => vec![await_.into()],
                 Statement::Allocation(allocation) => vec![allocation.into()],
-                Statement::Assignment(assignment) => vec![assignment.into()],
+                Statement::Assignment(assignment) => {
+                    if let Assignment {
+                        target,
+                        value: Expression::TupleExpression(TupleExpression(values)),
+                    } = &assignment
+                    {
+                        if let Some(fn_name) = fn_translation.get(target) {
+                            for (i, value) in values.iter().enumerate() {
+                                if let Value::Memory(memory) = value {
+                                    if cycles.contains_key(memory) {
+                                        weak_fns.insert((fn_name.clone(), i));
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    vec![assignment.into()]
+                }
                 Statement::Declaration(Declaration { type_, memory }) => {
                     let mut statements = if cyclic_closures.contains(&memory) {
-                        let cycle = cycles.cycles[&memory].borrow().clone();
+                        let cycle = cycles[&memory].borrow().clone();
                         for memory in &cycle {
                             cyclic_closures.remove(&memory);
                         }
@@ -197,10 +230,13 @@ impl WeakReferrer {
                     condition,
                     branches,
                 }) => {
-                    let (branches, _) = [branches.0, branches.1]
+                    let (branches, extra_fns) = [branches.0, branches.1]
                         .into_iter()
-                        .map(|branch| self.add_allocations(branch, &cycles))
+                        .map(|branch| self.add_allocations(branch, &closure_cycles))
                         .collect::<(Vec<_>, Vec<_>)>();
+                    for fns in extra_fns {
+                        weak_fns.extend(fns.into_iter());
+                    }
                     let branches: [Vec<Statement>; 2] = branches.try_into().unwrap();
                     vec![IfStatement {
                         condition,
@@ -213,13 +249,17 @@ impl WeakReferrer {
                     branches,
                     auxiliary_memory,
                 }) => {
-                    let (branches, _) = branches
+                    let (branches, extra_fns) = branches
                         .into_iter()
                         .map(|MatchBranch { target, statements }| {
-                            let (statements, weak_fns) = self.add_allocations(statements, &cycles);
+                            let (statements, weak_fns) =
+                                self.add_allocations(statements, &closure_cycles);
                             (MatchBranch { target, statements }, weak_fns)
                         })
                         .collect::<(Vec<_>, Vec<_>)>();
+                    for fns in extra_fns {
+                        weak_fns.extend(fns.into_iter());
+                    }
                     vec![MatchStatement {
                         branches,
                         expression,
@@ -230,20 +270,20 @@ impl WeakReferrer {
             })
             .collect_vec();
 
-        (statements, HashSet::new())
+        (statements, weak_fns)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Allocation, Assignment, Await, ClosureInstantiation, Declaration, FnType, Id, IfStatement,
-        MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression, TupleType,
-        UnionType,
+        Allocation, Assignment, Await, BuiltIn, ClosureInstantiation, Declaration, FnType, Id,
+        IfStatement, MatchBranch, MatchStatement, Memory, Name, Statement, TupleExpression,
+        TupleType, UnionType,
     };
 
     use super::*;
-    use lowering::AtomicTypeEnum;
+    use lowering::{AtomicTypeEnum, Boolean};
     use test_case::test_case;
 
     #[test_case(
@@ -257,9 +297,7 @@ mod tests {
             }.into()
         ],
         ClosureCycles{
-            fn_translation: HashMap::from([
-                (Name::from("f"), Memory(Id::from("closure")))
-            ]),
+            fn_translation: HashMap::new(),
             cycles: HashMap::new()
         };
         "no env"
@@ -286,7 +324,7 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f"), Memory(Id::from("closure")))
+                (Memory(Id::from("env")), Name::from("f")),
             ]),
             cycles: HashMap::new()
         };
@@ -327,7 +365,7 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f"), Memory(Id::from("closure")))
+                (Memory(Id::from("env")), Name::from("f"))
             ]),
             cycles: HashMap::from([
                 (Memory(Id::from("closure")), Rc::new(RefCell::new(vec![Memory(Id::from("closure"))])))
@@ -398,8 +436,8 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
             ]),
             cycles: {
                 let cycles = Rc::new(RefCell::new(vec![
@@ -505,9 +543,9 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
-                (Name::from("f2"), Memory(Id::from("closure2"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
+                (Memory(Id::from("env2")), Name::from("f2")),
             ]),
             cycles: {
                 let cycles = Rc::new(RefCell::new(vec![
@@ -621,9 +659,9 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
-                (Name::from("f2"), Memory(Id::from("closure2"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
+                (Memory(Id::from("env2")), Name::from("f2")),
             ]),
             cycles: {
                 let cycles = Rc::new(RefCell::new(vec![
@@ -763,10 +801,10 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
-                (Name::from("f2"), Memory(Id::from("closure2"))),
-                (Name::from("f3"), Memory(Id::from("closure3"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
+                (Memory(Id::from("env2")), Name::from("f2")),
+                (Memory(Id::from("env3")), Name::from("f3")),
             ]),
             cycles: {
                 let cycles = Rc::new(RefCell::new(vec![
@@ -857,8 +895,8 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
             ]),
             cycles: {
                 let cycles = Rc::new(RefCell::new(vec![
@@ -948,8 +986,8 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
             ]),
             cycles: {
                 let cycles = Rc::new(RefCell::new(vec![
@@ -1085,10 +1123,10 @@ mod tests {
         ],
         ClosureCycles{
             fn_translation: HashMap::from([
-                (Name::from("f0"), Memory(Id::from("closure0"))),
-                (Name::from("f1"), Memory(Id::from("closure1"))),
-                (Name::from("f2"), Memory(Id::from("closure2"))),
-                (Name::from("f3"), Memory(Id::from("closure3"))),
+                (Memory(Id::from("env0")), Name::from("f0")),
+                (Memory(Id::from("env1")), Name::from("f1")),
+                (Memory(Id::from("env2")), Name::from("f2")),
+                (Memory(Id::from("env3")), Name::from("f3")),
             ]),
             cycles: {
                 let cycle0 = Rc::new(RefCell::new(vec![
@@ -1258,7 +1296,10 @@ mod tests {
                 )
             }.into(),
         ],
-        HashSet::new();
+        HashSet::from([
+            (Name::from("f0"), 0),
+            (Name::from("f1"), 0),
+        ]);
         "if statement"
     )]
     #[test_case(
@@ -1288,6 +1329,7 @@ mod tests {
                             Declaration{
                                 memory: Memory(Id::from("env0")),
                                 type_: TupleType(vec![
+                                    AtomicTypeEnum::BOOL.into(),
                                     FnType(
                                         vec![AtomicTypeEnum::INT.into()],
                                         Box::new(AtomicTypeEnum::INT.into()),
@@ -1306,7 +1348,10 @@ mod tests {
                             Assignment{
                                 target: Memory(Id::from("env0")),
                                 value: TupleExpression(
-                                    vec![Memory(Id::from("closure1")).into()]
+                                    vec![
+                                        BuiltIn::from(Boolean{value: true}).into(),
+                                        Memory(Id::from("closure1")).into()
+                                    ]
                                 ).into()
                             }.into(),
                             Assignment{
@@ -1364,6 +1409,7 @@ mod tests {
                             Declaration{
                                 memory: Memory(Id::from("env0")),
                                 type_: TupleType(vec![
+                                    AtomicTypeEnum::BOOL.into(),
                                     FnType(
                                         vec![AtomicTypeEnum::INT.into()],
                                         Box::new(AtomicTypeEnum::INT.into()),
@@ -1382,7 +1428,10 @@ mod tests {
                             Assignment{
                                 target: Memory(Id::from("env0")),
                                 value: TupleExpression(
-                                    vec![Memory(Id::from("closure1")).into()]
+                                    vec![
+                                        BuiltIn::from(Boolean{value: true}).into(),
+                                        Memory(Id::from("closure1")).into()
+                                    ]
                                 ).into()
                             }.into(),
                             Assignment{
@@ -1410,7 +1459,10 @@ mod tests {
                 ]
             }.into(),
         ],
-        HashSet::new();
+        HashSet::from([
+            (Name::from("f0"), 1),
+            (Name::from("f1"), 0),
+        ]);
         "match statement"
     )]
     #[test_case(
@@ -1478,7 +1530,9 @@ mod tests {
                 }.into()
             }.into(),
         ],
-        HashSet::new();
+        HashSet::from([
+            (Name::from("f"), 1)
+        ]);
         "self cycle"
     )]
     #[test_case(
@@ -1726,7 +1780,12 @@ mod tests {
                 }.into()
             }.into(),
         ],
-        HashSet::new();
+        HashSet::from([
+            (Name::from("f0"), 0),
+            (Name::from("f1"), 0),
+            (Name::from("f2"), 0),
+            (Name::from("f3"), 0),
+        ]);
         "separate cycles"
     )]
     #[test_case(
@@ -1980,7 +2039,13 @@ mod tests {
                 }.into()
             }.into(),
         ],
-        HashSet::new();
+        HashSet::from([
+            (Name::from("f0"), 0),
+            (Name::from("f1"), 0),
+            (Name::from("f1"), 1),
+            (Name::from("f2"), 0),
+            (Name::from("f3"), 0),
+        ]);
         "overlapping cycles"
     )]
     fn test_add_allocations(
