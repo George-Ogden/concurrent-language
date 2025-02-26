@@ -282,7 +282,10 @@ pub struct Declaration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Allocation(pub Vec<Memory>);
+pub struct Allocation {
+    pub name: Name,
+    pub memory: Vec<Memory>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Assignment {

@@ -2,6 +2,7 @@ use itertools::Itertools;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    iter,
     rc::Rc,
 };
 
@@ -255,7 +256,13 @@ impl Weakener {
                             cyclic_closures.remove(&memory);
                         }
                         if cycle.len() > 1 {
-                            vec![Allocation(cycle).into()]
+                            vec![Allocation {
+                                name: iter::once(Name::from("Allocator"))
+                                    .chain(cycle.iter().map(|Memory(id)| id.clone()))
+                                    .join("_"),
+                                memory: cycle,
+                            }
+                            .into()]
                         } else {
                             Vec::new()
                         }
@@ -1301,10 +1308,13 @@ mod tests {
                 condition: Memory(Id::from("condition")).into(),
                 branches: (
                     vec![
-                        Allocation(vec![
-                            Memory(Id::from("closure0")),
-                            Memory(Id::from("closure1")),
-                        ]).into(),
+                        Allocation{
+                            memory: vec![
+                                Memory(Id::from("closure0")),
+                                Memory(Id::from("closure1")),
+                            ],
+                            name: Name::from("Allocator_closure0_closure1")
+                        }.into(),
                         Declaration{
                             memory: Memory(Id::from("closure0")),
                             type_: FnType(
@@ -1460,10 +1470,13 @@ mod tests {
                     MatchBranch{
                         target: None,
                         statements: vec![
-                            Allocation(vec![
-                                Memory(Id::from("closure0")),
-                                Memory(Id::from("closure1")),
-                            ]).into(),
+                            Allocation{
+                                memory: vec![
+                                    Memory(Id::from("closure0")),
+                                    Memory(Id::from("closure1")),
+                                ],
+                                name: Name::from("Allocator_closure0_closure1")
+                            }.into(),
                             Declaration{
                                 memory: Memory(Id::from("closure0")),
                                 type_: FnType(
@@ -1727,10 +1740,13 @@ mod tests {
             }.into(),
         ],
         vec![
-            Allocation(vec![
-                Memory(Id::from("closure0")),
-                Memory(Id::from("closure1")),
-            ]).into(),
+            Allocation{
+                memory: vec![
+                    Memory(Id::from("closure0")),
+                    Memory(Id::from("closure1")),
+                ],
+                name: Name::from("Allocator_closure0_closure1")
+            }.into(),
             Declaration{
                 memory: Memory(Id::from("closure0")),
                 type_: FnType(
@@ -1789,10 +1805,13 @@ mod tests {
                     env: Some(Memory(Id::from("env1")).into())
                 }.into()
             }.into(),
-            Allocation(vec![
-                Memory(Id::from("closure2")),
-                Memory(Id::from("closure3")),
-            ]).into(),
+            Allocation{
+                memory: vec![
+                    Memory(Id::from("closure2")),
+                    Memory(Id::from("closure3")),
+                ],
+                name: Name::from("Allocator_closure2_closure3")
+            }.into(),
             Declaration{
                 memory: Memory(Id::from("closure2")),
                 type_: FnType(
@@ -1984,12 +2003,15 @@ mod tests {
             }.into(),
         ],
         vec![
-            Allocation(vec![
-                Memory(Id::from("closure0")),
-                Memory(Id::from("closure1")),
-                Memory(Id::from("closure2")),
-                Memory(Id::from("closure3")),
-            ]).into(),
+            Allocation{
+                memory: vec![
+                    Memory(Id::from("closure0")),
+                    Memory(Id::from("closure1")),
+                    Memory(Id::from("closure2")),
+                    Memory(Id::from("closure3")),
+                ],
+                name: Name::from("Allocator_closure0_closure1_closure2_closure3")
+            }.into(),
             Declaration{
                 memory: Memory(Id::from("closure0")),
                 type_: FnType(
@@ -2570,12 +2592,15 @@ mod tests {
                 env: Vec::new(),
                 allocations: Vec::new(),
                 statements: vec![
-                    Allocation(vec![
-                        Memory(Id::from("closure0")),
-                        Memory(Id::from("closure1")),
-                        Memory(Id::from("closure2")),
-                        Memory(Id::from("closure3")),
-                    ]).into(),
+                    Allocation{
+                        memory: vec![
+                            Memory(Id::from("closure0")),
+                            Memory(Id::from("closure1")),
+                            Memory(Id::from("closure2")),
+                            Memory(Id::from("closure3")),
+                        ],
+                        name: Name::from("Allocator_closure0_closure1_closure2_closure3")
+                    }.into(),
                     Declaration{
                         memory: Memory(Id::from("closure0")),
                         type_: FnType(
