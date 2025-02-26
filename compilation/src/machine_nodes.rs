@@ -15,6 +15,7 @@ pub enum MachineType {
     AtomicType(AtomicType),
     TupleType(TupleType),
     FnType(FnType),
+    WeakFnType(FnType),
     UnionType(UnionType),
     NamedType(Name),
 }
@@ -55,7 +56,7 @@ impl TypeDef {
         match type_ {
             MachineType::AtomicType(_) => Vec::new(),
             MachineType::TupleType(TupleType(types)) => self.all_used_types(types),
-            MachineType::FnType(FnType(args, ret)) => {
+            MachineType::FnType(FnType(args, ret)) | MachineType::WeakFnType(FnType(args, ret)) => {
                 let mut types = self.all_used_types(args);
                 types.extend(self.used_types(&*ret));
                 types
