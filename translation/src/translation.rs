@@ -1,9 +1,5 @@
-use core::fmt;
 use itertools::Itertools;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Formatter,
-};
+use std::collections::{HashMap, HashSet};
 
 use compilation::{
     Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ClosureInstantiation,
@@ -11,6 +7,8 @@ use compilation::{
     IfStatement, Integer, MachineType, MatchStatement, Memory, Name, Program, Statement,
     TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
+
+use crate::type_formatter::TypeFormatter;
 
 type Code = String;
 
@@ -21,7 +19,7 @@ impl Translator {
         format!("{}", TypeFormatter(type_))
     }
     fn translate_lazy_type(&self, type_: &MachineType) -> Code {
-        format!("LazyT<{}>", TypeFormatter(type_))
+        format!("LazyT<{}>", self.translate_type(type_))
     }
     fn top_sort(&self, type_defs: &Vec<TypeDef>) -> Vec<(Name, Option<MachineType>)> {
         let mut visited = HashSet::<Name>::new();
@@ -255,6 +253,7 @@ impl Translator {
     }
     fn translate_statement(&self, statement: Statement) -> Code {
         match statement {
+            compilation::Statement::Allocation(_) => todo!(),
             Statement::Await(await_) => self.translate_await(await_),
             Statement::Assignment(assignment) => self.translate_assignment(assignment),
             Statement::IfStatement(if_statement) => self.translate_if_statement(if_statement),
@@ -376,52 +375,6 @@ impl Translator {
     pub fn translate(program: Program) -> Code {
         let translator = Translator {};
         translator.translate_program(program)
-    }
-}
-
-struct TypeFormatter<'a>(&'a MachineType);
-impl fmt::Display for TypeFormatter<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match &self.0 {
-            MachineType::AtomicType(AtomicType(atomic)) => match atomic {
-                AtomicTypeEnum::INT => write!(f, "Int"),
-                AtomicTypeEnum::BOOL => write!(f, "Bool"),
-            },
-            MachineType::TupleType(TupleType(types)) => {
-                write!(f, "TupleT<{}>", TypesFormatter(types))
-            }
-            MachineType::FnType(FnType(args, ret)) => {
-                write!(
-                    f,
-                    "FnT<{}>",
-                    TypesFormatter(
-                        &std::iter::once(*ret.clone())
-                            .chain(args.clone().into_iter())
-                            .collect()
-                    )
-                )
-            }
-            MachineType::UnionType(UnionType(type_names)) => {
-                write!(f, "VariantT<{}>", type_names.join(","))
-            }
-            MachineType::NamedType(name) => write!(f, "{}", name),
-        }
-    }
-}
-
-struct TypesFormatter<'a>(&'a Vec<MachineType>);
-impl fmt::Display for TypesFormatter<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "{}",
-            &self
-                .0
-                .iter()
-                .map(|machine_type| format!("{}", TypeFormatter(machine_type)))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
     }
 }
 
@@ -550,6 +503,17 @@ mod tests {
         ).into(),
         "FnT<Bool,Int,Int>";
         "int comparison fn"
+    )]
+    #[test_case(
+        MachineType::WeakFnType(FnType(
+            vec![
+                AtomicType(AtomicTypeEnum::INT).into(),
+                AtomicType(AtomicTypeEnum::INT).into(),
+            ],
+            Box::new(AtomicType(AtomicTypeEnum::BOOL).into())
+        )),
+        "WeakFnT<Bool,Int,Int>";
+        "weak function"
     )]
     #[test_case(
         FnType(
