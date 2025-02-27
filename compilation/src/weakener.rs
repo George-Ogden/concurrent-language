@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    Allocation, Assignment, ClosureInstantiation, Declaration, Expression, FnDef, IfStatement,
+    Allocation, Assignment, ClosureInstantiation, Declaration, Expression, FnDef, Id, IfStatement,
     MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement, TupleExpression,
     Value,
 };
@@ -256,10 +256,12 @@ impl Weakener {
                             cyclic_closures.remove(&memory);
                         }
                         if cycle.len() > 1 {
+                            let name = iter::once(Name::from("Allocator"))
+                                .chain(cycle.iter().map(|Memory(id)| id.clone()))
+                                .join("_");
                             vec![Allocation {
-                                name: iter::once(Name::from("Allocator"))
-                                    .chain(cycle.iter().map(|Memory(id)| id.clone()))
-                                    .join("_"),
+                                target: Memory(Id::from(format!("{name}_"))),
+                                name,
                                 memory: cycle,
                             }
                             .into()]
@@ -1313,7 +1315,8 @@ mod tests {
                                 Memory(Id::from("closure0")),
                                 Memory(Id::from("closure1")),
                             ],
-                            name: Name::from("Allocator_closure0_closure1")
+                            name: Name::from("Allocator_closure0_closure1"),
+                            target: Memory(Id::from("Allocator_closure0_closure1_"))
                         }.into(),
                         Declaration{
                             memory: Memory(Id::from("closure0")),
@@ -1475,6 +1478,7 @@ mod tests {
                                     Memory(Id::from("closure0")),
                                     Memory(Id::from("closure1")),
                                 ],
+                                target: Memory(Id::from("Allocator_closure0_closure1_")),
                                 name: Name::from("Allocator_closure0_closure1")
                             }.into(),
                             Declaration{
@@ -1745,7 +1749,8 @@ mod tests {
                     Memory(Id::from("closure0")),
                     Memory(Id::from("closure1")),
                 ],
-                name: Name::from("Allocator_closure0_closure1")
+                name: Name::from("Allocator_closure0_closure1"),
+                target: Memory(Id::from("Allocator_closure0_closure1_"))
             }.into(),
             Declaration{
                 memory: Memory(Id::from("closure0")),
@@ -1810,7 +1815,8 @@ mod tests {
                     Memory(Id::from("closure2")),
                     Memory(Id::from("closure3")),
                 ],
-                name: Name::from("Allocator_closure2_closure3")
+                name: Name::from("Allocator_closure2_closure3"),
+                target: Memory(Id::from("Allocator_closure2_closure3_"))
             }.into(),
             Declaration{
                 memory: Memory(Id::from("closure2")),
@@ -2010,7 +2016,8 @@ mod tests {
                     Memory(Id::from("closure2")),
                     Memory(Id::from("closure3")),
                 ],
-                name: Name::from("Allocator_closure0_closure1_closure2_closure3")
+                name: Name::from("Allocator_closure0_closure1_closure2_closure3"),
+                target: Memory(Id::from("Allocator_closure0_closure1_closure2_closure3_"))
             }.into(),
             Declaration{
                 memory: Memory(Id::from("closure0")),
@@ -2599,7 +2606,8 @@ mod tests {
                             Memory(Id::from("closure2")),
                             Memory(Id::from("closure3")),
                         ],
-                        name: Name::from("Allocator_closure0_closure1_closure2_closure3")
+                        name: Name::from("Allocator_closure0_closure1_closure2_closure3"),
+                        target: Memory(Id::from("Allocator_closure0_closure1_closure2_closure3_"))
                     }.into(),
                     Declaration{
                         memory: Memory(Id::from("closure0")),

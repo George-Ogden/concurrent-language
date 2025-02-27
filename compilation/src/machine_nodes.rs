@@ -285,6 +285,7 @@ pub struct Declaration {
 pub struct Allocation {
     pub name: Name,
     pub memory: Vec<Memory>,
+    pub target: Memory,
 }
 
 #[derive(Clone, Debug, PartialEq)]
