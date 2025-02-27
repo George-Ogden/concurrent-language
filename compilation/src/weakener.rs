@@ -222,6 +222,7 @@ impl Weakener {
         } = &closure_cycles;
         let mut cyclic_closures: HashSet<_> = cycles.keys().cloned().collect();
         let mut weak_fns = HashSet::new();
+        let name_translation: HashMap<Memory, Name> = fn_translation.values().cloned().collect();
         let statements = statements
             .into_iter()
             .flat_map(|statement| match statement {
@@ -256,13 +257,17 @@ impl Weakener {
                             cyclic_closures.remove(&memory);
                         }
                         if cycle.len() > 1 {
+                            let fns = cycle
+                                .iter()
+                                .map(|memory| (memory.clone(), name_translation[&memory].clone()))
+                                .collect_vec();
                             let name = iter::once(Name::from("Allocator"))
-                                .chain(cycle.iter().map(|Memory(id)| id.clone()))
+                                .chain(cycle.into_iter().map(|Memory(id)| id))
                                 .join("_");
                             vec![Allocation {
                                 target: Memory(Id::from(format!("{name}_"))),
                                 name,
-                                memory: cycle,
+                                fns,
                             }
                             .into()]
                         } else {
@@ -1311,9 +1316,9 @@ mod tests {
                 branches: (
                     vec![
                         Allocation{
-                            memory: vec![
-                                Memory(Id::from("closure0")),
-                                Memory(Id::from("closure1")),
+                            fns: vec![
+                                (Memory(Id::from("closure0")),Name::from("f0")),
+                                (Memory(Id::from("closure1")),Name::from("f1")),
                             ],
                             name: Name::from("Allocator_closure0_closure1"),
                             target: Memory(Id::from("Allocator_closure0_closure1_"))
@@ -1474,9 +1479,9 @@ mod tests {
                         target: None,
                         statements: vec![
                             Allocation{
-                                memory: vec![
-                                    Memory(Id::from("closure0")),
-                                    Memory(Id::from("closure1")),
+                                fns: vec![
+                                    (Memory(Id::from("closure0")),Name::from("f0")),
+                                    (Memory(Id::from("closure1")),Name::from("f1")),
                                 ],
                                 target: Memory(Id::from("Allocator_closure0_closure1_")),
                                 name: Name::from("Allocator_closure0_closure1")
@@ -1745,9 +1750,9 @@ mod tests {
         ],
         vec![
             Allocation{
-                memory: vec![
-                    Memory(Id::from("closure0")),
-                    Memory(Id::from("closure1")),
+                fns: vec![
+                    (Memory(Id::from("closure0")),Name::from("f0")),
+                    (Memory(Id::from("closure1")),Name::from("f1")),
                 ],
                 name: Name::from("Allocator_closure0_closure1"),
                 target: Memory(Id::from("Allocator_closure0_closure1_"))
@@ -1811,9 +1816,9 @@ mod tests {
                 }.into()
             }.into(),
             Allocation{
-                memory: vec![
-                    Memory(Id::from("closure2")),
-                    Memory(Id::from("closure3")),
+                fns: vec![
+                    (Memory(Id::from("closure2")),Name::from("f2")),
+                    (Memory(Id::from("closure3")),Name::from("f3")),
                 ],
                 name: Name::from("Allocator_closure2_closure3"),
                 target: Memory(Id::from("Allocator_closure2_closure3_"))
@@ -2010,11 +2015,11 @@ mod tests {
         ],
         vec![
             Allocation{
-                memory: vec![
-                    Memory(Id::from("closure0")),
-                    Memory(Id::from("closure1")),
-                    Memory(Id::from("closure2")),
-                    Memory(Id::from("closure3")),
+                fns: vec![
+                    (Memory(Id::from("closure0")),Name::from("f0")),
+                    (Memory(Id::from("closure1")),Name::from("f1")),
+                    (Memory(Id::from("closure2")),Name::from("f2")),
+                    (Memory(Id::from("closure3")),Name::from("f3")),
                 ],
                 name: Name::from("Allocator_closure0_closure1_closure2_closure3"),
                 target: Memory(Id::from("Allocator_closure0_closure1_closure2_closure3_"))
@@ -2600,11 +2605,11 @@ mod tests {
                 allocations: Vec::new(),
                 statements: vec![
                     Allocation{
-                        memory: vec![
-                            Memory(Id::from("closure0")),
-                            Memory(Id::from("closure1")),
-                            Memory(Id::from("closure2")),
-                            Memory(Id::from("closure3")),
+                        fns: vec![
+                            (Memory(Id::from("closure0")),Name::from("f0")),
+                            (Memory(Id::from("closure1")),Name::from("f1")),
+                            (Memory(Id::from("closure2")),Name::from("f2")),
+                            (Memory(Id::from("closure3")),Name::from("f3")),
                         ],
                         name: Name::from("Allocator_closure0_closure1_closure2_closure3"),
                         target: Memory(Id::from("Allocator_closure0_closure1_closure2_closure3_"))

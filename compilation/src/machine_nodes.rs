@@ -284,7 +284,7 @@ pub struct Declaration {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Allocation {
     pub name: Name,
-    pub memory: Vec<Memory>,
+    pub fns: Vec<(Memory, Name)>,
     pub target: Memory,
 }
 
