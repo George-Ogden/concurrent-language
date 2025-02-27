@@ -1,11 +1,13 @@
+use itertools::Either::{Left, Right};
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
+use std::convert::identity;
 
 use compilation::{
-    Assignment, AtomicType, AtomicTypeEnum, Await, Boolean, BuiltIn, ClosureInstantiation,
-    ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
-    IfStatement, Integer, MachineType, MatchStatement, Memory, Name, Program, Statement,
-    TupleExpression, TupleType, TypeDef, UnionType, Value,
+    Allocation, Assignment, Await, Boolean, BuiltIn, ClosureInstantiation, ConstructorCall,
+    Declaration, ElementAccess, Expression, FnCall, FnDef, Id, IfStatement, Integer, MachineType,
+    MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
+    UnionType, Value,
 };
 
 use crate::type_formatter::TypeFormatter;
@@ -203,6 +205,22 @@ impl Translator {
             self.translate_memory(memory)
         )
     }
+    fn translate_allocation(
+        &self,
+        allocation: Allocation,
+    ) -> (Code, HashMap<Memory, (Name, usize)>) {
+        let Allocation { name, memory } = allocation;
+        let mut allocation_map = HashMap::new();
+        let (struct_fields, allocations): (Vec<_>, Vec<_>) = memory.into_iter().enumerate().map(|(i, memory)| { allocation_map.insert(memory.clone(), (name.clone(), i)); let id = self.translate_memory(memory); ( format!("LazyConstant<remove_lazy_t<decltype({id})>> _{i};") , format!("{id} = std::shared_ptr<remove_shared_ptr_t<decltype({id})>>({name}_, &{name}_->_{i});")) }).unzip();
+        let struct_definition = format!("struct {name} {{ {} }};", struct_fields.join("\n"));
+        let instantiation =
+            format!("std::shared_ptr<{name}> {name}_ = std::make_shared<{name}>();");
+        let allocations = allocations.join("\n");
+        (
+            format!("{struct_definition} {instantiation} {allocations}"),
+            allocation_map,
+        )
+    }
     fn translate_assignment(&self, assignment: Assignment) -> Code {
         let Memory(id) = assignment.target;
         let value_code = match assignment.value {
@@ -261,25 +279,41 @@ impl Translator {
     }
     fn translate_statement(&self, statement: Statement) -> Code {
         match statement {
-            compilation::Statement::Allocation(_) => todo!(),
             Statement::Await(await_) => self.translate_await(await_),
             Statement::Assignment(assignment) => self.translate_assignment(assignment),
             Statement::IfStatement(if_statement) => self.translate_if_statement(if_statement),
             Statement::Declaration(declaration) => self.translate_declaration(declaration),
+            Statement::Allocation(allocation) => self.translate_allocation(allocation).0,
             Statement::MatchStatement(match_statement) => {
                 self.translate_match_statement(match_statement)
             }
         }
     }
     fn translate_statements(&self, statements: Vec<Statement>) -> Code {
-        let (declarations, other_statements): (Vec<_>, Vec<_>) = statements
-            .into_iter()
-            .partition(|statement| matches!(statement, Statement::Declaration(_)));
+        let (forwarded, other_statements): (Vec<_>, Vec<_>) =
+            statements
+                .into_iter()
+                .partition_map(|statement| match statement {
+                    Statement::Declaration(declaration) => Left(Left(declaration)),
+                    Statement::Allocation(allocation) => Left(Right(allocation)),
+                    statement => Right(statement),
+                });
+
+        let (declarations, allocations): (Vec<_>, Vec<_>) =
+            forwarded.into_iter().partition_map(identity);
 
         let declarations_code = declarations
             .into_iter()
-            .map(|statement| self.translate_statement(statement))
+            .map(|declaration| self.translate_declaration(declaration))
             .join("\n");
+
+        let (allocation_codes, allocations): (Vec<_>, Vec<_>) = allocations
+            .into_iter()
+            .map(|allocation| self.translate_allocation(allocation))
+            .unzip();
+        let allocations_code = allocation_codes.join("\n");
+        let allocations: HashMap<Memory, (String, usize)> =
+            HashMap::from_iter(allocations.into_iter().flatten());
 
         let closure_predefinitions = other_statements
             .iter()
@@ -290,7 +324,14 @@ impl Translator {
                 }) = statement
                 {
                     let id = self.translate_memory(target.clone());
-                    Some(format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>(ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_lazy_t<decltype({id})>>({name}::init));"))
+                    Some(match allocations.get(target){
+                        Some(_) => format!("*std::dynamic_pointer_cast<
+            LazyConstant<remove_lazy_t<decltype({id})>>>({id}) =
+            LazyConstant<remove_lazy_t<decltype({id})>>(
+                ClosureFnT<remove_lazy_t<typename {name}::EnvT>,
+                           remove_lazy_t<decltype({id})>>({name}::init));"),
+                        None => format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>(ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_lazy_t<decltype({id})>>({name}::init));") ,
+                    })
                 } else {
                     None
                 }
@@ -302,7 +343,7 @@ impl Translator {
             .map(|statement| self.translate_statement(statement))
             .join("\n");
 
-        format!("{declarations_code}\n{closure_predefinitions}\n{other_code}")
+        format!("{declarations_code}\n{allocations_code}\n{closure_predefinitions}\n{other_code}")
     }
     fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
         let Declaration { memory, type_ } = memory_allocation;
@@ -390,7 +431,7 @@ impl Translator {
 mod tests {
     use super::*;
 
-    use compilation::{Id, MatchBranch, Name};
+    use compilation::{Allocation, AtomicType, AtomicTypeEnum, FnType, Id, MatchBranch, Name};
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
@@ -1152,7 +1193,28 @@ mod tests {
         "closure assignment"
     )]
     #[test_case(
-            vec![
+        vec![
+            Declaration {
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::BOOL.into()),
+                ).into(),
+                memory: Memory(Id::from("is_odd_fn"))
+            }.into(),
+            Declaration {
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::BOOL.into()),
+                ).into(),
+                memory: Memory(Id::from("is_even_fn"))
+            }.into(),
+            Allocation{
+                name: Name::from("Allocator"),
+                memory: vec![
+                    Memory(Id::from("is_odd_fn")),
+                    Memory(Id::from("is_even_fn")),
+                ]
+            }.into(),
             Assignment {
                 target: Memory(Id::from("is_even_fn")).into(),
                 value: ClosureInstantiation{
@@ -1168,8 +1230,49 @@ mod tests {
                 }.into(),
             }.into()
         ],
-        "is_even_fn = make_lazy<remove_lazy_t<decltype(is_even_fn)>>(ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>>(IsEven::init)); is_odd_fn = make_lazy<remove_lazy_t<decltype(is_odd_fn)>>(ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>> *>(&is_even_fn->lvalue())->env() = store_env<typename IsEven::EnvT>(is_even_env); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>> *>(&is_odd_fn->lvalue())->env() = store_env<typename IsOdd::EnvT>(is_odd_env);";
+        "LazyT<FnT<Bool, Int>> is_odd_fn; LazyT<FnT<Bool, Int>> is_even_fn; struct Allocator { LazyConstant<remove_lazy_t<decltype(is_odd_fn)>> _0; LazyConstant<remove_lazy_t<decltype(is_even_fn)>> _1; }; std::shared_ptr<Allocator> Allocator_ = std::make_shared<Allocator>(); is_odd_fn = std::shared_ptr<remove_shared_ptr_t<decltype(is_odd_fn)>>( Allocator_, &Allocator_->_0); is_even_fn = std::shared_ptr<remove_shared_ptr_t<decltype(is_even_fn)>>( Allocator_, &Allocator_->_1); *std::dynamic_pointer_cast< LazyConstant<remove_lazy_t<decltype(is_even_fn)>>>(is_even_fn) = LazyConstant<remove_lazy_t<decltype(is_even_fn)>>( ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>>(IsEven::init)); *std::dynamic_pointer_cast< LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>>(is_odd_fn) = LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>( ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>> *>(&is_even_fn->lvalue())->env() = store_env<typename IsEven::EnvT>(is_even_env); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>> *>(&is_odd_fn->lvalue())->env() = store_env<typename IsOdd::EnvT>(is_odd_env);";
         "mutually recursive closure assignment"
+    )]
+    #[test_case(
+        vec![
+            Declaration {
+                type_: FnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ).into(),
+                memory: Memory(Id::from("f1"))
+            }.into(),
+            Allocation{
+                name: Name::from("alloc23"),
+                memory: vec![
+                    Memory(Id::from("f2")),
+                    Memory(Id::from("f3")),
+                ]
+            }.into(),
+            Allocation{
+                name: Name::from("alloc45"),
+                memory: vec![
+                    Memory(Id::from("f4")),
+                    Memory(Id::from("f5")),
+                ]
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("f4")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("F4"),
+                    env: Some(Memory(Id::from("f4_env")).into())
+                }.into(),
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("f1")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("F1"),
+                    env: Some(Memory(Id::from("f1_env")).into())
+                }.into(),
+            }.into()
+        ],
+        "LazyT<FnT<Int,Int>>f1; struct alloc23{LazyConstant<remove_lazy_t<decltype(f2)>>_0; LazyConstant<remove_lazy_t<decltype(f3)>>_1; }; std::shared_ptr<alloc23>alloc23_=std::make_shared<alloc23>(); f2=std::shared_ptr<remove_shared_ptr_t<decltype(f2)>>(alloc23_,&alloc23_->_0); f3=std::shared_ptr<remove_shared_ptr_t<decltype(f3)>>(alloc23_,&alloc23_->_1); struct alloc45{LazyConstant<remove_lazy_t<decltype(f4)>>_0; LazyConstant<remove_lazy_t<decltype(f5)>>_1; }; std::shared_ptr<alloc45>alloc45_=std::make_shared<alloc45>(); f4=std::shared_ptr<remove_shared_ptr_t<decltype(f4)>>(alloc45_,&alloc45_->_0); f5=std::shared_ptr<remove_shared_ptr_t<decltype(f5)>>(alloc45_,&alloc45_->_1); *std::dynamic_pointer_cast<LazyConstant<remove_lazy_t<decltype(f4)>>>(f4)=LazyConstant<remove_lazy_t<decltype(f4)>>(ClosureFnT<remove_lazy_t<typename F4::EnvT>,remove_lazy_t<decltype(f4)>>(F4::init)); f1=make_lazy<remove_lazy_t<decltype(f1)>>(ClosureFnT<remove_lazy_t<typename F1::EnvT>,remove_lazy_t<decltype(f1)>>(F1::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename F4::EnvT>,remove_lazy_t<decltype(f4)>>*>(&f4->lvalue())->env()=store_env<typename F4::EnvT>(f4_env); std::bit_cast<ClosureFnT<remove_lazy_t<typename F1::EnvT>,remove_lazy_t<decltype(f1)>>*>(&f1->lvalue())->env()=store_env<typename F1::EnvT>(f1_env);";
+        "dual allocator"
     )]
     #[test_case(
         vec![

@@ -686,20 +686,28 @@ struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
 };
 
 TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {
-    std::shared_ptr<LazyConstant<FnT<Bool, Int>>[]> allocator(
-        new LazyConstant<FnT<Bool, Int>>[2],
-        std::default_delete<LazyConstant<FnT<Bool, Int>>[]>());
 
-    LazyT<FnT<Bool, Int>> is_odd_fn(allocator, &allocator[0]);
+    LazyT<FnT<Bool, Int>> is_odd_fn;
 
     {
-        LazyT<FnT<Bool, Int>> is_even_fn(allocator, &allocator[1]);
+        LazyT<FnT<Bool, Int>> is_even_fn;
+
+        struct Allocator {
+            LazyConstant<remove_lazy_t<decltype(is_odd_fn)>> _0;
+            LazyConstant<remove_lazy_t<decltype(is_odd_fn)>> _1;
+        };
+        std::shared_ptr<Allocator> allocator = std::make_shared<Allocator>();
+        is_odd_fn = std::shared_ptr<remove_shared_ptr_t<decltype(is_odd_fn)>>(
+            allocator, &allocator->_0);
+        is_even_fn = std::shared_ptr<remove_shared_ptr_t<decltype(is_even_fn)>>(
+            allocator, &allocator->_1);
 
         *std::dynamic_pointer_cast<
             LazyConstant<remove_lazy_t<decltype(is_even_fn)>>>(is_even_fn) =
             LazyConstant<remove_lazy_t<decltype(is_even_fn)>>(
                 ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,
                            remove_lazy_t<decltype(is_even_fn)>>(IsEven::init));
+
         *std::dynamic_pointer_cast<
             LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>>(is_odd_fn) =
             LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>(
