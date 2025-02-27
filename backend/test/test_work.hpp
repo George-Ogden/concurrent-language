@@ -193,8 +193,8 @@ class PriorityChecker
 
   public:
     static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args,
-                                               std::shared_ptr<EnvT> env) {
-        return std::make_unique<PriorityChecker>(args, *env);
+                                               const EnvT &env) {
+        return std::make_unique<PriorityChecker>(args, env);
     }
 };
 
@@ -208,13 +208,14 @@ TEST_F(WorkRunnerPriorityPropagationTest, LowPriority) {
     WorkRunner::num_cpus = ThreadManager::available_concurrency();
     WorkT indirect_work, direct_work;
     LazyT<Int> v1, v2;
-    auto env = std::make_tuple(
+    typename PriorityChecker::EnvT env = std::make_tuple(
         make_lazy<WorkT *>(&indirect_work), make_lazy<bool>(),
         make_lazy<std::function<void()>>(std::function<void()>([]() {})));
 
-    std::tie(indirect_work, v1) =
-        Work::fn_call(TypedClosureG<typename PriorityChecker::EnvT, Int>{
-            PriorityChecker::init, env});
+    FnT<Int> fn =
+        std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
+            PriorityChecker::init, env);
+    std::tie(indirect_work, v1) = Work::fn_call(fn);
     WorkManager::enqueue(indirect_work);
 
     std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
@@ -245,9 +246,10 @@ TEST_F(WorkRunnerPriorityPropagationTest, HighPriority) {
                         make_lazy<std::function<void()>>(
                             std::function<void()>([&v2]() { v2->require(); })));
 
-    std::tie(indirect_work, v1) =
-        Work::fn_call(TypedClosureG<typename PriorityChecker::EnvT, Int>{
-            PriorityChecker::init, env});
+    FnT<Int> fn =
+        std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
+            PriorityChecker::init, env);
+    std::tie(indirect_work, v1) = Work::fn_call(fn);
     WorkManager::enqueue(indirect_work);
 
     std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
@@ -277,7 +279,7 @@ class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
 
   public:
     static std::unique_ptr<TypedFnI<TupleT<Int, Int>, Int, Int>>
-    init(const ArgsT &args, std::shared_ptr<void>) {
+    init(const ArgsT &args) {
         return std::make_unique<PairFn>(args);
     }
 };
@@ -285,8 +287,9 @@ class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
 TEST(TupleWorkTest, CorrectValue) {
     std::shared_ptr<Work> work;
     LazyT<TupleT<Int, Int>> results;
-    TypedFnG<TupleT<Int, Int>, Int, Int> pair_fn =
-        TypedClosureG<Empty, TupleT<Int, Int>, Int, Int>{PairFn::init};
+    FnT<TupleT<Int, Int>, Int, Int> pair_fn =
+        std::make_shared<TypedClosureG<Empty, TupleT<Int, Int>, Int, Int>>(
+            PairFn::init);
     std::tie(work, results) =
         Work::fn_call(pair_fn, make_lazy<Int>(4), make_lazy<Int>(-4));
     work->run();

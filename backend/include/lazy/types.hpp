@@ -17,6 +17,8 @@ template <typename T> struct remove_lazy<std::shared_ptr<Lazy<T>>> {
     using type = T;
 };
 
+template <typename T> struct remove_lazy<Lazy<T> *> { using type = T; };
+
 template <typename T> using remove_lazy_t = typename remove_lazy<T>::type;
 
 template <typename... Ts> struct remove_lazy<std::tuple<Ts...>> {

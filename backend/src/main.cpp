@@ -10,6 +10,7 @@ int main(int argc, char *argv[]) {
     using ArgsT = typename Main::ArgsT;
     argc--;
     argv++;
+    ThreadManager::override_concurrency(1);
     constexpr auto N = std::tuple_size_v<ArgsT>;
     if (N != argc) {
         std::cerr << "Invalid number of arguments expected " << N << " got "

@@ -18,4 +18,4 @@ typename TypedFnI<Ret, Args...>::RetT TypedFnI<Ret, Args...>::run() {
 }
 
 template <typename E, typename Ret, typename... Args>
-TypedClosureI<E, Ret, Args...>::TypedClosureI(const ArgsT& args, EnvT env):TypedFnI<Ret, Args...>(args),env(env){}
+TypedClosureI<E, Ret, Args...>::TypedClosureI(const ArgsT& args, const EnvT &env):TypedFnI<Ret, Args...>(args),env(env){}

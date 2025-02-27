@@ -20,11 +20,12 @@
       public:                                                                  \
         using TypedFnI<Int, Int, Int>::TypedFnI;                               \
         static std::unique_ptr<TypedFnI<Int, Int, Int>>                        \
-        init(const ArgsT &args, std::shared_ptr<void>) {                       \
+        init(const ArgsT &args) {                                              \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
     };                                                                         \
-    FnT<Int, Int, Int> fn##_G{fn##_I::init};
+    FnT<Int, Int, Int> fn##_G =                                                \
+        std::make_shared<TypedClosureG<Empty, Int, Int, Int>>(fn##_I::init);
 
 #define Unary_Int_Int_Op__BuiltIn(fn)                                          \
     class fn##_I : public TypedFnI<Int, Int> {                                 \
@@ -33,12 +34,12 @@
                                                                                \
       public:                                                                  \
         using TypedFnI<Int, Int>::TypedFnI;                                    \
-        static std::unique_ptr<TypedFnI<Int, Int>>                             \
-        init(const ArgsT &args, std::shared_ptr<void>) {                       \
+        static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {   \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
     };                                                                         \
-    FnT<Int, Int> fn##_G{fn##_I::init};
+    FnT<Int, Int> fn##_G =                                                     \
+        std::make_shared<TypedClosureG<Empty, Int, Int>>(fn##_I::init);
 
 #define Unary_Bool_Bool_Op__BuiltIn(fn)                                        \
     class fn##_I : public TypedFnI<Bool, Bool> {                               \
@@ -47,12 +48,12 @@
                                                                                \
       public:                                                                  \
         using TypedFnI<Bool, Bool>::TypedFnI;                                  \
-        static std::unique_ptr<TypedFnI<Bool, Bool>>                           \
-        init(const ArgsT &args, std::shared_ptr<void>) {                       \
+        static std::unique_ptr<TypedFnI<Bool, Bool>> init(const ArgsT &args) { \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
     };                                                                         \
-    FnT<Bool, Bool> fn##_G{fn##_I::init};
+    FnT<Bool, Bool> fn##_G =                                                   \
+        std::make_shared<TypedClosureG<Empty, Bool, Bool>>(fn##_I::init);
 
 #define Binary_Int_Int_Bool_Op__BuiltIn(fn)                                    \
     class fn##_I : public TypedFnI<Bool, Int, Int> {                           \
@@ -64,11 +65,12 @@
       public:                                                                  \
         using TypedFnI<Bool, Int, Int>::TypedFnI;                              \
         static std::unique_ptr<TypedFnI<Bool, Int, Int>>                       \
-        init(const ArgsT &args, std::shared_ptr<void>) {                       \
+        init(const ArgsT &args) {                                              \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
     };                                                                         \
-    FnT<Bool, Int, Int> fn##_G{fn##_I::init};
+    FnT<Bool, Int, Int> fn##_G =                                               \
+        std::make_shared<TypedClosureG<Empty, Bool, Int, Int>>(fn##_I::init);
 
 LazyT<Int> Plus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
     WorkManager::await(x, y);
