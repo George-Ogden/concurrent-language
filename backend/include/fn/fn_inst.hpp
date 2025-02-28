@@ -21,6 +21,7 @@ template <typename Ret, typename... Args> class TypedFnI {
     virtual ~TypedFnI();
     explicit TypedFnI(const ArgsT &);
     RetT run();
+    virtual void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn);
 };
 
 template <typename E, typename Ret, typename... Args>
@@ -34,6 +35,8 @@ struct TypedClosureI : public TypedFnI<Ret, Args...> {
 
   protected:
     EnvT env;
+    std::shared_ptr<TypedFnG<Ret, Args...>> fn;
+    void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn) override;
 };
 
 template <typename Ret, typename... Args>
