@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fn/fn_gen.hpp"
+#include "fn/types.hpp"
 #include "work/runner.hpp"
 #include "work/work.hpp"
 
@@ -11,7 +11,7 @@
 
 struct WorkManager {
     template <typename Ret, typename... Args>
-    static LazyT<Ret> run(TypedFnG<Ret, Args...> fn, LazyT<Args>... args);
+    static LazyT<Ret> run(FnT<Ret, Args...> fn, LazyT<Args>... args);
     static std::monostate main(std::atomic<WorkT> *ref);
     static void enqueue(WorkT work);
     template <typename... Vs> static void await(Vs &...vs);

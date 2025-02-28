@@ -1,0 +1,23 @@
+isz = (n: int) -> bool {
+    n == 0
+};
+
+is_even = (x: int ) -> bool {
+    if (isz(x)){
+        true
+    } else {
+        is_odd(x - 1)
+    }
+};
+
+is_odd = (x: int ) -> bool {
+    if (isz(x)){
+        false
+    } else {
+        is_even(x - 1)
+    }
+};
+
+main = (n: int)->bool{
+    is_even(n)
+};

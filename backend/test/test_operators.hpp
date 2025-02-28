@@ -23,8 +23,9 @@ TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
                                   1000000000224LL}) {
         for (Int y : {-8, 4, 3, 17}) {
+            FnT<Int, Int, Int> f = op;
             auto result =
-                WorkManager::run(op, make_lazy<Int>(x), make_lazy<Int>(y));
+                WorkManager::run(f, make_lazy<Int>(x), make_lazy<Int>(y));
             Int expected = validate(x, y);
             ASSERT_EQ(result->value(), expected);
         }

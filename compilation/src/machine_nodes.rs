@@ -15,6 +15,7 @@ pub enum MachineType {
     AtomicType(AtomicType),
     TupleType(TupleType),
     FnType(FnType),
+    WeakFnType(FnType),
     UnionType(UnionType),
     NamedType(Name),
 }
@@ -55,7 +56,7 @@ impl TypeDef {
         match type_ {
             MachineType::AtomicType(_) => Vec::new(),
             MachineType::TupleType(TupleType(types)) => self.all_used_types(types),
-            MachineType::FnType(FnType(args, ret)) => {
+            MachineType::FnType(FnType(args, ret)) | MachineType::WeakFnType(FnType(args, ret)) => {
                 let mut types = self.all_used_types(args);
                 types.extend(self.used_types(&*ret));
                 types
@@ -78,7 +79,7 @@ pub enum Value {
     Memory(Memory),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Memory(pub Id);
 
 #[derive(Clone, Debug, FromVariants, PartialEq)]
@@ -130,6 +131,7 @@ pub struct ClosureInstantiation {
 pub enum Statement {
     Await(Await),
     Declaration(Declaration),
+    Allocation(Allocation),
     Assignment(Assignment),
     IfStatement(IfStatement),
     MatchStatement(MatchStatement),
@@ -209,7 +211,7 @@ impl Statement {
     }
     fn get_declarations(&self) -> Declarations {
         match self {
-            Statement::Await(_) => HashMap::new(),
+            Statement::Await(_) | Statement::Allocation(_) => HashMap::new(),
             Statement::Assignment(Assignment {
                 target,
                 value:
@@ -279,6 +281,13 @@ pub struct Declaration {
     pub memory: Memory,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Allocation {
+    pub name: Name,
+    pub fns: Vec<(Memory, Name)>,
+    pub target: Memory,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Assignment {
     pub target: Memory,
@@ -310,7 +319,7 @@ pub struct FnDef {
     pub arguments: Vec<(Memory, MachineType)>,
     pub statements: Vec<Statement>,
     pub ret: (Value, MachineType),
-    pub env: Option<MachineType>,
+    pub env: Vec<MachineType>,
     pub allocations: Vec<Declaration>,
 }
 

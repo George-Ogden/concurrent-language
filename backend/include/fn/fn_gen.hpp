@@ -8,41 +8,31 @@
 #include <memory>
 #include <type_traits>
 
-class FnG {
-  protected:
-    void *_fn = nullptr;
-    std::shared_ptr<void> _env;
-    FnG(void *fn, std::shared_ptr<void> env);
-    explicit FnG(void *fn);
-
-  public:
-    FnG();
-    virtual ~FnG();
-};
-
-template <typename Ret, typename... Args> struct TypedFnG : public FnG {
+template <typename Ret, typename... Args> struct TypedFnG {
     using RetT = LazyT<std::decay_t<Ret>>;
     using ArgsT = LazyT<TupleT<std::decay_t<Args>...>>;
-    using T = std::unique_ptr<TypedFnI<Ret, Args...>> (*)(
-        const ArgsT &, std::shared_ptr<void>);
+    using Fn = TypedFnG<Ret, std::decay_t<Args>...>;
     using U = std::unique_ptr<TypedFnI<Ret, Args...>>;
-    TypedFnG(T fn, const std::shared_ptr<void> env);
-    explicit TypedFnG(T fn);
     TypedFnG();
-    virtual U init(LazyT<std::decay_t<Args>>... args) const;
+    virtual ~TypedFnG();
+    virtual U init(LazyT<std::decay_t<Args>>... args) const = 0;
 };
 
 template <typename E, typename Ret, typename... Args>
 struct TypedClosureG : public TypedFnG<Ret, Args...> {
     using typename TypedFnG<Ret, Args...>::ArgsT;
     using typename TypedFnG<Ret, Args...>::RetT;
+    using typename TypedFnG<Ret, Args...>::Fn;
     using EnvT = LazyT<E>;
-    using T = std::unique_ptr<TypedFnI<Ret, Args...>> (*)(
-        const ArgsT &, std::shared_ptr<EnvT>);
-    using TypedFnG<Ret, Args...>::U;
-    TypedClosureG(T fn, EnvT env);
+    using T = std::unique_ptr<TypedFnI<Ret, Args...>> (*)(const ArgsT &,
+                                                          const EnvT &);
+    using typename TypedFnG<Ret, Args...>::U;
+    T fn;
+    EnvT env;
+    TypedClosureG(T fn, const EnvT &env);
     explicit TypedClosureG(T fn);
-    EnvT &env();
+    TypedClosureG();
+    U init(LazyT<std::decay_t<Args>>... args) const override;
 };
 
 template <typename Ret, typename... Args>
@@ -50,6 +40,11 @@ struct TypedClosureG<Empty, Ret, Args...> : public TypedFnG<Ret, Args...> {
     using typename TypedFnG<Ret, Args...>::ArgsT;
     using typename TypedFnG<Ret, Args...>::RetT;
     using T = std::unique_ptr<TypedFnI<Ret, Args...>> (*)(const ArgsT &);
-    using TypedFnG<Ret, Args...>::U;
+    using typename TypedFnG<Ret, Args...>::Fn;
+    using typename TypedFnG<Ret, Args...>::U;
     using TypedFnG<Ret, Args...>::TypedFnG;
+    T fn;
+    explicit TypedClosureG(T fn);
+    TypedClosureG();
+    U init(LazyT<std::decay_t<Args>>... args) const override;
 };

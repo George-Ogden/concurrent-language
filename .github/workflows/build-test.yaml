@@ -46,7 +46,7 @@ jobs:
     - name: Temporary Script
       run: |
         echo '#include "main/include.hpp"' > backend/include/main/main.hpp
-        echo 'struct Main : TypedClosureI<Empty, Int> { using TypedClosureI<Empty, Int>::TypedClosureI; LazyT<Int> body() override { return make_lazy<Int>(0); } static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args, std::shared_ptr<void>) { return std::make_unique<Main>(args);}};' >> backend/include/main/main.hpp
+        echo 'struct Main : TypedClosureI<Empty, Int> { using TypedClosureI<Empty, Int>::TypedClosureI; LazyT<Int> body() override { return make_lazy<Int>(0); } static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) { return std::make_unique<Main>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty, Int>>(init);};' >> backend/include/main/main.hpp
 
     - name: Build
       run: |
