@@ -91,7 +91,9 @@ test: build
 	done;
 	for sample in benchmark/**; do \
 		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
-		cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
+		for i in `seq 1 10`; do \
+			cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
+		done; \
 	done;
 
 clean:
