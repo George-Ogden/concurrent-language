@@ -205,30 +205,24 @@ impl Translator {
             self.translate_memory(memory)
         )
     }
-    fn translate_allocation(&self, allocation: Allocation) -> (Code, HashSet<Memory>) {
-        let Allocation {
-            name,
-            memory,
-            target,
-        } = allocation;
-        let mut allocated_memory = HashSet::new();
-        let (struct_fields, allocations): (Vec<_>, Vec<_>) = memory.into_iter().enumerate().map(|(i, memory)| {
-            allocated_memory.insert(memory.clone());
-            let id = self.translate_memory(memory);
+    fn translate_allocation(
+        &self,
+        allocation: Allocation,
+    ) -> (Code, HashMap<Memory, (Code, usize)>) {
+        let Allocation { name, fns, target } = allocation;
+        let mut allocated_memory = HashMap::new();
+        let mut struct_fields = fns.into_iter().enumerate().map(|(i, (memory, name))| {
             let target = self.translate_memory(target.clone());
-            (
-                format!("LazyConstant<remove_lazy_t<decltype({id})>> _{i};"),
-                format!("{id} = std::shared_ptr<remove_shared_ptr_t<decltype({id})>>({target}, &{target}->_{i});")
-            )
-        }).unzip();
+            allocated_memory.insert(memory.clone(), (target.clone(), i));
+            format!("ClosureFnT<remove_lazy_t<typename {name}::EnvT>, typename {name}::Fn> _{i};")
+        });
         let struct_definition = format!("struct {name} {{ {} }};", struct_fields.join("\n"));
         let instantiation = format!(
             "std::shared_ptr<{name}> {} = std::make_shared<{name}>();",
             self.translate_memory(target)
         );
-        let allocations = allocations.join("\n");
         (
-            format!("{struct_definition} {instantiation} {allocations}"),
+            format!("{struct_definition} {instantiation}"),
             allocated_memory,
         )
     }
@@ -240,10 +234,10 @@ impl Translator {
                 self.translate_constructor_call(id.clone(), constructor_call)
             }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
-                return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::init);"), |env| {
+                return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::G);"), |env| {
                     let value = self.translate_value(env);
                     format!(
-                        "std::bit_cast<ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_lazy_t<decltype({id})>>*>(&{id}->lvalue())->env() = store_env<typename {name}::EnvT>({value});",
+                        "std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_shared_ptr_t<remove_lazy_t<decltype({id})>>>>({id}->lvalue())->env = store_env<typename {name}::EnvT>({value});",
                     )
                 })
             }
@@ -323,30 +317,34 @@ impl Translator {
             .map(|allocation| self.translate_allocation(allocation))
             .unzip();
         let allocations_code = allocation_codes.join("\n");
-        let allocations: HashSet<Memory> = HashSet::from_iter(allocations.into_iter().flatten());
+        let allocations: HashMap<Memory, (Code, usize)> =
+            HashMap::from_iter(allocations.into_iter().flatten());
 
-        let closure_predefinitions = other_statements
-            .iter()
-            .filter_map(|statement| {
-                if let Statement::Assignment(Assignment {
-                    target,
-                    value: Expression::ClosureInstantiation(ClosureInstantiation { name, env: Some(_) }),
-                }) = statement
-                {
-                    let id = self.translate_memory(target.clone());
-                    Some(match allocations.get(target){
-                        Some(_) => format!("*std::dynamic_pointer_cast<
-            LazyConstant<remove_lazy_t<decltype({id})>>>({id}) =
-            LazyConstant<remove_lazy_t<decltype({id})>>(
-                ClosureFnT<remove_lazy_t<typename {name}::EnvT>,
-                           remove_lazy_t<decltype({id})>>({name}::init));"),
-                        None => format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>(ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_lazy_t<decltype({id})>>({name}::init));") ,
-                    })
-                } else {
-                    None
-                }
-            })
-            .join("\n");
+        let closure_predefinitions =
+            other_statements
+                .iter()
+                .filter_map(|statement| {
+                    if let Statement::Assignment(Assignment {
+                        target,
+                        value:
+                            Expression::ClosureInstantiation(ClosureInstantiation {
+                                name,
+                                env: Some(_),
+                            }),
+                    }) = statement
+                    {
+                        let id = self.translate_memory(target.clone());
+                        Some(match allocations.get(target) {
+                            Some((allocator, idx)) => format!(
+                                "{id} = setup_closure<{name}>({allocator}, {allocator}->_{idx});"
+                            ),
+                            None => format!("{id} = setup_closure<{name}>();"),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .join("\n");
 
         let other_code = other_statements
             .into_iter()
@@ -379,20 +377,22 @@ impl Translator {
             .map(|type_| self.translate_type(&type_))
             .join(",");
         let base_name = "TypedClosureI";
-        let (env_ptr, replication_args, base) = if fn_def.env.len() == 0 {
+        let (env_ptr, replication_args, base, instance) = if fn_def.env.len() == 0 {
             (
-                String::from("std::shared_ptr<void>"),
+                String::new(),
                 String::from("args"),
                 format!("{base_name}<Empty,{external_types}>"),
+                format!("static inline FnT<{external_types}> G = std::make_shared<TypedClosureG<Empty,{external_types}>>(init);")
             )
         } else {
             (
-                String::from("std::shared_ptr<EnvT> env"),
-                String::from("args, *env"),
+                String::from(", const EnvT &env"),
+                String::from("args, env"),
                 format!(
                     "{base_name}<{},{external_types}>",
                     self.translate_type(&TupleType(fn_def.env).into()),
                 ),
+                String::new(),
             )
         };
 
@@ -413,11 +413,11 @@ impl Translator {
                 .join(",")
         );
         let clone_code = format!(
-            "static std::unique_ptr<TypedFnI<{external_types}>> init(const ArgsT &args, {env_ptr}) {{ return std::make_unique<{name}>({replication_args}); }}"
+            "static std::unique_ptr<TypedFnI<{external_types}>> init(const ArgsT &args{env_ptr}) {{ return std::make_unique<{name}>({replication_args}); }}"
         );
         let allocations_code = self.translate_memory_allocations(fn_def.allocations);
         format!(
-            "{declaration_code} {{ {constructor_code} {allocations_code} {header_code} {{ {statements_code} {return_code} }} {clone_code} }};"
+            "{declaration_code} {{ {constructor_code} {allocations_code} {header_code} {{ {statements_code} {return_code} }} {clone_code} {instance} }};"
         )
     }
     fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
@@ -1188,7 +1188,7 @@ mod tests {
                 env: None
             }.into(),
         }.into()],
-        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(Closure::init);";
+        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(Closure::G);";
         "closure without env assignment"
     )]
     #[test_case(
@@ -1199,7 +1199,7 @@ mod tests {
                 env: Some(Memory(Id::from("x")).into())
             }.into(),
         }.into()],
-        "closure = make_lazy<remove_lazy_t<decltype(closure)>>(ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>(Adder::init));  std::bit_cast<ClosureFnT<remove_lazy_t<typename Adder::EnvT>, remove_lazy_t<decltype(closure)>>*>(&closure->lvalue())->env() = store_env<typename Adder::EnvT>(x);";
+        "closure = setup_closure<Adder>(); std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename Adder::EnvT>,remove_shared_ptr_t<remove_lazy_t<decltype(closure)>>>>(closure->lvalue())->env = store_env<typename Adder::EnvT>(x);";
         "closure assignment"
     )]
     #[test_case(
@@ -1221,10 +1221,17 @@ mod tests {
             Allocation{
                 name: Name::from("Allocator"),
                 target: Memory(Id::from("allocator")),
-                memory: vec![
-                    Memory(Id::from("is_odd_fn")),
-                    Memory(Id::from("is_even_fn")),
+                fns: vec![
+                    (Memory(Id::from("is_odd_fn")), Name::from("IsOdd")),
+                    (Memory(Id::from("is_even_fn")), Name::from("IsEven")),
                 ]
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("is_odd_fn")).into(),
+                value: ClosureInstantiation{
+                    name: Name::from("IsOdd"),
+                    env: Some(Memory(Id::from("is_odd_env")).into())
+                }.into(),
             }.into(),
             Assignment {
                 target: Memory(Id::from("is_even_fn")).into(),
@@ -1233,15 +1240,8 @@ mod tests {
                     env: Some(Memory(Id::from("is_even_env")).into())
                 }.into(),
             }.into(),
-            Assignment {
-                target: Memory(Id::from("is_odd_fn")).into(),
-                value: ClosureInstantiation{
-                    name: Name::from("IsOdd"),
-                    env: Some(Memory(Id::from("is_odd_env")).into())
-                }.into(),
-            }.into()
         ],
-        "LazyT<FnT<Bool, Int>> is_odd_fn; LazyT<FnT<Bool, Int>> is_even_fn; struct Allocator { LazyConstant<remove_lazy_t<decltype(is_odd_fn)>> _0; LazyConstant<remove_lazy_t<decltype(is_even_fn)>> _1; }; std::shared_ptr<Allocator> allocator = std::make_shared<Allocator>(); is_odd_fn = std::shared_ptr<remove_shared_ptr_t<decltype(is_odd_fn)>>( allocator, &allocator->_0); is_even_fn = std::shared_ptr<remove_shared_ptr_t<decltype(is_even_fn)>>( allocator, &allocator->_1); *std::dynamic_pointer_cast< LazyConstant<remove_lazy_t<decltype(is_even_fn)>>>(is_even_fn) = LazyConstant<remove_lazy_t<decltype(is_even_fn)>>( ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>>(IsEven::init)); *std::dynamic_pointer_cast< LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>>(is_odd_fn) = LazyConstant<remove_lazy_t<decltype(is_odd_fn)>>( ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>>(IsOdd::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_lazy_t<decltype(is_even_fn)>> *>(&is_even_fn->lvalue())->env() = store_env<typename IsEven::EnvT>(is_even_env); std::bit_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>, remove_lazy_t<decltype(is_odd_fn)>> *>(&is_odd_fn->lvalue())->env() = store_env<typename IsOdd::EnvT>(is_odd_env);";
+        "LazyT<FnT<Bool, Int>> is_odd_fn; LazyT<FnT<Bool, Int>> is_even_fn; struct Allocator { ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,typename IsOdd::Fn> _0; ClosureFnT<remove_lazy_t<typename IsEven::EnvT>,typename IsEven::Fn> _1; }; std::shared_ptr<Allocator> allocator = std::make_shared<Allocator>(); is_odd_fn = setup_closure<IsOdd>(allocator,allocator->_0); is_even_fn = setup_closure<IsEven>(allocator,allocator->_1); std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,remove_shared_ptr_t<remove_lazy_t<decltype(is_odd_fn)>>>>(is_odd_fn->lvalue())->env = store_env<typename IsOdd::EnvT>(is_odd_env); std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename IsEven::EnvT>, remove_shared_ptr_t<remove_lazy_t<decltype(is_even_fn)>>>>( is_even_fn->lvalue())->env = store_env<typename IsEven::EnvT>(is_even_env);";
         "mutually recursive closure assignment"
     )]
     #[test_case(
@@ -1255,17 +1255,17 @@ mod tests {
             }.into(),
             Allocation{
                 name: Name::from("alloc23"),
-                memory: vec![
-                    Memory(Id::from("f2")),
-                    Memory(Id::from("f3")),
+                fns: vec![
+                    (Memory(Id::from("f2")), Name::from("F2")),
+                    (Memory(Id::from("f3")), Name::from("F3")),
                 ],
                 target: Memory(Id::from("a23"))
             }.into(),
             Allocation{
                 name: Name::from("alloc45"),
-                memory: vec![
-                    Memory(Id::from("f4")),
-                    Memory(Id::from("f5")),
+                fns: vec![
+                    (Memory(Id::from("f4")), Name::from("F4")),
+                    (Memory(Id::from("f4")), Name::from("F5")),
                 ],
                 target: Memory(Id::from("a45"))
             }.into(),
@@ -1284,7 +1284,7 @@ mod tests {
                 }.into(),
             }.into()
         ],
-        "LazyT<FnT<Int,Int>>f1; struct alloc23{ LazyConstant<remove_lazy_t<decltype(f2)>>_0; LazyConstant<remove_lazy_t<decltype(f3)>>_1; }; std::shared_ptr<alloc23> a23 = std::make_shared<alloc23>(); f2 = std::shared_ptr<remove_shared_ptr_t<decltype(f2)>>(a23, &a23->_0); f3 = std::shared_ptr<remove_shared_ptr_t<decltype(f3)>>(a23,& a23->_1); struct alloc45{ LazyConstant<remove_lazy_t<decltype(f4)>> _0; LazyConstant<remove_lazy_t<decltype(f5)>> _1; }; std::shared_ptr<alloc45> a45 = std::make_shared<alloc45>(); f4 = std::shared_ptr<remove_shared_ptr_t<decltype(f4)>>(a45, &a45->_0); f5 = std::shared_ptr<remove_shared_ptr_t<decltype(f5)>>(a45,&a45->_1); *std::dynamic_pointer_cast<LazyConstant<remove_lazy_t<decltype(f4)>>>(f4) = LazyConstant<remove_lazy_t<decltype(f4)>>(ClosureFnT<remove_lazy_t<typename F4::EnvT>, remove_lazy_t<decltype(f4)>>(F4::init)); f1 = make_lazy<remove_lazy_t<decltype(f1)>>(ClosureFnT<remove_lazy_t<typename F1::EnvT>,remove_lazy_t<decltype(f1)>>(F1::init)); std::bit_cast<ClosureFnT<remove_lazy_t<typename F4::EnvT>,remove_lazy_t<decltype(f4)>>*>(&f4->lvalue())->env() = store_env<typename F4::EnvT>(f4_env); std::bit_cast<ClosureFnT<remove_lazy_t<typename F1::EnvT>, remove_lazy_t<decltype(f1)>>*>(&f1->lvalue())->env() = store_env<typename F1::EnvT>(f1_env);";
+        "LazyT<FnT<Int,Int>>f1; struct alloc23 { ClosureFnT<remove_lazy_t<typename F2::EnvT>,typename F2::Fn>_0; ClosureFnT<remove_lazy_t<typename F3::EnvT>,typename F3::Fn>_1; }; std::shared_ptr<alloc23>a23 = std::make_shared<alloc23>(); struct alloc45{ClosureFnT<remove_lazy_t<typename F4::EnvT>,typename F4::Fn> _0; ClosureFnT<remove_lazy_t<typename F5::EnvT>,typename F5::Fn> _1; }; std::shared_ptr<alloc45>a45 = std::make_shared<alloc45>(); f4 = setup_closure<F4>(a45,a45->_1); f1 = setup_closure<F1>(); std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename F4::EnvT>,remove_shared_ptr_t<remove_lazy_t<decltype(f4)>>>>(f4->lvalue())->env = store_env<typename F4::EnvT>(f4_env); std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename F1::EnvT>,remove_shared_ptr_t<remove_lazy_t<decltype(f1)>>>>(f1->lvalue())->env = store_env<typename F1::EnvT>(f1_env); ";
         "dual allocator"
     )]
     #[test_case(
@@ -1383,7 +1383,7 @@ mod tests {
             ret: (Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: Vec::new()
         },
-        "struct IdentityInt : TypedClosureI<Empty, Int, Int> { using TypedClosureI<Empty, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { return x; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, std::shared_ptr<void>) { return std::make_unique<IdentityInt>(args); }};";
+        "struct IdentityInt : TypedClosureI<Empty, Int, Int> { using TypedClosureI<Empty, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { return x; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) { return std::make_unique<IdentityInt>(args); } static inline FnT<Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int>>(init);};";
         "identity int"
     )]
     #[test_case(
@@ -1471,7 +1471,7 @@ mod tests {
                 }
             ]
         },
-        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> res1; LazyT<Int> res2; LazyT<Int> res3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { res1 = Plus__BuiltIn(a, b); res2 = Plus__BuiltIn(c, d); res3 = Plus__BuiltIn(res1, res2); return res3; } static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args, std::shared_ptr<void>) { return std::make_unique<FourWayPlus>(args); }};";
+        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> res1; LazyT<Int> res2; LazyT<Int> res3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { res1 = Plus__BuiltIn(a, b); res2 = Plus__BuiltIn(c, d); res3 = Plus__BuiltIn(res1, res2); return res3; } static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G=std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
         "four way plus"
     )]
     #[test_case(
@@ -1518,7 +1518,7 @@ mod tests {
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             allocations: Vec::new()
         },
-        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> y; LazyT<Int> inner_res; y = load_env(std::get<0ULL>(env)); inner_res = Plus__BuiltIn(x, y); return inner_res; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, std::shared_ptr<EnvT> env) { return std::make_unique<Adder>(args, *env); }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> y; LazyT<Int> inner_res; y = load_env(std::get<0ULL>(env)); inner_res = Plus__BuiltIn(x, y); return inner_res; } static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
         "adder closure"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1609,7 +1609,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call=Plus__BuiltIn(x,y); return call;} static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args,std::shared_ptr<void>) {return std::make_unique<Main>(args);}}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { x=make_lazy<Int>(9LL); y=make_lazy<Int>(5LL); if(main == decltype(main){}) {WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); WorkManager::enqueue(work);}return main;} static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args,std::shared_ptr<void>) {return std::make_unique<PreMain>(args);}};";
+        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call=Plus__BuiltIn(x,y); return call;} static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);}static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { x=make_lazy<Int>(9LL); y=make_lazy<Int>(5LL); if(main == decltype(main){}) {WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); WorkManager::enqueue(work);}return main;} static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
