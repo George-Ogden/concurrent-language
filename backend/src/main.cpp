@@ -10,6 +10,7 @@ int main(int argc, char *argv[]) {
     using ArgsT = typename Main::ArgsT;
     argc--;
     argv++;
+    ThreadManager::override_concurrency(1);
     constexpr auto N = std::tuple_size_v<ArgsT>;
     if (N != argc) {
         std::cerr << "Invalid number of arguments expected " << N << " got "
@@ -25,7 +26,7 @@ int main(int argc, char *argv[]) {
     }
     (std::make_index_sequence<N>{});
 
-    function_equivalent_t<Main> main{Main::init};
+    std::shared_ptr<typename Main::Fn> main = Main::G;
     auto result = std::apply(
         [&main](auto &...args) { return WorkManager::run(main, args...); },
         args);

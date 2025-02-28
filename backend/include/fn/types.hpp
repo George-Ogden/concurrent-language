@@ -12,7 +12,10 @@ struct closure_fn<E, TypedFnG<R, As...>> {
 
 template <typename E, typename T> using ClosureFnT = closure_fn<E, T>::type;
 
-template <typename R, typename... As> using FnT = TypedFnG<R, As...>;
+template <typename R, typename... As>
+using FnT = std::shared_ptr<TypedFnG<R, As...>>;
+template <typename R, typename... As>
+using WeakFnT = std::weak_ptr<TypedFnG<R, As...>>;
 
 template <typename E, typename R, typename... As>
 using ClosureT = TypedClosureG<E, R, As...>;

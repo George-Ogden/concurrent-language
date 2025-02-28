@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation, ConstructorCall,
-    Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType,
-    MatchBranch, MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType,
-    TypeDef, UnionType, Value,
+    weakener::Weakener, AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation,
+    ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
+    IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -274,6 +274,7 @@ impl Compiler {
     ) -> Vec<Statement> {
         match statement {
             Statement::Await(await_) => vec![await_.into()],
+            Statement::Allocation(allocation) => vec![allocation.into()],
             Statement::Assignment(assignment) => vec![assignment.into()],
             Statement::Declaration(Declaration { type_: _, memory })
                 if declarations.contains_key(&memory) =>
@@ -549,18 +550,13 @@ impl Compiler {
             })
             .collect();
         let name = self.next_fn_name();
-        let env_type: MachineType =
-            TupleType(env_types.into_iter().map(|(_, type_)| type_).collect_vec()).into();
+        let env_types = env_types.into_iter().map(|(_, type_)| type_).collect_vec();
         self.fn_defs.push(FnDef {
             name: name.clone(),
             arguments: args,
             statements,
             ret: (ret_val, ret_type),
-            env: if env_mapping.len() > 0 {
-                Some(env_type.clone())
-            } else {
-                None
-            },
+            env: env_types.clone(),
             allocations,
         });
 
@@ -573,7 +569,7 @@ impl Compiler {
             let statements = vec![
                 Declaration {
                     memory: tuple_mem.clone(),
-                    type_: env_type,
+                    type_: TupleType(env_types).into(),
                 }
                 .into(),
                 Assignment {
@@ -599,10 +595,11 @@ impl Compiler {
         let (statements, _) = self.compile_lambda(main);
         assert_eq!(statements.len(), 0);
         self.fn_defs.last_mut().unwrap().name = Name::from("Main");
-        Program {
+        let program = Program {
             fn_defs: self.fn_defs.clone(),
             type_defs,
-        }
+        };
+        Weakener::weaken(program)
     }
     pub fn compile(program: IntermediateProgram) -> Program {
         let mut compiler = Compiler::new();
@@ -1776,7 +1773,7 @@ mod tests {
                     (Memory(Id::from("m0")), AtomicTypeEnum::INT.into()),
                     (Memory(Id::from("m1")), AtomicTypeEnum::INT.into()),
                 ],
-                env: None,
+                env: Vec::new(),
                 statements: vec![
                     Declaration {
                         memory: Memory(Id::from("m2")),
@@ -1864,10 +1861,10 @@ mod tests {
             FnDef{
                 name: Name::from("F0"),
                 arguments: Vec::new(),
-                env: Some(TupleType(vec![
+                env: vec![
                     AtomicTypeEnum::INT.into(),
                     AtomicTypeEnum::INT.into()
-                ]).into()),
+                ].into(),
                 statements: vec![
                     Declaration {
                         memory: Memory(Id::from("m0")),
@@ -1975,9 +1972,9 @@ mod tests {
             FnDef{
                 name: Name::from("F0"),
                 arguments: vec![(Memory(Id::from("m0")), AtomicTypeEnum::INT.into())],
-                env: Some(TupleType(vec![
+                env: vec![
                     AtomicTypeEnum::INT.into(),
-                ]).into()),
+                ].into(),
                 statements: vec![
                     Declaration {
                         memory: Memory(Id::from("m1")),
@@ -2108,7 +2105,7 @@ mod tests {
                     arguments: vec![(Memory(Id::from("m0")), AtomicTypeEnum::INT.into())],
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
-                    env: None,
+                    env: Vec::new(),
                     allocations: Vec::new()
                 },
                 FnDef {
@@ -2144,12 +2141,12 @@ mod tests {
                         }.into()
                     ],
                     ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
-                    env: Some(TupleType(vec![
+                    env: vec![
                         FnType(
                             vec![AtomicTypeEnum::INT.into()],
                             Box::new(AtomicTypeEnum::INT.into())
                         ).into()
-                    ]).into()),
+                    ].into(),
                     allocations: vec![
                         Declaration {
                             type_: AtomicTypeEnum::INT.into(),
@@ -2209,7 +2206,7 @@ mod tests {
                         }.into()
                     ],
                     ret: (Memory(Id::from("m6")).into(), AtomicTypeEnum::INT.into()),
-                    env: None,
+                    env: Vec::new(),
                     allocations: vec![
                         Declaration {
                             type_: AtomicTypeEnum::INT.into(),
@@ -2295,7 +2292,7 @@ mod tests {
                         }.into()
                     ],
                     ret: (Memory(Id::from("m2")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
-                    env: Some(TupleType(vec![TupleType(vec![TupleType(Vec::new()).into()]).into()]).into()),
+                    env: vec![TupleType(vec![TupleType(Vec::new()).into()]).into()].into(),
                     allocations: Vec::new()
                 },
                 FnDef {
@@ -2351,7 +2348,7 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("m5")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
-                    env: None,
+                    env: Vec::new(),
                     allocations: vec![
                         Declaration {
                             type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
@@ -2469,7 +2466,7 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("m1")).into(),AtomicTypeEnum::INT.into()),
-                    env: None,
+                    env: Vec::new(),
                     allocations: Vec::new()
                 },
             ]
@@ -2500,7 +2497,7 @@ mod tests {
                     ],
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m1")).into(), AtomicTypeEnum::INT.into()),
-                    env: None,
+                    env: Vec::new(),
                     allocations: Vec::new()
                 }
             ]
@@ -2592,12 +2589,12 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
-                    env: Some(TupleType(vec![
-                        FnType(
+                    env: vec![
+                        MachineType::WeakFnType(FnType(
                             vec![AtomicTypeEnum::INT.into()],
                             Box::new(AtomicTypeEnum::INT.into())
-                        ).into()
-                    ]).into()),
+                        ))
+                    ].into(),
                     allocations: vec![
                         Declaration {
                             memory: Memory(Id::from("m3")),
@@ -2654,7 +2651,7 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("m6")).into(), AtomicTypeEnum::INT.into()),
-                    env: None,
+                    env: Vec::new(),
                     allocations: vec![
                         Declaration {
                             memory: Memory(Id::from("m6")),

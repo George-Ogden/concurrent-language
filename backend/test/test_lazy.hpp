@@ -32,6 +32,7 @@ TEST_F(LazyConstantTest, UnfinishedContinuationBehaviour) {
     ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
     ASSERT_EQ(**valid, true);
+    delete valid;
     delete remaining;
 }
 
@@ -42,6 +43,7 @@ TEST_F(LazyConstantTest, FinishedContinuationBehaviour) {
     x->add_continuation(Continuation{remaining, counter, valid});
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
     ASSERT_EQ(**valid, false);
+    delete valid;
 }
 
 TEST_F(LazyConstantTest, InvalidFinishedContinuationBehaviour) {
