@@ -24,15 +24,53 @@ macro_rules! define_vector_interval{
                     }
                 )*
 
-                pub fn add(&self, other: Self) -> Self {
+                pub fn hull(&self, other: Self) -> Self {
+                    Self {
+                        $($fields: self.$fields.hull(&other.$fields),)*
+                    }
+                }
+            }
+
+            impl Add<[<$name Interval>]> for [<$name Interval>] {
+                type Output = Self;
+                fn add(self, other: Self) -> Self {
+                    Self {
+                        $($fields: self.$fields.add(other.$fields),)*
+                    }
+                }
+            }
+
+            impl Add<[<$name Constant>]> for [<$name Interval>] {
+                type Output = Self;
+                fn add(self, other: [<$name Constant>]) -> Self {
                     Self {
                         $($fields: self.$fields.add(other.$fields),)*
                     }
                 }
 
-                pub fn hull(&self, other: Self) -> Self {
+            }
+
+            #[derive(PartialEq, Clone, Debug)]
+            struct [<$name Constant>] {
+                $($fields: usize,)*
+            }
+            impl [<$name Constant>] {
+                pub fn new() -> Self {
                     Self {
-                        $($fields: self.$fields.hull(&other.$fields),)*
+                        $($fields: 0,)*
+                    }
+                }
+                $(
+                    pub fn $fields() -> Self {
+                        let mut instance = Self::new();
+                        instance.$fields = instance.$fields + 1;
+                        instance
+                    }
+                )*
+
+                pub fn add(&self, other: Self) -> Self {
+                    Self {
+                        $($fields: self.$fields.add(other.$fields),)*
                     }
                 }
             }
@@ -45,13 +83,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_test() {
+    fn new_interval_test() {
         define_vector_interval!(TestClass);
         assert_eq!(TestClassInterval::new(), TestClassInterval::new());
     }
 
+    fn new_constant_test() {
+        define_vector_interval!(TestClass);
+        assert_eq!(TestClassConstant::new(), TestClassConstant::new());
+    }
+
     #[test]
-    fn attribute_test() {
+    fn interval_attribute_test() {
         define_vector_interval!(TestClass, field);
         assert_eq!(TestClassInterval::new(), TestClassInterval::new());
         assert_ne!(TestClassInterval::field(), TestClassInterval::new());
@@ -59,7 +102,15 @@ mod tests {
     }
 
     #[test]
-    fn multiple_attributes_test() {
+    fn constant_attribute_test() {
+        define_vector_interval!(TestClass, field);
+        assert_eq!(TestClassConstant::new(), TestClassConstant::new());
+        assert_ne!(TestClassConstant::field(), TestClassConstant::new());
+        assert_eq!(TestClassConstant::field(), TestClassConstant::field());
+    }
+
+    #[test]
+    fn multiple_interval_attributes_test() {
         define_vector_interval!(TestClass, field1, field2, field3);
         assert_eq!(TestClassInterval::new(), TestClassInterval::new());
         assert_eq!(TestClassInterval::field1(), TestClassInterval::field1());
@@ -75,22 +126,74 @@ mod tests {
     }
 
     #[test]
-    fn test_add() {
+    fn multiple_constant_attributes_test() {
         define_vector_interval!(TestClass, field1, field2, field3);
+        assert_eq!(TestClassConstant::new(), TestClassConstant::new());
+        assert_eq!(TestClassConstant::field1(), TestClassConstant::field1());
+        assert_eq!(TestClassConstant::field2(), TestClassConstant::field2());
+        assert_eq!(TestClassConstant::field3(), TestClassConstant::field3());
+
+        assert_ne!(TestClassConstant::new(), TestClassConstant::field1());
+        assert_ne!(TestClassConstant::field1(), TestClassConstant::field2());
+        assert_ne!(TestClassConstant::field2(), TestClassConstant::field3());
+        assert_ne!(TestClassConstant::field3(), TestClassConstant::new());
+        assert_ne!(TestClassConstant::field1(), TestClassConstant::field3());
+        assert_ne!(TestClassConstant::field2(), TestClassConstant::new());
+    }
+
+    #[test]
+    fn test_constant_add() {
+        define_vector_interval!(TestClass, field1, field2, field3);
+        let a = TestClassConstant {
+            field1: 1,
+            field2: 2,
+            field3: 3,
+        };
+        let b = TestClassConstant {
+            field1: 4,
+            field2: 5,
+            field3: 6,
+        };
+        let c = TestClassConstant {
+            field1: 5,
+            field2: 7,
+            field3: 9,
+        };
+        assert_eq!(a.add(b), c)
+    }
+
+    #[test]
+    fn test_interval_add() {
+        define_vector_interval!(TestClass, field1, field2);
         let a = TestClassInterval {
-            field1: Interval::singleton(1),
-            field2: Interval::singleton(2),
-            field3: Interval::singleton(3),
+            field1: Interval::new(1, 8),
+            field2: Interval::new(2, 7),
         };
         let b = TestClassInterval {
-            field1: Interval::singleton(4),
-            field2: Interval::singleton(5),
-            field3: Interval::singleton(6),
+            field1: Interval::new(2, 3),
+            field2: Interval::new(5, 5),
         };
         let c = TestClassInterval {
-            field1: Interval::singleton(5),
-            field2: Interval::singleton(7),
-            field3: Interval::singleton(9),
+            field1: Interval::new(3, 11),
+            field2: Interval::new(7, 12),
+        };
+        assert_eq!(a.add(b), c)
+    }
+
+    #[test]
+    fn test_mixed_add() {
+        define_vector_interval!(TestClass, field1, field2);
+        let a = TestClassInterval {
+            field1: Interval::new(1, 8),
+            field2: Interval::new(2, 7),
+        };
+        let b = TestClassConstant {
+            field1: 3,
+            field2: 5,
+        };
+        let c = TestClassInterval {
+            field1: Interval::new(4, 11),
+            field2: Interval::new(7, 12),
         };
         assert_eq!(a.add(b), c)
     }
