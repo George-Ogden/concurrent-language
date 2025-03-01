@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::ops::{Add, Mul};
 
 #[macro_export]
-macro_rules! define_vector_interval{
+macro_rules! define_named_vector{
     ($name:ident $(, $fields:ident )*) => {
         #[derive(PartialEq, Clone, Debug)]
         struct $name {
@@ -76,13 +76,13 @@ mod tests {
     use super::*;
 
     fn new_constant_test() {
-        define_vector_interval!(TestClass);
+        define_named_vector!(TestClass);
         assert_eq!(TestClass::new(), TestClass::new());
     }
 
     #[test]
     fn constant_attribute_test() {
-        define_vector_interval!(TestClass, field);
+        define_named_vector!(TestClass, field);
         assert_eq!(TestClass::new(), TestClass::new());
         assert_ne!(TestClass::field(), TestClass::new());
         assert_eq!(TestClass::field(), TestClass::field());
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn multiple_constant_attributes_test() {
-        define_vector_interval!(TestClass, field1, field2);
+        define_named_vector!(TestClass, field1, field2);
         assert_eq!(TestClass::new(), TestClass::new());
         assert_eq!(TestClass::field1(), TestClass::field1());
         assert_eq!(TestClass::field2(), TestClass::field2());
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_constant_add() {
-        define_vector_interval!(TestClass, field1, field2, field3);
+        define_named_vector!(TestClass, field1, field2, field3);
         let a = TestClass {
             field1: 1,
             field2: 2,
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_multiplication() {
-        define_vector_interval!(TestClass, field1, field2);
+        define_named_vector!(TestClass, field1, field2);
         let a = TestClass {
             field1: 8,
             field2: 6,
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_dot_product() {
-        define_vector_interval!(TestClass, field1, field2);
+        define_named_vector!(TestClass, field1, field2);
         let a = TestClass {
             field1: 8,
             field2: 6,
