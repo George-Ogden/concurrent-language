@@ -50,6 +50,14 @@ macro_rules! define_vector_interval{
 
             }
 
+            impl From<[<$name Constant>]> for [<$name Interval>] {
+                fn from(value: [<$name Constant>]) -> Self {
+                    Self {
+                        $($fields: Interval::singleton(value.$fields),)*
+                    }
+                }
+            }
+
             #[derive(PartialEq, Clone, Debug)]
             struct [<$name Constant>] {
                 $($fields: usize,)*
@@ -217,5 +225,21 @@ mod tests {
             field3: Interval::new(5, 13),
         };
         assert_eq!(a.hull(b), c)
+    }
+
+    #[test]
+    fn test_constant_conversion() {
+        define_vector_interval!(TestClass, field1, field2, field3);
+        let constant = TestClassConstant {
+            field1: 1,
+            field2: 2,
+            field3: 3,
+        };
+        let interval = TestClassInterval {
+            field1: Interval::singleton(1),
+            field2: Interval::singleton(2),
+            field3: Interval::singleton(3),
+        };
+        assert_eq!(interval, constant.into())
     }
 }
