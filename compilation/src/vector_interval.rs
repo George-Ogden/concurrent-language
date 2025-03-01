@@ -28,6 +28,12 @@ macro_rules! define_vector_interval{
                     $($fields: self.$fields.add(other.$fields),)*
                 }
             }
+
+            pub fn hull(&self, other: Self) -> Self {
+                $name {
+                    $($fields: self.$fields.hull(&other.$fields),)*
+                }
+            }
         }
     };
 }
@@ -85,5 +91,26 @@ mod tests {
             field3: Interval::singleton(9),
         };
         assert_eq!(a.add(b), c)
+    }
+
+    #[test]
+    fn test_hull() {
+        define_vector_interval!(TestClass, field1, field2, field3);
+        let a = TestClass {
+            field1: Interval::new(1, 2),
+            field2: Interval::new(8, 15),
+            field3: Interval::new(5, 13),
+        };
+        let b = TestClass {
+            field1: Interval::new(5, 6),
+            field2: Interval::new(5, 10),
+            field3: Interval::new(10, 11),
+        };
+        let c = TestClass {
+            field1: Interval::new(1, 6),
+            field2: Interval::new(5, 15),
+            field3: Interval::new(5, 13),
+        };
+        assert_eq!(a.hull(b), c)
     }
 }
