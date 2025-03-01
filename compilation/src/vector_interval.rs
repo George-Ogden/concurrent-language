@@ -1,8 +1,11 @@
 use gcollections::ops::*;
 use interval::ops::*;
 use interval::Interval;
+use lowering::Id;
+use std::collections::HashMap;
 use std::ops::{Add, Mul};
 
+#[macro_export]
 macro_rules! define_vector_interval{
     ($name:ident $(, $fields:ident )*) => {
         paste::paste! {
@@ -67,11 +70,13 @@ macro_rules! define_vector_interval{
             #[derive(PartialEq, Clone, Debug)]
             struct [<$name Constant>] {
                 $($fields: usize,)*
+                operators: HashMap<Id, usize>
             }
             impl [<$name Constant>] {
                 pub fn new() -> Self {
                     Self {
                         $($fields: 0,)*
+                        operators: HashMap::new()
                     }
                 }
                 $(
@@ -81,10 +86,18 @@ macro_rules! define_vector_interval{
                         instance
                     }
                 )*
+            }
 
-                pub fn add(&self, other: Self) -> Self {
+            impl Add<[<$name Constant>]> for [<$name Constant>] {
+                type Output = Self;
+                fn add(self, other: Self) -> Self {
                     Self {
                         $($fields: self.$fields.add(other.$fields),)*
+                        operators: HashMap::from_iter(
+                            self.operators.keys().chain(other.operators.keys()).map(
+                                |key| (key.clone(), self.operators.get(key).cloned().unwrap_or(0) + other.operators.get(key).cloned().unwrap_or(0))
+                            )
+                        )
                     }
                 }
             }
@@ -162,16 +175,28 @@ mod tests {
             field1: 1,
             field2: 2,
             field3: 3,
+            operators: HashMap::from([
+                (Id::from("+"), 8),
+                (Id::from("*"), 12),
+                (Id::from("--"), 2),
+            ]),
         };
         let b = TestClassConstant {
             field1: 4,
             field2: 5,
             field3: 6,
+            operators: HashMap::from([(Id::from("+"), 6), (Id::from("<=>"), 1)]),
         };
         let c = TestClassConstant {
             field1: 5,
             field2: 7,
             field3: 9,
+            operators: HashMap::from([
+                (Id::from("+"), 14),
+                (Id::from("*"), 12),
+                (Id::from("--"), 2),
+                (Id::from("<=>"), 1),
+            ]),
         };
         assert_eq!(a.add(b), c)
     }
@@ -204,6 +229,7 @@ mod tests {
         let b = TestClassConstant {
             field1: 3,
             field2: 5,
+            operators: HashMap::new(),
         };
         let c = TestClassInterval {
             field1: Interval::new(4, 11),
@@ -240,6 +266,7 @@ mod tests {
             field1: 1,
             field2: 2,
             field3: 3,
+            operators: HashMap::from([(Id::from("+"), 2), (Id::from("&"), 1)]),
         };
         let interval = TestClassInterval {
             field1: Interval::singleton(1),
@@ -259,6 +286,7 @@ mod tests {
         let b = TestClassConstant {
             field1: 3,
             field2: 5,
+            operators: HashMap::new(),
         };
         let c = Interval::new(13, 59);
         assert_eq!(a.mul(b), c)
