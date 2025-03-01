@@ -45,6 +45,20 @@ macro_rules! define_vector_interval{
             }
         }
 
+        impl Mul<usize> for $name {
+            type Output = Self;
+            fn mul(self, other: usize) -> Self {
+                Self {
+                    $($fields: self.$fields * other,)*
+                    operators: HashMap::from_iter(
+                        self.operators.into_iter().map(
+                            |(key, value)| (key, value * other)
+                        )
+                    )
+                }
+            }
+        }
+
         impl Mul<$name> for $name {
             type Output = usize;
             fn mul(self, other: Self) -> Self::Output {
@@ -135,6 +149,23 @@ mod tests {
 
     #[test]
     fn test_multiplication() {
+        define_vector_interval!(TestClass, field1, field2);
+        let a = TestClass {
+            field1: 8,
+            field2: 6,
+            operators: HashMap::from([(Id::from("<=>"), 3), (Id::from("--"), 2)]),
+        };
+        let b = 2;
+        let c = TestClass {
+            field1: 16,
+            field2: 12,
+            operators: HashMap::from([(Id::from("<=>"), 6), (Id::from("--"), 4)]),
+        };
+        assert_eq!(a.mul(b), c)
+    }
+
+    #[test]
+    fn test_dot_product() {
         define_vector_interval!(TestClass, field1, field2);
         let a = TestClass {
             field1: 8,
