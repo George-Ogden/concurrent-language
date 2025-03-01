@@ -105,6 +105,7 @@ clean:
 LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
 REPEATS := 10
 MAX_PRIORITY := $(shell chrt -m | awk -F '[:/]' '/SCHED_FIFO/ {print $$NF}')
+PATTERN := Execution time: ([[:digit:]]+) ?ns.*
 
 $(LOG_DIR):
 	mkdir -p $@
@@ -118,15 +119,20 @@ benchmark: $(LOG_DIR)
 		make build FILE=$$program/main.txt USER_FLAG=-1; \
 			while read input; do  \
 				echo $$program $$input; \
-				echo $$input | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
-					sleep 60 & \
-					SLEEP_PID=$$!; \
-					cat <(xargs ./backend/bin/main 2>&1 > /dev/null; kill $$SLEEP_PID) & \
-					EXEC_PID=$$!; \
-					wait $$SLEEP_PID || exit 0 && (kill -9 -- -$$EXEC_PID; exit 1) \
-				' \
-				| { if read -r output; then echo "$$output"; else echo "nan"; fi; } \
-				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
+				( \
+					echo $$input | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
+						sleep 60 & \
+						SLEEP_PID=$$!; \
+						cat <(xargs ./backend/bin/main 2>&1 > /dev/null; kill $$SLEEP_PID) & \
+						EXEC_PID=$$!; \
+						wait $$SLEEP_PID || exit 0 && (kill -9 -- -$$EXEC_PID; exit 1) \
+					' \
+					| { if read -r output; then echo "$$output"; else echo; fi; } \
+					| grep -E '$(PATTERN)' \
+					| sed -E 's/$(PATTERN)/\1/'  \
+					| grep . \
+					|| echo nan \
+				) \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
