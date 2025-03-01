@@ -6,10 +6,8 @@ INCLUDE := -Iinclude
 
 BUILD_DIR := build_
 WRAP_DIR := wrap
-WRAP_FILE := $(BUILD_DIR)/wrap.hpp
-WRAP_FILES := $(wildcard $(WRAP_DIR)/*.hpp)
 USER_FILE := include/main/user.hpp
-WRAP := -Wl,--wrap=sysconf,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
+WRAP := -Wl,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
 
 TARGET_DIR := bin
 SRC_DIR := src
@@ -18,6 +16,12 @@ TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*
 HEADERS := $(wildcard include/*.hpp include/**/*.hpp include/**/*.tpp) $(USER_FILE)
 
 ifeq ($(USER_FLAG), 1)
+	WRAP_FILE := wrap/user.hpp
+else ifeq ($(USER_FLAG), -1)
+	WRAP_FILE := wrap/benchmark.hpp
+endif
+
+ifneq ($(filter $(USER_FLAG),1 -1),)
 	CXXFLAGS += $(WRAP)
 	HEADERS += $(WRAP_FILE)
 	INCLUDE += -I.
@@ -55,13 +59,7 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 	fi
 
 $(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
-	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
-
-$(WRAP_FILE): $(WRAP_FILES) | $(BUILD_DIR)
-	echo "" > $@; \
-	for file in $(WRAP_FILES); do \
-		echo "#include \"$$file\"" >> $@; \
-	done
+	$(if $(filter $(USER_FLAG),1 -1), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(HEADERS) $(COMPILER_FILE) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(OPTIMIZATION) $(INCLUDE) $(LIBS) -c -o $@ $<
