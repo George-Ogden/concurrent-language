@@ -1,7 +1,7 @@
 use gcollections::ops::*;
 use interval::ops::*;
 use interval::Interval;
-use std::ops::Add;
+use std::ops::{Add, Mul};
 
 macro_rules! define_vector_interval{
     ($name:ident $(, $fields:ident )*) => {
@@ -47,7 +47,13 @@ macro_rules! define_vector_interval{
                         $($fields: self.$fields.add(other.$fields),)*
                     }
                 }
+            }
 
+            impl Mul<[<$name Constant>]> for [<$name Interval>] {
+                type Output = Interval<usize>;
+                fn mul(self, other: [<$name Constant>]) -> Self::Output {
+                    Interval::singleton(0) $(+ self.$fields.mul(other.$fields))*
+                }
             }
 
             impl From<[<$name Constant>]> for [<$name Interval>] {
@@ -241,5 +247,20 @@ mod tests {
             field3: Interval::singleton(3),
         };
         assert_eq!(interval, constant.into())
+    }
+
+    #[test]
+    fn test_multiplication_conversion() {
+        define_vector_interval!(TestClass, field1, field2);
+        let a = TestClassInterval {
+            field1: Interval::new(1, 8),
+            field2: Interval::new(2, 7),
+        };
+        let b = TestClassConstant {
+            field1: 3,
+            field2: 5,
+        };
+        let c = Interval::new(13, 59);
+        assert_eq!(a.mul(b), c)
     }
 }
