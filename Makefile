@@ -75,7 +75,7 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: build
-	pytest . -vv
+	pytest parsing -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
@@ -95,6 +95,7 @@ test: build
 			cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
 		done; \
 	done;
+	pytest scripts -vv
 
 clean:
 	rm -rf $(GRAMMAR)
@@ -110,6 +111,7 @@ $(LOG_DIR):
 
 benchmark: $(LOG_DIR)
 	git log --format="%H" -n 1 > $^/git
+	touch $^/title.txt
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 		for i in `seq 1 $(REPEATS)`; do \
 	for program in benchmark/**; do \
