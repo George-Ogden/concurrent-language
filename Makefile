@@ -104,19 +104,27 @@ clean:
 
 LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
 REPEATS := 10
+MAX_PRIORITY := $(shell chrt -m | awk -F '[:/]' '/SCHED_FIFO/ {print $$NF}')
 
 $(LOG_DIR):
 	mkdir -p $@
 
 benchmark: $(LOG_DIR)
 	git log --format="%H" -n 1 > $^/git
+
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 		for i in `seq 1 $(REPEATS)`; do \
 	for program in benchmark/**; do \
-		make build FILE=$$program/main.txt; \
+		make build FILE=$$program/main.txt USER_FLAG=-1; \
 			while read input; do  \
 				echo $$program $$input; \
-				sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null \
+				echo $$input | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
+					sleep 60 & \
+					SLEEP_PID=$$!; \
+					cat <(xargs ./backend/bin/main 2>&1 > /dev/null; kill $$SLEEP_PID) & \
+					EXEC_PID=$$!; \
+					wait $$SLEEP_PID || exit 0 && (kill -9 -- -$$EXEC_PID; exit 1) \
+				' \
 				| { if read -r output; then echo "$$output"; else echo "nan"; fi; } \
 				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
 				| xargs printf '%s\t' \
