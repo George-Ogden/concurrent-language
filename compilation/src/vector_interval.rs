@@ -79,6 +79,11 @@ macro_rules! define_vector_interval{
                         operators: HashMap::new()
                     }
                 }
+                pub fn operator(operator: Id) -> Self {
+                    let mut instance = Self::new();
+                    instance.operators.insert(operator, 1);
+                    instance
+                }
                 $(
                     pub fn $fields() -> Self {
                         let mut instance = Self::new();
@@ -154,17 +159,33 @@ mod tests {
 
     #[test]
     fn multiple_constant_attributes_test() {
-        define_vector_interval!(TestClass, field1, field2, field3);
+        define_vector_interval!(TestClass, field1, field2);
         assert_eq!(TestClassConstant::new(), TestClassConstant::new());
         assert_eq!(TestClassConstant::field1(), TestClassConstant::field1());
         assert_eq!(TestClassConstant::field2(), TestClassConstant::field2());
-        assert_eq!(TestClassConstant::field3(), TestClassConstant::field3());
+        assert_eq!(
+            TestClassConstant::operator(Id::from("-")),
+            TestClassConstant::operator(Id::from("-"))
+        );
+        assert_eq!(
+            TestClassConstant::operator(Id::from("<")),
+            TestClassConstant::operator(Id::from("<"))
+        );
 
         assert_ne!(TestClassConstant::new(), TestClassConstant::field1());
         assert_ne!(TestClassConstant::field1(), TestClassConstant::field2());
-        assert_ne!(TestClassConstant::field2(), TestClassConstant::field3());
-        assert_ne!(TestClassConstant::field3(), TestClassConstant::new());
-        assert_ne!(TestClassConstant::field1(), TestClassConstant::field3());
+        assert_ne!(
+            TestClassConstant::operator(Id::from("-")),
+            TestClassConstant::operator(Id::from("<"))
+        );
+        assert_ne!(
+            TestClassConstant::operator(Id::from("-")),
+            TestClassConstant::new()
+        );
+        assert_ne!(
+            TestClassConstant::field1(),
+            TestClassConstant::operator(Id::from("<"))
+        );
         assert_ne!(TestClassConstant::field2(), TestClassConstant::new());
     }
 
