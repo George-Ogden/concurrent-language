@@ -1,6 +1,3 @@
-use gcollections::ops::*;
-use interval::ops::*;
-use interval::Interval;
 use lowering::Id;
 use std::collections::HashMap;
 use std::ops::{Add, Mul};
@@ -8,103 +5,53 @@ use std::ops::{Add, Mul};
 #[macro_export]
 macro_rules! define_vector_interval{
     ($name:ident $(, $fields:ident )*) => {
-        paste::paste! {
-            #[derive(PartialEq, Clone, Debug)]
-            struct [<$name Interval>] {
-                $($fields: Interval<usize>,)*
-            }
-            impl [<$name Interval>] {
-                pub fn new() -> Self {
-                    Self {
-                        $($fields: Interval::singleton(0),)*
-                    }
-                }
-                $(
-                    pub fn $fields() -> Self {
-                        let mut instance = Self::new();
-                        instance.$fields = instance.$fields + 1;
-                        instance
-                    }
-                )*
-
-                pub fn hull(&self, other: Self) -> Self {
-                    Self {
-                        $($fields: self.$fields.hull(&other.$fields),)*
-                    }
+        #[derive(PartialEq, Clone, Debug)]
+        struct $name {
+            $($fields: usize,)*
+            operators: HashMap<Id, usize>
+        }
+        impl $name {
+            pub fn new() -> Self {
+                Self {
+                    $($fields: 0,)*
+                    operators: HashMap::new()
                 }
             }
-
-            impl Add<[<$name Interval>]> for [<$name Interval>] {
-                type Output = Self;
-                fn add(self, other: Self) -> Self {
-                    Self {
-                        $($fields: self.$fields.add(other.$fields),)*
-                    }
-                }
+            pub fn operator(operator: Id) -> Self {
+                let mut instance = Self::new();
+                instance.operators.insert(operator, 1);
+                instance
             }
-
-            impl Add<[<$name Constant>]> for [<$name Interval>] {
-                type Output = Self;
-                fn add(self, other: [<$name Constant>]) -> Self {
-                    Self {
-                        $($fields: self.$fields.add(other.$fields),)*
-                    }
-                }
-            }
-
-            impl Mul<[<$name Constant>]> for [<$name Interval>] {
-                type Output = Interval<usize>;
-                fn mul(self, other: [<$name Constant>]) -> Self::Output {
-                    Interval::singleton(0) $(+ self.$fields.mul(other.$fields))*
-                }
-            }
-
-            impl From<[<$name Constant>]> for [<$name Interval>] {
-                fn from(value: [<$name Constant>]) -> Self {
-                    Self {
-                        $($fields: Interval::singleton(value.$fields),)*
-                    }
-                }
-            }
-
-            #[derive(PartialEq, Clone, Debug)]
-            struct [<$name Constant>] {
-                $($fields: usize,)*
-                operators: HashMap<Id, usize>
-            }
-            impl [<$name Constant>] {
-                pub fn new() -> Self {
-                    Self {
-                        $($fields: 0,)*
-                        operators: HashMap::new()
-                    }
-                }
-                pub fn operator(operator: Id) -> Self {
+            $(
+                pub fn $fields() -> Self {
                     let mut instance = Self::new();
-                    instance.operators.insert(operator, 1);
+                    instance.$fields = instance.$fields + 1;
                     instance
                 }
-                $(
-                    pub fn $fields() -> Self {
-                        let mut instance = Self::new();
-                        instance.$fields = instance.$fields + 1;
-                        instance
-                    }
-                )*
-            }
+            )*
+        }
 
-            impl Add<[<$name Constant>]> for [<$name Constant>] {
-                type Output = Self;
-                fn add(self, other: Self) -> Self {
-                    Self {
-                        $($fields: self.$fields.add(other.$fields),)*
-                        operators: HashMap::from_iter(
-                            self.operators.keys().chain(other.operators.keys()).map(
-                                |key| (key.clone(), self.operators.get(key).cloned().unwrap_or(0) + other.operators.get(key).cloned().unwrap_or(0))
-                            )
+        impl Add<$name> for $name {
+            type Output = Self;
+            fn add(self, other: Self) -> Self {
+                Self {
+                    $($fields: self.$fields.add(other.$fields),)*
+                    operators: HashMap::from_iter(
+                        self.operators.keys().chain(other.operators.keys()).map(
+                            |key| (key.clone(), self.operators.get(key).cloned().unwrap_or(0) + other.operators.get(key).cloned().unwrap_or(0))
                         )
-                    }
+                    )
                 }
+            }
+        }
+
+        impl Mul<$name> for $name {
+            type Output = usize;
+            fn mul(self, other: Self) -> Self::Output {
+                $(self.$fields * other.$fields +)*
+                self.operators.keys().map(
+                    |key| self.operators[key].clone() * other.operators.get(key).cloned().unwrap_or(0)
+                ).sum::<usize>()
             }
         }
     };
@@ -114,85 +61,49 @@ macro_rules! define_vector_interval{
 mod tests {
     use super::*;
 
-    #[test]
-    fn new_interval_test() {
-        define_vector_interval!(TestClass);
-        assert_eq!(TestClassInterval::new(), TestClassInterval::new());
-    }
-
     fn new_constant_test() {
         define_vector_interval!(TestClass);
-        assert_eq!(TestClassConstant::new(), TestClassConstant::new());
-    }
-
-    #[test]
-    fn interval_attribute_test() {
-        define_vector_interval!(TestClass, field);
-        assert_eq!(TestClassInterval::new(), TestClassInterval::new());
-        assert_ne!(TestClassInterval::field(), TestClassInterval::new());
-        assert_eq!(TestClassInterval::field(), TestClassInterval::field());
+        assert_eq!(TestClass::new(), TestClass::new());
     }
 
     #[test]
     fn constant_attribute_test() {
         define_vector_interval!(TestClass, field);
-        assert_eq!(TestClassConstant::new(), TestClassConstant::new());
-        assert_ne!(TestClassConstant::field(), TestClassConstant::new());
-        assert_eq!(TestClassConstant::field(), TestClassConstant::field());
-    }
-
-    #[test]
-    fn multiple_interval_attributes_test() {
-        define_vector_interval!(TestClass, field1, field2, field3);
-        assert_eq!(TestClassInterval::new(), TestClassInterval::new());
-        assert_eq!(TestClassInterval::field1(), TestClassInterval::field1());
-        assert_eq!(TestClassInterval::field2(), TestClassInterval::field2());
-        assert_eq!(TestClassInterval::field3(), TestClassInterval::field3());
-
-        assert_ne!(TestClassInterval::new(), TestClassInterval::field1());
-        assert_ne!(TestClassInterval::field1(), TestClassInterval::field2());
-        assert_ne!(TestClassInterval::field2(), TestClassInterval::field3());
-        assert_ne!(TestClassInterval::field3(), TestClassInterval::new());
-        assert_ne!(TestClassInterval::field1(), TestClassInterval::field3());
-        assert_ne!(TestClassInterval::field2(), TestClassInterval::new());
+        assert_eq!(TestClass::new(), TestClass::new());
+        assert_ne!(TestClass::field(), TestClass::new());
+        assert_eq!(TestClass::field(), TestClass::field());
     }
 
     #[test]
     fn multiple_constant_attributes_test() {
         define_vector_interval!(TestClass, field1, field2);
-        assert_eq!(TestClassConstant::new(), TestClassConstant::new());
-        assert_eq!(TestClassConstant::field1(), TestClassConstant::field1());
-        assert_eq!(TestClassConstant::field2(), TestClassConstant::field2());
+        assert_eq!(TestClass::new(), TestClass::new());
+        assert_eq!(TestClass::field1(), TestClass::field1());
+        assert_eq!(TestClass::field2(), TestClass::field2());
         assert_eq!(
-            TestClassConstant::operator(Id::from("-")),
-            TestClassConstant::operator(Id::from("-"))
+            TestClass::operator(Id::from("-")),
+            TestClass::operator(Id::from("-"))
         );
         assert_eq!(
-            TestClassConstant::operator(Id::from("<")),
-            TestClassConstant::operator(Id::from("<"))
+            TestClass::operator(Id::from("<")),
+            TestClass::operator(Id::from("<"))
         );
 
-        assert_ne!(TestClassConstant::new(), TestClassConstant::field1());
-        assert_ne!(TestClassConstant::field1(), TestClassConstant::field2());
+        assert_ne!(TestClass::new(), TestClass::field1());
+        assert_ne!(TestClass::field1(), TestClass::field2());
         assert_ne!(
-            TestClassConstant::operator(Id::from("-")),
-            TestClassConstant::operator(Id::from("<"))
+            TestClass::operator(Id::from("-")),
+            TestClass::operator(Id::from("<"))
         );
-        assert_ne!(
-            TestClassConstant::operator(Id::from("-")),
-            TestClassConstant::new()
-        );
-        assert_ne!(
-            TestClassConstant::field1(),
-            TestClassConstant::operator(Id::from("<"))
-        );
-        assert_ne!(TestClassConstant::field2(), TestClassConstant::new());
+        assert_ne!(TestClass::operator(Id::from("-")), TestClass::new());
+        assert_ne!(TestClass::field1(), TestClass::operator(Id::from("<")));
+        assert_ne!(TestClass::field2(), TestClass::new());
     }
 
     #[test]
     fn test_constant_add() {
         define_vector_interval!(TestClass, field1, field2, field3);
-        let a = TestClassConstant {
+        let a = TestClass {
             field1: 1,
             field2: 2,
             field3: 3,
@@ -202,13 +113,13 @@ mod tests {
                 (Id::from("--"), 2),
             ]),
         };
-        let b = TestClassConstant {
+        let b = TestClass {
             field1: 4,
             field2: 5,
             field3: 6,
             operators: HashMap::from([(Id::from("+"), 6), (Id::from("<=>"), 1)]),
         };
-        let c = TestClassConstant {
+        let c = TestClass {
             field1: 5,
             field2: 7,
             field3: 9,
@@ -223,93 +134,24 @@ mod tests {
     }
 
     #[test]
-    fn test_interval_add() {
+    fn test_multiplication() {
         define_vector_interval!(TestClass, field1, field2);
-        let a = TestClassInterval {
-            field1: Interval::new(1, 8),
-            field2: Interval::new(2, 7),
+        let a = TestClass {
+            field1: 8,
+            field2: 6,
+            operators: HashMap::from([(Id::from("<=>"), 3), (Id::from("--"), 2)]),
         };
-        let b = TestClassInterval {
-            field1: Interval::new(2, 3),
-            field2: Interval::new(5, 5),
-        };
-        let c = TestClassInterval {
-            field1: Interval::new(3, 11),
-            field2: Interval::new(7, 12),
-        };
-        assert_eq!(a.add(b), c)
-    }
-
-    #[test]
-    fn test_mixed_add() {
-        define_vector_interval!(TestClass, field1, field2);
-        let a = TestClassInterval {
-            field1: Interval::new(1, 8),
-            field2: Interval::new(2, 7),
-        };
-        let b = TestClassConstant {
+        let b = TestClass {
             field1: 3,
             field2: 5,
-            operators: HashMap::new(),
+            operators: HashMap::from([
+                (Id::from("+"), 14),
+                (Id::from("*"), 12),
+                (Id::from("--"), 2),
+                (Id::from("<=>"), 1),
+            ]),
         };
-        let c = TestClassInterval {
-            field1: Interval::new(4, 11),
-            field2: Interval::new(7, 12),
-        };
-        assert_eq!(a.add(b), c)
-    }
-
-    #[test]
-    fn test_hull() {
-        define_vector_interval!(TestClass, field1, field2, field3);
-        let a = TestClassInterval {
-            field1: Interval::new(1, 2),
-            field2: Interval::new(8, 15),
-            field3: Interval::new(5, 13),
-        };
-        let b = TestClassInterval {
-            field1: Interval::new(5, 6),
-            field2: Interval::new(5, 10),
-            field3: Interval::new(10, 11),
-        };
-        let c = TestClassInterval {
-            field1: Interval::new(1, 6),
-            field2: Interval::new(5, 15),
-            field3: Interval::new(5, 13),
-        };
-        assert_eq!(a.hull(b), c)
-    }
-
-    #[test]
-    fn test_constant_conversion() {
-        define_vector_interval!(TestClass, field1, field2, field3);
-        let constant = TestClassConstant {
-            field1: 1,
-            field2: 2,
-            field3: 3,
-            operators: HashMap::from([(Id::from("+"), 2), (Id::from("&"), 1)]),
-        };
-        let interval = TestClassInterval {
-            field1: Interval::singleton(1),
-            field2: Interval::singleton(2),
-            field3: Interval::singleton(3),
-        };
-        assert_eq!(interval, constant.into())
-    }
-
-    #[test]
-    fn test_multiplication_conversion() {
-        define_vector_interval!(TestClass, field1, field2);
-        let a = TestClassInterval {
-            field1: Interval::new(1, 8),
-            field2: Interval::new(2, 7),
-        };
-        let b = TestClassConstant {
-            field1: 3,
-            field2: 5,
-            operators: HashMap::new(),
-        };
-        let c = Interval::new(13, 59);
+        let c = 61;
         assert_eq!(a.mul(b), c)
     }
 }
