@@ -65,6 +65,7 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 
 $(BACKEND):
 	make -C backend USER_FLAG=$(USER_FLAG)
+	touch $@
 
 $(PARSER): $(GRAMMAR)
 	touch $@
@@ -105,6 +106,8 @@ clean:
 
 LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
 REPEATS := 10
+MAX_PRIORITY := $(shell chrt -m | awk -F '[:/]' '/SCHED_FIFO/ {print $$NF}')
+PATTERN := Execution time: ([[:digit:]]+) ?ns.*
 
 $(LOG_DIR):
 	mkdir -p $@
@@ -112,15 +115,14 @@ $(LOG_DIR):
 benchmark: $(LOG_DIR)
 	git log --format="%H" -n 1 > $^/git
 	touch $^/title.txt
+
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
-		for i in `seq 1 $(REPEATS)`; do \
-	for program in benchmark/**; do \
-		make build FILE=$$program/main.txt; \
+	for i in `seq 1 $(REPEATS)`; do \
+		for program in benchmark/**; do \
+			make build FILE=$$program/main.txt USER_FLAG=-1;  \
 			while read input; do  \
 				echo $$program $$input; \
-				sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null \
-				| { if read -r output; then echo "$$output"; else echo "nan"; fi; } \
-				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
+				make time --silent FILE=$$program/main.txt USER_FLAG=-1 INPUT="$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
@@ -129,4 +131,20 @@ benchmark: $(LOG_DIR)
 		done; \
 	done;
 
-.PHONY: all benchmark build clean run
+LIMIT := 60
+time: $(BACKEND)
+	echo $(INPUT) | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
+		sleep $(LIMIT) & \
+		SLEEP_PID=$$!; \
+		cat <(xargs $(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
+		EXEC_PID=$$!; \
+		wait $$SLEEP_PID || exit 0 && (kill -- -$$EXEC_PID; exit 1) \
+	' \
+	| { if read -r output; then echo "$$output"; else echo; fi; } \
+	| grep -E '$(PATTERN)' \
+	| sed -E 's/$(PATTERN)/\1/'  \
+	| grep . \
+	|| echo nan \
+
+
+.PHONY: all benchmark build clean run time

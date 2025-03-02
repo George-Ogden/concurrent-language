@@ -1,15 +1,14 @@
 CXX := g++
-CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors
+EXTRA_FLAGS :=
+CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors $(EXTRA_FLAGS)
 OPTIMIZATION := -Ofast
 LIBS := -lpthread
 INCLUDE := -Iinclude
 
 BUILD_DIR := build_
 WRAP_DIR := wrap
-WRAP_FILE := $(BUILD_DIR)/wrap.hpp
-WRAP_FILES := $(wildcard $(WRAP_DIR)/*.hpp)
 USER_FILE := include/main/user.hpp
-WRAP := -Wl,--wrap=sysconf,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
+WRAP := -Wl,--wrap=pthread_setschedparam,--wrap=pthread_setaffinity_np
 
 TARGET_DIR := bin
 SRC_DIR := src
@@ -17,7 +16,15 @@ TARGET := $(TARGET_DIR)/main
 TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*.cpp))
 HEADERS := $(wildcard include/*.hpp include/**/*.hpp include/**/*.tpp) $(USER_FILE)
 
+WRAP_USER_FILE := wrap/user.hpp
+WRAP_BENCHMARK_FILE := wrap/benchmark.hpp
 ifeq ($(USER_FLAG), 1)
+	WRAP_FILE := $(WRAP_USER_FILE)
+else ifeq ($(USER_FLAG), -1)
+	WRAP_FILE := $(WRAP_BENCHMARK_FILE)
+endif
+
+ifneq ($(filter $(USER_FLAG),1 -1),)
 	CXXFLAGS += $(WRAP)
 	HEADERS += $(WRAP_FILE)
 	INCLUDE += -I.
@@ -31,7 +38,7 @@ TEST_DIR := test
 TEST_LIBS := -lgtest -lgtest_main
 TEST_BUILDDIR := $(BUILD_DIR)/test
 TEST_FLAGS := -g -fsanitize=address $(WRAP)
-TEST_INCLUDE := $(wildcard $(TEST_DIR)/*.hpp) $(WRAP_FILE)
+TEST_INCLUDE := $(wildcard $(TEST_DIR)/*.hpp) $(WRAP_USER_FILE)
 TEST_FILE := $(TEST_BUILDDIR)/test.cpp
 TEST_EXECS := $(patsubst $(TEST_DIR)/test_%.hpp, $(TARGET_DIR)/test_%, $(filter $(TEST_DIR)/test_%.hpp, $(TEST_INCLUDE)))
 TEST_EXEC := $(TARGET_DIR)/test
@@ -55,13 +62,7 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 	fi
 
 $(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
-	$(if $(filter 1,$(USER_FLAG)), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
-
-$(WRAP_FILE): $(WRAP_FILES) | $(BUILD_DIR)
-	echo "" > $@; \
-	for file in $(WRAP_FILES); do \
-		echo "#include \"$$file\"" >> $@; \
-	done
+	$(if $(filter $(USER_FLAG),1 -1), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(HEADERS) $(COMPILER_FILE) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(OPTIMIZATION) $(INCLUDE) $(LIBS) -c -o $@ $<
