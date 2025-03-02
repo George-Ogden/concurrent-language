@@ -1,10 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
-    AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation, CompilationArgs,
-    ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
-    IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement,
-    TupleExpression, TupleType, TypeDef, UnionType, Value,
+    code_vector::CodeVectorCalculator, AllocationState, Assignment, Await, BuiltIn,
+    ClosureInstantiation, CompilationArgs, ConstructorCall, Declaration, ElementAccess, Expression,
+    FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name,
+    Program, Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -604,18 +604,51 @@ impl Compiler {
             type_defs,
         }
     }
-    pub fn compile(program: IntermediateProgram, _args: CompilationArgs) -> Program {
+    pub fn compile(program: IntermediateProgram, args: CompilationArgs) -> Program {
         let mut compiler = Compiler::new();
+        if let Some(filename) = args.export_vector_file {
+            Self::export_vector(&program, filename).expect("Failed to save program")
+        };
         compiler.compile_program(program)
+    }
+    fn export_vector(program: &IntermediateProgram, filename: String) -> Result<(), String> {
+        let fns = program
+            .main
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                    expression: IntermediateExpression::IntermediateLambda(lambda),
+                    location: _,
+                }) = statement
+                {
+                    Some(lambda)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+        if fns.len() != 1 {
+            return Err(String::from(""));
+        };
+        let lambda = fns[0];
+        let vector = CodeVectorCalculator::lambda_vector(lambda);
+        vector
+            .save(&Path::new(&filename))
+            .map_err(|e| e.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use std::{fs, path::PathBuf};
+
     use super::*;
 
     use lowering::{Boolean, Integer};
+    use rstest::{fixture, rstest};
+    use tempfile::TempDir;
     use test_case::test_case;
 
     #[test_case(
@@ -2062,12 +2095,11 @@ mod tests {
                     statements: vec![
                         IntermediateAssignment{
                             location: identity.location.clone(),
-                            expression:
-                                IntermediateLambda{
-                                    args: vec![arg.clone()],
-                                    statements: Vec::new(),
-                                    ret: arg.clone().into()
-                                }.into()
+                            expression: IntermediateLambda{
+                                args: vec![arg.clone()],
+                                statements: Vec::new(),
+                                ret: arg.clone().into()
+                            }.into()
                         }.into(),
                         IntermediateAssignment{
                             location: main.location.clone(),
@@ -2077,11 +2109,10 @@ mod tests {
                                     statements: vec![
                                         IntermediateAssignment{
                                             location: y.location.clone(),
-                                            expression:
-                                                IntermediateFnCall{
-                                                    fn_: identity.clone().into(),
-                                                    args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
-                                                }.into()
+                                            expression: IntermediateFnCall{
+                                                fn_: identity.clone().into(),
+                                                args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
+                                            }.into()
                                         }.into()
                                     ],
                                     ret: y.clone().into()
@@ -2670,5 +2701,59 @@ mod tests {
         let mut compiler = Compiler::new();
         let compiled_program = compiler.compile_program(program);
         assert_eq!(compiled_program, expected_program);
+    }
+
+    #[fixture]
+    fn temporary_filename() -> PathBuf {
+        let tmp_dir = TempDir::new().expect("Could not create temp dir.");
+        let tmp = tmp_dir.path().join("filename");
+        tmp
+    }
+
+    #[rstest]
+    fn test_compile_program_with_args(temporary_filename: PathBuf) {
+        let identity = IntermediateMemory::from(IntermediateType::from(IntermediateFnType(
+            vec![AtomicTypeEnum::INT.into()],
+            Box::new(AtomicTypeEnum::INT.into()),
+        )));
+        let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+        let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
+        let identity_fn = IntermediateLambda {
+            args: vec![arg.clone()],
+            statements: Vec::new(),
+            ret: arg.clone().into(),
+        };
+        let program = IntermediateProgram {
+            main: IntermediateLambda {
+                args: Vec::new(),
+                ret: main_call.clone().into(),
+                statements: vec![
+                    IntermediateAssignment {
+                        location: identity.location.clone(),
+                        expression: identity_fn.clone().into(),
+                    }
+                    .into(),
+                    IntermediateAssignment {
+                        location: main_call.location.clone(),
+                        expression: IntermediateFnCall {
+                            fn_: identity.clone().into(),
+                            args: Vec::new(),
+                        }
+                        .into(),
+                    }
+                    .into(),
+                ],
+            },
+            types: Vec::new(),
+        };
+        let identity_vector = CodeVectorCalculator::lambda_vector(&identity_fn);
+        Compiler::compile(
+            program,
+            CompilationArgs {
+                export_vector_file: Some(temporary_filename.to_str().unwrap().into()),
+            },
+        );
+        let contents = fs::read_to_string(temporary_filename).expect("Failed to read file.");
+        assert_eq!(contents, identity_vector.to_string())
     }
 }

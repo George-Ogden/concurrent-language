@@ -39,16 +39,21 @@ macro_rules! define_named_vector{
                 }
             )*
             pub fn save(&self, filepath: &Path) -> std::io::Result<()> {
+                if let Some(dir) = filepath.parent() {
+                    fs::create_dir_all(dir)?;
+                }
+                fs::write(filepath, self.to_string())
+            }
+
+            pub fn to_string(&self) -> String {
                 let (operator_names, operator_values): (Vec<_>, Vec<_>) = self.operators.clone().into_iter().sorted().unzip();
                 let fields: [&str; define_named_vector!(@count $($fields)*)] = [$(stringify!($fields),)*];
                 let field_names: Vec<String> = fields.into_iter().map(String::from).collect();
                 let header = field_names.into_iter().chain(operator_names).collect::<Vec<_>>().join("\t");
 
                 let contents = [$(self.$fields,)*].into_iter().chain(operator_values).map(|x| x.to_string()).join("\t");
-                if let Some(dir) = filepath.parent() {
-                    fs::create_dir_all(dir)?;
-                }
-                fs::write(filepath, format!("{header}\n{contents}"))
+                format!("{header}\n{contents}")
+
             }
         }
 
@@ -254,6 +259,24 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_to_string() {
+        define_named_vector!(TestClass, field_a, field_b);
+        let vector = TestClass {
+            field_a: 3,
+            field_b: 9,
+            operators: HashMap::from([
+                (Id::from("j"), 10),
+                (Id::from("a"), 12),
+                (Id::from("c"), 10),
+            ]),
+        };
+        assert_eq!(
+            vector.to_string(),
+            "field_a\tfield_b\ta\tc\tj\n3\t9\t12\t10\t10"
+        )
+    }
+
     #[fixture]
     fn temporary_filename() -> PathBuf {
         let tmp_dir = TempDir::new().expect("Could not create temp dir.");
@@ -280,6 +303,6 @@ mod tests {
             assert!(result.is_ok())
         }
         let contents = fs::read_to_string(temporary_filename).expect("Failed to read file.");
-        assert_eq!(contents, "field_a\tfield_b\ta\tc\tj\n3\t9\t12\t10\t10")
+        assert_eq!(contents, vector.to_string())
     }
 }

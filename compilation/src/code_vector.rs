@@ -104,7 +104,7 @@ impl CodeVectorCalculator {
     fn statements_vector(statements: &Vec<IntermediateStatement>) -> CodeVector {
         statements.iter().map(Self::statement_vector).sum()
     }
-    fn lambda_vector(lambda: &IntermediateLambda) -> CodeVector {
+    pub fn lambda_vector(lambda: &IntermediateLambda) -> CodeVector {
         let mut default = CodeVector::new();
         default.operators =
             HashMap::from_iter(CODE_SIZE_CONSTANTS.operators.keys().map(|k| (k.clone(), 0)));
