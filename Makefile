@@ -65,6 +65,7 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 
 $(BACKEND):
 	make -C backend USER_FLAG=$(USER_FLAG)
+	touch $@
 
 $(PARSER): $(GRAMMAR)
 	touch $@
@@ -116,25 +117,11 @@ benchmark: $(LOG_DIR)
 	touch $^/title.txt
 
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
-		for i in `seq 1 $(REPEATS)`; do \
-	for program in benchmark/**; do \
-		make build FILE=$$program/main.txt USER_FLAG=-1; \
+	for i in `seq 1 $(REPEATS)`; do \
+		for program in benchmark/**; do \
 			while read input; do  \
 				echo $$program $$input; \
-				( \
-					echo $$input | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
-						sleep 60 & \
-						SLEEP_PID=$$!; \
-						cat <(xargs ./backend/bin/main 2>&1 > /dev/null; kill $$SLEEP_PID) & \
-						EXEC_PID=$$!; \
-						wait $$SLEEP_PID || exit 0 && (kill -9 -- -$$EXEC_PID; exit 1) \
-					' \
-					| { if read -r output; then echo "$$output"; else echo; fi; } \
-					| grep -E '$(PATTERN)' \
-					| sed -E 's/$(PATTERN)/\1/'  \
-					| grep . \
-					|| echo nan \
-				) \
+				make time --silent FILE=$$program/main.txt USER_FLAG=-1 INPUT="$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
@@ -143,4 +130,20 @@ benchmark: $(LOG_DIR)
 		done; \
 	done;
 
-.PHONY: all benchmark build clean run
+LIMIT := 60
+time: $(BACKEND)
+	echo $(INPUT) | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
+		sleep $(LIMIT) & \
+		SLEEP_PID=$$!; \
+		cat <(xargs $(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
+		EXEC_PID=$$!; \
+		wait $$SLEEP_PID || exit 0 && (kill -9 -- -$$EXEC_PID; exit 1) \
+	' \
+	| { if read -r output; then echo "$$output"; else echo; fi; } \
+	| grep -E '$(PATTERN)' \
+	| sed -E 's/$(PATTERN)/\1/'  \
+	| grep . \
+	|| echo nan \
+
+
+.PHONY: all benchmark build clean run time
