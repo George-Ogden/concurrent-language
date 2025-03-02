@@ -1,115 +1,49 @@
 use std::collections::HashMap;
-use std::iter::Sum;
 use std::ops::{Add, Mul};
 
-use gcollections::ops::*;
-use interval::ops::*;
-use interval::Interval;
-use lowering::IntermediateIfStatement;
-use lowering::IntermediateLambda;
-use lowering::IntermediateMatchBranch;
-use lowering::IntermediateMatchStatement;
-use lowering::IntermediateStatement;
+use itertools::Itertools;
 use lowering::{
     BuiltInFn, Id, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateFnCall, IntermediateValue,
+    IntermediateFnCall, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
+    IntermediateMatchStatement, IntermediateStatement, IntermediateValue,
 };
 use once_cell::sync::Lazy;
 
-use crate::define_named_vector;
+use crate::code_size::{CodeVector, CODE_SIZE_CONSTANTS};
 
-define_named_vector!(
-    CodeVector,
-    builtin_bool,
-    builtin_int,
-    builtin_fn,
-    memory_access,
-    tuple_expression,
-    element_access,
-    value_expression,
-    fn_call,
-    ctor_call,
-    lambda,
-    assignment,
-    if_statement,
-    match_statement,
-);
+pub struct CodeVectorCalculator {}
 
-pub const CODE_SIZE_CONSTANTS: Lazy<CodeVector> = Lazy::new(|| CodeVector {
-    builtin_bool: 3,
-    builtin_int: 8,
-    builtin_fn: 11,
-    memory_access: 38,
-    tuple_expression: 2,
-    element_access: 7,
-    value_expression: 1,
-    fn_call: 89,
-    ctor_call: 92,
-    lambda: 47,
-    assignment: 5,
-    if_statement: 13,
-    match_statement: 17,
-    operators: HashMap::from(
-        [
-            ("**", 10),
-            ("*", 4),
-            ("/", 4),
-            ("%", 4),
-            ("+", 1),
-            ("-", 1),
-            (">>", 1),
-            ("<<", 1),
-            ("<=>", 2),
-            ("&", 1),
-            ("^", 1),
-            ("|", 1),
-            ("++", 1),
-            ("--", 1),
-            ("<", 1),
-            ("<=", 1),
-            (">", 1),
-            (">=", 1),
-            ("==", 1),
-            ("!=", 1),
-            ("!", 1),
-        ]
-        .map(|(id, size)| (Id::from(id), size as usize)),
-    ),
-});
-
-pub struct CodeSizeEstimator {}
-
-impl CodeSizeEstimator {
-    fn builtin_size(built_in: &IntermediateBuiltIn) -> usize {
+impl CodeVectorCalculator {
+    fn builtin_vector(built_in: &IntermediateBuiltIn) -> CodeVector {
         match built_in {
-            IntermediateBuiltIn::Integer(_) => CODE_SIZE_CONSTANTS.builtin_int,
-            IntermediateBuiltIn::Boolean(_) => CODE_SIZE_CONSTANTS.builtin_bool,
-            IntermediateBuiltIn::BuiltInFn(_) => CODE_SIZE_CONSTANTS.builtin_fn,
+            IntermediateBuiltIn::Integer(_) => CodeVector::builtin_int(),
+            IntermediateBuiltIn::Boolean(_) => CodeVector::builtin_bool(),
+            IntermediateBuiltIn::BuiltInFn(_) => CodeVector::builtin_fn(),
         }
     }
-    fn value_size(value: &IntermediateValue) -> usize {
+    fn value_vector(value: &IntermediateValue) -> CodeVector {
         match value {
-            IntermediateValue::IntermediateBuiltIn(built_in) => Self::builtin_size(built_in),
+            IntermediateValue::IntermediateBuiltIn(built_in) => Self::builtin_vector(built_in),
             IntermediateValue::IntermediateMemory(_) | IntermediateValue::IntermediateArg(_) => {
-                CODE_SIZE_CONSTANTS.memory_access
+                CodeVector::memory_access()
             }
         }
     }
-    fn values_size(values: &Vec<IntermediateValue>) -> usize {
-        values.iter().map(Self::value_size).sum()
+    fn values_vector(values: &Vec<IntermediateValue>) -> CodeVector {
+        values.iter().map(Self::value_vector).sum()
     }
 
-    fn expression_size(expression: &IntermediateExpression) -> usize {
-        let values_size = Self::values_size(&expression.values());
+    fn expression_vector(expression: &IntermediateExpression) -> CodeVector {
+        let values_vector = Self::values_vector(&expression.values());
         match expression {
             IntermediateExpression::IntermediateValue(_) => {
-                CODE_SIZE_CONSTANTS.value_expression + values_size
+                CodeVector::value_expression() + values_vector
             }
             IntermediateExpression::IntermediateElementAccess(_) => {
-                CODE_SIZE_CONSTANTS.element_access + values_size
+                CodeVector::element_access() + values_vector
             }
             IntermediateExpression::IntermediateTupleExpression(_) => {
-                CODE_SIZE_CONSTANTS.tuple_expression + values_size
+                CodeVector::tuple_expression() + values_vector
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                 fn_:
@@ -118,74 +52,75 @@ impl CodeSizeEstimator {
                         _,
                     ))),
                 args,
-            }) => CODE_SIZE_CONSTANTS.operators[id] + Self::values_size(args),
-            IntermediateExpression::IntermediateFnCall(_) => {
-                CODE_SIZE_CONSTANTS.fn_call + values_size
-            }
+            }) => CodeVector::operator(id.clone()) + Self::values_vector(args),
+            IntermediateExpression::IntermediateFnCall(_) => CodeVector::fn_call() + values_vector,
             IntermediateExpression::IntermediateCtorCall(_) => {
-                CODE_SIZE_CONSTANTS.ctor_call + values_size
+                CodeVector::ctor_call() + values_vector
             }
-            IntermediateExpression::IntermediateLambda(_) => CODE_SIZE_CONSTANTS.lambda,
+            IntermediateExpression::IntermediateLambda(_) => CodeVector::lambda(),
         }
     }
 
-    fn statement_size(statement: &IntermediateStatement) -> Interval<usize> {
+    fn statement_vector(statement: &IntermediateStatement) -> CodeVector {
         match statement {
             IntermediateStatement::IntermediateAssignment(assignment) => {
-                Self::assignment_size(assignment)
+                Self::assignment_vector(assignment)
             }
             IntermediateStatement::IntermediateIfStatement(if_statement) => {
-                Self::if_statement_size(if_statement)
+                Self::if_statement_vector(if_statement)
             }
             IntermediateStatement::IntermediateMatchStatement(match_statement) => {
-                Self::match_statement_size(match_statement)
+                Self::match_statement_vector(match_statement)
             }
         }
     }
-    fn assignment_size(assignment: &IntermediateAssignment) -> Interval<usize> {
-        Interval::singleton(
-            Self::expression_size(&assignment.expression) + CODE_SIZE_CONSTANTS.assignment,
-        )
+    fn assignment_vector(assignment: &IntermediateAssignment) -> CodeVector {
+        Self::expression_vector(&assignment.expression) + CodeVector::assignment()
     }
-    fn if_statement_size(if_statement: &IntermediateIfStatement) -> Interval<usize> {
-        let condition_size = Self::value_size(&if_statement.condition);
-        let branch_sizes = Self::statements_size(&if_statement.branches.0)
-            .hull(&Self::statements_size(&if_statement.branches.1));
-        branch_sizes + condition_size + CODE_SIZE_CONSTANTS.if_statement
+    fn if_statement_vector(if_statement: &IntermediateIfStatement) -> CodeVector {
+        let condition_vector = Self::value_vector(&if_statement.condition);
+        let branch_vectors = (
+            Self::statements_vector(&if_statement.branches.0),
+            Self::statements_vector(&if_statement.branches.1),
+        );
+        if &branch_vectors.0 != &branch_vectors.1 {
+            panic!("If statement branches are not equal")
+        }
+        branch_vectors.0 + condition_vector + CodeVector::if_statement()
     }
-    fn match_statement_size(match_statement: &IntermediateMatchStatement) -> Interval<usize> {
-        let subject_size = Self::value_size(&match_statement.subject);
-        let branch_sizes = match_statement
+    fn match_statement_vector(match_statement: &IntermediateMatchStatement) -> CodeVector {
+        let subject_vector = Self::value_vector(&match_statement.subject);
+        let branch_vectors = match_statement
             .branches
             .iter()
-            .map(Self::match_branch_size)
-            .reduce(|x, y| Interval::hull(&x, &y))
-            .unwrap();
-        branch_sizes + subject_size + CODE_SIZE_CONSTANTS.match_statement
+            .map(Self::match_branch_vector)
+            .collect_vec();
+        if !branch_vectors.iter().all_equal() {
+            panic!("Match statement branches are not equal")
+        }
+        branch_vectors[0].clone() + subject_vector + CodeVector::match_statement()
     }
-    fn match_branch_size(match_branch: &IntermediateMatchBranch) -> Interval<usize> {
-        Self::statements_size(&match_branch.statements)
+    fn match_branch_vector(match_branch: &IntermediateMatchBranch) -> CodeVector {
+        Self::statements_vector(&match_branch.statements)
     }
-    fn statements_size(statements: &Vec<IntermediateStatement>) -> Interval<usize> {
-        statements
-            .iter()
-            .map(Self::statement_size)
-            .fold(Interval::singleton(0), Interval::add)
+    fn statements_vector(statements: &Vec<IntermediateStatement>) -> CodeVector {
+        statements.iter().map(Self::statement_vector).sum()
     }
-    fn lambda_size(lambda: &IntermediateLambda) -> (usize, usize) {
-        let size_interval =
-            Self::statements_size(&lambda.statements) + Self::value_size(&lambda.ret);
-        (size_interval.lower(), size_interval.upper())
+    fn lambda_vector(lambda: &IntermediateLambda) -> CodeVector {
+        let mut default = CodeVector::new();
+        default.operators =
+            HashMap::from_iter(CODE_SIZE_CONSTANTS.operators.keys().map(|k| (k.clone(), 0)));
+        Self::statements_vector(&lambda.statements) + Self::value_vector(&lambda.ret) + default
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::min, collections::HashSet};
+
+    use std::panic::{self, AssertUnwindSafe};
 
     use super::*;
 
-    use interval::Interval;
     use itertools::Itertools;
     use lowering::{
         AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
@@ -197,37 +132,28 @@ mod tests {
     };
     use test_case::test_case;
 
-    const CSC: Lazy<CodeVector> = CODE_SIZE_CONSTANTS;
-    const BBS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_bool);
-    const BIS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_int);
-    const BFS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.builtin_fn);
-    const MAS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.memory_access);
-    const TES: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.tuple_expression);
-    const EAS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.element_access);
-    const VES: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.value_expression);
-    const FCS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.fn_call);
-    const CCS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.ctor_call);
-    const LS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.lambda);
-    const AS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.assignment);
-    const ISS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.if_statement);
-    const MSS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.match_statement);
-
-    #[test]
-    fn exhaustive_operator_test() {
-        assert_eq!(
-            CSC.operators.keys().cloned().collect::<HashSet<_>>(),
-            DEFAULT_CONTEXT.with(|context| context.keys().cloned().collect::<HashSet<_>>())
-        )
-    }
+    const BBV: Lazy<CodeVector> = Lazy::new(|| CodeVector::builtin_bool());
+    const BIV: Lazy<CodeVector> = Lazy::new(|| CodeVector::builtin_int());
+    const BFV: Lazy<CodeVector> = Lazy::new(|| CodeVector::builtin_fn());
+    const MAV: Lazy<CodeVector> = Lazy::new(|| CodeVector::memory_access());
+    const TEV: Lazy<CodeVector> = Lazy::new(|| CodeVector::tuple_expression());
+    const EAV: Lazy<CodeVector> = Lazy::new(|| CodeVector::element_access());
+    const VEV: Lazy<CodeVector> = Lazy::new(|| CodeVector::value_expression());
+    const FCV: Lazy<CodeVector> = Lazy::new(|| CodeVector::fn_call());
+    const CCV: Lazy<CodeVector> = Lazy::new(|| CodeVector::ctor_call());
+    const LV: Lazy<CodeVector> = Lazy::new(|| CodeVector::lambda());
+    const AV: Lazy<CodeVector> = Lazy::new(|| CodeVector::assignment());
+    const ISV: Lazy<CodeVector> = Lazy::new(|| CodeVector::if_statement());
+    const MSV: Lazy<CodeVector> = Lazy::new(|| CodeVector::match_statement());
 
     #[test_case(
         IntermediateValue::from(Boolean{value: true}),
-        *BBS;
+        BBV.clone();
         "bool"
     )]
     #[test_case(
         IntermediateValue::from(Integer{value: 5}),
-        *BIS;
+        BIV.clone();
         "int"
     )]
     #[test_case(
@@ -238,7 +164,7 @@ mod tests {
                 Box::new(AtomicTypeEnum::INT.into())
             )
         ))),
-        *BFS;
+        BFV.clone();
         "built-in function"
     )]
     #[test_case(
@@ -246,7 +172,7 @@ mod tests {
             type_: AtomicTypeEnum::INT.into(),
             location: Location::new()
         }),
-        *MAS;
+        MAV.clone();
         "argument"
     )]
     #[test_case(
@@ -254,17 +180,17 @@ mod tests {
             type_: AtomicTypeEnum::BOOL.into(),
             location: Location::new()
         }),
-        *MAS;
+        MAV.clone();
         "memory"
     )]
-    fn test_value_size(value: IntermediateValue, expected_size: usize) {
-        let size = CodeSizeEstimator::value_size(&value);
-        assert_eq!(size, expected_size)
+    fn test_value_vector(value: IntermediateValue, expected_vector: CodeVector) {
+        let vector = CodeVectorCalculator::value_vector(&value);
+        assert_eq!(vector, expected_vector)
     }
 
     #[test_case(
         IntermediateTupleExpression(Vec::new()).into(),
-        *TES;
+        TEV.clone();
         "empty tuple"
     )]
     #[test_case(
@@ -272,7 +198,7 @@ mod tests {
             IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
             Integer{value: 43}.into()
         ]).into(),
-        *TES + *BIS + *MAS;
+        TEV.clone() + BIV.clone() + MAV.clone();
         "non-empty tuple"
     )]
     #[test_case(
@@ -286,12 +212,12 @@ mod tests {
                 ]).into()
             }.into()
         }.into(),
-        *EAS + *MAS;
+        EAV.clone() + MAV.clone();
         "tuple access"
     )]
     #[test_case(
         IntermediateValue::from(Integer{value: -27}).into(),
-        *VES + *BIS;
+        VEV.clone() + BIV.clone();
         "value expression"
     )]
     #[test_case(
@@ -305,7 +231,7 @@ mod tests {
             }.into(),
             args: Vec::new(),
         }.into(),
-        *FCS + *MAS;
+        FCV.clone() + MAV.clone();
         "user-defined fn-call no args"
     )]
     #[test_case(
@@ -322,7 +248,7 @@ mod tests {
                 Integer{value: 43}.into()
             ]
         }.into(),
-        *FCS + *MAS + *BIS + *MAS;
+        FCV.clone() + MAV.clone() + BIV.clone() + MAV.clone();
         "user-defined fn-call"
     )]
     #[test_case(
@@ -338,7 +264,7 @@ mod tests {
                 IntermediateArg{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
             ]
         }.into(),
-        CSC.operators[&Id::from("!")] + *MAS;
+        CodeVector::operator(Id::from("!")) + MAV.clone();
         "negation operator call"
     )]
     #[test_case(
@@ -355,7 +281,7 @@ mod tests {
                 Integer{ value: -5}.into(),
             ]
         }.into(),
-        CSC.operators[&Id::from("/")] + *BIS + *MAS;
+        CodeVector::operator(Id::from("/")) + BIV.clone() + MAV.clone();
         "division operator call"
     )]
     #[test_case(
@@ -372,7 +298,7 @@ mod tests {
                 IntermediateArg{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
             ]
         }.into(),
-        CSC.operators[&Id::from("**")] + *BIS + *MAS;
+        CodeVector::operator(Id::from("**")) + BIV.clone() + MAV.clone();
         "exponentiation operator call"
     )]
     #[test_case(
@@ -383,7 +309,7 @@ mod tests {
                 vec![None, None]
             )
         }.into(),
-        *CCS;
+        CCV.clone();
         "ctor call no data"
     )]
     #[test_case(
@@ -397,7 +323,7 @@ mod tests {
                 ]
             )
         }.into(),
-        *CCS + *BBS;
+        CCV.clone() + BBV.clone();
         "ctor call with data"
     )]
     #[test_case(
@@ -406,12 +332,12 @@ mod tests {
             statements: Vec::new(),
             ret: Boolean{value: true}.into()
         }.into(),
-        *LS;
+        LV.clone();
         "lambda"
     )]
-    fn test_expression_size(expression: IntermediateExpression, expected_size: usize) {
-        let size = CodeSizeEstimator::expression_size(&expression);
-        assert_eq!(size, expected_size)
+    fn test_expression_vector(expression: IntermediateExpression, expected_vector: CodeVector) {
+        let vector = CodeVectorCalculator::expression_vector(&expression);
+        assert_eq!(vector, expected_vector)
     }
 
     #[test_case(
@@ -426,16 +352,59 @@ mod tests {
                     ]
                 )
             }.into();
-            let statement_size = *AS + CodeSizeEstimator::expression_size(&expression);
+            let statement_vector = AV.clone() + CodeVectorCalculator::expression_vector(&expression);
             (
                 IntermediateAssignment{
                     expression: expression,
                     location: Location::new()
                 }.into(),
-                Interval::new(statement_size, statement_size)
+                Ok(statement_vector)
             )
         };
         "assignment"
+    )]
+    #[test_case(
+        {
+            let args = vec![
+                IntermediateArg{
+                    location: Location::new(),
+                    type_: AtomicTypeEnum::INT.into()
+                },
+                IntermediateArg{
+                    location: Location::new(),
+                    type_: AtomicTypeEnum::INT.into()
+                },
+            ];
+            let target = Location::new();
+            let branches = (
+                vec![
+                    IntermediateAssignment{
+                        location: target.clone(),
+                        expression: IntermediateValue::from(args[0].clone()).into()
+                    }.into(),
+                ],
+                vec![
+                    IntermediateAssignment{
+                        location: target.clone(),
+                        expression: IntermediateValue::from(args[1].clone()).into()
+                    }.into(),
+                ]
+            );
+            let condition = IntermediateMemory{
+                location: Location::new(),
+                type_: AtomicTypeEnum::BOOL.into()
+            };
+            let statement_vector = CodeVectorCalculator::statements_vector(&branches.0);
+            let condition_vector = CodeVectorCalculator::value_vector(&condition.clone().into());
+            (
+                IntermediateIfStatement{
+                    condition: condition.into(),
+                    branches
+                }.into(),
+                Ok(statement_vector + condition_vector + ISV.clone())
+            )
+        };
+        "if statement balanced"
     )]
     #[test_case(
         {
@@ -475,10 +444,6 @@ mod tests {
                 location: Location::new(),
                 type_: AtomicTypeEnum::BOOL.into()
             };
-            let small_statement_size = CodeSizeEstimator::statement_size(&small_assignment.clone().into()).lower();
-            let large_statements_size = CodeSizeEstimator::statement_size(&large_assignment.clone().into()).lower() + CodeSizeEstimator::statement_size(&large_final_assignment.clone().into()).lower();
-            let condition_size = CodeSizeEstimator::value_size(&condition.clone().into());
-            let (lower_bound, upper_bound) = (small_statement_size + condition_size + *ISS, large_statements_size + condition_size + *ISS);
             (
                 IntermediateIfStatement{
                     condition: condition.into(),
@@ -490,10 +455,58 @@ mod tests {
                         ],
                     )
                 }.into(),
-                Interval::new(lower_bound, upper_bound)
+                Err(())
             )
         };
-        "if statement"
+        "if statement unbalanced"
+    )]
+    #[test_case(
+        {
+            let args = vec![
+                IntermediateArg{
+                    location: Location::new(),
+                    type_: AtomicTypeEnum::INT.into()
+                },
+                IntermediateArg{
+                    location: Location::new(),
+                    type_: AtomicTypeEnum::INT.into()
+                }
+            ];
+            let target = Location::new();
+            let assignment_0 = IntermediateAssignment{
+                expression: args[0].clone().into(),
+                location: target.clone()
+            };
+            let assignment_1 = IntermediateAssignment{
+                expression: args[1].clone().into(),
+                location: target.clone()
+            };
+            let subject = IntermediateMemory{
+                location: Location::new(),
+                type_: IntermediateUnionType(
+                    vec![Some(AtomicTypeEnum::INT.into()), Some(AtomicTypeEnum::INT.into())]
+                ).into()
+            };
+            let statement_vector = CodeVectorCalculator::statement_vector(&assignment_0.clone().into());
+            let subject_vector = CodeVectorCalculator::value_vector(&subject.clone().into());
+            (
+                IntermediateMatchStatement{
+                    subject: subject.into(),
+                    branches: vec![
+                        IntermediateMatchBranch{
+                            target: Some(args[0].clone()),
+                            statements: vec![assignment_0.into()],
+                        },
+                        IntermediateMatchBranch{
+                            target: Some(args[1].clone()),
+                            statements: vec![assignment_1.into()],
+                        },
+                    ]
+                }.into(),
+                Ok(statement_vector + subject_vector + MSV.clone())
+            )
+        };
+        "match statement balanced"
     )]
     #[test_case(
         {
@@ -536,11 +549,6 @@ mod tests {
                     vec![Some(AtomicTypeEnum::INT.into()), None, Some(AtomicTypeEnum::INT.into())]
                 ).into()
             };
-            let small_statement_size = CodeSizeEstimator::statement_size(&small_assignment.clone().into()).lower();
-            let medium_statement_size = CodeSizeEstimator::statement_size(&medium_assignment.clone().into()).lower();
-            let large_statement_size = CodeSizeEstimator::statement_size(&large_assignment.clone().into()).lower();
-            let subject_size = CodeSizeEstimator::value_size(&subject.clone().into());
-            let (lower_bound, upper_bound) = (min(small_statement_size, medium_statement_size) + subject_size + *MSS, large_statement_size + subject_size + *MSS);
             (
                 IntermediateMatchStatement{
                     subject: subject.into(),
@@ -559,15 +567,25 @@ mod tests {
                         },
                     ]
                 }.into(),
-                Interval::new(lower_bound, upper_bound)
+                Err(())
             )
         };
-        "match statement"
+        "match statement unbalanced"
     )]
-    fn test_statement_size(statement_size: (IntermediateStatement, Interval<usize>)) {
-        let (statement, expected_size) = statement_size;
-        let size = CodeSizeEstimator::statement_size(&statement);
-        assert_eq!(size, expected_size)
+    fn test_statement_vector(statement_vector: (IntermediateStatement, Result<CodeVector, ()>)) {
+        let (statement, result) = statement_vector;
+        match result {
+            Ok(expected_vector) => {
+                let vector = CodeVectorCalculator::statement_vector(&statement);
+                assert_eq!(vector, expected_vector)
+            }
+            Err(()) => {
+                let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    CodeVectorCalculator::statement_vector(&statement)
+                }));
+                assert!(result.is_err())
+            }
+        }
     }
 
     #[test_case(
@@ -581,11 +599,52 @@ mod tests {
                     args: vec![arg.clone()],
                     statements: Vec::new(),
                     ret: arg.clone().into()
-                }.into()
+                }
             },
-            (*MAS, *MAS)
+            Ok(MAV.clone())
         );
         "lambda no statements"
+    )]
+    #[test_case(
+        {
+            let arg = IntermediateArg{
+                type_: AtomicTypeEnum::BOOL.into(),
+                location: Location::new()
+            };
+            let target = IntermediateMemory{
+                type_: AtomicTypeEnum::INT.into(),
+                location: Location::new()
+            };
+            let statement = IntermediateIfStatement{
+                condition: arg.clone().into(),
+                branches:(
+                    vec![
+                        IntermediateAssignment{
+                            location: target.location.clone(),
+                            expression: IntermediateValue::from(Integer{ value: 1 }).into(),
+                        }.into()
+                    ],
+                    vec![
+                        IntermediateAssignment{
+                            location: target.location.clone(),
+                            expression: IntermediateValue::from(Integer{ value: -1 }).into(),
+                        }.into()
+                    ]
+                )
+            };
+            let if_statement_vector = CodeVectorCalculator::if_statement_vector(&statement);
+            (
+                IntermediateLambda {
+                    args: vec![arg.clone()],
+                    statements: vec![
+                        statement.into()
+                    ],
+                    ret: target.into()
+                },
+                Ok(if_statement_vector + MAV.clone())
+            )
+        };
+        "lambda if statement"
     )]
     #[test_case(
         {
@@ -617,9 +676,6 @@ mod tests {
                     ]
                 )
             };
-            let range = CodeSizeEstimator::if_statement_size(&statement);
-            let lower_bound = range.lower() + *MAS;
-            let upper_bound = range.upper() + *MAS;
             (
                 IntermediateLambda {
                     args: vec![arg.clone()],
@@ -627,15 +683,45 @@ mod tests {
                         statement.into()
                     ],
                     ret: target.into()
-                }.into(),
-                (lower_bound, upper_bound)
+                },
+                Err(())
             )
         };
-        "lambda if statement"
+        "lambda if statement unbalanced"
     )]
-    fn test_lambda_size(lambda_size: (IntermediateLambda, (usize, usize))) {
-        let (lambda, expected_size) = lambda_size;
-        let size = CodeSizeEstimator::lambda_size(&lambda);
-        assert_eq!(size, expected_size)
+    fn test_lambda_vector(lambda_vector: (IntermediateLambda, Result<CodeVector, ()>)) {
+        let (lambda, result) = lambda_vector;
+        match result {
+            Ok(expected_vector) => {
+                let mut vector = CodeVectorCalculator::lambda_vector(&lambda);
+                vector.operators.retain(|_, v| *v != 0);
+                assert_eq!(vector, expected_vector)
+            }
+            Err(()) => {
+                let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    CodeVectorCalculator::lambda_vector(&lambda)
+                }));
+                assert!(result.is_err())
+            }
+        }
+    }
+
+    #[test]
+    fn exhaustive_operator_test() {
+        let lambda = IntermediateLambda {
+            args: Vec::new(),
+            statements: Vec::new(),
+            ret: Integer { value: 0 }.into(),
+        };
+        let lambda_vector = CodeVectorCalculator::lambda_vector(&lambda);
+        assert_eq!(
+            lambda_vector
+                .operators
+                .keys()
+                .cloned()
+                .sorted()
+                .collect_vec(),
+            DEFAULT_CONTEXT.with(|context| context.keys().cloned().sorted().collect_vec())
+        )
     }
 }

@@ -1,4 +1,5 @@
 mod code_size;
+mod code_vector;
 mod compiler;
 mod machine_nodes;
 mod named_vector;
