@@ -4,6 +4,7 @@ mod code_vector;
 mod compiler;
 mod machine_nodes;
 mod named_vector;
+mod weakener;
 
 pub use args::CompilationArgs;
 pub use compiler::Compiler;

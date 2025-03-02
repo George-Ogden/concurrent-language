@@ -1,11 +1,3 @@
-use itertools::Itertools;
-use lowering::Id;
-use std::collections::HashMap;
-use std::fs;
-use std::iter::Sum;
-use std::ops::{Add, Mul};
-use std::path::Path;
-
 #[macro_export]
 macro_rules! define_named_vector{
     (@count ) => {0usize};
@@ -107,7 +99,14 @@ macro_rules! define_named_vector{
 mod tests {
     use std::path::PathBuf;
 
+    use itertools::Itertools;
+    use lowering::Id;
     use rstest::{fixture, rstest};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::iter::Sum;
+    use std::ops::{Add, Mul};
+    use std::path::Path;
     use tempfile::TempDir;
 
     use super::*;

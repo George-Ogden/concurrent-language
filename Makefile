@@ -65,6 +65,7 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 
 $(BACKEND):
 	make -C backend USER_FLAG=$(USER_FLAG)
+	touch $@
 
 $(PARSER): $(GRAMMAR)
 	touch $@
@@ -75,7 +76,7 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: build
-	pytest . -vv
+	pytest parsing -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
@@ -83,7 +84,7 @@ test: build
 	cargo test --manifest-path $(OPTIMIZER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
-	ASAN_OPTIONS=detect_stack_use_after_return=1:detect_leaks=0 ./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
+	./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	for sample in samples/*; do \
 		if [ "$$sample" != "samples/grammar.txt" ]; then \
 			make build FILE=$$sample || exit 1; \
@@ -91,8 +92,11 @@ test: build
 	done;
 	for sample in benchmark/**; do \
 		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
-		cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
+		for i in `seq 1 10`; do \
+			cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
+		done; \
 	done;
+	pytest scripts -vv
 
 clean:
 	rm -rf $(GRAMMAR)
@@ -102,21 +106,23 @@ clean:
 
 LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
 REPEATS := 10
+MAX_PRIORITY := $(shell chrt -m | awk -F '[:/]' '/SCHED_FIFO/ {print $$NF}')
+PATTERN := Execution time: ([[:digit:]]+) ?ns.*
 
 $(LOG_DIR):
 	mkdir -p $@
 
 benchmark: $(LOG_DIR)
 	git log --format="%H" -n 1 > $^/git
+	touch $^/title.txt
+
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
-		for i in `seq 1 $(REPEATS)`; do \
-	for program in benchmark/**; do \
-		make build FILE=$$program/main.txt; \
+	for i in `seq 1 $(REPEATS)`; do \
+		for program in benchmark/**; do \
+			make build FILE=$$program/main.txt USER_FLAG=-1;  \
 			while read input; do  \
 				echo $$program $$input; \
-				sudo timeout 60 ./backend/bin/main $$input 2>&1 > /dev/null \
-				| { if read -r output; then echo "$$output"; else echo "nan"; fi; } \
-				| sed -E 's/Execution time: ([[:digit:]]+)ns.*/\1/' \
+				make time --silent FILE=$$program/main.txt USER_FLAG=-1 INPUT="$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
@@ -125,4 +131,20 @@ benchmark: $(LOG_DIR)
 		done; \
 	done;
 
-.PHONY: all benchmark build clean run
+LIMIT := 60
+time: $(BACKEND)
+	echo $(INPUT) | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
+		sleep $(LIMIT) & \
+		SLEEP_PID=$$!; \
+		cat <(xargs $(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
+		EXEC_PID=$$!; \
+		wait $$SLEEP_PID || exit 0 && (kill -- -$$EXEC_PID; exit 1) \
+	' \
+	| { if read -r output; then echo "$$output"; else echo; fi; } \
+	| grep -E '$(PATTERN)' \
+	| sed -E 's/$(PATTERN)/\1/'  \
+	| grep . \
+	|| echo nan \
+
+
+.PHONY: all benchmark build clean run time

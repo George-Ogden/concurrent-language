@@ -1,10 +1,14 @@
 #pragma once
 
+#include "fn/fn_inst.tpp"
+#include "fn/types.hpp"
 #include "lazy/lazy.hpp"
 #include "lazy/types.hpp"
 #include "types/utils.hpp"
 
+#include <memory>
 #include <type_traits>
+#include <utility>
 
 template <typename F, typename T>
 requires is_shared_ptr_v<T> && std::is_base_of_v<
@@ -58,4 +62,60 @@ template <typename T> auto make_lazy_placeholders(std::shared_ptr<Work> work) {
                 work);
         },
         T{});
+}
+
+template <typename T> T load_env(T env) { return env; }
+
+template <typename... Ts> auto load_env(std::tuple<Ts...> ts) {
+    return std::apply(
+        [](auto &...ts) { return std::make_tuple(load_env(ts)...); }, ts);
+}
+
+template <typename R, typename... A>
+std::shared_ptr<Lazy<FnT<R, A...>>>
+load_env(std::shared_ptr<Lazy<WeakFnT<R, A...>>> f) {
+    return make_lazy<FnT<R, A...>>(std::shared_ptr(f->value()));
+}
+
+template <typename T, typename U> struct StoreEnv {
+    static T store(U env) { return env; }
+};
+
+template <typename... Ts, typename U> struct StoreEnv<std::tuple<Ts...>, U> {
+    static std::tuple<Ts...> store(U env) {
+        return std::apply(
+            [](auto &...args) {
+                return std::make_tuple(
+                    StoreEnv<Ts, decltype(args)>::store(args)...);
+            },
+            env);
+    }
+};
+
+template <typename R, typename... A, typename U>
+struct StoreEnv<std::shared_ptr<Lazy<WeakFnT<R, A...>>>, U> {
+    static LazyT<WeakFnT<R, A...>> store(U f) {
+        return make_lazy<WeakFnT<R, A...>>(f->value());
+    }
+};
+
+template <typename T, typename U> T store_env(U env) {
+    return StoreEnv<T, U>::store(env);
+}
+
+template <typename F> LazyT<std::shared_ptr<typename F::Fn>> setup_closure() {
+    std::shared_ptr<typename F::Fn> fn = make_shared<
+        ClosureFnT<remove_lazy_t<typename F::EnvT>, typename F::Fn>>(F::init);
+    return make_lazy<std::shared_ptr<typename F::Fn>>(fn);
+}
+
+template <typename F, typename Y>
+LazyT<std::shared_ptr<typename F::Fn>> setup_closure(
+    std::shared_ptr<Y> &allocator,
+    ClosureFnT<remove_lazy_t<typename F::EnvT>, typename F::Fn> &memory) {
+    memory =
+        ClosureFnT<remove_lazy_t<typename F::EnvT>, typename F::Fn>(F::init);
+    std::shared_ptr<typename F::Fn> fn =
+        std::shared_ptr<typename F::Fn>(allocator, &memory);
+    return make_lazy<std::shared_ptr<typename F::Fn>>(fn);
 }

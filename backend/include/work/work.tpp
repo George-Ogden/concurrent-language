@@ -28,7 +28,8 @@ std::pair<std::shared_ptr<Work>, LazyT<Ret>> Work::fn_call(FnT<Ret, Args...> f, 
     std::shared_ptr<TypedWork<Ret, Args...>> work = std::make_shared<TypedWork<Ret, Args...>>();
     auto placeholders = make_lazy_placeholders<LazyT<Ret>>(work);
     work->targets = lazy_map([](const auto &t) { return std::weak_ptr(t); }, placeholders);
-    work->fn = f.init(args...);
+    work->fn = f->init(args...);
+    work->fn->set_fn(f);
     return std::make_pair(work, placeholders);
 }
 

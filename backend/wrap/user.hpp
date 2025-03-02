@@ -15,4 +15,9 @@ int __wrap_pthread_setaffinity_np(pthread_t thread, size_t cpusetsize,
     }
     return 0;
 }
+long long int __wrap_pthread_setschedparam(pthread_t __target_thread,
+                                           int __policy,
+                                           const struct sched_param *__param) {
+    return 0;
+}
 }
