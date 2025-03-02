@@ -138,7 +138,7 @@ time: $(BACKEND)
 		SLEEP_PID=$$!; \
 		cat <(xargs $(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
 		EXEC_PID=$$!; \
-		wait $$SLEEP_PID || exit 0 && (kill -9 -- -$$EXEC_PID; exit 1) \
+		wait $$SLEEP_PID || exit 0 && (kill -- -$$EXEC_PID; exit 1) \
 	' \
 	| { if read -r output; then echo "$$output"; else echo; fi; } \
 	| grep -E '$(PATTERN)' \
