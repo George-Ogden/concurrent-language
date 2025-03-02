@@ -16,10 +16,12 @@ TARGET := $(TARGET_DIR)/main
 TARGETS := $(patsubst $(SRC_DIR)/%.cpp, $(TARGET_DIR)/%, $(wildcard $(SRC_DIR)/*.cpp))
 HEADERS := $(wildcard include/*.hpp include/**/*.hpp include/**/*.tpp) $(USER_FILE)
 
+WRAP_USER_FILE := wrap/user.hpp
+WRAP_BENCHMARK_FILE := wrap/benchmark.hpp
 ifeq ($(USER_FLAG), 1)
-	WRAP_FILE := wrap/user.hpp
+	WRAP_FILE := $(WRAP_USER_FILE)
 else ifeq ($(USER_FLAG), -1)
-	WRAP_FILE := wrap/benchmark.hpp
+	WRAP_FILE := $(WRAP_BENCHMARK_FILE)
 endif
 
 ifneq ($(filter $(USER_FLAG),1 -1),)
@@ -36,7 +38,7 @@ TEST_DIR := test
 TEST_LIBS := -lgtest -lgtest_main
 TEST_BUILDDIR := $(BUILD_DIR)/test
 TEST_FLAGS := -g -fsanitize=address $(WRAP)
-TEST_INCLUDE := $(wildcard $(TEST_DIR)/*.hpp) $(WRAP_FILE)
+TEST_INCLUDE := $(wildcard $(TEST_DIR)/*.hpp) $(WRAP_USER_FILE)
 TEST_FILE := $(TEST_BUILDDIR)/test.cpp
 TEST_EXECS := $(patsubst $(TEST_DIR)/test_%.hpp, $(TARGET_DIR)/test_%, $(filter $(TEST_DIR)/test_%.hpp, $(TEST_INCLUDE)))
 TEST_EXEC := $(TARGET_DIR)/test
