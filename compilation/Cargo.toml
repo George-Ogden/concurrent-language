@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.31", features = ["derive"] }
 from_variants = { version = "0.1.0", path = "../from_variants" }
 gcollections = "1.5.0"
 intervallum = "1.4.1"

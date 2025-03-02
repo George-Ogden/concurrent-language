@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation, ConstructorCall,
-    Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType,
-    MatchBranch, MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType,
-    TypeDef, UnionType, Value,
+    AllocationState, Assignment, Await, BuiltIn, ClosureInstantiation, CompilationArgs,
+    ConstructorCall, Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id,
+    IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name, Program, Statement,
+    TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -604,7 +604,7 @@ impl Compiler {
             type_defs,
         }
     }
-    pub fn compile(program: IntermediateProgram) -> Program {
+    pub fn compile(program: IntermediateProgram, _args: CompilationArgs) -> Program {
         let mut compiler = Compiler::new();
         compiler.compile_program(program)
     }
