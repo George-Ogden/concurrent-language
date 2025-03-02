@@ -633,7 +633,7 @@ impl Compiler {
         };
         let lambda = fns[0];
         let vector = CodeVectorCalculator::lambda_vector(lambda);
-        vector
+        vector?
             .save(&Path::new(&filename))
             .map_err(|e| e.to_string())
     }
@@ -2746,7 +2746,7 @@ mod tests {
             },
             types: Vec::new(),
         };
-        let identity_vector = CodeVectorCalculator::lambda_vector(&identity_fn);
+        let identity_vector = CodeVectorCalculator::lambda_vector(&identity_fn).expect("");
         Compiler::compile(
             program,
             CompilationArgs {

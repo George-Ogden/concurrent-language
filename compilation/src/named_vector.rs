@@ -53,7 +53,6 @@ macro_rules! define_named_vector{
 
                 let contents = [$(self.$fields,)*].into_iter().chain(operator_values).map(|x| x.to_string()).join("\t");
                 format!("{header}\n{contents}")
-
             }
         }
 

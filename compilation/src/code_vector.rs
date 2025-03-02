@@ -59,7 +59,7 @@ impl CodeVectorCalculator {
         }
     }
 
-    fn statement_vector(statement: &IntermediateStatement) -> CodeVector {
+    fn statement_vector(statement: &IntermediateStatement) -> Result<CodeVector, String> {
         match statement {
             IntermediateStatement::IntermediateAssignment(assignment) => {
                 Self::assignment_vector(assignment)
@@ -72,50 +72,56 @@ impl CodeVectorCalculator {
             }
         }
     }
-    fn assignment_vector(assignment: &IntermediateAssignment) -> CodeVector {
-        Self::expression_vector(&assignment.expression) + CodeVector::assignment()
+    fn assignment_vector(assignment: &IntermediateAssignment) -> Result<CodeVector, String> {
+        Ok(Self::expression_vector(&assignment.expression) + CodeVector::assignment())
     }
-    fn if_statement_vector(if_statement: &IntermediateIfStatement) -> CodeVector {
+    fn if_statement_vector(if_statement: &IntermediateIfStatement) -> Result<CodeVector, String> {
         let condition_vector = Self::value_vector(&if_statement.condition);
         let branch_vectors = (
-            Self::statements_vector(&if_statement.branches.0),
-            Self::statements_vector(&if_statement.branches.1),
+            Self::statements_vector(&if_statement.branches.0)?,
+            Self::statements_vector(&if_statement.branches.1)?,
         );
-        if &branch_vectors.0 != &branch_vectors.1 {
-            panic!("If statement branches are not equal")
+        if &branch_vectors.0 == &branch_vectors.1 {
+            Ok(branch_vectors.0 + condition_vector + CodeVector::if_statement())
+        } else {
+            Err(String::from("If statement branches are not equal"))
         }
-        branch_vectors.0 + condition_vector + CodeVector::if_statement()
     }
-    fn match_statement_vector(match_statement: &IntermediateMatchStatement) -> CodeVector {
+    fn match_statement_vector(
+        match_statement: &IntermediateMatchStatement,
+    ) -> Result<CodeVector, String> {
         let subject_vector = Self::value_vector(&match_statement.subject);
         let branch_vectors = match_statement
             .branches
             .iter()
             .map(Self::match_branch_vector)
-            .collect_vec();
-        if !branch_vectors.iter().all_equal() {
-            panic!("Match statement branches are not equal")
+            .collect::<Result<Vec<_>, _>>()?;
+        if branch_vectors.iter().all_equal() {
+            Ok(branch_vectors[0].clone() + subject_vector + CodeVector::match_statement())
+        } else {
+            Err(String::from("Match statement branches are not equal"))
         }
-        branch_vectors[0].clone() + subject_vector + CodeVector::match_statement()
     }
-    fn match_branch_vector(match_branch: &IntermediateMatchBranch) -> CodeVector {
+    fn match_branch_vector(match_branch: &IntermediateMatchBranch) -> Result<CodeVector, String> {
         Self::statements_vector(&match_branch.statements)
     }
-    fn statements_vector(statements: &Vec<IntermediateStatement>) -> CodeVector {
+    fn statements_vector(statements: &Vec<IntermediateStatement>) -> Result<CodeVector, String> {
         statements.iter().map(Self::statement_vector).sum()
     }
-    pub fn lambda_vector(lambda: &IntermediateLambda) -> CodeVector {
+    pub fn lambda_vector(lambda: &IntermediateLambda) -> Result<CodeVector, String> {
         let mut default = CodeVector::new();
         default.operators =
             HashMap::from_iter(CODE_SIZE_CONSTANTS.operators.keys().map(|k| (k.clone(), 0)));
-        Self::statements_vector(&lambda.statements) + Self::value_vector(&lambda.ret) + default
+        Ok(
+            Self::statements_vector(&lambda.statements)?
+                + Self::value_vector(&lambda.ret)
+                + default,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use std::panic::{self, AssertUnwindSafe};
 
     use super::*;
 
@@ -393,7 +399,7 @@ mod tests {
                 location: Location::new(),
                 type_: AtomicTypeEnum::BOOL.into()
             };
-            let statement_vector = CodeVectorCalculator::statements_vector(&branches.0);
+            let statement_vector = CodeVectorCalculator::statements_vector(&branches.0).expect("");
             let condition_vector = CodeVectorCalculator::value_vector(&condition.clone().into());
             (
                 IntermediateIfStatement{
@@ -486,7 +492,7 @@ mod tests {
                     vec![Some(AtomicTypeEnum::INT.into()), Some(AtomicTypeEnum::INT.into())]
                 ).into()
             };
-            let statement_vector = CodeVectorCalculator::statement_vector(&assignment_0.clone().into());
+            let statement_vector = CodeVectorCalculator::statement_vector(&assignment_0.clone().into()).expect("");
             let subject_vector = CodeVectorCalculator::value_vector(&subject.clone().into());
             (
                 IntermediateMatchStatement{
@@ -575,13 +581,12 @@ mod tests {
         let (statement, result) = statement_vector;
         match result {
             Ok(expected_vector) => {
-                let vector = CodeVectorCalculator::statement_vector(&statement);
+                let vector = CodeVectorCalculator::statement_vector(&statement)
+                    .expect("Expected code vector");
                 assert_eq!(vector, expected_vector)
             }
             Err(()) => {
-                let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    CodeVectorCalculator::statement_vector(&statement)
-                }));
+                let result = CodeVectorCalculator::statement_vector(&statement);
                 assert!(result.is_err())
             }
         }
@@ -631,7 +636,7 @@ mod tests {
                     ]
                 )
             };
-            let if_statement_vector = CodeVectorCalculator::if_statement_vector(&statement);
+            let if_statement_vector = CodeVectorCalculator::if_statement_vector(&statement).expect("");
             (
                 IntermediateLambda {
                     args: vec![arg.clone()],
@@ -692,14 +697,13 @@ mod tests {
         let (lambda, result) = lambda_vector;
         match result {
             Ok(expected_vector) => {
-                let mut vector = CodeVectorCalculator::lambda_vector(&lambda);
+                let mut vector =
+                    CodeVectorCalculator::lambda_vector(&lambda).expect("Expected code vector");
                 vector.operators.retain(|_, v| *v != 0);
                 assert_eq!(vector, expected_vector)
             }
             Err(()) => {
-                let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    CodeVectorCalculator::lambda_vector(&lambda)
-                }));
+                let result = CodeVectorCalculator::lambda_vector(&lambda);
                 assert!(result.is_err())
             }
         }
@@ -712,7 +716,7 @@ mod tests {
             statements: Vec::new(),
             ret: Integer { value: 0 }.into(),
         };
-        let lambda_vector = CodeVectorCalculator::lambda_vector(&lambda);
+        let lambda_vector = CodeVectorCalculator::lambda_vector(&lambda).expect("");
         assert_eq!(
             lambda_vector
                 .operators
