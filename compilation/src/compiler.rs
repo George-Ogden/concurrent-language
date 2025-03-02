@@ -626,7 +626,7 @@ impl Compiler {
             })
             .collect_vec();
         if fns.len() != 1 {
-            return Err(String::from(""));
+            return Err(String::from("Multiple functions found"));
         };
         let lambda = fns[0];
         let vector = CodeVectorCalculator::lambda_vector(lambda);
