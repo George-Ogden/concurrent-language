@@ -1,14 +1,18 @@
 use lowering::Id;
 use std::collections::HashMap;
+use std::iter::Sum;
 use std::ops::{Add, Mul};
 
 #[macro_export]
 macro_rules! define_named_vector{
+    ($name:ident $(, $fields:ident )*,) => {
+        define_named_vector!($name $(, $fields )*);
+    };
     ($name:ident $(, $fields:ident )*) => {
         #[derive(PartialEq, Clone, Debug)]
-        struct $name {
-            $($fields: usize,)*
-            operators: HashMap<Id, usize>
+        pub struct $name {
+            $(pub $fields: usize,)*
+            pub operators: HashMap<Id, usize>
         }
         impl $name {
             pub fn new() -> Self {
@@ -67,6 +71,13 @@ macro_rules! define_named_vector{
                     |key| self.operators[key].clone() * other.operators.get(key).cloned().unwrap_or(0)
                 ).sum::<usize>()
             }
+        }
+
+        impl Sum for $name {
+            fn sum<I>(iter: I) -> Self where I: Iterator<Item=Self>{
+                iter.fold(Self::new(), Self::add)
+            }
+
         }
     };
 }
@@ -184,5 +195,40 @@ mod tests {
         };
         let c = 61;
         assert_eq!(a.mul(b), c)
+    }
+
+    #[test]
+    fn test_sum() {
+        define_named_vector!(TestClass, field1, field2);
+        let a = TestClass {
+            field1: 8,
+            field2: 6,
+            operators: HashMap::from([(Id::from("<=>"), 3), (Id::from("--"), 2)]),
+        };
+        let b = TestClass {
+            field1: 3,
+            field2: 5,
+            operators: HashMap::from([
+                (Id::from("+"), 14),
+                (Id::from("*"), 12),
+                (Id::from("--"), 2),
+                (Id::from("<=>"), 1),
+            ]),
+        };
+        let c = TestClass {
+            field1: 5,
+            field2: 7,
+            operators: HashMap::from([
+                (Id::from("<>"), 14),
+                (Id::from("--"), 2),
+                (Id::from("<=>"), 1),
+            ]),
+        };
+        assert_eq!(
+            [a.clone(), b.clone(), c.clone()]
+                .into_iter()
+                .sum::<TestClass>(),
+            a + b + c
+        )
     }
 }
