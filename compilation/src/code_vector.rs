@@ -1,13 +1,11 @@
 use std::collections::HashMap;
-use std::ops::{Add, Mul};
 
 use itertools::Itertools;
 use lowering::{
-    BuiltInFn, Id, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
+    BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
     IntermediateFnCall, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
     IntermediateMatchStatement, IntermediateStatement, IntermediateValue,
 };
-use once_cell::sync::Lazy;
 
 use crate::code_size::{CodeVector, CODE_SIZE_CONSTANTS};
 
@@ -130,6 +128,7 @@ mod tests {
         IntermediateTupleExpression, IntermediateTupleType, IntermediateUnionType, Location,
         DEFAULT_CONTEXT,
     };
+    use once_cell::sync::Lazy;
     use test_case::test_case;
 
     const BBV: Lazy<CodeVector> = Lazy::new(|| CodeVector::builtin_bool());

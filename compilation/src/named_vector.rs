@@ -1,10 +1,15 @@
+use itertools::Itertools;
 use lowering::Id;
 use std::collections::HashMap;
+use std::fs;
 use std::iter::Sum;
 use std::ops::{Add, Mul};
+use std::path::Path;
 
 #[macro_export]
 macro_rules! define_named_vector{
+    (@count ) => {0usize};
+    (@count $head:ident $($tail:ident)*) => {1usize + define_named_vector!(@count $($tail)*)};
     ($name:ident $(, $fields:ident )*,) => {
         define_named_vector!($name $(, $fields )*);
     };
@@ -33,6 +38,18 @@ macro_rules! define_named_vector{
                     instance
                 }
             )*
+            pub fn save(&self, filepath: &Path) -> std::io::Result<()> {
+                let (operator_names, operator_values): (Vec<_>, Vec<_>) = self.operators.clone().into_iter().sorted().unzip();
+                let fields: [&str; define_named_vector!(@count $($fields)*)] = [$(stringify!($fields),)*];
+                let field_names: Vec<String> = fields.into_iter().map(String::from).collect();
+                let header = field_names.into_iter().chain(operator_names).collect::<Vec<_>>().join("\t");
+
+                let contents = [$(self.$fields,)*].into_iter().chain(operator_values).map(|x| x.to_string()).join("\t");
+                if let Some(dir) = filepath.parent() {
+                    fs::create_dir_all(dir)?;
+                }
+                fs::write(filepath, format!("{header}\n{contents}"))
+            }
         }
 
         impl Add<$name> for $name {
@@ -84,6 +101,11 @@ macro_rules! define_named_vector{
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use rstest::{fixture, rstest};
+    use tempfile::TempDir;
+
     use super::*;
 
     fn new_constant_test() {
@@ -230,5 +252,34 @@ mod tests {
                 .sum::<TestClass>(),
             a + b + c
         )
+    }
+
+    #[fixture]
+    fn temporary_filename() -> PathBuf {
+        let tmp_dir = TempDir::new().expect("Could not create temp dir.");
+        let tmp = tmp_dir.path().join("filename");
+        tmp
+    }
+
+    #[rstest]
+    fn test_save(temporary_filename: PathBuf) {
+        define_named_vector!(TestClass, field_a, field_b);
+        let vector = TestClass {
+            field_a: 3,
+            field_b: 9,
+            operators: HashMap::from([
+                (Id::from("j"), 10),
+                (Id::from("a"), 12),
+                (Id::from("c"), 10),
+            ]),
+        };
+        dbg!(&temporary_filename);
+        let result = vector.save(temporary_filename.as_path());
+        if !result.is_ok() {
+            dbg!(&result);
+            assert!(result.is_ok())
+        }
+        let contents = fs::read_to_string(temporary_filename).expect("Failed to read file.");
+        assert_eq!(contents, "field_a\tfield_b\ta\tc\tj\n3\t9\t12\t10\t10")
     }
 }

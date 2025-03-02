@@ -5,6 +5,7 @@ use std::ops::{Add, Mul};
 use gcollections::ops::*;
 use interval::ops::*;
 use interval::Interval;
+use itertools::Itertools;
 use lowering::IntermediateIfStatement;
 use lowering::IntermediateLambda;
 use lowering::IntermediateMatchBranch;
@@ -15,6 +16,8 @@ use lowering::{
     IntermediateFnCall, IntermediateValue,
 };
 use once_cell::sync::Lazy;
+use std::fs;
+use std::path::Path;
 
 use crate::define_named_vector;
 
