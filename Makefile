@@ -119,6 +119,7 @@ benchmark: $(LOG_DIR)
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 	for i in `seq 1 $(REPEATS)`; do \
 		for program in benchmark/**; do \
+			make build FILE=$$program/main.txt USER_FLAG=-1;  \
 			while read input; do  \
 				echo $$program $$input; \
 				make time --silent FILE=$$program/main.txt USER_FLAG=-1 INPUT="$$input" \
