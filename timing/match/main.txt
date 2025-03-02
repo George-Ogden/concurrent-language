@@ -1,0 +1,88 @@
+typedef Bull {Twoo | Faws};
+typedef Either {Left bool | Right bool};
+typedef And {A int | B int | C int};
+typedef Wrapper int;
+typedef List {Cons (int, List) | Nil (int,)};
+
+main = (a: int, b: int, c: int, d: int) -> int {
+    bull = if (a > 0){
+        Twoo{}{}
+    } else {
+        Faws{}{}
+    };
+    either = if (b > 0) {
+        Left{true}
+    } else {
+        Right{false}
+    };
+    and = if (c > 0){
+        A{4}
+    } else {
+        C{7}
+    };
+    wrap = Wrapper{a + b + 8};
+    w = Nil{(3,)};
+    j = Cons{(5, w)};
+    list = if (d > 0) {
+        j
+    } else {
+        w
+    };
+    s = match (list) {
+        Nil x: {
+            x.0
+        },
+        Cons x: {
+            x.0
+        }
+    };
+    s = s + match (j) {
+        Nil x: {
+            x.0
+        },
+        Cons x: {
+            x.0
+        }
+    };
+    s = s + match (bull) {
+        Twoo: {
+            1
+        },
+        Faws: {
+            3
+        }
+    };
+    s = s + match (wrap) {
+        Wrapper n: {
+            n
+        },
+    };
+    s = s + match (either) {
+        Left r: {
+            if (r) {
+                7
+            } else {
+                9
+            }
+        },
+        Right r: {
+            if (r) {
+                7
+            } else {
+                9
+            }
+        },
+    };
+    s = s + match (and) {
+        A a: {
+            a
+        },
+        B b: {
+            b
+        },
+        C c: {
+            c
+        }
+    };
+    s
+}

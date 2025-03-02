@@ -1,0 +1,4 @@
+main = (b: int, i: int, j: int) -> int {
+    x = ((b >> i) ^ (b >> j)) & 1;
+    b ^ ((x << i) | (x << j))
+}

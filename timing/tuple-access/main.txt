@@ -1,0 +1,16 @@
+main = (a: int, b: int, c: int, d: int) -> int {
+    u = if (a > 0){
+        (b, c)
+    } else {
+        (c, b)
+    };
+    v = if ((d <=> 0) == 0){
+        (a, d)
+    } else {
+        (d, a)
+    };
+    t = (u.0 % u.1, u.1 % u.0);
+    s = (v.0 - v.1, v.1 - v.0, t.0);
+    g = (t.0 / t.1 + s.0 / s.1 - s.2,);
+    g.0
+}

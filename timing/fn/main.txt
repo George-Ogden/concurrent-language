@@ -1,0 +1,28 @@
+main = (a: int, b: int, c: int, d: int) -> int {
+    add = if (a > 0){
+        __+__
+    } else {
+        __-__
+    };
+    cmp = if (b > 0){
+        __<__
+    } else {
+        __>__
+    };
+    inc = if (c > 0){
+        __++__
+    } else {
+        __--__
+    };
+    if (cmp(a, b)) {
+        1
+    } else {
+        0
+    } + if (cmp(c, d)) {
+        2
+    } else {
+        3
+    } + inc(a) + inc(b) + inc(c)
+    + add(a, b)
+    + add(c, d)
+}

@@ -1,0 +1,72 @@
+typedef List {Cons (int, List) | Nil };
+
+main = (a: int, b: int, c: int, d: int) -> List {
+    x = Cons{(
+        8, Cons{(
+            1, Cons{(
+                2, Cons{(
+                    1, Cons{(
+                        b, Cons{(
+                            1, Cons{(
+                                5, Cons{(
+                                    6, Cons{(
+                                        8, Cons{(
+                                            a, Nil{}{}
+                                        )}
+                                    )}
+                                )}
+                            )}
+                        )}
+                    )}
+                )}
+            )}
+        )}
+    )};
+    y = Cons{(
+        c, Cons{(
+            9, Cons{(
+                3, Cons{(
+                    1, Cons{(
+                        4, Cons{(
+                            1, Cons{(
+                                a, Cons{(
+                                    9, x
+                                )}
+                            )}
+                        )}
+                    )}
+                )}
+            )}
+        )}
+    )};
+    z = Cons{(
+        3, Cons{(
+            1, Cons{(
+                4, Cons{(
+                    1, Cons{(
+                        5, Cons{(
+                            2, y
+                        )}
+                    )}
+                )}
+            )}
+        )}
+    )};
+    Cons{(
+        d, Cons{(
+            1, Cons{(
+                2, Cons{(
+                    1, Cons{(
+                        9, Cons{(
+                            1, Cons{(
+                                5, Cons{(
+                                    3, z
+                                )}
+                            )}
+                        )}
+                    )}
+                )}
+            )}
+        )}
+    )}
+}

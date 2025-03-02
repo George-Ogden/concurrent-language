@@ -1,0 +1,15 @@
+typealias t (
+    ((int,),(int,),(int,),(int,),),
+    ((int,int),(int,int),(int,int),(int,int),(int,int),(int,int),),
+    ((int,int,int),(int,int,int),(int,int,int),(int,int,int),),
+    (int,int,int,int)
+);
+
+main = (a: int, b: int, c: int, d: int) -> t {
+    (
+        ((a,),(b,),(c,),(d,),),
+        ((a,b),(b,c),(c,d),(d,a),(a,c),(b,d),),
+        ((a,b,c),(b,c,d),(c,d,a),(d,a,b),),
+        (a,b,c,d)
+    )
+}
