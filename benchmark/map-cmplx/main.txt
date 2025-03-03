@@ -1,21 +1,21 @@
-typedef List{T} {Cons (T, List{T}) | Nil};
+typedef List<T> {Cons (T, List.<T>) | Nil};
 
-__::__ = (h : int, t : List{int}) -> List{int} {
-    Cons{int}{(h, t)}
+__::__ = (h : int, t : List.<int>) -> List.<int> {
+    Cons.<int>{(h, t)}
 };
 
-map{T,U} = (f: T -> U, xs: List{T}) -> List{U} {
-    __::__ = (h : U, t : List{U}) -> List{U} {
-        Cons{U}{(h, t)}
+map<T,U> = (f: T -> U, xs: List.<T>) -> List.<U> {
+    __::__ = (h : U, t : List.<U>) -> List.<U> {
+        Cons.<U>{(h, t)}
     };
     match (xs) {
         Cons x: {
             h = x.0;
             t = x.1;
-            f(h) :: map{T,U}(f, t)
+            f(h) :: map.<T,U>(f, t)
         },
         Nil : {
-            Nil{U}{}
+            Nil.<U>{}
         }
     }
 };
@@ -24,11 +24,11 @@ __<<-__ = (x: int, n: int) -> int {
     (x << n) - x
 };
 
-finite_list = (n: int) -> List{int} {
+finite_list = (n: int) -> List.<int> {
     // modified from https://stackoverflow.com/a/8831937/12103577
-    list_hash = (hash: int, n: int) -> List{int} {
+    list_hash = (hash: int, n: int) -> List.<int> {
         if (n == 0){
-            Nil{int}{}
+            Nil.<int>{}
         } else {
             hash = (hash <<- 5) + n;
             hash :: list_hash(hash, n - 1)
@@ -46,7 +46,7 @@ int_hash = (m: int, x: int) -> int {
     }
 };
 
-main = (m: int, n: int) -> List{int} {
+main = (m: int, n: int) -> List.<int> {
     xs = finite_list(n);
-    map{int,int}((x: int) -> int {int_hash(m, x)},xs)
+    map.<int,int>((x: int) -> int {int_hash(m, x)},xs)
 };
