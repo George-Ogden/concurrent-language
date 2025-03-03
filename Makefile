@@ -138,16 +138,17 @@ benchmark: | $(LOG_DIR)
 
 $(VECTOR_FILE): | $(LOG_DIR)
 	make $(TARGET) FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"
-	head -1 $(TEMPFILE) | sed 's/$$/\ttime/' > $@
+	head -1 $(TEMPFILE) | sed 's/$$/\ttime/' | sed 's/^/sample\t/' > $@
 
 timings: $(VECTOR_FILE)
 	for i in `seq 1 $(REPEATS)`; do \
 		for program in timing/**; do \
+			export program_name=`echo $$program | sed 's/.*\///'`; \
 			make build FILE=$$program/main.txt FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"; \
 			while read input; do \
 				echo $$program $$input; \
 				make time --silent FILE=$$program/main.txt INPUT="$$input" LIMIT=0 FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)" \
-				| sed "s/^/`tail -1 $(TEMPFILE)`\t/" \
+				| sed "s/^/$$program_name\t`tail -1 $(TEMPFILE)`\t/" \
 				>> $(VECTOR_FILE); \
 			done < $$program/inputs.txt; \
 		done; \
