@@ -11,7 +11,7 @@ main = (a: int, b: int, c: int, d: int) -> List {
                                 5, Cons{(
                                     6, Cons{(
                                         8, Cons{(
-                                            a, Nil{}{}
+                                            a, Nil{}
                                         )}
                                     )}
                                 )}

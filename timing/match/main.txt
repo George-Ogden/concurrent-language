@@ -6,9 +6,9 @@ typedef List {Cons (int, List) | Nil (int,)};
 
 main = (a: int, b: int, c: int, d: int) -> int {
     bull = if (a > 0){
-        Twoo{}{}
+        Twoo{}
     } else {
-        Faws{}{}
+        Faws{}
     };
     either = if (b > 0) {
         Left{true}
