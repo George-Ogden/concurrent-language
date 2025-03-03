@@ -110,26 +110,46 @@ LOG_DIR := logs/$(shell date +%Y%m%d%H%M%S%N)
 REPEATS := 10
 MAX_PRIORITY := $(shell chrt -m | awk -F '[:/]' '/SCHED_FIFO/ {print $$NF}')
 PATTERN := Execution time: ([[:digit:]]+) ?ns.*
+LOG_FILE := $(LOG_DIR)/log.tsv
+VECTOR_FILE := $(LOG_DIR)/vector.tsv
+TEMPFILE := $(shell mktemp)
 
 $(LOG_DIR):
 	mkdir -p $@
+	git log --format="%H" -n 1 > $@/git
 
-benchmark: $(LOG_DIR)
-	git log --format="%H" -n 1 > $^/git
+benchmark: | $(LOG_DIR)
 	touch $^/title.txt
 
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 	for i in `seq 1 $(REPEATS)`; do \
 		for program in benchmark/**; do \
-			make build FILE=$$program/main.txt USER_FLAG=-1;  \
-			while read input; do  \
+			make build FILE=$$program/main.txt USER_FLAG=-1; \
+			while read input; do \
 				echo $$program $$input; \
 				make time --silent FILE=$$program/main.txt USER_FLAG=-1 INPUT="$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
-				| xargs -0 echo  >> $(LOG_DIR)/log.tsv; \
+				| xargs -0 echo >> $(LOG_FILE) \
 			done < $$program/input.txt; \
+		done; \
+	done;
+
+$(VECTOR_FILE): | $(LOG_DIR)
+	make $(TARGET) FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"
+	head -1 $(TEMPFILE) | sed 's/$$/\ttime/' > $@
+
+timings: $(VECTOR_FILE)
+	for i in `seq 1 $(REPEATS)`; do \
+		for program in timing/**; do \
+			make build FILE=$$program/main.txt FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"; \
+			while read input; do \
+				echo $$program $$input; \
+				make time --silent FILE=$$program/main.txt INPUT="$$input" FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)" \
+				| sed "s/^/`tail -1 $(TEMPFILE)`\t/" \
+				>> $(VECTOR_FILE); \
+			done < $$program/inputs.txt; \
 		done; \
 	done;
 
@@ -144,9 +164,9 @@ time: build
 	' \
 	| { if read -r output; then echo "$$output"; else echo; fi; } \
 	| grep -E '$(PATTERN)' \
-	| sed -E 's/$(PATTERN)/\1/'  \
+	| sed -E 's/$(PATTERN)/\1/' \
 	| grep . \
 	|| echo nan \
 
 
-.PHONY: all benchmark build clean run time
+.PHONY: all benchmark build clean run time timings
