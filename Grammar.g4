@@ -47,8 +47,8 @@ definition
 
 id: ID | '_' | INFIX_ID;
 operator_symbol_without_eq_dot: ('&' | '|' | '!' | '+' | '-' | '^' | '$' | '<' | '>' | '@' | ':' | '*' | '%' | '/');
-operator_symbol: operator_symbol_without_eq_dot | '=' | '.';
-operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot;
+operator_symbol: operator_symbol_without_eq_dot | '=';
+operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot | '.' '.' +;
 operator_id: '__' operator '__';
 
 id_list : | id  WS* (',' WS* id WS* )* ','? ;
