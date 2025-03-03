@@ -146,7 +146,7 @@ timings: $(VECTOR_FILE)
 			make build FILE=$$program/main.txt FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"; \
 			while read input; do \
 				echo $$program $$input; \
-				make time --silent FILE=$$program/main.txt INPUT="$$input" FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)" \
+				make time --silent FILE=$$program/main.txt INPUT="$$input" LIMIT=0 FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)" \
 				| sed "s/^/`tail -1 $(TEMPFILE)`\t/" \
 				>> $(VECTOR_FILE); \
 			done < $$program/inputs.txt; \
@@ -155,24 +155,15 @@ timings: $(VECTOR_FILE)
 
 LIMIT := 60
 time: build
-	echo $(INPUT) | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
-		if [ "$(LIMIT)" = "0" ]; then \
-			xargs ./$(BACKEND) 2>&1 > /dev/null; \
-		else \
-			sleep $(LIMIT) & \
-			SLEEP_PID=$$!; \
-			chrt -f 1 cat <(xargs ./$(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
-			EXEC_PID=$$!; \
-			wait $$SLEEP_PID || exit 0 && (pkill -TERM -- $$EXEC_PID; exit 1); \
-		fi \
-	' \
+	if [ "$(LIMIT)" = "0" ]; then \
+		sudo ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
+	else \
+		sudo chrt -f $(MAX_PRIORITY) timeout $(LIMIT) chrt -f 1 ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
+	fi \
 	| { if read -r output; then echo "$$output"; else echo; fi; } \
 	| grep -E '$(PATTERN)' \
 	| sed -E 's/$(PATTERN)/\1/' \
 	| grep . \
 	|| echo nan \
-
-unknown:
-
 
 .PHONY: all benchmark build clean run time timings
