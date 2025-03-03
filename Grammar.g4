@@ -52,11 +52,11 @@ operator: (operator_symbol)+ operator_symbol | operator_symbol_without_eq_dot;
 operator_id: '__' operator '__';
 
 id_list : | id  WS* (',' WS* id WS* )* ','? ;
-generic_assignee : non_generic_assignee ('{' WS* id_list WS* '}')? ;
+generic_assignee : non_generic_assignee ('<' WS* id_list WS* '>')? ;
 non_generic_assignee: id | '__';
 
 generic_list : | type_instance WS* (',' WS* type_instance WS*)* ','? WS* ;
-generic_instance : id ('{' generic_list '}')? |  operator_id;
+generic_instance : id ('.' '<' generic_list '>')? |  operator_id;
 
 atomic_type
     : BOOL
