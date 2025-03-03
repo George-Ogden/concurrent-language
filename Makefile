@@ -33,8 +33,7 @@ USER_FLAG := 0
 run: build
 	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend run --quiet
 
-build: $(TARGET)
-	make -C backend build
+build: $(BACKEND)
 
 $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
 	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > $(TARGET)
@@ -63,15 +62,15 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST)
 	touch $@
 
-$(BACKEND):
-	make -C backend USER_FLAG=$(USER_FLAG)
+$(BACKEND): $(TARGET)
+	make -C backend build USER_FLAG=$(USER_FLAG)
 	touch $@
 
 $(PARSER): $(GRAMMAR)
 	touch $@
 
 $(GRAMMAR): Grammar.g4
-	antlr4 -v 4.13.0 -no-listener -visitor -Dlanguage=Python3 $^  -o $@
+	antlr4 -v 4.13.0 -no-listener -visitor -Dlanguage=Python3 $^ -o $@
 	touch $@/__init__.py
 	touch $@
 
@@ -132,7 +131,7 @@ benchmark: $(LOG_DIR)
 	done;
 
 LIMIT := 60
-time: $(BACKEND)
+time: build
 	echo $(INPUT) | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
 		sleep $(LIMIT) & \
 		SLEEP_PID=$$!; \
