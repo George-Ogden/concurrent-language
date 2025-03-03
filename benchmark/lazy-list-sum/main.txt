@@ -1,23 +1,23 @@
-typedef Chain{T} (T, Chain{T});
+typedef Chain<T> (T, Chain.<T>);
 
 __<<-__ = (x: int, n: int) -> int {
     (x << n) - x
 };
 
-__::__ = (h: int, t: Chain{int}) -> Chain{int} {
-    Chain{int}{(h, t)}
+__::__ = (h: int, t: Chain.<int>) -> Chain.<int> {
+    Chain.<int>{(h, t)}
 };
 
-infinite_list = () -> Chain{int} {
+infinite_list = () -> Chain.<int> {
     // modified from https://stackoverflow.com/a/8831937/12103577
-    list_hash = (hash: int, n: int) -> Chain{int} {
+    list_hash = (hash: int, n: int) -> Chain.<int> {
         hash = (hash <<- 5) + n;
         hash :: list_hash(hash, n + 1)
     };
     list_hash(0, 0)
 };
 
-prefix_xor = (c: Chain{int}, n: int) -> int {
+prefix_xor = (c: Chain.<int>, n: int) -> int {
     if (n <= 0) {
        0
     } else {
