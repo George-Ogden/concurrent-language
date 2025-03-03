@@ -156,17 +156,23 @@ timings: $(VECTOR_FILE)
 LIMIT := 60
 time: build
 	echo $(INPUT) | sudo setsid chrt -f $(MAX_PRIORITY) bash -c '\
-		sleep $(LIMIT) & \
-		SLEEP_PID=$$!; \
-		cat <(xargs $(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
-		EXEC_PID=$$!; \
-		wait $$SLEEP_PID || exit 0 && (kill -- -$$EXEC_PID; exit 1) \
+		if [ "$(LIMIT)" = "0" ]; then \
+			xargs ./$(BACKEND) 2>&1 > /dev/null; \
+		else \
+			sleep $(LIMIT) & \
+			SLEEP_PID=$$!; \
+			chrt -f 1 cat <(xargs ./$(BACKEND) 2>&1 > /dev/null; kill $$SLEEP_PID) & \
+			EXEC_PID=$$!; \
+			wait $$SLEEP_PID || exit 0 && (pkill -TERM -- $$EXEC_PID; exit 1); \
+		fi \
 	' \
 	| { if read -r output; then echo "$$output"; else echo; fi; } \
 	| grep -E '$(PATTERN)' \
 	| sed -E 's/$(PATTERN)/\1/' \
 	| grep . \
 	|| echo nan \
+
+unknown:
 
 
 .PHONY: all benchmark build clean run time timings
