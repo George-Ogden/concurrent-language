@@ -1236,10 +1236,3 @@ from ast_nodes import (
 def test_parse(code: str, node: Optional[ASTNode], target: str):
     ast = Parser.parse(code, target=target)
     assert node == ast
-
-
-def parse_sample():
-    with open("sample.txt") as f:
-        code = f.read()
-    ast = Parser.parse(code, target="program")
-    assert ast is not None
