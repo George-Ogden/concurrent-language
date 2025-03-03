@@ -17,18 +17,21 @@ PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
 TARGET := backend/include/main/main.hpp
 
+FRONTEND_FLAGS :=
+FLAGS_HASH := $(shell sha256sum $(FRONTEND_FLAGS) 2>/dev/null | cut -d' ' -f1)
+
+FILE := samples/samples.txt
 LAST_FILE_PREFIX := .last-file-hash-
 LAST_FILE_HASH = $(shell sha256sum $(FILE) 2>/dev/null | cut -d' ' -f1)
-LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)
+LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)$(FLAGS_HASH)
+
+all: $(PIPELINE) $(BACKEND)
+
+USER_FLAG := 0
 
 $(LAST_FILE):
 	rm $(LAST_FILE_PREFIX)* -f
 	touch $@
-
-all: $(PIPELINE) $(BACKEND)
-
-FILE := samples/samples.txt
-USER_FLAG := 0
 
 run: build
 	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend run --quiet
@@ -36,7 +39,7 @@ run: build
 build: $(BACKEND)
 
 $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
-	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) > $(TARGET)
+	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) $(FRONTEND_FLAGS) > $(TARGET)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
