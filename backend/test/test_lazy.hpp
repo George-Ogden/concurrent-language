@@ -53,3 +53,17 @@ TEST_F(LazyConstantTest, InvalidFinishedContinuationBehaviour) {
     x->add_continuation(Continuation{remaining, counter, valid});
     ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
 }
+
+TEST(LazyCacheTest, BooleanCache) {
+    LazyT<Bool> t0 = make_lazy<Bool>(true);
+    LazyT<Bool> t1 = make_lazy<Bool>(true);
+    LazyT<Bool> f0 = make_lazy<Bool>(false);
+    LazyT<Bool> f1 = make_lazy<Bool>(false);
+    ASSERT_TRUE(t0->value());
+    ASSERT_TRUE(t1->value());
+    ASSERT_FALSE(f0->value());
+    ASSERT_FALSE(f1->value());
+
+    ASSERT_EQ(t0.get(), t1.get());
+    ASSERT_EQ(f0.get(), f1.get());
+}
