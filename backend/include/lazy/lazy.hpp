@@ -4,6 +4,7 @@
 #include "fn/continuation.hpp"
 #include "types/utils.hpp"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -67,10 +68,29 @@ std::shared_ptr<Lazy<Bool>> make_lazy_bool(Args &&...args) {
     }
 }
 
+static inline std::array<std::shared_ptr<Lazy<Int>>, 256> integer_cache =
+    // cppcheck-suppress syntaxError
+    []<std::size_t... Is>(std::index_sequence<Is...>) {
+    return std::array<std::shared_ptr<Lazy<Int>>, 256>{
+        std::make_shared<LazyConstant<Int>>(Is - 128)...};
+}
+(std::make_index_sequence<256>{});
+
+template <typename... Args>
+std::shared_ptr<Lazy<Int>> make_lazy_int(Args &&...args) {
+    const Int i{args...};
+    if (-128 <= i && i < 128) {
+        return integer_cache[i + 128];
+    }
+    return std::make_shared<LazyConstant<Int>>(i);
+}
+
 template <typename T, typename... Args>
 std::shared_ptr<Lazy<T>> make_lazy(Args &&...args) {
     if constexpr (std::is_same_v<T, Bool>) {
         return make_lazy_bool(std::forward<Args>(args)...);
+    } else if constexpr (std::is_same_v<T, Int>) {
+        return make_lazy_int(std::forward<Args>(args)...);
     }
     return std::make_shared<LazyConstant<T>>(std::forward<Args>(args)...);
 }

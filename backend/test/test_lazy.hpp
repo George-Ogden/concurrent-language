@@ -67,3 +67,23 @@ TEST(LazyCacheTest, BooleanCache) {
     ASSERT_EQ(t0.get(), t1.get());
     ASSERT_EQ(f0.get(), f1.get());
 }
+
+TEST(LazyCacheTest, IntegerCache) {
+    for (Int i = -128; i < 128; i++) {
+        LazyT<Int> m = make_lazy<Int>(i);
+        LazyT<Int> n = make_lazy<Int>(i);
+        ASSERT_EQ(m->value(), i);
+        ASSERT_EQ(n->value(), i);
+        ASSERT_EQ(m.get(), n.get());
+    }
+}
+
+TEST(LazyCacheTest, IntegerCacheBounds) {
+    for (Int i : std::vector<Int>{-129, 128}) {
+        LazyT<Int> m = make_lazy<Int>(i);
+        LazyT<Int> n = make_lazy<Int>(i);
+        ASSERT_EQ(m->value(), i);
+        ASSERT_EQ(n->value(), i);
+        ASSERT_NE(m.get(), n.get());
+    }
+}
