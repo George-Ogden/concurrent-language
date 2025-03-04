@@ -209,7 +209,9 @@ TEST_F(WorkRunnerPriorityPropagationTest, LowPriority) {
     WorkT indirect_work, direct_work;
     LazyT<Int> v1, v2;
     typename PriorityChecker::EnvT env = std::make_tuple(
-        make_lazy<WorkT *>(&indirect_work), make_lazy<bool>(),
+        make_lazy<WorkT *>(&indirect_work),
+        std::make_shared<LazyConstant<bool>>(
+            false), // bypass value cache when changing value
         make_lazy<std::function<void()>>(std::function<void()>([]() {})));
 
     FnT<Int> fn =
@@ -242,7 +244,9 @@ TEST_F(WorkRunnerPriorityPropagationTest, HighPriority) {
     WorkT indirect_work, direct_work;
     LazyT<Int> v1, v2;
     auto env =
-        std::make_tuple(make_lazy<WorkT *>(&indirect_work), make_lazy<bool>(),
+        std::make_tuple(make_lazy<WorkT *>(&indirect_work),
+                        std::make_shared<LazyConstant<bool>>(
+                            false), // bypass value cache when changing value
                         make_lazy<std::function<void()>>(
                             std::function<void()>([&v2]() { v2->require(); })));
 
