@@ -81,7 +81,7 @@ $(TEST_FILE): $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
 
 $(TEST_BUILDDIR)/test_%.cpp: $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
 	echo "" > $@; \
-	for file in $(TEST_DIR)/test_$*.hpp $(WRAP_FILE); do \
+	for file in $(TEST_DIR)/test_$*.hpp $(WRAP_USER_FILE); do \
 		echo "#include \"$$file\"" >> $@; \
 	done
 
