@@ -1,7 +1,0 @@
-main = (a: int, b: int) -> int {
-    a0 = a + b;
-    a1 = a + ++b;
-    a2 = ++a + b;
-    a3 = ++a + ++b;
-    a0 * a1 * a2 * a3
-}
