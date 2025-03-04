@@ -54,10 +54,12 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     std::shared_ptr<Lazy<T>> as_ref() override;
 };
 
-static inline std::shared_ptr<Lazy<Bool>> lazy_true =
-    std::make_shared<LazyConstant<Bool>>(true);
-static inline std::shared_ptr<Lazy<Bool>> lazy_false =
-    std::make_shared<LazyConstant<Bool>>(false);
+static inline std::shared_ptr<void> null_shared_ptr{nullptr};
+static inline std::array<LazyConstant<Bool>, 2> bools = {
+    LazyConstant<Bool>{true}, LazyConstant<Bool>{false}};
+static inline std::shared_ptr<Lazy<Bool>> lazy_true{null_shared_ptr, &bools[0]};
+static inline std::shared_ptr<Lazy<Bool>> lazy_false{null_shared_ptr,
+                                                     &bools[1]};
 
 template <typename... Args>
 std::shared_ptr<Lazy<Bool>> make_lazy_bool(Args &&...args) {
@@ -68,13 +70,19 @@ std::shared_ptr<Lazy<Bool>> make_lazy_bool(Args &&...args) {
     }
 }
 
-static inline std::array<std::shared_ptr<Lazy<Int>>, 256> integer_cache =
+constexpr static inline std::size_t N = 128;
+static inline std::array<LazyConstant<Int>, N * 2> integers =
     // cppcheck-suppress syntaxError
     []<std::size_t... Is>(std::index_sequence<Is...>) {
-    return std::array<std::shared_ptr<Lazy<Int>>, 256>{
-        std::make_shared<LazyConstant<Int>>(Is - 128)...};
+    return std::array<LazyConstant<Int>, N * 2>{LazyConstant<Int>(Is - N)...};
 }
-(std::make_index_sequence<256>{});
+(std::make_index_sequence<N * 2>{});
+static inline std::array<std::shared_ptr<Lazy<Int>>, N * 2> integer_cache =
+    []<std::size_t... Is>(std::index_sequence<Is...>) {
+    return std::array<std::shared_ptr<Lazy<Int>>, N * 2>{
+        std::shared_ptr<Lazy<Int>>{null_shared_ptr, &integers[Is]}...};
+}
+(std::make_index_sequence<N * 2>{});
 
 template <typename... Args>
 std::shared_ptr<Lazy<Int>> make_lazy_int(Args &&...args) {
