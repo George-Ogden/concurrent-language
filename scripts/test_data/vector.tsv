@@ -1,0 +1,6 @@
+sample	builtin_bool	builtin_int	other	==	<=	&	|	^	**	time
+text	1	2	1	0	0	1	0	0	2	100.0
+text	2	1	2	0	1	0	0	0	2	50.0
+operator	0	0	0	2	3	1	4	1	0	30.0
+operator	1	0	0	8	2	0	3	9	0	35.0
+operator	1	0	0	8	2	0	3	9	0	25.0
