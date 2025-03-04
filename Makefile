@@ -2,17 +2,17 @@
 
 PARSER := parsing
 GRAMMAR := parsing/grammar
-TYPE_CHECKER := type-checker/target/debug/libtype_checker.d
+TYPE_CHECKER := type-checker/target/release/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
-TRANSLATOR := translation/target/debug/libtranslation.d
+TRANSLATOR := translation/target/release/libtranslation.d
 TRANSLATOR_MANIFEST := translation/Cargo.toml
-LOWERER := lowering/target/debug/liblowering.d
+LOWERER := lowering/target/release/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
-COMPILER := compilation/target/debug/libcompilation.d
+COMPILER := compilation/target/release/libcompilation.d
 COMPILER_MANIFEST := compilation/Cargo.toml
-OPTIMIZER := optimization/target/debug/optimization
+OPTIMIZER := optimization/target/release/optimization
 OPTIMIZER_MANIFEST := optimization/Cargo.toml
-PIPELINE := pipeline/target/debug/pipeline
+PIPELINE := pipeline/target/release/pipeline
 PIPELINE_MANIFEST := pipeline/Cargo.toml
 BACKEND := backend/bin/main
 TARGET := backend/include/main/main.hpp
@@ -42,27 +42,27 @@ $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
 	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) $(FRONTEND_FLAGS) > $(TARGET)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
-	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST)
+	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST) --release
 	touch $@
 
 $(LOWERER): $(wildcard lowering/src/*) $(TYPE_CHECKER)
-	cargo build --manifest-path $(LOWERER_MANIFEST)
+	cargo build --manifest-path $(LOWERER_MANIFEST) --release
 	touch $@
 
 $(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
-	cargo build --manifest-path $(COMPILER_MANIFEST)
+	cargo build --manifest-path $(COMPILER_MANIFEST) --release
 	touch $@
 
 $(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
-	cargo build --manifest-path $(TRANSLATOR_MANIFEST)
+	cargo build --manifest-path $(TRANSLATOR_MANIFEST) --release
 	touch $@
 
 $(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
-	cargo build --manifest-path $(OPTIMIZER_MANIFEST)
+	cargo build --manifest-path $(OPTIMIZER_MANIFEST) --release
 	touch $@
 
 $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
-	cargo build --manifest-path $(PIPELINE_MANIFEST)
+	cargo build --manifest-path $(PIPELINE_MANIFEST) --release
 	touch $@
 
 $(BACKEND): $(TARGET)
