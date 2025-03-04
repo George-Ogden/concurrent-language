@@ -4,7 +4,7 @@ import os
 
 import numpy as np
 import pandas as pd
-from fit import fit, get_final_coefficients, group_data, load_data, main
+from fit import GROUPS, fit, get_final_coefficients, group_data, load_data, main
 
 
 def test_load():
@@ -129,7 +129,13 @@ def test_main(capsys):
         log_filename=os.path.join(os.path.dirname(__file__), "test_data", "vector.tsv")
     )
 
+    old_groups = GROUPS
+    GROUPS[:] = [
+        ["<=", "=="],
+        ["&", "|", "^"],
+    ]
     main(args)
+    GROUPS[:] = old_groups
 
     captured = capsys.readouterr()
     result = json.loads(captured.out)
