@@ -772,6 +772,19 @@ from ast_nodes import (
             ),
             "expr",
         ),
+        (
+            "match(()) { Left x | Right x: { () }, }",
+            MatchExpression(
+                TupleExpression([]),
+                [
+                    MatchBlock(
+                        [MatchItem("Left", Assignee("x")), MatchItem("Right", Assignee("x"))],
+                        Block([], TupleExpression([])),
+                    ),
+                ],
+            ),
+            "expr",
+        ),
         ("x.0", ElementAccess(Var("x"), 0), "expr"),
         (
             "(a, b).1",
