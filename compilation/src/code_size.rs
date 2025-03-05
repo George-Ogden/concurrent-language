@@ -175,7 +175,7 @@ impl CodeSizeEstimator {
             .map(Self::statement_size)
             .fold(Interval::singleton(0), Interval::add)
     }
-    fn lambda_size(lambda: &IntermediateLambda) -> (usize, usize) {
+    pub fn estimate_size(lambda: &IntermediateLambda) -> (usize, usize) {
         let size_interval =
             Self::statements_size(&lambda.statements) + Self::value_size(&lambda.ret);
         (size_interval.lower(), size_interval.upper())
@@ -638,7 +638,7 @@ mod tests {
     )]
     fn test_lambda_size(lambda_size: (IntermediateLambda, (usize, usize))) {
         let (lambda, expected_size) = lambda_size;
-        let size = CodeSizeEstimator::lambda_size(&lambda);
+        let size = CodeSizeEstimator::estimate_size(&lambda);
         assert_eq!(size, expected_size)
     }
 }

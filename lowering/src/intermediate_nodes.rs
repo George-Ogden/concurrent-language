@@ -418,6 +418,7 @@ impl ExpressionEqualityChecker {
         self.assert_equal_locations(l1, l2)
     }
     fn assert_equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) {
+        assert_eq!(a1.len(), a2.len());
         for (a1, a2) in a1.iter().zip_eq(a2.iter()) {
             self.assert_equal_arg(a1, a2)
         }
@@ -569,6 +570,7 @@ impl ExpressionEqualityChecker {
         values1: &Vec<IntermediateValue>,
         values2: &Vec<IntermediateValue>,
     ) {
+        assert_eq!(values1.len(), values2.len());
         for (v1, v2) in values1.iter().zip_eq(values2.iter()) {
             self.assert_equal_value(v1, v2)
         }
@@ -578,6 +580,7 @@ impl ExpressionEqualityChecker {
         statements1: &Vec<IntermediateStatement>,
         statements2: &Vec<IntermediateStatement>,
     ) {
+        assert_eq!(statements1.len(), statements2.len());
         for (s1, s2) in statements1.iter().zip_eq(statements2.iter()) {
             self.assert_equal_statement(s1, s2)
         }
@@ -643,6 +646,7 @@ impl ExpressionEqualityChecker {
         branches1: &Vec<IntermediateMatchBranch>,
         branches2: &Vec<IntermediateMatchBranch>,
     ) {
+        assert_eq!(branches1.len(), branches2.len());
         for (b1, b2) in branches1.iter().zip_eq(branches2.iter()) {
             self.assert_equal_branch(b1, b2)
         }

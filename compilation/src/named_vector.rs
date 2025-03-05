@@ -109,8 +109,6 @@ mod tests {
     use std::path::Path;
     use tempfile::TempDir;
 
-    use super::*;
-
     fn new_constant_test() {
         define_named_vector!(TestClass);
         assert_eq!(TestClass::new(), TestClass::new());

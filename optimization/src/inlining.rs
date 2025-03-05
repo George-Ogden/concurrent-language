@@ -4,9 +4,13 @@ use lowering::{
     BuiltInFn, IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateCtorCall,
     IntermediateElementAccess, IntermediateExpression, IntermediateFnCall, IntermediateIfStatement,
     IntermediateLambda, IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory,
-    IntermediateStatement, IntermediateTupleExpression, IntermediateValue, Location,
+    IntermediateProgram, IntermediateStatement, IntermediateTupleExpression, IntermediateValue,
+    Location,
 };
 use std::{collections::HashMap, convert::identity};
+
+use crate::EquivalentExpressionEliminator;
+use compilation::CodeSizeEstimator;
 
 #[derive(Debug, PartialEq, Clone)]
 enum FnInst {
@@ -155,12 +159,26 @@ impl Refresher {
 
 struct Inliner {
     fn_defs: FnDefs,
+    size_limit: usize,
 }
 
 impl Inliner {
+    fn inline_up_to_size(
+        program: IntermediateProgram,
+        size_limit: Option<usize>,
+    ) -> IntermediateProgram {
+        let mut should_continue = true;
+        let mut program = program;
+        while should_continue {
+            (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
+            program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+        }
+        program
+    }
     fn new() -> Self {
         Inliner {
             fn_defs: FnDefs::new(),
+            size_limit: usize::max_value(),
         }
     }
 
@@ -299,13 +317,26 @@ impl Inliner {
         (statements, lambda.ret)
     }
 
-    fn inline_iteration(lambda: IntermediateLambda) -> (IntermediateLambda, bool) {
+    fn inline_iteration(
+        lambda: IntermediateLambda,
+        size_limit: Option<usize>,
+    ) -> (IntermediateLambda, bool) {
+        let bounds = CodeSizeEstimator::estimate_size(&lambda);
+        if let Some(size) = size_limit {
+            if bounds.1 >= size {
+                return (lambda, false);
+            }
+        }
         let IntermediateLambda {
             args,
             statements,
             ret,
         } = lambda;
-        let inliner = Inliner::from(&statements);
+        let mut inliner = Inliner::from(&statements);
+        if let Some(size) = size_limit {
+            inliner.size_limit = size;
+        }
+        let inliner = inliner;
         let (statements, should_continue) = inliner.inline_statements(statements);
         (
             IntermediateLambda {
@@ -361,7 +392,9 @@ impl Inliner {
                     fn_def = self.fn_defs.get(&reference)
                 }
                 match fn_def {
-                    Some(FnInst::Lambda(lambda)) => {
+                    Some(FnInst::Lambda(lambda))
+                        if CodeSizeEstimator::estimate_size(lambda).1 < self.size_limit =>
+                    {
                         let (extra_statements, value) = self.inline(lambda.clone(), args);
                         statements = extra_statements;
                         should_continue = true;
@@ -373,18 +406,21 @@ impl Inliner {
                     }
                     .into(),
                     Some(FnInst::Ref(_)) => panic!("Determined that fn_def was not reference."),
-                    None => IntermediateFnCall {
+                    _ => IntermediateFnCall {
                         fn_: IntermediateMemory { type_, location }.into(),
                         args,
                     }
                     .into(),
                 }
             }
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                args,
-                statements,
-                ret,
-            }) => {
+            IntermediateExpression::IntermediateLambda(lambda)
+                if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
+            {
+                let IntermediateLambda {
+                    args,
+                    statements,
+                    ret,
+                } = lambda;
                 let (statements, internal_continue) = self.inline_statements(statements);
                 should_continue |= internal_continue;
                 IntermediateLambda {
@@ -458,7 +494,7 @@ impl From<&Vec<IntermediateStatement>> for Inliner {
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashSet;
+    use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
     use super::*;
     use lowering::{
@@ -1645,7 +1681,7 @@ mod tests {
             ret: Integer { value: 0 }.into(),
             statements,
         };
-        let (optimized, should_continue) = Inliner::inline_iteration(lambda);
+        let (optimized, should_continue) = Inliner::inline_iteration(lambda, None);
         assert_eq!(expect_continue, should_continue);
 
         let expected = IntermediateLambda {
@@ -1655,5 +1691,209 @@ mod tests {
         };
         dbg!(&expected, &optimized);
         ExpressionEqualityChecker::assert_equal(&optimized.into(), &expected.into())
+    }
+
+    #[test]
+    fn test_main_inlining() {
+        let premain = IntermediateMemory {
+            location: Location::new(),
+            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+        };
+        let call = IntermediateMemory {
+            location: Location::new(),
+            type_: AtomicTypeEnum::INT.into(),
+        };
+        let simplified = IntermediateLambda {
+            args: Vec::new(),
+            ret: Integer { value: 0 }.into(),
+            statements: Vec::new(),
+        };
+        let main = IntermediateLambda {
+            args: Vec::new(),
+            statements: vec![
+                IntermediateAssignment {
+                    expression: simplified.clone().into(),
+                    location: premain.location.clone(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: call.location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: premain.clone().into(),
+                        args: Vec::new(),
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+            ret: call.clone().into(),
+        };
+        let types = vec![Rc::new(RefCell::new(
+            IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()), None]).into(),
+        ))];
+        let optimized = Inliner::inline_up_to_size(
+            IntermediateProgram {
+                main,
+                types: types.clone(),
+            },
+            None,
+        );
+        dbg!(&simplified, &optimized.main);
+        ExpressionEqualityChecker::assert_equal(&optimized.main.into(), &simplified.into());
+        assert_eq!(types, optimized.types)
+    }
+
+    #[test]
+    fn test_size_limited_inlining() {
+        let premain = IntermediateMemory {
+            location: Location::new(),
+            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+        };
+        let call = IntermediateMemory {
+            location: Location::new(),
+            type_: AtomicTypeEnum::INT.into(),
+        };
+        let simplified = IntermediateLambda {
+            args: Vec::new(),
+            ret: Integer { value: 0 }.into(),
+            statements: Vec::new(),
+        };
+        let main = IntermediateLambda {
+            args: Vec::new(),
+            statements: vec![
+                IntermediateAssignment {
+                    expression: simplified.clone().into(),
+                    location: premain.location.clone(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: call.location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: premain.clone().into(),
+                        args: Vec::new(),
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+            ret: call.clone().into(),
+        };
+        let types = vec![Rc::new(RefCell::new(
+            IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()), None]).into(),
+        ))];
+        let optimized = Inliner::inline_up_to_size(
+            IntermediateProgram {
+                main: main.clone(),
+                types: types.clone(),
+            },
+            Some(1),
+        );
+        dbg!(&main, &optimized.main);
+        ExpressionEqualityChecker::assert_equal(&optimized.main.into(), &main.into());
+        assert_eq!(types, optimized.types)
+    }
+
+    #[test]
+    fn test_recursive_inlining() {
+        let premain = IntermediateMemory {
+            location: Location::new(),
+            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+        };
+        let call = IntermediateMemory {
+            location: Location::new(),
+            type_: AtomicTypeEnum::INT.into(),
+        };
+
+        let arg = IntermediateArg {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let ret = IntermediateMemory {
+            location: Location::new(),
+            type_: AtomicTypeEnum::INT.into(),
+        };
+        let calls = [
+            IntermediateMemory {
+                location: Location::new(),
+                type_: AtomicTypeEnum::INT.into(),
+            },
+            IntermediateMemory {
+                location: Location::new(),
+                type_: AtomicTypeEnum::INT.into(),
+            },
+        ];
+        let recursive = IntermediateLambda {
+            args: vec![arg.clone()],
+            ret: ret.clone().into(),
+            statements: vec![
+                IntermediateAssignment {
+                    location: calls[0].location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: premain.clone().into(),
+                        args: vec![arg.clone().into()],
+                    }
+                    .into(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: calls[1].location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: premain.clone().into(),
+                        args: vec![arg.clone().into()],
+                    }
+                    .into(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: ret.location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: BuiltInFn(
+                            Id::from("+"),
+                            IntermediateFnType(
+                                vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                                Box::new(AtomicTypeEnum::INT.into()),
+                            )
+                            .into(),
+                        )
+                        .into(),
+                        args: vec![calls[0].clone().into(), calls[1].clone().into()],
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+        };
+        let main = IntermediateLambda {
+            args: Vec::new(),
+            statements: vec![
+                IntermediateAssignment {
+                    expression: recursive.clone().into(),
+                    location: premain.location.clone(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: call.location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: premain.clone().into(),
+                        args: vec![Integer { value: 10 }.into()],
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+            ret: call.clone().into(),
+        };
+        let current_size = CodeSizeEstimator::estimate_size(&recursive).1;
+        let optimized = Inliner::inline_up_to_size(
+            IntermediateProgram {
+                main,
+                types: Vec::new(),
+            },
+            Some(current_size * 10),
+        );
+        dbg!(&optimized);
+        let optimized_size = CodeSizeEstimator::estimate_size(&optimized.main).1;
+        assert!(optimized_size > current_size * 2);
+        assert!(optimized_size < current_size * 40);
     }
 }
