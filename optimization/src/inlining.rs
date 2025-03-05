@@ -37,6 +37,10 @@ type FnDefs = HashMap<Location, FnInst>;
 struct Inliner {}
 
 impl Inliner {
+    fn new() -> Self {
+        Inliner {}
+    }
+
     fn collect_fn_defs_from_statement(statement: &IntermediateStatement, fn_defs: &mut FnDefs) {
         match statement {
             IntermediateStatement::IntermediateAssignment(assignment) => {
@@ -129,17 +133,50 @@ impl Inliner {
             .map(|k| (k.clone(), combined[&k].clone()))
             .collect()
     }
+
+    fn inline(
+        &self,
+        mut lambda: IntermediateLambda,
+        args: Vec<IntermediateValue>,
+    ) -> (Vec<IntermediateStatement>, IntermediateValue) {
+        let mut updated_locations = lambda
+            .args
+            .iter()
+            .map(|arg| (arg.location.clone(), Location::new()))
+            .collect::<HashMap<_, _>>();
+        for target in IntermediateStatement::all_targets(&lambda.statements) {
+            updated_locations.insert(target, Location::new());
+        }
+        lambda.substitute(&updated_locations);
+        let assignments = lambda
+            .args
+            .iter()
+            .zip_eq(args.into_iter())
+            .map(|(arg, v)| {
+                IntermediateAssignment {
+                    location: updated_locations[&arg.location].clone(),
+                    expression: v.into(),
+                }
+                .into()
+            })
+            .collect_vec();
+        let mut statements = assignments;
+        statements.extend(lambda.statements);
+        (statements, lambda.ret)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashSet;
+
     use super::*;
     use lowering::{
-        AtomicTypeEnum, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
-        IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType, IntermediateIfStatement,
-        IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory,
-        IntermediateUnionType, IntermediateValue, Location,
+        AtomicTypeEnum, BuiltInFn, ExpressionEqualityChecker, Id, Integer, IntermediateArg,
+        IntermediateAssignment, IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType,
+        IntermediateIfStatement, IntermediateMatchBranch, IntermediateMatchStatement,
+        IntermediateMemory, IntermediateUnionType, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -551,5 +588,156 @@ mod tests {
         let mut fn_defs = FnDefs::new();
         Inliner::collect_fn_defs_from_statements(&statements, &mut fn_defs);
         assert_eq!(fn_defs, expected_fn_defs)
+    }
+
+    #[test_case(
+        (
+            IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            },
+            Vec::new(),
+            (
+                Vec::new(),
+                Integer{value: 11}.into(),
+            )
+        );
+        "trivial function"
+    )]
+    #[test_case(
+        {
+            let arg = IntermediateArg{
+                type_: AtomicTypeEnum::INT.into(),
+                location: Location::new(),
+            };
+            let value = IntermediateMemory {
+                type_: AtomicTypeEnum::INT.into(),
+                location: Location::new()
+            };
+            (
+                IntermediateLambda {
+                    args: vec![arg.clone()],
+                    statements: Vec::new(),
+                    ret: arg.clone().into()
+                },
+                vec![Integer{value: 22}.into()],
+                (
+                    vec![
+                        IntermediateAssignment{
+                            location: value.location.clone(),
+                            expression: IntermediateValue::from(Integer{value: 22}).into()
+                        }.into()
+                    ],
+                    value.clone().into()
+                )
+            )
+        };
+        "identity function"
+    )]
+    #[test_case(
+        {
+            let args = vec![
+                IntermediateArg{
+                    type_: AtomicTypeEnum::INT.into(),
+                    location: Location::new(),
+                },
+                IntermediateArg{
+                    type_: AtomicTypeEnum::INT.into(),
+                    location: Location::new(),
+                },
+            ];
+            let mem = args.iter().map(|arg| IntermediateMemory {
+                location: Location::new(),
+                type_: arg.type_.clone()
+            }).collect_vec();
+            let ret = IntermediateMemory {
+                type_: AtomicTypeEnum::INT.into(),
+                location: Location::new()
+            };
+            (
+                IntermediateLambda {
+                    args: args.clone(),
+                    statements: vec![
+                        IntermediateAssignment {
+                            expression: IntermediateFnCall {
+                                fn_: IntermediateBuiltIn::from(BuiltInFn(
+                                    Id::from("+"),
+                                    IntermediateFnType(
+                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    )
+                                )).into(),
+                                args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
+                            }.into(),
+                            location: ret.location.clone()
+                        }.into()
+                    ],
+                    ret: ret.clone().into()
+                },
+                vec![Integer{value: 11}.into(), Integer{value: -11}.into()],
+                (
+                    vec![
+                        IntermediateAssignment {
+                            expression: IntermediateValue::from(Integer{value: 11}).into(),
+                            location: mem[0].location.clone()
+                        }.into(),
+                        IntermediateAssignment {
+                            expression: IntermediateValue::from(Integer{value: -11}).into(),
+                            location: mem[1].location.clone()
+                        }.into(),
+                        IntermediateAssignment {
+                            expression: IntermediateFnCall {
+                                fn_: IntermediateBuiltIn::from(BuiltInFn(
+                                    Id::from("+"),
+                                    IntermediateFnType(
+                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    )
+                                )).into(),
+                                args: mem.clone().into_iter().map(|mem| mem.into()).collect_vec(),
+                            }.into(),
+                            location: ret.location.clone()
+                        }.into()
+                    ],
+                    ret.clone().into()
+                )
+            )
+        };
+        "plus function"
+    )]
+    fn test_inline_fn(
+        lambda_args_expected: (
+            IntermediateLambda,
+            Vec<IntermediateValue>,
+            (Vec<IntermediateStatement>, IntermediateValue),
+        ),
+    ) {
+        let (lambda, args, expected) = lambda_args_expected;
+        let inliner = Inliner::new();
+        let mut fn_targets = IntermediateStatement::all_targets(&lambda.statements);
+        fn_targets.extend(lambda.args.iter().map(|arg| arg.location.clone()));
+        let result = inliner.inline(lambda, args);
+        let targets = IntermediateStatement::all_targets(&result.0);
+
+        dbg!(&expected, &result);
+        assert!(ExpressionEqualityChecker::equal(
+            &IntermediateLambda {
+                args: Vec::new(),
+                statements: result.0,
+                ret: result.1
+            }
+            .into(),
+            &IntermediateLambda {
+                args: Vec::new(),
+                statements: expected.0,
+                ret: expected.1
+            }
+            .into()
+        ));
+        assert!(HashSet::<Location>::from_iter(fn_targets)
+            .intersection(&HashSet::from_iter(targets))
+            .collect_vec()
+            .is_empty())
     }
 }

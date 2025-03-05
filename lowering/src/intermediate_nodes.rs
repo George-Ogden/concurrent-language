@@ -150,14 +150,14 @@ impl IntermediateValue {
                     .clone(),
             }
             .into(),
-            IntermediateValue::IntermediateArg(arg) => IntermediateArg {
-                type_: arg.type_.clone(),
-                location: substitution
-                    .get(&arg.location)
-                    .unwrap_or(&arg.location)
-                    .clone(),
-            }
-            .into(),
+            IntermediateValue::IntermediateArg(arg) => match substitution.get(&arg.location) {
+                None => arg.clone().into(),
+                Some(location) => IntermediateMemory {
+                    location: location.clone(),
+                    type_: arg.type_.clone(),
+                }
+                .into(),
+            },
         }
     }
     fn substitute_all(values: &mut Vec<Self>, substitution: &Substitution) {
@@ -965,8 +965,13 @@ impl IntermediateStatement {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location: _,
-            }) => expression.substitute(substitution),
+                location,
+            }) => {
+                if let Some(new_location) = substitution.get(location) {
+                    *location = new_location.clone();
+                }
+                expression.substitute(substitution);
+            }
             IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
                 condition,
                 branches,
