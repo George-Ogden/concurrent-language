@@ -2,8 +2,8 @@ use counter::Counter;
 use itertools::Itertools;
 use lowering::{
     BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateIfStatement, IntermediateLambda, IntermediateStatement, IntermediateValue,
-    Location,
+    IntermediateIfStatement, IntermediateLambda, IntermediateMatchStatement, IntermediateStatement,
+    IntermediateValue, Location,
 };
 use std::collections::HashMap;
 
@@ -45,7 +45,9 @@ impl Inliner {
             IntermediateStatement::IntermediateIfStatement(if_statement) => {
                 Self::collect_fn_defs_from_if_statement(if_statement, fn_defs)
             }
-            IntermediateStatement::IntermediateMatchStatement(_) => todo!(),
+            IntermediateStatement::IntermediateMatchStatement(match_statement) => {
+                Self::collect_fn_defs_from_match_statement(match_statement, fn_defs);
+            }
         }
     }
     fn collect_fns_defs_from_assignment(
@@ -87,6 +89,23 @@ impl Inliner {
             branch_fn_defs.1,
         ]))
     }
+    fn collect_fn_defs_from_match_statement(
+        IntermediateMatchStatement {
+            subject: _,
+            branches,
+        }: &IntermediateMatchStatement,
+        fn_defs: &mut FnDefs,
+    ) {
+        let branch_fn_defs = branches
+            .iter()
+            .map(|branch| {
+                let mut fn_defs = fn_defs.clone();
+                Self::collect_fn_defs_from_statements(&branch.statements, &mut fn_defs);
+                fn_defs
+            })
+            .collect_vec();
+        fn_defs.extend(Self::merge_fn_defs(branch_fn_defs));
+    }
     fn collect_fn_defs_from_statements(
         statements: &Vec<IntermediateStatement>,
         fn_defs: &mut FnDefs,
@@ -118,7 +137,8 @@ mod tests {
     use lowering::{
         AtomicTypeEnum, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
         IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType, IntermediateIfStatement,
-        IntermediateMemory, IntermediateValue, Location,
+        IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory,
+        IntermediateUnionType, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -350,6 +370,129 @@ mod tests {
             )
         };
         "if statement double appearance"
+    )]
+    #[test_case(
+        {
+            let location_1 = Location::new();
+            let location_2 = Location::new();
+            let location_3 = Location::new();
+            let lambda_0 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            };
+            let lambda_1 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 13}.into()
+            };
+            let lambda_2 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 13}.into()
+            };
+            (
+                vec![
+                    IntermediateMatchStatement {
+                        subject: IntermediateArg{
+                            location: Location::new(),
+                            type_: IntermediateUnionType(vec![None,None,None]).into()
+                        }.into(),
+                        branches: vec![
+                            IntermediateMatchBranch {
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment {
+                                        location: location_1.clone(),
+                                        expression: lambda_0.clone().into()
+                                    }.into(),
+                                    IntermediateAssignment {
+                                        location: location_3.clone(),
+                                        expression: lambda_0.clone().into()
+                                    }.into(),
+                                ]
+                            },
+                            IntermediateMatchBranch {
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment {
+                                        location: location_2.clone(),
+                                        expression: lambda_1.clone().into()
+                                    }.into(),
+                                    IntermediateAssignment {
+                                        location: location_3.clone(),
+                                        expression: lambda_1.clone().into()
+                                    }.into(),
+                                ]
+                            },
+                            IntermediateMatchBranch {
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment {
+                                        location: location_2.clone(),
+                                        expression: lambda_2.clone().into()
+                                    }.into(),
+                                    IntermediateAssignment {
+                                        location: location_3.clone(),
+                                        expression: lambda_2.clone().into()
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into(),
+                ],
+                FnDefs::from([
+                    (location_1, lambda_0.into())
+                ])
+            )
+        };
+        "match statement"
+    )]
+    #[test_case(
+        {
+            let location_0 = Location::new();
+            let location_1 = Location::new();
+            let lambda_0 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            };
+            let lambda_1 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 13}.into()
+            };
+            (
+                vec![
+                    IntermediateAssignment {
+                        location: location_0.clone(),
+                        expression: lambda_0.clone().into()
+                    }.into(),
+                    IntermediateMatchStatement {
+                        subject: IntermediateArg{
+                            location: Location::new(),
+                            type_: IntermediateUnionType(vec![None]).into()
+                        }.into(),
+                        branches: vec![
+                            IntermediateMatchBranch {
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment {
+                                        location: location_1.clone(),
+                                        expression: lambda_1.clone().into()
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into(),
+                ],
+                FnDefs::from([
+                    (location_0, lambda_0.into()),
+                    (location_1, lambda_1.into()),
+                ])
+            )
+        };
+        "match statement with pre-definition"
     )]
     fn test_collect_fn_defs(statements_fns: (Vec<IntermediateStatement>, FnDefs)) {
         let (statements, expected_fn_defs) = statements_fns;
