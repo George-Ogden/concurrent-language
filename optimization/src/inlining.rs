@@ -1,9 +1,10 @@
 use counter::Counter;
 use itertools::Itertools;
 use lowering::{
-    BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateIfStatement, IntermediateLambda, IntermediateMatchStatement, IntermediateStatement,
-    IntermediateValue, Location,
+    BuiltInFn, IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateCtorCall,
+    IntermediateElementAccess, IntermediateExpression, IntermediateFnCall, IntermediateIfStatement,
+    IntermediateLambda, IntermediateMatchStatement, IntermediateMemory, IntermediateStatement,
+    IntermediateTupleExpression, IntermediateValue, Location,
 };
 use std::collections::HashMap;
 
@@ -33,6 +34,124 @@ impl From<Location> for FnInst {
 }
 
 type FnDefs = HashMap<Location, FnInst>;
+
+struct Refresher {
+    locations: HashMap<Location, Location>,
+}
+
+impl Refresher {
+    fn new() -> Self {
+        Refresher {
+            locations: HashMap::new(),
+        }
+    }
+    pub fn refresh(lambda: &mut IntermediateLambda) {
+        Refresher::new().refresh_lambda(lambda)
+    }
+    fn refresh_lambda(&mut self, lambda: &mut IntermediateLambda) {
+        let targets = IntermediateStatement::all_targets(&lambda.statements);
+        for target in targets {
+            self.locations.insert(target, Location::new());
+        }
+        for arg in &mut lambda.args {
+            self.refresh_arg(arg);
+        }
+        self.refresh_statements(&mut lambda.statements);
+        self.refresh_value(&mut lambda.ret);
+    }
+    fn refresh_statements(&mut self, statements: &mut Vec<IntermediateStatement>) {
+        for statement in statements {
+            self.refresh_statement(statement);
+        }
+    }
+    fn refresh_statement(&mut self, statement: &mut IntermediateStatement) {
+        match statement {
+            IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                expression,
+                location,
+            }) => {
+                self.refresh_location(location);
+                self.refresh_expression(expression)
+            }
+            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition,
+                branches,
+            }) => {
+                self.refresh_value(condition);
+                self.refresh_statements(&mut branches.0);
+                self.refresh_statements(&mut branches.1);
+            }
+            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                subject,
+                branches,
+            }) => {
+                self.refresh_value(subject);
+                for branch in branches {
+                    if let Some(arg) = &mut branch.target {
+                        self.refresh_arg(arg);
+                    }
+                    self.refresh_statements(&mut branch.statements);
+                }
+            }
+        }
+    }
+    fn refresh_expression(&mut self, expression: &mut IntermediateExpression) {
+        match expression {
+            IntermediateExpression::IntermediateValue(value) => {
+                self.refresh_value(value);
+            }
+            IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
+                value,
+                idx: _,
+            }) => {
+                self.refresh_value(value);
+            }
+            IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
+                values,
+            )) => {
+                self.refresh_values(values);
+            }
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
+                self.refresh_value(fn_);
+                self.refresh_values(args)
+            }
+            IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
+                idx: _,
+                data,
+                type_: _,
+            }) => match data {
+                None => (),
+                Some(data) => self.refresh_value(data),
+            },
+            IntermediateExpression::IntermediateLambda(lambda) => self.refresh_lambda(lambda),
+        }
+    }
+    fn refresh_values(&mut self, values: &mut Vec<IntermediateValue>) {
+        for value in values {
+            self.refresh_value(value)
+        }
+    }
+    fn refresh_value(&mut self, value: &mut IntermediateValue) {
+        match value {
+            IntermediateValue::IntermediateBuiltIn(_) => {}
+            IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location })
+            | IntermediateValue::IntermediateArg(IntermediateArg { type_: _, location }) => {
+                self.refresh_location(location)
+            }
+        }
+    }
+    fn refresh_location(&mut self, location: &mut Location) {
+        if let Some(updated_location) = self.locations.get(location) {
+            *location = updated_location.clone()
+        }
+    }
+    fn refresh_arg(&mut self, arg: &mut IntermediateArg) {
+        let location = Location::new();
+        self.locations
+            .insert(arg.location.clone(), location.clone());
+        arg.location = location;
+    }
+}
 
 struct Inliner {}
 
@@ -139,6 +258,7 @@ impl Inliner {
         mut lambda: IntermediateLambda,
         args: Vec<IntermediateValue>,
     ) -> (Vec<IntermediateStatement>, IntermediateValue) {
+        Refresher::refresh(&mut lambda);
         let mut updated_locations = lambda
             .args
             .iter()
@@ -739,5 +859,112 @@ mod tests {
             .intersection(&HashSet::from_iter(targets))
             .collect_vec()
             .is_empty())
+    }
+
+    #[test]
+    fn test_fn_refresh() {
+        let id_arg = IntermediateArg {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let id = IntermediateLambda {
+            args: vec![id_arg.clone()],
+            statements: Vec::new(),
+            ret: id_arg.clone().into(),
+        };
+        let id_fn = IntermediateMemory {
+            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+            location: Location::new(),
+        };
+
+        let idea_arg = IntermediateArg {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let idea_ret = IntermediateMemory {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let idea = IntermediateLambda {
+            args: vec![idea_arg.clone()],
+            statements: vec![
+                IntermediateAssignment {
+                    location: id_fn.location.clone(),
+                    expression: id.clone().into(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: idea_ret.location.clone(),
+                    expression: IntermediateFnCall {
+                        fn_: id_fn.clone().into(),
+                        args: vec![idea_arg.clone().into()],
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+            ret: idea_ret.clone().into(),
+        };
+
+        let inliner = Inliner::new();
+        let result = inliner.inline(idea, vec![Integer { value: 0 }.into()]);
+        let expected = (
+            vec![
+                IntermediateAssignment {
+                    location: idea_arg.location.clone(),
+                    expression: IntermediateValue::from(Integer { value: 0 }).into(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: id_fn.location.clone(),
+                    expression: id.clone().into(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: idea_ret.location.clone(),
+                    expression: IntermediateFnCall {
+                        fn_: id_fn.clone().into(),
+                        args: vec![IntermediateMemory {
+                            type_: idea_arg.type_.clone(),
+                            location: idea_arg.location.clone(),
+                        }
+                        .into()],
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+            idea_ret.clone().into(),
+        );
+
+        dbg!(&expected, &result);
+        assert!(ExpressionEqualityChecker::equal(
+            &IntermediateLambda {
+                args: Vec::new(),
+                statements: result.0.clone(),
+                ret: result.1
+            }
+            .into(),
+            &IntermediateLambda {
+                args: Vec::new(),
+                statements: expected.0,
+                ret: expected.1
+            }
+            .into()
+        ));
+
+        let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+            expression:
+                IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                    args,
+                    statements: _,
+                    ret: _,
+                }),
+            location: _,
+        }) = &result.0[1]
+        else {
+            panic!()
+        };
+        assert_ne!(args, &vec![id_arg]);
     }
 }
