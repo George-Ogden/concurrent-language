@@ -224,7 +224,7 @@ impl Inliner {
         }: &IntermediateMatchStatement,
         fn_defs: &mut FnDefs,
     ) {
-        let branch_fn_defs = branches
+        let mut branch_fn_defs = branches
             .iter()
             .map(|branch| {
                 let mut fn_defs = fn_defs.clone();
@@ -232,6 +232,16 @@ impl Inliner {
                 fn_defs
             })
             .collect_vec();
+        if branches.len() == 1 {
+            let statements = &branches[0].statements.clone();
+            if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+                expression: _,
+                location,
+            }) = &statements[statements.len() - 1]
+            {
+                branch_fn_defs[0].remove(location);
+            }
+        }
         fn_defs.extend(Self::merge_fn_defs(branch_fn_defs));
     }
     fn collect_fn_defs_from_statements(
@@ -343,27 +353,31 @@ impl Inliner {
         let mut statements = Vec::new();
         let expression = match expression {
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
-                fn_:
-                    IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }),
+                fn_: IntermediateValue::IntermediateMemory(IntermediateMemory { type_, location }),
                 args,
             }) if self.fn_defs.contains_key(&location) => {
-                let mut fn_def = &self.fn_defs[&location];
-                while let FnInst::Ref(reference) = fn_def {
-                    fn_def = &self.fn_defs[&reference]
+                let mut fn_def = self.fn_defs.get(&location);
+                while let Some(FnInst::Ref(reference)) = fn_def {
+                    fn_def = self.fn_defs.get(&reference)
                 }
                 match fn_def {
-                    FnInst::Lambda(lambda) => {
+                    Some(FnInst::Lambda(lambda)) => {
                         let (extra_statements, value) = self.inline(lambda.clone(), args);
                         statements = extra_statements;
                         should_continue = true;
                         value.into()
                     }
-                    FnInst::BuiltIn(built_in_fn) => IntermediateFnCall {
+                    Some(FnInst::BuiltIn(built_in_fn)) => IntermediateFnCall {
                         fn_: built_in_fn.clone().into(),
                         args,
                     }
                     .into(),
-                    FnInst::Ref(_) => panic!("Determined that fn_def was not reference."),
+                    Some(FnInst::Ref(_)) => panic!("Determined that fn_def was not reference."),
+                    None => IntermediateFnCall {
+                        fn_: IntermediateMemory { type_, location }.into(),
+                        args,
+                    }
+                    .into(),
                 }
             }
             IntermediateExpression::IntermediateLambda(IntermediateLambda {
@@ -795,6 +809,18 @@ mod tests {
                                         location: location_1.clone(),
                                         expression: lambda_1.clone().into()
                                     }.into(),
+                                    IntermediateAssignment {
+                                        location: Location::new(),
+                                        expression: IntermediateValue::from(
+                                            IntermediateMemory {
+                                                location: location_1.clone(),
+                                                type_: IntermediateFnType(
+                                                    Vec::new(),
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ).into(),
+                                            }
+                                        ).into()
+                                    }.into(),
                                 ]
                             },
                         ]
@@ -807,6 +833,51 @@ mod tests {
             )
         };
         "match statement with pre-definition"
+    )]
+    #[test_case(
+        {
+            let location_0 = Location::new();
+            let location_1 = Location::new();
+            let lambda_0 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            };
+            let lambda_1 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 13}.into()
+            };
+            (
+                vec![
+                    IntermediateMatchStatement {
+                        subject: IntermediateArg{
+                            location: Location::new(),
+                            type_: IntermediateUnionType(vec![None,None,None]).into()
+                        }.into(),
+                        branches: vec![
+                            IntermediateMatchBranch {
+                                target: None,
+                                statements: vec![
+                                    IntermediateAssignment {
+                                        location: location_0.clone(),
+                                        expression: lambda_0.clone().into()
+                                    }.into(),
+                                    IntermediateAssignment {
+                                        location: location_1.clone(),
+                                        expression: lambda_1.clone().into()
+                                    }.into(),
+                                ]
+                            },
+                        ]
+                    }.into(),
+                ],
+                FnDefs::from([
+                    (location_0, lambda_0.into())
+                ])
+            )
+        };
+        "match statement single branch"
     )]
     #[test_case(
         {
