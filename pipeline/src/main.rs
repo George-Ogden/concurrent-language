@@ -6,7 +6,7 @@ use args::Cli;
 use clap::Parser;
 use compilation::Compiler;
 use lowering::Lowerer;
-use optimization::{DeadCodeAnalyzer, EquivalentExpressionEliminator};
+use optimization::{DeadCodeAnalyzer, EquivalentExpressionEliminator, Inliner};
 use translation::Translator;
 use type_checker::{Program, TypeChecker};
 
@@ -23,6 +23,7 @@ fn main() {
                 for optimization in [
                     DeadCodeAnalyzer::remove_dead_code,
                     EquivalentExpressionEliminator::eliminate_equivalent_expressions,
+                    |program| Inliner::inline_up_to_size(program, Some(1000)),
                 ] {
                     lowered_program = optimization(lowered_program);
                 }

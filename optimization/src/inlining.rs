@@ -157,7 +157,7 @@ impl Refresher {
     }
 }
 
-struct Inliner {
+pub struct Inliner {
     fn_defs: FnDefs,
     size_limit: usize,
 }
@@ -165,7 +165,7 @@ struct Inliner {
 const MAX_INLINING_ITERATIONS: usize = 1000;
 
 impl Inliner {
-    fn inline_up_to_size(
+    pub fn inline_up_to_size(
         program: IntermediateProgram,
         size_limit: Option<usize>,
     ) -> IntermediateProgram {
