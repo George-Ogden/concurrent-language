@@ -162,6 +162,8 @@ struct Inliner {
     size_limit: usize,
 }
 
+const MAX_INLINING_ITERATIONS: usize = 1000;
+
 impl Inliner {
     fn inline_up_to_size(
         program: IntermediateProgram,
@@ -169,9 +171,11 @@ impl Inliner {
     ) -> IntermediateProgram {
         let mut should_continue = true;
         let mut program = program;
-        while should_continue {
+        let mut i = 0;
+        while should_continue && i < MAX_INLINING_ITERATIONS {
             (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
             program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+            i += 1;
         }
         program
     }
@@ -1797,7 +1801,11 @@ mod tests {
     fn test_recursive_inlining() {
         let premain = IntermediateMemory {
             location: Location::new(),
-            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+            type_: IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into()),
+            )
+            .into(),
         };
         let call = IntermediateMemory {
             location: Location::new(),
@@ -1895,5 +1903,75 @@ mod tests {
         let optimized_size = CodeSizeEstimator::estimate_size(&optimized.main).1;
         assert!(optimized_size > current_size * 2);
         assert!(optimized_size < current_size * 40);
+    }
+
+    #[test]
+    fn test_self_recursive_inlining() {
+        let premain = IntermediateMemory {
+            location: Location::new(),
+            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+        };
+        let arg = IntermediateArg {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let call = IntermediateMemory {
+            location: Location::new(),
+            type_: AtomicTypeEnum::INT.into(),
+        };
+
+        let ret = IntermediateMemory {
+            location: Location::new(),
+            type_: AtomicTypeEnum::INT.into(),
+        };
+        let recursive = IntermediateLambda {
+            args: vec![arg.clone()],
+            ret: ret.clone().into(),
+            statements: vec![IntermediateAssignment {
+                location: ret.location.clone().into(),
+                expression: IntermediateFnCall {
+                    fn_: premain.clone().into(),
+                    args: vec![arg.clone().into()],
+                }
+                .into(),
+            }
+            .into()],
+        };
+        let main = IntermediateLambda {
+            args: Vec::new(),
+            statements: vec![
+                IntermediateAssignment {
+                    expression: recursive.clone().into(),
+                    location: premain.location.clone(),
+                }
+                .into(),
+                IntermediateAssignment {
+                    location: call.location.clone().into(),
+                    expression: IntermediateFnCall {
+                        fn_: premain.clone().into(),
+                        args: vec![Integer { value: -10 }.into()],
+                    }
+                    .into(),
+                }
+                .into(),
+            ],
+            ret: call.clone().into(),
+        };
+        let current_size = CodeSizeEstimator::estimate_size(&recursive).1;
+        Inliner::inline_up_to_size(
+            IntermediateProgram {
+                main: main.clone(),
+                types: Vec::new(),
+            },
+            Some(current_size * 10),
+        );
+
+        Inliner::inline_up_to_size(
+            IntermediateProgram {
+                main: main.clone(),
+                types: Vec::new(),
+            },
+            None,
+        );
     }
 }
