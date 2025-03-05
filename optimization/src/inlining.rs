@@ -951,20 +951,20 @@ mod tests {
         let targets = IntermediateStatement::all_targets(&result.0);
 
         dbg!(&expected, &result);
-        assert!(ExpressionEqualityChecker::equal(
+        ExpressionEqualityChecker::assert_equal(
             &IntermediateLambda {
                 args: Vec::new(),
                 statements: result.0,
-                ret: result.1
+                ret: result.1,
             }
             .into(),
             &IntermediateLambda {
                 args: Vec::new(),
                 statements: expected.0,
-                ret: expected.1
+                ret: expected.1,
             }
-            .into()
-        ));
+            .into(),
+        );
         assert!(HashSet::<Location>::from_iter(fn_targets)
             .intersection(&HashSet::from_iter(targets))
             .collect_vec()
@@ -983,7 +983,11 @@ mod tests {
             ret: id_arg.clone().into(),
         };
         let id_fn = IntermediateMemory {
-            type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
+            type_: IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into()),
+            )
+            .into(),
             location: Location::new(),
         };
 
@@ -1048,20 +1052,20 @@ mod tests {
         );
 
         dbg!(&expected, &result);
-        assert!(ExpressionEqualityChecker::equal(
+        ExpressionEqualityChecker::assert_equal(
             &IntermediateLambda {
                 args: Vec::new(),
                 statements: result.0.clone(),
-                ret: result.1
+                ret: result.1,
             }
             .into(),
             &IntermediateLambda {
                 args: Vec::new(),
                 statements: expected.0,
-                ret: expected.1
+                ret: expected.1,
             }
-            .into()
-        ));
+            .into(),
+        );
 
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             expression:
@@ -1190,9 +1194,6 @@ mod tests {
             statements: expected,
         };
         dbg!(&expected, &optimized);
-        assert!(ExpressionEqualityChecker::equal(
-            &optimized.into(),
-            &expected.into()
-        ))
+        ExpressionEqualityChecker::assert_equal(&optimized.into(), &expected.into())
     }
 }

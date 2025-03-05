@@ -539,6 +539,7 @@ mod tests {
 
     use super::*;
 
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use test_case::test_case;
 
     #[test_case(
@@ -1685,10 +1686,7 @@ mod tests {
             ret: efficient_value,
         };
         dbg!(&efficient_fn, &expected_fn);
-        assert!(ExpressionEqualityChecker::equal(
-            &expected_fn,
-            &efficient_fn.into()
-        ))
+        ExpressionEqualityChecker::assert_equal(&expected_fn, &efficient_fn.into())
     }
 
     #[test]
@@ -1738,12 +1736,25 @@ mod tests {
             })
         };
 
-        assert!(ExpressionEqualityChecker::equal(&p0, &q0));
-        assert!(ExpressionEqualityChecker::equal(&p1, &q1));
-        assert!(!ExpressionEqualityChecker::equal(&p0, &p1));
-        assert!(!ExpressionEqualityChecker::equal(&q0, &q1));
-        assert!(!ExpressionEqualityChecker::equal(&p0, &q1));
-        assert!(!ExpressionEqualityChecker::equal(&p1, &q0));
+        ExpressionEqualityChecker::assert_equal(&p0, &q0);
+        ExpressionEqualityChecker::assert_equal(&p1, &q1);
+
+        assert!(catch_unwind(AssertUnwindSafe(
+            || ExpressionEqualityChecker::assert_equal(&p0, &p1)
+        ))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(
+            || ExpressionEqualityChecker::assert_equal(&q0, &q1)
+        ))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(
+            || ExpressionEqualityChecker::assert_equal(&p0, &q1)
+        ))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(
+            || ExpressionEqualityChecker::assert_equal(&q0, &p1)
+        ))
+        .is_err());
     }
 
     #[test_case(
@@ -2719,7 +2730,7 @@ mod tests {
                 v => v.into(),
             };
             dbg!(&expression, &e);
-            assert!(ExpressionEqualityChecker::equal(&expression, &e));
+            ExpressionEqualityChecker::assert_equal(&expression, &e);
             tuples.0.push(expression);
             tuples.1.push(e);
         }
@@ -2742,10 +2753,10 @@ mod tests {
                 ret: value,
             }
         };
-        assert!(ExpressionEqualityChecker::equal(
+        ExpressionEqualityChecker::assert_equal(
             &transform(tuples.0).into(),
-            &transform(tuples.1).into()
-        ))
+            &transform(tuples.1).into(),
+        )
     }
 
     #[test_case(
@@ -3200,10 +3211,7 @@ mod tests {
         let mut lowerer = Lowerer::new();
         let lower_program = lowerer.lower_program(program);
         dbg!(&lower_program, &expected);
-        assert!(ExpressionEqualityChecker::equal(
-            &lower_program.main.into(),
-            &expected.main.into()
-        ));
+        ExpressionEqualityChecker::assert_equal(&lower_program.main.into(), &expected.main.into());
         assert_eq!(lower_program.types, expected.types)
     }
 }

@@ -376,22 +376,26 @@ impl From<IntermediateBuiltIn> for IntermediateExpression {
 }
 
 pub struct ExpressionEqualityChecker {
-    true_history: HashMap<Location, Location>,
-    history: HashMap<Location, Location>,
+    left_true_history: HashMap<Location, Location>,
+    right_true_history: HashMap<Location, Location>,
+    left_history: HashMap<Location, Location>,
+    right_history: HashMap<Location, Location>,
 }
 
 impl ExpressionEqualityChecker {
-    pub fn equal(e1: &IntermediateExpression, e2: &IntermediateExpression) -> bool {
+    pub fn assert_equal(e1: &IntermediateExpression, e2: &IntermediateExpression) {
         let mut expression_equality_checker = Self::new();
-        expression_equality_checker.equal_expression(e1, e2)
+        expression_equality_checker.assert_equal_expression(e1, e2)
     }
     fn new() -> Self {
         ExpressionEqualityChecker {
-            true_history: HashMap::new(),
-            history: HashMap::new(),
+            left_true_history: HashMap::new(),
+            right_true_history: HashMap::new(),
+            left_history: HashMap::new(),
+            right_history: HashMap::new(),
         }
     }
-    fn equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) -> bool {
+    fn assert_equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) {
         let IntermediateMemory {
             location: l1,
             type_: _,
@@ -400,9 +404,9 @@ impl ExpressionEqualityChecker {
             location: l2,
             type_: _,
         } = m2;
-        self.equal_locations(l1, l2)
+        self.assert_equal_locations(l1, l2)
     }
-    fn equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) -> bool {
+    fn assert_equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) {
         let IntermediateArg {
             location: l1,
             type_: _,
@@ -411,33 +415,27 @@ impl ExpressionEqualityChecker {
             location: l2,
             type_: _,
         } = a2;
-        self.equal_locations(l1, l2)
+        self.assert_equal_locations(l1, l2)
     }
-    fn equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) -> bool {
-        a1.len() == a2.len()
-            && a1
-                .iter()
-                .zip(a2.iter())
-                .all(|(a1, a2)| self.equal_arg(a1, a2))
-    }
-    fn equal_locations(&mut self, l1: &Location, l2: &Location) -> bool {
-        if self.history.get(&l1) == Some(&l2) {
-            true
-        } else if matches!(self.history.get(&l1), Some(_))
-            || matches!(self.history.get(&l2), Some(_))
-        {
-            false
-        } else {
-            self.history.insert(l1.clone(), l2.clone());
-            self.history.insert(l2.clone(), l1.clone());
-            true
+    fn assert_equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) {
+        for (a1, a2) in a1.iter().zip_eq(a2.iter()) {
+            self.assert_equal_arg(a1, a2)
         }
     }
-    fn equal_assignment(
+    fn assert_equal_locations(&mut self, l1: &Location, l2: &Location) {
+        if self.left_history.get(&l1) == Some(&l2) {
+            return;
+        }
+        assert!(!matches!(self.left_history.get(&l1), Some(_)));
+        assert!(!matches!(self.right_history.get(&l2), Some(_)));
+        self.left_history.insert(l1.clone(), l2.clone());
+        self.right_history.insert(l2.clone(), l1.clone());
+    }
+    fn assert_equal_assignment(
         &mut self,
         m1: &IntermediateAssignment,
         m2: &IntermediateAssignment,
-    ) -> bool {
+    ) {
         let IntermediateAssignment {
             expression: e1,
             location: l1,
@@ -446,36 +444,35 @@ impl ExpressionEqualityChecker {
             expression: e2,
             location: l2,
         } = m2;
-        if self.true_history.get(&l1) == Some(&l2) {
-            true
-        } else if self.history.get(&l1) == Some(&l2) {
-            self.true_history.insert(l1.clone(), l2.clone());
-            self.true_history.insert(l2.clone(), l1.clone());
-            self.equal_expression(&e1, &e2)
-        } else if matches!(self.true_history.get(&l1), Some(_))
-            || matches!(self.true_history.get(&l2), Some(_))
-            || matches!(self.history.get(&l1), Some(_))
-            || matches!(self.history.get(&l2), Some(_))
-        {
-            false
+        if self.left_true_history.get(&l1) == Some(&l2) {
+            return;
+        }
+        if self.left_history.get(&l1) == Some(&l2) {
+            self.left_true_history.insert(l1.clone(), l2.clone());
+            self.right_true_history.insert(l2.clone(), l1.clone());
+            self.assert_equal_expression(&e1, &e2)
         } else {
-            self.history.insert(l1.clone(), l2.clone());
-            self.history.insert(l2.clone(), l1.clone());
-            self.true_history.insert(l1.clone(), l2.clone());
-            self.true_history.insert(l2.clone(), l1.clone());
-            self.equal_expression(&e1, &e2)
+            assert!(!matches!(self.left_true_history.get(&l1), Some(_)));
+            assert!(!matches!(self.right_true_history.get(&l2), Some(_)));
+            assert!(!matches!(self.left_history.get(&l1), Some(_)));
+            assert!(!matches!(self.right_history.get(&l2), Some(_)));
+            self.left_history.insert(l1.clone(), l2.clone());
+            self.right_history.insert(l2.clone(), l1.clone());
+            self.left_true_history.insert(l1.clone(), l2.clone());
+            self.right_true_history.insert(l2.clone(), l1.clone());
+            self.assert_equal_expression(&e1, &e2)
         }
     }
-    fn equal_expression(
+    fn assert_equal_expression(
         &mut self,
         e1: &IntermediateExpression,
         e2: &IntermediateExpression,
-    ) -> bool {
+    ) {
         match (e1, e2) {
             (
                 IntermediateExpression::IntermediateValue(v1),
                 IntermediateExpression::IntermediateValue(v2),
-            ) => self.equal_value(&v1, &v2),
+            ) => self.assert_equal_value(&v1, &v2),
             (
                 IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
                     value: v1,
@@ -485,7 +482,10 @@ impl ExpressionEqualityChecker {
                     value: v2,
                     idx: i2,
                 }),
-            ) => i1 == i2 && self.equal_value(&v1, &v2),
+            ) => {
+                assert_eq!(i1, i2);
+                self.assert_equal_value(&v1, &v2)
+            }
             (
                 IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                     values1,
@@ -493,7 +493,7 @@ impl ExpressionEqualityChecker {
                 IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                     values2,
                 )),
-            ) => self.equal_values(&values1, &values2),
+            ) => self.assert_equal_values(&values1, &values2),
             (
                 IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                     fn_: v1,
@@ -503,7 +503,10 @@ impl ExpressionEqualityChecker {
                     fn_: v2,
                     args: a2,
                 }),
-            ) => self.equal_values(&a1, &a2) && self.equal_value(&v1, &v2),
+            ) => {
+                self.assert_equal_values(&a1, &a2);
+                self.assert_equal_value(&v1, &v2)
+            }
             (
                 IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
                     idx: i1,
@@ -516,13 +519,13 @@ impl ExpressionEqualityChecker {
                     type_: t2,
                 }),
             ) => {
-                i1 == i2
-                    && match (d1, d2) {
-                        (None, None) => true,
-                        (Some(d1), Some(d2)) => self.equal_value(d1, d2),
-                        _ => false,
-                    }
-                    && t1 == t2
+                assert_eq!(i1, i2);
+                match (d1, d2) {
+                    (None, None) => {}
+                    (Some(d1), Some(d2)) => self.assert_equal_value(d1, d2),
+                    _ => assert!(false),
+                }
+                assert_eq!(t1, t2)
             }
             (
                 IntermediateExpression::IntermediateLambda(IntermediateLambda {
@@ -536,57 +539,55 @@ impl ExpressionEqualityChecker {
                     ret: r2,
                 }),
             ) => {
-                self.equal_args(a1, a2)
-                    && self.equal_statements(&s1, &s2)
-                    && self.equal_value(&r1, &r2)
+                self.assert_equal_args(a1, a2);
+                self.assert_equal_statements(&s1, &s2);
+                self.assert_equal_value(&r1, &r2)
             }
-            _ => false,
+            _ => assert!(false),
         }
     }
-    fn equal_value(&mut self, v1: &IntermediateValue, v2: &IntermediateValue) -> bool {
+    fn assert_equal_value(&mut self, v1: &IntermediateValue, v2: &IntermediateValue) {
         match (v1, v2) {
             (
                 IntermediateValue::IntermediateBuiltIn(b1),
                 IntermediateValue::IntermediateBuiltIn(b2),
-            ) => b1 == b2,
+            ) => assert_eq!(b1, b2),
             (IntermediateValue::IntermediateArg(a1), IntermediateValue::IntermediateArg(a2)) => {
-                self.equal_arg(a1, a2)
+                self.assert_equal_arg(a1, a2);
             }
             (
                 IntermediateValue::IntermediateMemory(m1),
                 IntermediateValue::IntermediateMemory(m2),
-            ) => self.equal_memory(m1, m2),
-            _ => false,
+            ) => self.assert_equal_memory(m1, m2),
+            _ => {
+                assert!(false);
+            }
         }
     }
-    fn equal_values(
+    fn assert_equal_values(
         &mut self,
         values1: &Vec<IntermediateValue>,
         values2: &Vec<IntermediateValue>,
-    ) -> bool {
-        values1.len() == values2.len()
-            && values1
-                .iter()
-                .zip(values2.iter())
-                .all(|(v1, v2)| self.equal_value(v1, v2))
+    ) {
+        for (v1, v2) in values1.iter().zip_eq(values2.iter()) {
+            self.assert_equal_value(v1, v2)
+        }
     }
-    fn equal_statements(
+    fn assert_equal_statements(
         &mut self,
         statements1: &Vec<IntermediateStatement>,
         statements2: &Vec<IntermediateStatement>,
-    ) -> bool {
-        statements1.len() == statements2.len()
-            && statements1
-                .iter()
-                .zip(statements2.iter())
-                .all(|(s1, s2)| self.equal_statement(s1, s2))
+    ) {
+        for (s1, s2) in statements1.iter().zip_eq(statements2.iter()) {
+            self.assert_equal_statement(s1, s2)
+        }
     }
-    fn equal_statement(&mut self, s1: &IntermediateStatement, s2: &IntermediateStatement) -> bool {
+    fn assert_equal_statement(&mut self, s1: &IntermediateStatement, s2: &IntermediateStatement) {
         match (s1, s2) {
             (
                 IntermediateStatement::IntermediateAssignment(m1),
                 IntermediateStatement::IntermediateAssignment(m2),
-            ) => self.equal_assignment(m1, m2),
+            ) => self.assert_equal_assignment(m1, m2),
             (
                 IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
                     condition: c1,
@@ -597,9 +598,9 @@ impl ExpressionEqualityChecker {
                     branches: b2,
                 }),
             ) => {
-                self.equal_value(c1, c2)
-                    && self.equal_statements(&b1.0, &b2.0)
-                    && self.equal_statements(&b1.1, &b2.1)
+                self.assert_equal_value(c1, c2);
+                self.assert_equal_statements(&b1.0, &b2.0);
+                self.assert_equal_statements(&b1.1, &b2.1)
             }
             (
                 IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
@@ -610,15 +611,18 @@ impl ExpressionEqualityChecker {
                     subject: s2,
                     branches: b2,
                 }),
-            ) => self.equal_value(s1, s2) && self.equal_branches(b1, b2),
-            _ => false,
+            ) => {
+                self.assert_equal_value(s1, s2);
+                self.assert_equal_branches(b1, b2)
+            }
+            _ => assert!(false),
         }
     }
-    fn equal_branch(
+    fn assert_equal_branch(
         &mut self,
         branch1: &IntermediateMatchBranch,
         branch2: &IntermediateMatchBranch,
-    ) -> bool {
+    ) {
         let IntermediateMatchBranch {
             target: t1,
             statements: s1,
@@ -628,21 +632,20 @@ impl ExpressionEqualityChecker {
             statements: s2,
         } = branch2;
         (match (t1, t2) {
-            (None, None) => true,
-            (Some(a1), Some(a2)) => self.equal_arg(a1, a2),
-            _ => false,
-        }) && self.equal_statements(s1, s2)
+            (None, None) => {}
+            (Some(a1), Some(a2)) => self.assert_equal_arg(a1, a2),
+            _ => assert!(false),
+        });
+        self.assert_equal_statements(s1, s2)
     }
-    fn equal_branches(
+    fn assert_equal_branches(
         &mut self,
         branches1: &Vec<IntermediateMatchBranch>,
         branches2: &Vec<IntermediateMatchBranch>,
-    ) -> bool {
-        branches1.len() == branches2.len()
-            && branches1
-                .iter()
-                .zip(branches2.iter())
-                .all(|(b1, e2)| self.equal_branch(b1, e2))
+    ) {
+        for (b1, b2) in branches1.iter().zip_eq(branches2.iter()) {
+            self.assert_equal_branch(b1, b2)
+        }
     }
 }
 

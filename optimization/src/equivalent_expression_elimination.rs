@@ -1419,10 +1419,7 @@ mod tests {
         let optimized_fn =
             allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
         dbg!(&optimized_fn, &expected_fn);
-        assert!(ExpressionEqualityChecker::equal(
-            &optimized_fn,
-            &expected_fn.into()
-        ));
+        ExpressionEqualityChecker::assert_equal(&optimized_fn, &expected_fn.into());
     }
 
     #[test_case(
@@ -1474,9 +1471,9 @@ mod tests {
         dbg!(&optimized_program);
         dbg!(&expected_program);
         assert_eq!(optimized_program.types, expected_program.types);
-        assert!(ExpressionEqualityChecker::equal(
+        ExpressionEqualityChecker::assert_equal(
             &optimized_program.main.into(),
-            &expected_program.main.into()
-        ))
+            &expected_program.main.into(),
+        )
     }
 }

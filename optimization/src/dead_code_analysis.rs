@@ -2444,9 +2444,9 @@ mod tests {
         dbg!(&optimized_program);
         dbg!(&expected_program);
         assert_eq!(optimized_program.types, expected_program.types);
-        assert!(ExpressionEqualityChecker::equal(
+        ExpressionEqualityChecker::assert_equal(
             &optimized_program.main.into(),
-            &expected_program.main.into()
-        ))
+            &expected_program.main.into(),
+        )
     }
 }
