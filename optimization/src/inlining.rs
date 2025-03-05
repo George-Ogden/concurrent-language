@@ -60,6 +60,7 @@ impl Inliner {
         match expression {
             IntermediateExpression::IntermediateLambda(lambda) => {
                 fn_defs.insert(location.clone(), lambda.clone().into());
+                Self::collect_fn_defs_from_statements(&lambda.statements, fn_defs);
             }
             IntermediateExpression::IntermediateValue(IntermediateValue::IntermediateBuiltIn(
                 IntermediateBuiltIn::BuiltInFn(fn_),
@@ -493,6 +494,57 @@ mod tests {
             )
         };
         "match statement with pre-definition"
+    )]
+    #[test_case(
+        {
+            let internal_location = Location::new();
+            let external_location = Location::new();
+            let ret_loc = Location::new();
+            let internal_lambda = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            };
+            let external_lambda = IntermediateLambda {
+                args: Vec::new(),
+                statements: vec![
+                    IntermediateAssignment {
+                        location: internal_location.clone(),
+                        expression: internal_lambda.clone().into()
+                    }.into(),
+                    IntermediateAssignment {
+                        location: ret_loc.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: IntermediateMemory {
+                                location: internal_location.clone(),
+                                type_: IntermediateFnType(
+                                    Vec::new(),
+                                    Box::new(AtomicTypeEnum::INT.into())
+                                ).into()
+                            }.into(),
+                            args: Vec::new()
+                        }.into()
+                    }.into(),
+                ],
+                ret: IntermediateMemory {
+                    location: ret_loc,
+                    type_: AtomicTypeEnum::INT.into()
+                }.into()
+            };
+            (
+                vec![
+                    IntermediateAssignment {
+                        location: external_location.clone(),
+                        expression: external_lambda.clone().into()
+                    }.into(),
+                ],
+                FnDefs::from([
+                    (internal_location, internal_lambda.into()),
+                    (external_location, external_lambda.into()),
+                ])
+            )
+        };
+        "nested lambda defs"
     )]
     fn test_collect_fn_defs(statements_fns: (Vec<IntermediateStatement>, FnDefs)) {
         let (statements, expected_fn_defs) = statements_fns;
