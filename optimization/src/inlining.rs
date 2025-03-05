@@ -6,7 +6,7 @@ use lowering::{
     IntermediateLambda, IntermediateMatchStatement, IntermediateMemory, IntermediateStatement,
     IntermediateTupleExpression, IntermediateValue, Location,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::identity};
 
 #[derive(Debug, PartialEq, Clone)]
 enum FnInst {
@@ -153,11 +153,15 @@ impl Refresher {
     }
 }
 
-struct Inliner {}
+struct Inliner {
+    fn_defs: FnDefs,
+}
 
 impl Inliner {
     fn new() -> Self {
-        Inliner {}
+        Inliner {
+            fn_defs: FnDefs::new(),
+        }
     }
 
     fn collect_fn_defs_from_statement(statement: &IntermediateStatement, fn_defs: &mut FnDefs) {
@@ -283,6 +287,112 @@ impl Inliner {
         let mut statements = assignments;
         statements.extend(lambda.statements);
         (statements, lambda.ret)
+    }
+
+    fn inline_iteration(lambda: IntermediateLambda) -> (IntermediateLambda, bool) {
+        let IntermediateLambda {
+            args,
+            statements,
+            ret,
+        } = lambda;
+        let inliner = Inliner::from(&statements);
+        let (statements, should_continue) = inliner.inline_statements(statements);
+        (
+            IntermediateLambda {
+                args,
+                statements,
+                ret,
+            },
+            should_continue,
+        )
+    }
+    fn inline_statements(
+        &self,
+        statements: Vec<IntermediateStatement>,
+    ) -> (Vec<IntermediateStatement>, bool) {
+        let (statements, continues): (Vec<_>, Vec<_>) = statements
+            .into_iter()
+            .map(|statement| self.inline_statement(statement))
+            .unzip();
+        (statements.concat(), continues.into_iter().any(identity))
+    }
+    fn inline_statement(
+        &self,
+        statement: IntermediateStatement,
+    ) -> (Vec<IntermediateStatement>, bool) {
+        match statement {
+            IntermediateStatement::IntermediateAssignment(assignment) => {
+                self.inline_assignment(assignment)
+            }
+            IntermediateStatement::IntermediateIfStatement(if_statement) => todo!(),
+            IntermediateStatement::IntermediateMatchStatement(match_statement) => todo!(),
+        }
+    }
+    fn inline_assignment(
+        &self,
+        IntermediateAssignment {
+            expression,
+            location,
+        }: IntermediateAssignment,
+    ) -> (Vec<IntermediateStatement>, bool) {
+        let mut should_continue = false;
+        let mut statements = Vec::new();
+        let expression = match expression {
+            IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
+                fn_: IntermediateValue::IntermediateMemory(IntermediateMemory { type_, location }),
+                args,
+            }) if self.fn_defs.contains_key(&location) => {
+                let mut fn_def = &self.fn_defs[&location];
+                while let FnInst::Ref(reference) = fn_def {
+                    fn_def = &self.fn_defs[&reference]
+                }
+                match fn_def {
+                    FnInst::Lambda(lambda) => {
+                        let (extra_statements, value) = self.inline(lambda.clone(), args);
+                        statements = extra_statements;
+                        should_continue = true;
+                        value.into()
+                    }
+                    FnInst::BuiltIn(built_in_fn) => IntermediateFnCall {
+                        fn_: built_in_fn.clone().into(),
+                        args,
+                    }
+                    .into(),
+                    FnInst::Ref(location) => panic!("Determined that fn_def was not reference."),
+                }
+            }
+            IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                args,
+                statements,
+                ret,
+            }) => {
+                let (statements, internal_continue) = self.inline_statements(statements);
+                should_continue |= internal_continue;
+                IntermediateLambda {
+                    args,
+                    statements,
+                    ret,
+                }
+                .into()
+            }
+            _ => expression,
+        };
+        statements.push(
+            IntermediateAssignment {
+                expression,
+                location,
+            }
+            .into(),
+        );
+        (statements, should_continue)
+    }
+}
+
+impl From<&Vec<IntermediateStatement>> for Inliner {
+    fn from(statements: &Vec<IntermediateStatement>) -> Self {
+        let mut inliner = Inliner::new();
+        Inliner::collect_fn_defs_from_statements(statements, &mut inliner.fn_defs);
+        inliner
     }
 }
 
@@ -723,7 +833,7 @@ mod tests {
                 Integer{value: 11}.into(),
             )
         );
-        "trivial function"
+        "trivial fn"
     )]
     #[test_case(
         {
@@ -753,7 +863,7 @@ mod tests {
                 )
             )
         };
-        "identity function"
+        "identity fn"
     )]
     #[test_case(
         {
@@ -824,7 +934,7 @@ mod tests {
                 )
             )
         };
-        "plus function"
+        "plus fn"
     )]
     fn test_inline_fn(
         lambda_args_expected: (
@@ -966,5 +1076,123 @@ mod tests {
             panic!()
         };
         assert_ne!(args, &vec![id_arg]);
+    }
+
+    #[test_case(
+        {
+            let fn_ = IntermediateMemory{
+                location: Location::new(),
+                type_: IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()
+            };
+            let ret_location = Location::new();
+            let lambda = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 1}.into()
+            };
+            (
+                vec![
+                    IntermediateAssignment {
+                        location: fn_.location.clone(),
+                        expression: lambda.clone().into()
+                    }.into(),
+                    IntermediateAssignment {
+                        location: ret_location.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: fn_.clone().into(),
+                            args: Vec::new()
+                        }.into()
+                    }.into(),
+                ],
+                vec![
+                    IntermediateAssignment {
+                        location: fn_.location.clone(),
+                        expression: lambda.clone().into()
+                    }.into(),
+                    IntermediateAssignment {
+                        location: Location::new(),
+                        expression: IntermediateValue::from(Integer{value: 1}).into()
+                    }.into(),
+                ]
+            )
+        },
+        true;
+        "trivial fn"
+    )]
+    #[test_case(
+        {
+            let fn_ = IntermediateMemory{
+                location: Location::new(),
+                type_: IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()
+            };
+            let ret_location = Location::new();
+            let op = IntermediateValue::from(BuiltInFn(
+                Id::from("++"),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                )
+            ));
+            (
+                vec![
+                    IntermediateAssignment {
+                        location: fn_.location.clone(),
+                        expression: op.clone().into()
+                    }.into(),
+                    IntermediateAssignment {
+                        location: ret_location.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: fn_.clone().into(),
+                            args: vec![Integer{value: 3}.into()]
+                        }.into()
+                    }.into(),
+                ],
+                vec![
+                    IntermediateAssignment {
+                        location: fn_.location.clone(),
+                        expression: op.clone().into()
+                    }.into(),
+                    IntermediateAssignment {
+                        location: ret_location.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: op.clone(),
+                            args: vec![Integer{value: 3}.into()]
+                        }.into()
+                    }.into(),
+                ]
+            )
+        },
+        false;
+        "built-in fn"
+    )]
+    fn test_inlining(
+        statements_expected: (Vec<IntermediateStatement>, Vec<IntermediateStatement>),
+        expect_continue: bool,
+    ) {
+        let (statements, expected) = statements_expected;
+        let lambda = IntermediateLambda {
+            args: Vec::new(),
+            ret: Integer { value: 0 }.into(),
+            statements,
+        };
+        let (optimized, should_continue) = Inliner::inline_iteration(lambda);
+        assert_eq!(expect_continue, should_continue);
+
+        let expected = IntermediateLambda {
+            args: Vec::new(),
+            ret: Integer { value: 0 }.into(),
+            statements: expected,
+        };
+        dbg!(&expected, &optimized);
+        assert!(ExpressionEqualityChecker::equal(
+            &optimized.into(),
+            &expected.into()
+        ))
     }
 }
