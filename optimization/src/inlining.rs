@@ -1,6 +1,9 @@
+use counter::Counter;
+use itertools::Itertools;
 use lowering::{
     BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateLambda, IntermediateMemory, IntermediateStatement, IntermediateValue, Location,
+    IntermediateIfStatement, IntermediateLambda, IntermediateStatement, IntermediateValue,
+    Location,
 };
 use std::collections::HashMap;
 
@@ -29,44 +32,82 @@ impl From<Location> for FnInst {
     }
 }
 
+type FnDefs = HashMap<Location, FnInst>;
+
 struct Inliner {}
 
 impl Inliner {
-    fn collect_fn_defs_from_statement(
-        statement: &IntermediateStatement,
-        fn_defs: &mut HashMap<Location, FnInst>,
-    ) {
+    fn collect_fn_defs_from_statement(statement: &IntermediateStatement, fn_defs: &mut FnDefs) {
         match statement {
-            IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-                expression,
-                location,
-            }) => match expression {
-                IntermediateExpression::IntermediateLambda(lambda) => {
-                    fn_defs.insert(location.clone(), lambda.clone().into());
-                }
-                IntermediateExpression::IntermediateValue(
-                    IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(fn_)),
-                ) => {
-                    fn_defs.insert(location.clone(), fn_.clone().into());
-                }
-                IntermediateExpression::IntermediateValue(
-                    IntermediateValue::IntermediateMemory(memory),
-                ) if fn_defs.contains_key(&memory.location) => {
-                    fn_defs.insert(location.clone(), memory.location.clone().into());
-                }
-                _ => {}
-            },
-            IntermediateStatement::IntermediateIfStatement(_) => todo!(),
+            IntermediateStatement::IntermediateAssignment(assignment) => {
+                Self::collect_fns_defs_from_assignment(assignment, fn_defs)
+            }
+            IntermediateStatement::IntermediateIfStatement(if_statement) => {
+                Self::collect_fn_defs_from_if_statement(if_statement, fn_defs)
+            }
             IntermediateStatement::IntermediateMatchStatement(_) => todo!(),
         }
     }
+    fn collect_fns_defs_from_assignment(
+        IntermediateAssignment {
+            expression,
+            location,
+        }: &IntermediateAssignment,
+        fn_defs: &mut FnDefs,
+    ) {
+        match expression {
+            IntermediateExpression::IntermediateLambda(lambda) => {
+                fn_defs.insert(location.clone(), lambda.clone().into());
+            }
+            IntermediateExpression::IntermediateValue(IntermediateValue::IntermediateBuiltIn(
+                IntermediateBuiltIn::BuiltInFn(fn_),
+            )) => {
+                fn_defs.insert(location.clone(), fn_.clone().into());
+            }
+            IntermediateExpression::IntermediateValue(IntermediateValue::IntermediateMemory(
+                memory,
+            )) if fn_defs.contains_key(&memory.location) => {
+                fn_defs.insert(location.clone(), memory.location.clone().into());
+            }
+            _ => {}
+        }
+    }
+    fn collect_fn_defs_from_if_statement(
+        IntermediateIfStatement {
+            condition: _,
+            branches,
+        }: &IntermediateIfStatement,
+        fn_defs: &mut FnDefs,
+    ) {
+        let mut branch_fn_defs = (fn_defs.clone(), fn_defs.clone());
+        Self::collect_fn_defs_from_statements(&branches.0, &mut branch_fn_defs.0);
+        Self::collect_fn_defs_from_statements(&branches.1, &mut branch_fn_defs.1);
+        fn_defs.extend(Self::merge_fn_defs(vec![
+            branch_fn_defs.0,
+            branch_fn_defs.1,
+        ]))
+    }
     fn collect_fn_defs_from_statements(
         statements: &Vec<IntermediateStatement>,
-        fn_defs: &mut HashMap<Location, FnInst>,
+        fn_defs: &mut FnDefs,
     ) {
         for statement in statements {
             Self::collect_fn_defs_from_statement(statement, fn_defs);
         }
+    }
+    fn merge_fn_defs(fn_defs: Vec<FnDefs>) -> FnDefs {
+        let counter = fn_defs
+            .iter()
+            .flat_map(HashMap::keys)
+            .collect::<Counter<_>>();
+        let keys = counter
+            .into_iter()
+            .filter_map(|(key, count)| if count == 1 { Some(key.clone()) } else { None })
+            .collect_vec();
+        let combined = fn_defs.into_iter().flatten().collect::<HashMap<_, _>>();
+        keys.into_iter()
+            .map(|k| (k.clone(), combined[&k].clone()))
+            .collect()
     }
 }
 
@@ -76,7 +117,8 @@ mod tests {
     use super::*;
     use lowering::{
         AtomicTypeEnum, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
-        IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType, IntermediateValue, Location,
+        IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType, IntermediateIfStatement,
+        IntermediateMemory, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -101,7 +143,7 @@ mod tests {
                         }.into()
                     }.into()
                 ],
-                HashMap::new()
+                FnDefs::new()
             )
         };
         "no lambda defs"
@@ -121,7 +163,7 @@ mod tests {
                         expression: lambda.clone().into()
                     }.into()
                 ],
-                HashMap::from([
+                FnDefs::from([
                     (location, lambda.into())
                 ])
             )
@@ -157,7 +199,7 @@ mod tests {
                         expression: lambda_b.clone().into()
                     }.into(),
                 ],
-                HashMap::from([
+                FnDefs::from([
                     (location_a, lambda_a.into()),
                     (location_b, lambda_b.into()),
                 ])
@@ -182,7 +224,7 @@ mod tests {
                         expression: IntermediateValue::from(fn_.clone()).into()
                     }.into()
                 ],
-                HashMap::from([
+                FnDefs::from([
                     (location, fn_.into())
                 ])
             )
@@ -215,7 +257,7 @@ mod tests {
                         expression: IntermediateValue::from(memory.clone()).into()
                     }.into()
                 ],
-                HashMap::from([
+                FnDefs::from([
                     (memory.location.clone(), lambda.into()),
                     (location, memory.location.into()),
                 ])
@@ -223,11 +265,95 @@ mod tests {
         };
         "reassignment"
     )]
-    fn test_collect_fn_defs(
-        statements_fns: (Vec<IntermediateStatement>, HashMap<Location, FnInst>),
-    ) {
+    #[test_case(
+        {
+            let location_0 = Location::new();
+            let location_1 = Location::new();
+            let lambda_0 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            };
+            let lambda_1 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 13}.into()
+            };
+            (
+                vec![
+                    IntermediateIfStatement {
+                        condition: IntermediateArg{
+                            location: Location::new(),
+                            type_: AtomicTypeEnum::BOOL.into()
+                        }.into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment {
+                                    location: location_0.clone(),
+                                    expression: lambda_0.clone().into()
+                                }.into()
+                            ],
+                            vec![
+                                IntermediateAssignment {
+                                    location: location_1.clone(),
+                                    expression: lambda_1.clone().into()
+                                }.into()
+                            ]
+                        )
+                    }.into(),
+                ],
+                FnDefs::from([
+                    (location_0, lambda_0.into()),
+                    (location_1, lambda_1.into()),
+                ])
+            )
+        };
+        "if statement single appearances"
+    )]
+    #[test_case(
+        {
+            let location = Location::new();
+            let lambda_0 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 11}.into()
+            };
+            let lambda_1 = IntermediateLambda {
+                args: Vec::new(),
+                statements: Vec::new(),
+                ret: Integer{value: 13}.into()
+            };
+            (
+                vec![
+                    IntermediateIfStatement {
+                        condition: IntermediateArg{
+                            location: Location::new(),
+                            type_: AtomicTypeEnum::BOOL.into()
+                        }.into(),
+                        branches: (
+                            vec![
+                                IntermediateAssignment {
+                                    location: location.clone(),
+                                    expression: lambda_0.clone().into()
+                                }.into()
+                            ],
+                            vec![
+                                IntermediateAssignment {
+                                    location: location.clone(),
+                                    expression: lambda_1.clone().into()
+                                }.into()
+                            ]
+                        )
+                    }.into(),
+                ],
+                FnDefs::new()
+            )
+        };
+        "if statement double appearance"
+    )]
+    fn test_collect_fn_defs(statements_fns: (Vec<IntermediateStatement>, FnDefs)) {
         let (statements, expected_fn_defs) = statements_fns;
-        let mut fn_defs = HashMap::new();
+        let mut fn_defs = FnDefs::new();
         Inliner::collect_fn_defs_from_statements(&statements, &mut fn_defs);
         assert_eq!(fn_defs, expected_fn_defs)
     }
