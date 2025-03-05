@@ -1,22 +1,29 @@
+use itertools::Either::{self, Left, Right};
 use lowering::{
-    IntermediateAssignment, IntermediateLambda, IntermediateMemory, IntermediateStatement, Location,
+    BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
+    IntermediateLambda, IntermediateMemory, IntermediateStatement, IntermediateValue, Location,
 };
 use std::collections::HashMap;
+
+type FnInst = Either<IntermediateLambda, BuiltInFn>;
 
 struct Inliner {}
 
 impl Inliner {
     fn collect_fn_defs_from_statement(
         statement: &IntermediateStatement,
-    ) -> HashMap<Location, IntermediateLambda> {
+    ) -> HashMap<Location, FnInst> {
         match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location,
             }) => match expression {
-                lowering::IntermediateExpression::IntermediateLambda(lambda) => {
-                    HashMap::from([(location.clone(), lambda.clone())])
+                IntermediateExpression::IntermediateLambda(lambda) => {
+                    HashMap::from([(location.clone(), Left(lambda.clone()))])
                 }
+                IntermediateExpression::IntermediateValue(
+                    IntermediateValue::IntermediateBuiltIn(IntermediateBuiltIn::BuiltInFn(fn_)),
+                ) => HashMap::from([(location.clone(), Right(fn_.clone()))]),
                 _ => HashMap::new(),
             },
             IntermediateStatement::IntermediateIfStatement(_) => todo!(),
@@ -25,7 +32,7 @@ impl Inliner {
     }
     fn collect_fn_defs_from_statements(
         statements: &Vec<IntermediateStatement>,
-    ) -> HashMap<Location, IntermediateLambda> {
+    ) -> HashMap<Location, FnInst> {
         statements
             .iter()
             .flat_map(Self::collect_fn_defs_from_statement)
@@ -39,7 +46,7 @@ mod tests {
     use super::*;
     use lowering::{
         AtomicTypeEnum, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
-        IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType, Location,
+        IntermediateBuiltIn, IntermediateFnCall, IntermediateFnType, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -85,7 +92,7 @@ mod tests {
                     }.into()
                 ],
                 HashMap::from([
-                    (location, lambda)
+                    (location, Left(lambda))
                 ])
             )
         };
@@ -121,18 +128,39 @@ mod tests {
                     }.into(),
                 ],
                 HashMap::from([
-                    (location_a, lambda_a),
-                    (location_b, lambda_b),
+                    (location_a, Left(lambda_a)),
+                    (location_b, Left(lambda_b)),
                 ])
             )
         };
         "multiple lambda defs"
     )]
+    #[test_case(
+        {
+            let location = Location::new();
+            let fn_ = BuiltInFn(
+                Id::from("<=>"),
+                IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into())
+                )
+            );
+            (
+                vec![
+                    IntermediateAssignment {
+                        location: location.clone(),
+                        expression: IntermediateValue::from(fn_.clone()).into()
+                    }.into()
+                ],
+                HashMap::from([
+                    (location, Right(fn_))
+                ])
+            )
+        };
+        "built-in fn assignment"
+    )]
     fn test_collect_fn_defs(
-        statements_fns: (
-            Vec<IntermediateStatement>,
-            HashMap<Location, IntermediateLambda>,
-        ),
+        statements_fns: (Vec<IntermediateStatement>, HashMap<Location, FnInst>),
     ) {
         let (statements, expected_fn_defs) = statements_fns;
         let fn_defs = Inliner::collect_fn_defs_from_statements(&statements);
