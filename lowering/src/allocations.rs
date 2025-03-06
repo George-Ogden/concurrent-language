@@ -58,7 +58,9 @@ impl AllocationOptimizer {
                     }
                     if branches.len() == 1 {
                         let statements = branches[0].statements.clone();
-                        self.register_memory(&vec![statements[statements.len() - 1].clone()])
+                        if statements.len() > 0 {
+                            self.register_memory(&vec![statements[statements.len() - 1].clone()])
+                        }
                     }
                 }
             }
