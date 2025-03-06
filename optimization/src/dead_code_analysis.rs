@@ -287,7 +287,7 @@ impl DeadCodeAnalyzer {
                                     .collect_vec();
                                 let fn_mem = IntermediateMemory::from(IntermediateType::from(
                                     IntermediateLambda {
-                                        args,
+                                        args: used_args.clone(),
                                         statements: statements.clone(),
                                         ret: ret.clone(),
                                     }
@@ -2438,11 +2438,113 @@ mod tests {
         };
         "unused shared arguments"
     )]
+    #[test_case(
+        {
+            let main = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let main_opt = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let main_call = IntermediateMemory::from(
+                IntermediateType::from(AtomicTypeEnum::INT)
+            );
+            let arg = IntermediateArg::from(
+                IntermediateType::from(AtomicTypeEnum::INT)
+            );
+            let last_call = IntermediateMemory::from(
+                IntermediateType::from(AtomicTypeEnum::INT)
+            );
+            (
+                IntermediateProgram{
+                    main: IntermediateLambda{
+                        args: vec![arg.clone().into()],
+                        ret: last_call.clone().into(),
+                        statements: vec![
+                            IntermediateAssignment{
+                                location: main.location.clone(),
+                                expression:
+                                    IntermediateLambda{
+                                        args: vec![
+                                            IntermediateArg::from(
+                                                IntermediateType::from(AtomicTypeEnum::INT)
+                                            )
+                                        ],
+                                        statements: Vec::new(),
+                                        ret: Integer{value: 0}.into()
+                                    }.into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: last_call.location.clone(),
+                                expression: IntermediateFnCall{
+                                    fn_: main.clone().into(),
+                                    args: vec![arg.clone().into()]
+                                }.into()
+                            }.into(),
+                        ],
+                    },
+                    types: Vec::new()
+                },
+                IntermediateProgram{
+                    main: IntermediateLambda{
+                        args: vec![arg.clone().into()],
+                        ret: last_call.clone().into(),
+                        statements: vec![
+                            IntermediateAssignment{
+                                location: main_opt.location.clone(),
+                                expression:
+                                    IntermediateLambda{
+                                        args: Vec::new(),
+                                        statements: Vec::new(),
+                                        ret: Integer{value: 0}.into()
+                                    }.into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: main.location.clone(),
+                                expression:
+                                    IntermediateLambda{
+                                        args: vec![
+                                            IntermediateArg::from(
+                                                IntermediateType::from(AtomicTypeEnum::INT)
+                                            )
+                                        ],
+                                        statements: vec![
+                                            IntermediateAssignment{
+                                                location: main_call.location.clone(),
+                                                expression: IntermediateFnCall{
+                                                    fn_: main_opt.clone().into(),
+                                                    args: Vec::new()
+                                                }.into()
+                                            }.into(),
+                                        ],
+                                        ret: main_call.clone().into()
+                                    }.into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: last_call.location.clone(),
+                                expression: IntermediateFnCall{
+                                    fn_: main_opt.clone().into(),
+                                    args: Vec::new()
+                                }.into()
+                            }.into(),
+                        ],
+                    },
+                    types: Vec::new(),
+                },
+            )
+        };
+        "unused main arg"
+    )]
     fn test_remove_program_dead_code(program_expected: (IntermediateProgram, IntermediateProgram)) {
         let (program, expected_program) = program_expected;
         let optimized_program = DeadCodeAnalyzer::remove_dead_code(program);
-        dbg!(&optimized_program);
-        dbg!(&expected_program);
+        dbg!(&expected_program, &optimized_program);
         assert_eq!(optimized_program.types, expected_program.types);
         ExpressionEqualityChecker::assert_equal(
             &optimized_program.main.into(),
