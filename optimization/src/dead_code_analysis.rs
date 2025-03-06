@@ -6,7 +6,7 @@ use std::{
 use itertools::{zip_eq, Itertools};
 use lowering::{
     IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
-    IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
+    IntermediateFnType, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
     IntermediateMatchStatement, IntermediateMemory, IntermediateProgram, IntermediateStatement,
     IntermediateTupleExpression, IntermediateType, IntermediateValue, Location,
 };
@@ -378,12 +378,25 @@ impl DeadCodeAnalyzer {
                             }) if self.fn_updates.contains_key(&memory.location)
                                 && !self.fn_updates.values().contains(&location) =>
                             {
+                                let IntermediateType::IntermediateFnType(IntermediateFnType(
+                                    arg_types,
+                                    ret_type,
+                                )) = memory.type_
+                                else {
+                                    panic!("Calling non-fn")
+                                };
+                                let args = self.filter_args(&memory.location, args);
+                                let type_ = IntermediateFnType(
+                                    args.iter().map(|arg| arg.type_()).collect(),
+                                    ret_type.clone(),
+                                )
+                                .into();
                                 Some(
                                     IntermediateAssignment {
                                         expression: IntermediateFnCall {
-                                            args: self.filter_args(&memory.location, args),
+                                            args,
                                             fn_: IntermediateMemory {
-                                                type_: memory.type_,
+                                                type_,
                                                 location: self.fn_updates[&memory.location].clone(),
                                             }
                                             .into(),
