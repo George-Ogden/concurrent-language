@@ -36,7 +36,8 @@ $(LAST_FILE):
 run: build
 	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend run --quiet
 
-build: $(BACKEND)
+build: $(TARGET)
+	make -C backend build
 
 $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
 	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) $(FRONTEND_FLAGS) > $(TARGET)
