@@ -7,6 +7,8 @@ use lowering::{
     IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
 };
 
+use crate::refresher::Refresher;
+
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
 type Definitions = HashMap<Location, IntermediateExpression>;
 type NormalizedLocations = HashMap<Location, Location>;
@@ -493,7 +495,10 @@ impl EquivalentExpressionEliminator {
                 }
             }
         }
-        return new_statements;
+        let mut refresher = Refresher::new();
+        refresher.register_statements(&new_statements);
+        refresher.refresh_statements(&mut new_statements, true);
+        new_statements
     }
     fn strongly_process_location(
         &self,
@@ -651,11 +656,11 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AllocationOptimizer, AtomicTypeEnum, ExpressionEqualityChecker, Integer, IntermediateArg,
-        IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess, IntermediateFnCall,
-        IntermediateFnType, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
-        IntermediateMatchStatement, IntermediateMemory, IntermediateProgram,
-        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        AllocationOptimizer, AtomicTypeEnum, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
+        IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess,
+        IntermediateFnCall, IntermediateFnType, IntermediateIfStatement, IntermediateLambda,
+        IntermediateMatchBranch, IntermediateMatchStatement, IntermediateMemory,
+        IntermediateProgram, IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
         IntermediateUnionType, IntermediateValue, Location,
     };
     use test_case::test_case;
@@ -1420,6 +1425,168 @@ mod tests {
             allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
         dbg!(&optimized_fn, &expected_fn);
         ExpressionEqualityChecker::assert_equal(&optimized_fn, &expected_fn.into());
+    }
+
+    #[test]
+    fn test_refresh_lambdas() {
+        let arg = IntermediateArg {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let id = IntermediateLambda {
+            args: vec![arg.clone()],
+            statements: Vec::new(),
+            ret: arg.clone().into(),
+        };
+        let id_loc = IntermediateMemory {
+            type_: IntermediateFnType(
+                vec![AtomicTypeEnum::INT.into()],
+                Box::new(AtomicTypeEnum::INT.into()),
+            )
+            .into(),
+            location: Location::new(),
+        };
+        let target = IntermediateMemory {
+            type_: AtomicTypeEnum::INT.into(),
+            location: Location::new(),
+        };
+        let statements = vec![
+            IntermediateAssignment {
+                location: id_loc.location.clone(),
+                expression: id.clone().into(),
+            }
+            .into(),
+            IntermediateIfStatement {
+                condition: IntermediateArg {
+                    location: Location::new(),
+                    type_: AtomicTypeEnum::BOOL.into(),
+                }
+                .into(),
+                branches: (
+                    vec![IntermediateIfStatement {
+                        condition: IntermediateArg {
+                            location: Location::new(),
+                            type_: AtomicTypeEnum::BOOL.into(),
+                        }
+                        .into(),
+                        branches: (
+                            vec![IntermediateAssignment {
+                                expression: IntermediateFnCall {
+                                    fn_: BuiltInFn(
+                                        Id::from("++"),
+                                        IntermediateFnType(
+                                            vec![AtomicTypeEnum::INT.into()],
+                                            Box::new(AtomicTypeEnum::INT.into()),
+                                        )
+                                        .into(),
+                                    )
+                                    .into(),
+                                    args: vec![Integer { value: 1 }.into()],
+                                }
+                                .into(),
+                                location: target.location.clone(),
+                            }
+                            .into()],
+                            vec![IntermediateAssignment {
+                                expression: IntermediateFnCall {
+                                    fn_: id_loc.clone().into(),
+                                    args: vec![Integer { value: 2 }.into()],
+                                }
+                                .into(),
+                                location: target.location.clone(),
+                            }
+                            .into()],
+                        ),
+                    }
+                    .into()],
+                    vec![IntermediateIfStatement {
+                        condition: IntermediateArg {
+                            location: Location::new(),
+                            type_: AtomicTypeEnum::BOOL.into(),
+                        }
+                        .into(),
+                        branches: (
+                            vec![IntermediateAssignment {
+                                expression: IntermediateFnCall {
+                                    fn_: BuiltInFn(
+                                        Id::from("--"),
+                                        IntermediateFnType(
+                                            vec![AtomicTypeEnum::INT.into()],
+                                            Box::new(AtomicTypeEnum::INT.into()),
+                                        )
+                                        .into(),
+                                    )
+                                    .into(),
+                                    args: vec![Integer { value: 3 }.into()],
+                                }
+                                .into(),
+                                location: target.location.clone(),
+                            }
+                            .into()],
+                            vec![IntermediateAssignment {
+                                expression: IntermediateFnCall {
+                                    fn_: id_loc.clone().into(),
+                                    args: vec![Integer { value: 4 }.into()],
+                                }
+                                .into(),
+                                location: target.location.clone(),
+                            }
+                            .into()],
+                        ),
+                    }
+                    .into()],
+                ),
+            }
+            .into(),
+        ];
+        let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
+        let optimized_lambda =
+            equivalent_expression_eliminator.eliminate_from_lambda(IntermediateLambda {
+                args: Vec::new(),
+                statements,
+                ret: target.clone().into(),
+            });
+        let optimized_statements = optimized_lambda.statements;
+        assert_eq!(optimized_statements.len(), 1);
+        let IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+            condition: _,
+            branches,
+        }) = optimized_statements[0].clone()
+        else {
+            panic!()
+        };
+        assert_eq!(branches.0.len(), 1);
+        assert_eq!(branches.1.len(), 1);
+        let IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+            condition: _,
+            branches: true_branches,
+        }) = branches.0[0].clone()
+        else {
+            panic!()
+        };
+        let IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+            condition: _,
+            branches: false_branches,
+        }) = branches.1[0].clone()
+        else {
+            panic!()
+        };
+        let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+            expression: IntermediateExpression::IntermediateLambda(lambda_0),
+            location: location_0,
+        }) = true_branches.1[0].clone()
+        else {
+            panic!()
+        };
+        let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+            expression: IntermediateExpression::IntermediateLambda(lambda_1),
+            location: location_1,
+        }) = false_branches.1[0].clone()
+        else {
+            panic!()
+        };
+        assert_ne!(location_0, location_1);
+        assert_ne!(lambda_0.args, lambda_1.args);
     }
 
     #[test_case(
