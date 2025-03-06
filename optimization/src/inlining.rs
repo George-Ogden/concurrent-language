@@ -139,10 +139,10 @@ impl Inliner {
             .collect_vec();
         if branches.len() == 1 {
             let statements = &branches[0].statements.clone();
-            if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
+            if let Some(IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression: _,
                 location,
-            }) = &statements[statements.len() - 1]
+            })) = &statements.get(statements.len() - 1)
             {
                 branch_fn_defs[0].remove(location);
             }
@@ -178,22 +178,13 @@ impl Inliner {
         args: Vec<IntermediateValue>,
     ) -> (Vec<IntermediateStatement>, IntermediateValue) {
         Refresher::refresh(&mut lambda);
-        let mut updated_locations = lambda
-            .args
-            .iter()
-            .map(|arg| (arg.location.clone(), Location::new()))
-            .collect::<HashMap<_, _>>();
-        for target in IntermediateStatement::all_targets(&lambda.statements) {
-            updated_locations.insert(target, Location::new());
-        }
-        lambda.substitute(&updated_locations);
         let assignments = lambda
             .args
             .iter()
             .zip_eq(args.into_iter())
             .map(|(arg, v)| {
                 IntermediateAssignment {
-                    location: updated_locations[&arg.location].clone(),
+                    location: arg.location.clone(),
                     expression: v.into(),
                 }
                 .into()
