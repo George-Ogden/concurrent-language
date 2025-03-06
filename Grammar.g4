@@ -33,7 +33,7 @@ ID: [a-zA-Z_][a-zA-Z0-9_]* '\''* ;
 UINT: '0' | [1-9][0-9]* ;
 WS: [ \t\n\r\f]+;
 
-program : definitions WS* EOF ;
+program : WS* definitions WS* EOF ;
 
 definitions : | definition WS* (';' WS* definition WS*)* ';' ?;
 
