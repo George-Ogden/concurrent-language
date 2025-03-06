@@ -274,7 +274,7 @@ impl From<IntermediateValue> for IntermediateAssignment {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, FromVariants, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, FromVariants, Hash)]
 pub enum IntermediateExpression {
     IntermediateValue(IntermediateValue),
     IntermediateElementAccess(IntermediateElementAccess),
@@ -282,6 +282,19 @@ pub enum IntermediateExpression {
     IntermediateFnCall(IntermediateFnCall),
     IntermediateCtorCall(IntermediateCtorCall),
     IntermediateLambda(IntermediateLambda),
+}
+
+impl fmt::Debug for IntermediateExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IntermediateValue(value) => write!(f, "{value:?}"),
+            Self::IntermediateElementAccess(element_access) => write!(f, "{element_access:?}"),
+            Self::IntermediateTupleExpression(tuple) => write!(f, "{tuple:?}"),
+            Self::IntermediateFnCall(fn_call) => write!(f, "{fn_call:?}"),
+            Self::IntermediateCtorCall(ctor_call) => write!(f, "{ctor_call:?}"),
+            Self::IntermediateLambda(lambda) => write!(f, "{lambda:?}"),
+        }
+    }
 }
 
 impl IntermediateExpression {
@@ -867,11 +880,21 @@ impl IntermediateLambda {
     }
 }
 
-#[derive(Clone, PartialEq, FromVariants, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, FromVariants, Eq, Hash)]
 pub enum IntermediateStatement {
     IntermediateAssignment(IntermediateAssignment),
     IntermediateIfStatement(IntermediateIfStatement),
     IntermediateMatchStatement(IntermediateMatchStatement),
+}
+
+impl fmt::Debug for IntermediateStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IntermediateAssignment(assignment) => write!(f, "{:?}", assignment),
+            Self::IntermediateIfStatement(if_statement) => write!(f, "{:?}", if_statement),
+            Self::IntermediateMatchStatement(match_statement) => write!(f, "{:?}", match_statement),
+        }
+    }
 }
 
 impl IntermediateStatement {
