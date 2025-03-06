@@ -287,12 +287,12 @@ pub enum IntermediateExpression {
 impl fmt::Debug for IntermediateExpression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::IntermediateValue(value) => write!(f, "{value:?}"),
-            Self::IntermediateElementAccess(element_access) => write!(f, "{element_access:?}"),
-            Self::IntermediateTupleExpression(tuple) => write!(f, "{tuple:?}"),
-            Self::IntermediateFnCall(fn_call) => write!(f, "{fn_call:?}"),
-            Self::IntermediateCtorCall(ctor_call) => write!(f, "{ctor_call:?}"),
-            Self::IntermediateLambda(lambda) => write!(f, "{lambda:?}"),
+            Self::IntermediateValue(value) => value.fmt(f),
+            Self::IntermediateElementAccess(element_access) => element_access.fmt(f),
+            Self::IntermediateTupleExpression(tuple) => tuple.fmt(f),
+            Self::IntermediateFnCall(fn_call) => fn_call.fmt(f),
+            Self::IntermediateCtorCall(ctor_call) => ctor_call.fmt(f),
+            Self::IntermediateLambda(lambda) => lambda.fmt(f),
         }
     }
 }
@@ -890,9 +890,9 @@ pub enum IntermediateStatement {
 impl fmt::Debug for IntermediateStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::IntermediateAssignment(assignment) => write!(f, "{:?}", assignment),
-            Self::IntermediateIfStatement(if_statement) => write!(f, "{:?}", if_statement),
-            Self::IntermediateMatchStatement(match_statement) => write!(f, "{:?}", match_statement),
+            Self::IntermediateAssignment(assignment) => assignment.fmt(f),
+            Self::IntermediateIfStatement(if_statement) => if_statement.fmt(f),
+            Self::IntermediateMatchStatement(match_statement) => match_statement.fmt(f),
         }
     }
 }
