@@ -8,7 +8,9 @@ use lowering::{
 };
 use std::{collections::HashMap, convert::identity};
 
-use crate::{refresher::Refresher, EquivalentExpressionEliminator};
+use crate::{
+    equivalent_expression_elimination::EquivalentExpressionEliminator, refresher::Refresher,
+};
 use compilation::CodeSizeEstimator;
 
 #[derive(Debug, PartialEq, Clone)]
