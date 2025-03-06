@@ -129,12 +129,18 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
 static LOCATION_ID: AtomicUsize = AtomicUsize::new(0);
-#[derive(Clone, PartialEq, Ord, PartialOrd, Hash, Debug, Eq)]
+#[derive(Clone, PartialEq, Ord, PartialOrd, Hash, Eq)]
 pub struct Location(usize);
 
 impl Location {
     pub fn new() -> Self {
         Self(LOCATION_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl fmt::Debug for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -214,7 +220,7 @@ impl From<IntermediateAssignment> for IntermediateValue {
     }
 }
 
-#[derive(Clone, Debug, FromVariants, PartialEq, Eq, Hash)]
+#[derive(Clone, FromVariants, PartialEq, Eq, Hash)]
 pub enum IntermediateBuiltIn {
     Integer(Integer),
     Boolean(Boolean),
@@ -227,6 +233,16 @@ impl IntermediateBuiltIn {
             IntermediateBuiltIn::Integer(_) => AtomicTypeEnum::INT.into(),
             IntermediateBuiltIn::Boolean(_) => AtomicTypeEnum::BOOL.into(),
             IntermediateBuiltIn::BuiltInFn(BuiltInFn(_, type_)) => type_.clone().into(),
+        }
+    }
+}
+
+impl fmt::Debug for IntermediateBuiltIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Integer(Integer { value }) => f.debug_tuple("Integer").field(value).finish(),
+            Self::Boolean(Boolean { value }) => f.debug_tuple("Boolean").field(value).finish(),
+            Self::BuiltInFn(BuiltInFn(name, _)) => f.debug_tuple("BuiltInFn").field(name).finish(),
         }
     }
 }
@@ -660,10 +676,16 @@ pub enum IntermediateValue {
     IntermediateArg(IntermediateArg),
 }
 
-#[derive(Clone, Eq, Debug)]
+#[derive(Clone, Eq)]
 pub struct IntermediateMemory {
     pub type_: IntermediateType,
     pub location: Location,
+}
+
+impl fmt::Debug for IntermediateMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Memory").field(&self.location).finish()
+    }
 }
 
 impl IntermediateMemory {
@@ -693,10 +715,16 @@ impl From<IntermediateType> for IntermediateMemory {
     }
 }
 
-#[derive(Clone, Eq, Debug)]
+#[derive(Clone, Eq)]
 pub struct IntermediateArg {
     pub type_: IntermediateType,
     pub location: Location,
+}
+
+impl fmt::Debug for IntermediateArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Arg").field(&self.location).finish()
+    }
 }
 
 impl IntermediateArg {
