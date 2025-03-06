@@ -379,7 +379,7 @@ impl DeadCodeAnalyzer {
                                 && !self.fn_updates.values().contains(&location) =>
                             {
                                 let IntermediateType::IntermediateFnType(IntermediateFnType(
-                                    arg_types,
+                                    _,
                                     ret_type,
                                 )) = memory.type_
                                 else {
