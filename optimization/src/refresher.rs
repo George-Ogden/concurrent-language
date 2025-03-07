@@ -6,8 +6,9 @@ use lowering::{
 };
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct Refresher {
-    locations: HashMap<Location, Location>,
+    locations: HashMap<Location, IntermediateValue>,
 }
 
 impl Refresher {
@@ -16,56 +17,113 @@ impl Refresher {
             locations: HashMap::new(),
         }
     }
+    pub fn refresh_for_inlining(lambda: &mut IntermediateLambda) {
+        let mut refresher = Refresher::new();
+        for arg in lambda.args.iter_mut() {
+            let IntermediateArg { type_, location } = arg.clone();
+            let memory = IntermediateMemory::from(type_);
+            refresher.locations.insert(location, memory.clone().into());
+            arg.location = memory.location;
+        }
+        refresher.refresh_statements(&mut lambda.statements);
+        refresher.refresh_value(&mut lambda.ret);
+    }
     pub fn refresh(lambda: &mut IntermediateLambda) {
         Refresher::new().refresh_lambda(lambda);
     }
     pub fn register_statements(&mut self, statements: &Vec<IntermediateStatement>) {
-        let targets = IntermediateStatement::all_targets(statements);
+        let targets = statements.iter().filter_map(|statement| {
+            if let IntermediateStatement::IntermediateAssignment(assignment) = statement {
+                Some(assignment.clone())
+            } else {
+                None
+            }
+        });
         for target in targets {
-            self.locations.insert(target, Location::new());
+            self.locations.entry(target.location).or_insert(
+                IntermediateMemory {
+                    location: Location::new(),
+                    type_: target.expression.type_(),
+                }
+                .into(),
+            );
         }
     }
-    fn refresh_lambda(&mut self, lambda: &mut IntermediateLambda) {
-        self.register_statements(&lambda.statements);
+    fn refresh_lambda(mut self, lambda: &mut IntermediateLambda) {
         for arg in &mut lambda.args {
             self.refresh_arg(arg);
         }
         self.refresh_statements(&mut lambda.statements);
         self.refresh_value(&mut lambda.ret);
     }
-    pub fn refresh_statements(&mut self, statements: &mut Vec<IntermediateStatement>) {
-        for statement in statements.iter_mut() {
-            self.refresh_statement(statement);
+    fn refresh_statements(
+        &mut self,
+        statements: &mut Vec<IntermediateStatement>,
+    ) -> Option<(Location, IntermediateValue)> {
+        self.register_statements(statements);
+        let mut it = statements.iter_mut().peekable();
+        while let Some(statement) = it.next() {
+            let last = self.refresh_statement(statement);
+            if it.peek().is_none() {
+                return last;
+            }
         }
+        None
     }
-    fn refresh_statement(&mut self, statement: &mut IntermediateStatement) {
+    fn refresh_branch_statements(
+        &mut self,
+        statements: &mut Vec<IntermediateStatement>,
+    ) -> Option<(Location, IntermediateValue)> {
+        let last = self.clone().refresh_statements(statements);
+        if let Some((k, v)) = last.clone() {
+            self.locations.insert(k, v);
+        }
+        last
+    }
+    fn refresh_statement(
+        &mut self,
+        statement: &mut IntermediateStatement,
+    ) -> Option<(Location, IntermediateValue)> {
         match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
                 location,
             }) => {
-                self.refresh_location(location);
-                self.refresh_expression(expression)
+                self.refresh_expression(expression);
+                if let Some(IntermediateValue::IntermediateMemory(memory)) =
+                    self.refresh_location(location)
+                {
+                    let previous_location = location.clone();
+                    *location = memory.location.clone();
+                    Some((previous_location, memory.into()))
+                } else {
+                    None
+                }
             }
             IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
                 condition,
                 branches,
             }) => {
                 self.refresh_value(condition);
-                self.refresh_statements(&mut branches.0);
-                self.refresh_statements(&mut branches.1);
+                self.refresh_branch_statements(&mut branches.1);
+                self.refresh_branch_statements(&mut branches.0)
             }
             IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
                 subject,
                 branches,
             }) => {
                 self.refresh_value(subject);
-                for branch in branches {
+                let mut it = branches.iter_mut().peekable();
+                while let Some(branch) = it.next() {
                     if let Some(arg) = &mut branch.target {
                         self.refresh_arg(arg);
                     }
-                    self.refresh_statements(&mut branch.statements);
+                    let last = self.refresh_branch_statements(&mut branch.statements);
+                    if it.peek().is_none() {
+                        return last;
+                    }
                 }
+                None
             }
         }
     }
@@ -97,7 +155,9 @@ impl Refresher {
                 None => (),
                 Some(data) => self.refresh_value(data),
             },
-            IntermediateExpression::IntermediateLambda(lambda) => self.refresh_lambda(lambda),
+            IntermediateExpression::IntermediateLambda(lambda) => {
+                self.clone().refresh_lambda(lambda)
+            }
         }
     }
     fn refresh_values(&mut self, values: &mut Vec<IntermediateValue>) {
@@ -108,32 +168,27 @@ impl Refresher {
     fn refresh_value(&mut self, value: &mut IntermediateValue) {
         match value {
             IntermediateValue::IntermediateBuiltIn(_) => {}
-            IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }) => {
-                self.refresh_location(location);
-            }
-            IntermediateValue::IntermediateArg(IntermediateArg { type_, location }) => {
-                if self.refresh_location(location) {
-                    *value = IntermediateMemory {
-                        type_: type_.clone(),
-                        location: location.clone(),
-                    }
-                    .into()
+            IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location })
+            | IntermediateValue::IntermediateArg(IntermediateArg { type_: _, location }) => {
+                if let Some(updated_value) = self.refresh_location(location) {
+                    *value = updated_value;
                 }
             }
         }
     }
-    fn refresh_location(&mut self, location: &mut Location) -> bool {
-        if let Some(updated_location) = self.locations.get(location) {
-            *location = updated_location.clone();
-            true
-        } else {
-            false
-        }
+    fn refresh_location(&mut self, location: &mut Location) -> Option<IntermediateValue> {
+        self.locations.get(location).cloned()
     }
     fn refresh_arg(&mut self, arg: &mut IntermediateArg) {
         let location = Location::new();
-        self.locations
-            .insert(arg.location.clone(), location.clone());
+        self.locations.insert(
+            arg.location.clone(),
+            IntermediateArg {
+                location: location.clone(),
+                type_: arg.type_.clone(),
+            }
+            .into(),
+        );
         arg.location = location;
     }
 }

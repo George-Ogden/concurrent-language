@@ -53,11 +53,13 @@ impl EquivalentExpressionEliminator {
         } else {
             Vec::new()
         };
-        IntermediateLambda {
+        let mut lambda = IntermediateLambda {
             args,
             statements,
             ret,
-        }
+        };
+        Refresher::refresh(&mut lambda);
+        lambda
     }
     fn prepare_history(&mut self, statements: &mut Vec<IntermediateStatement>) {
         for statement in statements {
@@ -261,6 +263,7 @@ impl EquivalentExpressionEliminator {
                     .collect_vec(),
                 defined,
             );
+
             lambda
                 .find_open_vars()
                 .into_iter()
@@ -384,12 +387,12 @@ impl EquivalentExpressionEliminator {
             }
         }
 
-        for statement in statements {
-            let values =
+        for mut statement in statements {
+            let locations =
                 if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-                    expression: IntermediateExpression::IntermediateLambda(lambda),
+                    expression: IntermediateExpression::IntermediateLambda(ref mut lambda),
                     location: _,
-                }) = &statement
+                }) = &mut statement
                 {
                     lambda
                         .find_open_vars()
@@ -403,7 +406,7 @@ impl EquivalentExpressionEliminator {
                         .filter_map(IntermediateValue::filter_memory_location)
                         .collect_vec()
                 };
-            for dependency in values {
+            for dependency in locations {
                 if strongly_required_locations.contains(&dependency) {
                     self.strongly_process_location(
                         dependency,
@@ -495,9 +498,6 @@ impl EquivalentExpressionEliminator {
                 }
             }
         }
-        let mut refresher = Refresher::new();
-        refresher.register_statements(&new_statements);
-        refresher.refresh_statements(&mut new_statements, true);
         new_statements
     }
     fn strongly_process_location(
@@ -517,8 +517,16 @@ impl EquivalentExpressionEliminator {
             return;
         };
 
-        let values = if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression
-        {
+        if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression {
+            for memory in lambda.find_open_vars() {
+                self.strongly_process_location(
+                    memory.location,
+                    defined,
+                    strongly_required_locations,
+                    definitions,
+                    new_statements,
+                );
+            }
             lambda.statements = self.strongly_reorder(
                 lambda.statements.clone(),
                 &lambda
@@ -528,28 +536,21 @@ impl EquivalentExpressionEliminator {
                     .collect_vec(),
                 defined,
             );
-            lambda
-                .find_open_vars()
-                .into_iter()
-                .map(|memory| memory.location)
-                .collect_vec()
         } else {
-            expression
+            for location in expression
                 .values()
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
-                .collect_vec()
+            {
+                self.strongly_process_location(
+                    location,
+                    defined,
+                    strongly_required_locations,
+                    definitions,
+                    new_statements,
+                );
+            }
         };
-
-        for location in values {
-            self.strongly_process_location(
-                location,
-                defined,
-                strongly_required_locations,
-                definitions,
-                new_statements,
-            );
-        }
 
         new_statements.push(
             IntermediateAssignment {
@@ -572,13 +573,22 @@ impl EquivalentExpressionEliminator {
                     location,
                 }) => {
                     if strongly_required_locations.contains(location) {
-                        strongly_required_locations.extend(
+                        let locations = if let IntermediateExpression::IntermediateLambda(lambda) =
+                            expression
+                        {
+                            lambda
+                                .find_open_vars()
+                                .into_iter()
+                                .map(|memory| memory.location)
+                                .collect_vec()
+                        } else {
                             expression
                                 .values()
                                 .iter()
                                 .filter_map(IntermediateValue::filter_memory_location)
-                                .collect_vec(),
-                        );
+                                .collect_vec()
+                        };
+                        strongly_required_locations.extend(locations);
                     }
                 }
                 IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
@@ -1369,6 +1379,101 @@ mod tests {
         };
         "recursive fn"
     )]
+    #[test_case(
+        {
+            let foo = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![x.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: bar_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: bar.clone().into(),
+                                        args: vec![x.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: bar_call.clone().into()
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![y.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: vec![y.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: foo_call.clone().into()
+                        }.into(),
+                        location: bar.location.clone()
+                    }.into(),
+                ],
+                vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![y.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: vec![y.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: foo_call.clone().into()
+                        }.into(),
+                        location: bar.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![x.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: bar_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: bar.clone().into(),
+                                        args: vec![x.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: bar_call.clone().into()
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                ],
+                vec![
+                    foo.location.clone(),
+                    bar.location.clone(),
+                ]
+            )
+        };
+        "mutually recursive fns"
+    )]
     fn test_eliminate(
         statements: (
             Vec<IntermediateStatement>,
@@ -1420,10 +1525,11 @@ mod tests {
                 ret: original_location.clone().into(),
             });
         let allocation_optimizer = AllocationOptimizer::from_statements(&optimized_fn.statements);
-        dbg!(&optimized_fn);
+        eprintln!("optimized: {:?}", &optimized_fn.statements);
         let optimized_fn =
             allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
-        dbg!(&optimized_fn, &expected_fn);
+        eprintln!("expected: {:?}", &expected_fn);
+        eprintln!("optimized: {:?}", &optimized_fn);
         ExpressionEqualityChecker::assert_equal(&optimized_fn, &expected_fn.into());
     }
 

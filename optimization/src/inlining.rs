@@ -9,6 +9,7 @@ use lowering::{
 use std::{collections::HashMap, convert::identity};
 
 use crate::{
+    dead_code_analysis::DeadCodeAnalyzer,
     equivalent_expression_elimination::EquivalentExpressionEliminator, refresher::Refresher,
 };
 use compilation::CodeSizeEstimator;
@@ -58,6 +59,7 @@ impl Inliner {
         while should_continue && i < MAX_INLINING_ITERATIONS {
             (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
             program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+            program = DeadCodeAnalyzer::remove_dead_code(program);
             i += 1;
         }
         program
@@ -177,7 +179,7 @@ impl Inliner {
         mut lambda: IntermediateLambda,
         args: Vec<IntermediateValue>,
     ) -> (Vec<IntermediateStatement>, IntermediateValue) {
-        Refresher::refresh(&mut lambda);
+        Refresher::refresh_for_inlining(&mut lambda);
         let assignments = lambda
             .args
             .iter()
