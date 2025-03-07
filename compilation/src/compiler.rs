@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
-    code_vector::CodeVectorCalculator, weakener::Weakener, AllocationState, Assignment, Await,
-    BuiltIn, ClosureInstantiation, CompilationArgs, ConstructorCall, Declaration, ElementAccess,
-    Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement,
-    Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
+    code_vector::CodeVectorCalculator, weakener::Weakener, Assignment, Await, BuiltIn,
+    ClosureInstantiation, CompilationArgs, ConstructorCall, Declaration, ElementAccess, Expression,
+    FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name,
+    Program, Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -200,20 +200,20 @@ impl Compiler {
     fn compile_expression(
         &mut self,
         expression: IntermediateExpression,
-    ) -> (Vec<Statement>, Expression) {
+    ) -> (Vec<Statement>, Expression, Vec<Declaration>) {
         match expression {
             IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 values,
             )) => {
                 let values = self.compile_values(values);
-                (Vec::new(), TupleExpression(values).into())
+                (Vec::new(), TupleExpression(values).into(), Vec::new())
             }
             IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
                 value,
                 idx,
             }) => {
                 let value = self.compile_value(value);
-                (Vec::new(), ElementAccess { value, idx }.into())
+                (Vec::new(), ElementAccess { value, idx }.into(), Vec::new())
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
                 let MachineType::FnType(fn_type) = self.compile_type(&fn_.type_()) else {
@@ -233,6 +233,7 @@ impl Compiler {
                         args: args_values,
                     }
                     .into(),
+                    Vec::new(),
                 )
             }
             IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
@@ -255,108 +256,77 @@ impl Compiler {
                         }),
                     }
                     .into(),
+                    Vec::new(),
                 )
             }
             IntermediateExpression::IntermediateValue(value) => {
                 let value = self.compile_value(value);
-                (Vec::new(), value.into())
+                (Vec::new(), value.into(), Vec::new())
             }
-            IntermediateExpression::IntermediateLambda(lambda) => {
+            IntermediateExpression::ILambda(lambda) => {
                 let (statements, closure_inst) = self.compile_lambda(lambda);
-                (statements, closure_inst.into())
+                (statements, closure_inst.into(), Vec::new())
+            }
+            IntermediateExpression::IIf(if_) => {
+                let (statements, value, allocations) = self.compile_if(if_);
+                (statements, value.into(), allocations)
+            }
+            IntermediateExpression::IMatch(match_) => {
+                let (statements, value, allocations) = self.compile_match(match_);
+                (statements, value.into(), allocations)
             }
         }
     }
-    fn update_declarations(
-        &mut self,
-        statement: Statement,
-        declarations: &HashMap<Memory, AllocationState>,
-    ) -> Vec<Statement> {
-        match statement {
-            Statement::Await(await_) => vec![await_.into()],
-            Statement::Allocation(allocation) => vec![allocation.into()],
-            Statement::Assignment(assignment) => vec![assignment.into()],
-            Statement::Declaration(Declaration { type_: _, memory })
-                if declarations.contains_key(&memory) =>
-            {
-                Vec::new()
-            }
-            Statement::Declaration(Declaration { type_, memory }) => {
-                vec![Declaration { type_, memory }.into()]
-            }
-            Statement::IfStatement(IfStatement {
-                condition,
-                branches,
-            }) => vec![IfStatement {
-                condition,
-                branches: (
-                    self.update_all_declarations(branches.0, declarations),
-                    self.update_all_declarations(branches.1, declarations),
-                ),
-            }
-            .into()],
-            Statement::MatchStatement(MatchStatement {
-                expression,
-                branches,
-                auxiliary_memory,
-            }) => vec![MatchStatement {
-                expression,
-                branches: branches
-                    .into_iter()
-                    .map(|MatchBranch { target, statements }| MatchBranch {
-                        target,
-                        statements: self.update_all_declarations(statements, declarations),
-                    })
-                    .collect_vec(),
-                auxiliary_memory,
-            }
-            .into()],
-        }
-    }
-    fn update_all_declarations(
-        &mut self,
-        statements: Vec<Statement>,
-        declarations: &HashMap<Memory, AllocationState>,
-    ) -> Vec<Statement> {
-        statements
-            .into_iter()
-            .flat_map(|statement| self.update_declarations(statement, declarations))
-            .collect()
-    }
-    fn compile_if_statement(&mut self, if_statement: IntermediateIfStatement) -> Vec<Statement> {
-        let IntermediateIfStatement {
+    fn compile_if(&mut self, if_: IIf) -> (Vec<Statement>, Value, Vec<Declaration>) {
+        let IIf {
             condition,
-            branches: (true_branch, false_branch),
-        } = if_statement;
+            branches: (true_block, false_block),
+        } = if_;
         let condition = self.compile_value(condition);
         let mut statements = if let Value::Memory(mem) = &condition {
             vec![Await(vec![mem.clone()]).into()]
         } else {
             Vec::new()
         };
-        let true_branch = self.compile_statements(true_branch);
-        let false_branch = self.compile_statements(false_branch);
-        let true_declarations = Statement::declarations(&true_branch);
-        let false_declarations = Statement::declarations(&false_branch);
-        let shared_declarations =
-            Statement::merge_declarations_parallel(true_declarations, false_declarations);
-        let true_branch = self.update_all_declarations(true_branch, &shared_declarations);
-        let false_branch = self.update_all_declarations(false_branch, &shared_declarations);
-        statements.extend(Statement::from_declarations(shared_declarations));
+        let target = IntermediateMemory::from(true_block.type_());
+        let memory = self.compile_memory(&target);
         statements.push(
-            IfStatement {
-                condition,
-                branches: (true_branch, false_branch),
+            Declaration {
+                memory: memory.clone(),
+                type_: self.compile_type(&target.type_()),
             }
             .into(),
         );
-        statements
+        let (mut true_statements, true_value, true_allocations) = self.compile_block(true_block);
+        true_statements.push(
+            Assignment {
+                target: memory.clone(),
+                value: true_value.into(),
+            }
+            .into(),
+        );
+        let (mut false_statements, false_value, false_allocations) =
+            self.compile_block(false_block);
+        false_statements.push(
+            Assignment {
+                target: memory.clone(),
+                value: false_value.into(),
+            }
+            .into(),
+        );
+        statements.push(
+            IfStatement {
+                condition,
+                branches: (true_statements, false_statements),
+            }
+            .into(),
+        );
+        let mut allocations = true_allocations;
+        allocations.extend(false_allocations);
+        (statements, memory.into(), allocations)
     }
-    fn compile_match_statement(
-        &mut self,
-        match_statement: IntermediateMatchStatement,
-    ) -> Vec<Statement> {
-        let IntermediateMatchStatement { subject, branches } = match_statement;
+    fn compile_match(&mut self, match_: IMatch) -> (Vec<Statement>, Value, Vec<Declaration>) {
+        let IMatch { subject, branches } = match_;
         let type_ = subject.type_();
         let MachineType::UnionType(union_type) = self.compile_type(&type_) else {
             panic!("Match expression subject has non-union type.")
@@ -367,38 +337,33 @@ impl Compiler {
         } else {
             Vec::new()
         };
-        let branches = branches
+        let result = IntermediateMemory::from(branches[0].block.type_());
+        let memory = self.compile_memory(&result);
+        statements.push(
+            Declaration {
+                memory: memory.clone(),
+                type_: self.compile_type(&result.type_()),
+            }
+            .into(),
+        );
+        let (branches, allocations): (Vec<_>, Vec<_>) = branches
             .into_iter()
-            .map(|IntermediateMatchBranch { target, statements }| {
+            .map(|IntermediateMatchBranch { target, block }| {
+                let (mut statements, value, allocations) = self.compile_block(block);
+                statements.push(
+                    Assignment {
+                        target: memory.clone(),
+                        value: value.into(),
+                    }
+                    .into(),
+                );
                 let branch = MatchBranch {
                     target: target.map(|arg| self.compile_arg(&arg)),
-                    statements: self.compile_statements(statements),
+                    statements,
                 };
-                branch
+                (branch, allocations)
             })
-            .collect_vec();
-        let mut shared_declarations = HashMap::new();
-        let mut it = branches
-            .iter()
-            .map(|branch| Statement::declarations(&branch.statements));
-        match it.next() {
-            None => (),
-            Some(first) => {
-                shared_declarations = first;
-                for declarations in it {
-                    shared_declarations =
-                        Statement::merge_declarations_parallel(shared_declarations, declarations);
-                }
-            }
-        }
-        let branches = branches
-            .into_iter()
-            .map(|MatchBranch { target, statements }| MatchBranch {
-                target,
-                statements: self.update_all_declarations(statements, &shared_declarations),
-            })
-            .collect_vec();
-        statements.extend(Statement::from_declarations(shared_declarations));
+            .unzip();
         statements.push(
             MatchStatement {
                 expression: (subject, union_type),
@@ -407,29 +372,38 @@ impl Compiler {
             }
             .into(),
         );
-        statements
+        let value = self.compile_memory(&result);
+        (statements, value.into(), allocations.concat())
     }
-    fn compile_statement(&mut self, statement: IntermediateStatement) -> Vec<Statement> {
+    fn compile_statement(
+        &mut self,
+        statement: IntermediateStatement,
+    ) -> (Vec<Statement>, Vec<Declaration>) {
         match statement {
             IntermediateStatement::IntermediateAssignment(memory) => {
                 self.compile_assignment(memory)
             }
-            IntermediateStatement::IntermediateIfStatement(if_statement) => {
-                self.compile_if_statement(if_statement)
-            }
-            IntermediateStatement::IntermediateMatchStatement(match_statement) => {
-                self.compile_match_statement(match_statement)
-            }
         }
     }
-    fn compile_assignment(&mut self, assignment: IntermediateAssignment) -> Vec<Statement> {
+    fn compile_assignment(
+        &mut self,
+        assignment: IntermediateAssignment,
+    ) -> (Vec<Statement>, Vec<Declaration>) {
         let IntermediateAssignment {
             expression,
             location,
         } = assignment;
         let type_ = self.compile_type(&expression.type_());
-        let (mut statements, value) = self.compile_expression(expression);
+        let (mut statements, value, mut allocations) = self.compile_expression(expression);
         let memory = self.compile_location(&location);
+        let assignment = Assignment {
+            target: memory.clone(),
+            value: value.clone(),
+        };
+        let declaration = Declaration {
+            memory: memory.clone().into(),
+            type_,
+        };
         if matches!(
             &value,
             Expression::FnCall(FnCall {
@@ -438,41 +412,35 @@ impl Compiler {
                 args: _
             })
         ) {
-            statements.push(
-                Assignment {
-                    target: memory,
-                    value,
-                }
-                .into(),
-            );
+            dbg!(&value);
+            allocations.push(declaration.into());
+            statements.push(assignment.into());
         } else {
-            statements.push(
-                Declaration {
-                    memory: memory.clone().into(),
-                    type_,
-                }
-                .into(),
-            );
-            statements.push(
-                Assignment {
-                    target: memory,
-                    value,
-                }
-                .into(),
-            );
+            statements.push(declaration.into());
+            statements.push(assignment.into());
         }
-        statements
+        (statements, allocations)
     }
-    fn compile_statements(&mut self, statements: Vec<IntermediateStatement>) -> Vec<Statement> {
-        statements
+    fn compile_statements(
+        &mut self,
+        statements: Vec<IntermediateStatement>,
+    ) -> (Vec<Statement>, Vec<Declaration>) {
+        let (statements, allocations): (Vec<_>, Vec<_>) = statements
             .into_iter()
             .map(|statement| self.compile_statement(statement))
-            .concat()
+            .unzip();
+        (statements.concat(), allocations.concat())
     }
-    fn replace_open_vars(
-        &mut self,
-        fn_def: &mut IntermediateLambda,
-    ) -> Vec<(IntermediateValue, Location)> {
+    fn compile_block(&mut self, block: IBlock) -> (Vec<Statement>, Value, Vec<Declaration>) {
+        let (statements, declarations): (Vec<_>, Vec<_>) = block
+            .statements
+            .into_iter()
+            .map(|statement| self.compile_statement(statement))
+            .unzip();
+        let value = self.compile_value(block.ret);
+        (statements.concat(), value, declarations.concat())
+    }
+    fn replace_open_vars(&mut self, fn_def: &mut ILambda) -> Vec<(IntermediateValue, Location)> {
         let open_vars = fn_def.find_open_vars();
         let new_locations = open_vars
             .iter()
@@ -515,40 +483,31 @@ impl Compiler {
             })
             .collect_vec()
     }
-    fn compile_lambda(
-        &mut self,
-        mut lambda: IntermediateLambda,
-    ) -> (Vec<Statement>, ClosureInstantiation) {
+    fn compile_lambda(&mut self, mut lambda: ILambda) -> (Vec<Statement>, ClosureInstantiation) {
         let env_mapping = self.replace_open_vars(&mut lambda);
         let env_types = env_mapping
             .iter()
             .map(|(value, location)| (location.clone(), self.compile_type(&value.type_())))
             .collect_vec();
 
-        let IntermediateLambda {
+        let ILambda {
             args,
-            statements,
-            ret: return_value,
+            block:
+                IBlock {
+                    statements,
+                    ret: return_value,
+                },
         } = lambda;
         let args = args
             .into_iter()
             .map(|arg| (self.compile_arg(&arg), self.compile_type(&arg.type_())))
             .collect_vec();
         let mut prefix = self.closure_prefix(&env_types);
-        let mut statements = self.compile_statements(statements);
+        let (mut statements, allocations) = self.compile_statements(statements);
         prefix.extend(statements);
         statements = prefix;
         let ret_type = self.compile_type(&return_value.type_());
         let ret_val = self.compile_value(return_value);
-        let declarations = Statement::declarations(&statements);
-        let allocations = declarations
-            .into_iter()
-            .filter_map(|(memory, state)| match state {
-                AllocationState::Undeclared(Some(type_)) => Some(Declaration { memory, type_ }),
-                AllocationState::Undeclared(None) => None,
-                AllocationState::Declared(_) => None,
-            })
-            .collect();
         let name = self.next_fn_name();
         let env_types = env_types.into_iter().map(|(_, type_)| type_).collect_vec();
         self.fn_defs.push(FnDef {
@@ -609,27 +568,7 @@ impl Compiler {
         compiler.compile_program(program)
     }
     fn export_vector(program: &IntermediateProgram, filename: String) -> Result<(), String> {
-        let fns = program
-            .main
-            .statements
-            .iter()
-            .filter_map(|statement| {
-                if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-                    expression: IntermediateExpression::IntermediateLambda(lambda),
-                    location: _,
-                }) = statement
-                {
-                    Some(lambda)
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-        if fns.len() != 1 {
-            return Err(String::from("Multiple functions found"));
-        };
-        let lambda = fns[0];
-        let vector = CodeVectorCalculator::lambda_vector(lambda);
+        let vector = CodeVectorCalculator::lambda_vector(&program.main);
         vector?
             .save(&Path::new(&filename))
             .map_err(|e| e.to_string())
@@ -980,8 +919,8 @@ mod tests {
         expected: (Vec<Statement>, Expression),
     ) {
         let mut compiler = Compiler::new();
-        let result = compiler.compile_expression(expression);
-        assert_eq!(result, expected);
+        let (statements, expression, _) = compiler.compile_expression(expression);
+        assert_eq!((statements, expression), expected);
     }
     #[test_case(
         {
@@ -1034,8 +973,8 @@ mod tests {
         let (constructor, type_) = constructor_type;
         let mut compiler = Compiler::new();
         compiler.compile_type_defs(vec![type_]);
-        let result = compiler.compile_expression(constructor.into());
-        assert_eq!(result, expected);
+        let (statements, expression, _) = compiler.compile_expression(constructor.into());
+        assert_eq!((statements, expression), expected);
     }
 
     #[test_case(
@@ -1146,24 +1085,15 @@ mod tests {
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
             let location = Location::new();
             vec![
-                IntermediateIfStatement{
-                    condition: arg.into(),
-                    branches: (
-                        vec![
-                            IntermediateAssignment {
-                                location: location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                            }.into()
-                        ],
-                        vec![
-                            IntermediateAssignment {
-                                location: location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                            }.into()
-                        ]
-                    )
+                IntermediateAssignment {
+                    location: location.clone(),
+                    expression: IIf{
+                        condition: arg.into(),
+                        branches: (
+                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into(),
+                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into(),
+                        )
+                    }.into()
                 }.into()
             ]
         },
@@ -1193,7 +1123,15 @@ mod tests {
                         }.into(),
                     ],
                 )
-            }.into()
+            }.into(),
+            Declaration {
+                memory: Memory(Id::from("m2")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("m2")),
+                value: Expression::Value(Memory(Id::from("m1")).into()),
+            }.into(),
         ];
         "if statement awaited argument"
     )]
@@ -1201,24 +1139,15 @@ mod tests {
         {
             let location = Location::new();
             vec![
-                IntermediateIfStatement{
-                    condition: IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
-                    branches: (
-                        vec![
-                            IntermediateAssignment {
-                                location: location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
-                            }.into()
-                        ],
-                        vec![
-                            IntermediateAssignment {
-                                location: location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: false})).into()
-                            }.into()
-                        ]
-                    )
+                IntermediateAssignment {
+                    location: location.clone(),
+                    expression: IIf{
+                        condition: IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
+                        branches: (
+                            IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
+                            IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: false})).into(),
+                        )
+                    }.into()
                 }.into()
             ]
         },
@@ -1247,128 +1176,64 @@ mod tests {
                         }.into(),
                     ],
                 )
-            }.into()
+            }.into(),
+            Declaration {
+                memory: Memory(Id::from("m1")),
+                type_: AtomicTypeEnum::BOOL.into()
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("m1")),
+                value: Expression::Value(Memory(Id::from("m0")).into()),
+            }.into(),
         ];
         "if statement value only"
     )]
     #[test_case(
         {
             let location = Location::new();
+            let temp = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             vec![
-                IntermediateIfStatement{
-                    condition: IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
-                    branches: (
-                        vec![
-                            IntermediateAssignment {
-                                location: location.clone(),
-                                expression:
-                                    IntermediateFnCall{
-                                        fn_: IntermediateMemory{
-                                            location: Location::new(),
-                                            type_: IntermediateFnType(
-                                                vec![AtomicTypeEnum::INT.into()],
-                                                Box::new(AtomicTypeEnum::INT.into())
-                                            ).into()
-                                        }.into(),
-                                        args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
-                                    }.into()
-                            }.into()
-                        ],
-                        vec![
-                            IntermediateAssignment {
-                                location: location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                            }.into()
-                        ]
-                    )
-                }.into()
-            ]
-        },
-        vec![
-            IfStatement {
-                condition: BuiltIn::from(Boolean{value: true}).into(),
-                branches: (
-                    vec![
-                        Await(vec![Memory(Id::from("m0"))]).into(),
-                        Assignment {
-                            target: Memory(Id::from("m1")),
-                            value: FnCall{
-                                fn_: Memory(Id::from("m0")).into(),
-                                fn_type: FnType(
-                                    vec![AtomicTypeEnum::INT.into()],
-                                    Box::new(AtomicTypeEnum::INT.into())
-                                ),
-                                args: vec![BuiltIn::from(Integer{value: 0}).into()]
-                            }.into(),
-                        }.into(),
-                    ],
-                    vec![
-                        Assignment {
-                            target: Memory(Id::from("m1")),
-                            value: Expression::Value(BuiltIn::from(Integer{value: 0}).into()),
-                        }.into(),
-                    ],
-                )
-            }.into()
-        ];
-        "if statement value and call"
-    )]
-    #[test_case(
-        {
-            let memory = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
-            vec![
-                IntermediateIfStatement{
-                    condition: IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
-                    branches: (
-                        vec![
-                            IntermediateAssignment {
-                                location: memory.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                            }.into()
-                        ],
-                        vec![
-                            IntermediateAssignment {
-                                location: memory.location.clone(),
-                                expression:
-                                    IntermediateFnCall{
-                                        fn_: IntermediateMemory{
-                                            location: Location::new(),
-                                            type_: IntermediateFnType(
-                                                vec![AtomicTypeEnum::INT.into()],
-                                                Box::new(AtomicTypeEnum::INT.into())
-                                            ).into()
-                                        }.into(),
-                                        args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
-                                    }.into()
-                            }.into()
-                        ],
-                    )
-                }.into(),
                 IntermediateAssignment {
-                    location: Location::new(),
-                    expression:
-                        IntermediateTupleExpression(
-                            vec![memory.clone().into()]
-                        ).into()
+                    location: location.clone(),
+                    expression: IIf{
+                        condition: IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into(),
+                        branches: (
+                            (
+                                vec![
+                                    IntermediateAssignment {
+                                        location: temp.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: IntermediateMemory{
+                                                location: Location::new(),
+                                                type_: IntermediateFnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ).into()
+                                            }.into(),
+                                            args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
+                                        }.into()
+                                    }.into()
+                                ],
+                                temp.into()
+                            ).into(),
+                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                        )
+                    }.into()
                 }.into()
             ]
         },
         vec![
+            Declaration {
+                memory: Memory(Id::from("m0")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
             IfStatement {
                 condition: BuiltIn::from(Boolean{value: true}).into(),
                 branches: (
-                    vec![
-                        Assignment {
-                            target: Memory(Id::from("m0")),
-                            value: Expression::Value(BuiltIn::from(Integer{value: 0}).into()),
-                        }.into(),
-                    ],
                     vec![
                         Await(vec![Memory(Id::from("m1"))]).into(),
                         Assignment {
-                            target: Memory(Id::from("m0")),
+                            target: Memory(Id::from("m2")),
                             value: FnCall{
                                 fn_: Memory(Id::from("m1")).into(),
                                 fn_type: FnType(
@@ -1378,21 +1243,29 @@ mod tests {
                                 args: vec![BuiltIn::from(Integer{value: 0}).into()]
                             }.into(),
                         }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: Expression::Value(Memory(Id::from("m2")).into()),
+                        }.into(),
+                    ],
+                    vec![
+                        Assignment {
+                            target: Memory(Id::from("m0")),
+                            value: Expression::Value(BuiltIn::from(Integer{value: 0}).into()),
+                        }.into(),
                     ],
                 )
             }.into(),
             Declaration {
-                type_: TupleType(vec![AtomicTypeEnum::INT.into()]).into(),
-                memory: Memory(Id::from("m2"))
+                memory: Memory(Id::from("m3")),
+                type_: AtomicTypeEnum::INT.into()
             }.into(),
             Assignment {
-                target: Memory(Id::from("m2")),
-                value: TupleExpression(
-                    vec![Memory(Id::from("m0")).into()]
-                ).into(),
+                target: Memory(Id::from("m3")),
+                value: Expression::Value(Memory(Id::from("m0")).into()),
             }.into(),
         ];
-        "if statement value and call use"
+        "if statement value and call"
     )]
     #[test_case(
         {
@@ -1401,10 +1274,12 @@ mod tests {
             vec![
                 IntermediateAssignment{
                     location: location,
-                    expression: IntermediateLambda {
+                    expression: ILambda {
                         args: vec![arg.clone()],
-                        statements: Vec::new(),
-                        ret: arg.clone().into()
+                        block: IBlock {
+                            statements: Vec::new(),
+                            ret: arg.clone().into()
+                        },
                     }.into()
                 }.into(),
             ]
@@ -1434,7 +1309,7 @@ mod tests {
         expected_statements: Vec<Statement>,
     ) {
         let mut compiler = Compiler::new();
-        let compiled_statements = compiler.compile_statements(statements);
+        let (compiled_statements, _) = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
     #[test_case(
@@ -1445,30 +1320,21 @@ mod tests {
             (
                 vec![Rc::new(RefCell::new(bull_type))],
                 vec![
-                    IntermediateMatchStatement{
-                        subject: arg.into(),
-                        branches: vec![
-                            IntermediateMatchBranch{
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location.clone(),
-                                        expression:
-                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                                    }.into()
-                                ],
-                            },
-                            IntermediateMatchBranch{
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location.clone(),
-                                        expression:
-                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                    }.into()
-                                ]
-                            }
-                        ]
+                    IntermediateAssignment {
+                        location: location.clone(),
+                        expression: IMatch{
+                            subject: arg.into(),
+                            branches: vec![
+                                IntermediateMatchBranch{
+                                    target: None,
+                                    block: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
+                                },
+                                IntermediateMatchBranch{
+                                    target: None,
+                                    block:IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                }
+                            ]
+                        }.into()
                     }.into()
                 ]
             )
@@ -1509,7 +1375,15 @@ mod tests {
                         ],
                     }
                 ]
-            }.into()
+            }.into(),
+            Declaration {
+                memory: Memory(Id::from("m3")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("m3")),
+                value: Expression::Value(Memory(Id::from("m1")).into()),
+            }.into(),
         ];
         "match statement no targets"
     )]
@@ -1519,147 +1393,46 @@ mod tests {
             let arg: IntermediateArg = IntermediateType::from(either_type.clone()).into();
             let target0: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let target1: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
-            let location = Location::new();
-            (
-                vec![Rc::new(RefCell::new(either_type))],
-                vec![
-                    IntermediateMatchStatement{
-                        subject: arg.into(),
-                        branches: vec![
-                            IntermediateMatchBranch{
-                                target: Some(target0.clone()),
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location.clone(),
-                                        expression:
-                                            IntermediateFnCall{
-                                                fn_: BuiltInFn(
-                                                    Name::from(">"),
-                                                    IntermediateFnType(
-                                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
-                                                        Box::new(AtomicTypeEnum::BOOL.into())
-                                                    ).into()
-                                                ).into(),
-                                                args: vec![
-                                                    target0.into(),
-                                                    IntermediateBuiltIn::from(Integer{value: 0}).into()
-                                                ]
-                                            }.into()
-                                    }.into()
-                                ],
-                            },
-                            IntermediateMatchBranch{
-                                target: Some(target1.clone()),
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location.clone(),
-                                        expression:
-                                            IntermediateValue::from(target1).into()
-                                    }.into()
-                                ]
-                            }
-                        ]
-                    }.into()
-                ]
-            )
-        },
-        vec![
-            Await(vec![Memory(Id::from("m0"))]).into(),
-            Declaration{
-                memory: Memory(Id::from("m2")),
-                type_: AtomicTypeEnum::BOOL.into()
-            }.into(),
-            MatchStatement {
-                expression: (
-                    Memory(Id::from("m0")).into(),
-                    UnionType(vec![Name::from("T0C0"),Name::from("T0C1")])
-                ),
-                auxiliary_memory: Memory(Id::from("m4")),
-                branches: vec![
-                    MatchBranch {
-                        target: Some(Memory(Id::from("m1"))),
-                        statements: vec![
-                            Assignment {
-                                target: Memory(Id::from("m2")),
-                                value: FnCall{
-                                    fn_: BuiltIn::BuiltInFn(
-                                        Name::from("Comparison_GT__BuiltIn"),
-                                    ).into(),
-                                    fn_type: FnType(
-                                        vec![
-                                            AtomicTypeEnum::INT.into(),
-                                            AtomicTypeEnum::INT.into()
-                                        ],
-                                        Box::new(AtomicTypeEnum::BOOL.into())
-                                    ),
-                                    args: vec![
-                                        Memory(Id::from("m1")).into(),
-                                        BuiltIn::from(Integer{value: 0}).into(),
-                                    ]
-                                }.into(),
-                            }.into(),
-                        ],
-                    },
-                    MatchBranch {
-                        target: Some(Memory(Id::from("m3"))),
-                        statements: vec![
-                            Assignment {
-                                target: Memory(Id::from("m2")),
-                                value: Expression::Value(Memory(Id::from("m3")).into()),
-                            }.into(),
-                        ],
-                    }
-                ]
-            }.into()
-        ];
-        "match statement with targets"
-    )]
-    #[test_case(
-        {
-            let either_type: IntermediateType = IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::BOOL.into())]).into();
-            let arg: IntermediateArg = IntermediateType::from(either_type.clone()).into();
-            let target0: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
-            let target1: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
             let memory = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
+            let temp = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
             (
                 vec![Rc::new(RefCell::new(either_type))],
                 vec![
-                    IntermediateMatchStatement{
-                        subject: arg.into(),
-                        branches: vec![
-                            IntermediateMatchBranch{
-                                target: Some(target0.clone()),
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: memory.location.clone(),
-                                        expression:
-                                            IntermediateFnCall{
-                                                fn_: BuiltInFn(
-                                                    Name::from(">"),
-                                                    IntermediateFnType(
-                                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
-                                                        Box::new(AtomicTypeEnum::BOOL.into())
-                                                    ).into()
-                                                ).into(),
-                                                args: vec![
-                                                    target0.into(),
-                                                    IntermediateBuiltIn::from(Integer{value: 0}).into()
-                                                ]
+                    IntermediateAssignment {
+                        location: memory.location.clone(),
+                        expression: IMatch {
+                            subject: arg.into(),
+                            branches: vec![
+                                IntermediateMatchBranch{
+                                    target: Some(target0.clone()),
+                                    block: (
+                                        vec![
+                                            IntermediateAssignment {
+                                                location: temp.location.clone(),
+                                                expression: IntermediateFnCall{
+                                                    fn_: BuiltInFn(
+                                                        Name::from(">"),
+                                                        IntermediateFnType(
+                                                            vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                                            Box::new(AtomicTypeEnum::BOOL.into())
+                                                        ).into()
+                                                    ).into(),
+                                                    args: vec![
+                                                        target0.into(),
+                                                        IntermediateBuiltIn::from(Integer{value: 0}).into()
+                                                    ]
+                                                }.into()
                                             }.into()
-                                    }.into()
-                                ],
-                            },
-                            IntermediateMatchBranch{
-                                target: Some(target1.clone()),
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: memory.location.clone(),
-                                        expression:
-                                            IntermediateValue::from(target1).into()
-                                    }.into()
-                                ]
-                            }
-                        ]
+                                        ],
+                                        temp.clone().into()
+                                    ).into(),
+                                },
+                                IntermediateMatchBranch{
+                                    target: Some(target1.clone()),
+                                    block:IntermediateValue::from(target1).into()
+                                }
+                            ]
+                        }.into(),
                     }.into(),
                     IntermediateAssignment {
                         location: Location::new(),
@@ -1681,7 +1454,7 @@ mod tests {
         vec![
             Await(vec![Memory(Id::from("m0"))]).into(),
             Declaration{
-                memory: Memory(Id::from("m2")),
+                memory: Memory(Id::from("m1")),
                 type_: AtomicTypeEnum::BOOL.into()
             }.into(),
             MatchStatement {
@@ -1689,13 +1462,17 @@ mod tests {
                     Memory(Id::from("m0")).into(),
                     UnionType(vec![Name::from("T0C0"),Name::from("T0C1")])
                 ),
-                auxiliary_memory: Memory(Id::from("m4")),
+                auxiliary_memory: Memory(Id::from("m5")),
                 branches: vec![
                     MatchBranch {
-                        target: Some(Memory(Id::from("m1"))),
+                        target: Some(Memory(Id::from("m2"))),
                         statements: vec![
+                            Declaration {
+                                type_: AtomicTypeEnum::BOOL.into(),
+                                memory: Memory(Id::from("m3"))
+                            }.into(),
                             Assignment {
-                                target: Memory(Id::from("m2")),
+                                target: Memory(Id::from("m3")),
                                 value: FnCall{
                                     fn_: BuiltIn::BuiltInFn(
                                         Name::from("Comparison_GT__BuiltIn"),
@@ -1708,20 +1485,26 @@ mod tests {
                                         Box::new(AtomicTypeEnum::BOOL.into())
                                     ),
                                     args: vec![
-                                        Memory(Id::from("m1")).into(),
+                                        Memory(Id::from("m2")).into(),
                                         BuiltIn::from(Integer{value: 0}).into(),
                                     ]
                                 }.into(),
                             }.into(),
+                            Assignment {
+                                target: Memory(Id::from("m1")),
+                                value: Expression::Value(
+                                    Memory(Id::from("m3")).into(),
+                                ),
+                            }.into(),
                         ],
                     },
                     MatchBranch {
-                        target: Some(Memory(Id::from("m3"))),
+                        target: Some(Memory(Id::from("m4"))),
                         statements: vec![
                             Assignment {
-                                target: Memory(Id::from("m2")),
+                                target: Memory(Id::from("m1")),
                                 value: Expression::Value(
-                                    Memory(Id::from("m3")).into(),
+                                    Memory(Id::from("m4")).into(),
                                 ),
                             }.into(),
                         ],
@@ -1729,23 +1512,37 @@ mod tests {
                 ]
             }.into(),
             Declaration {
-                type_: TupleType(vec![AtomicTypeEnum::BOOL.into(),AtomicTypeEnum::INT.into()]).into(),
-                memory: Memory(Id::from("m5"))
-            }.into(),
-            Assignment {
-                target: Memory(Id::from("m5")),
-                value: TupleExpression(
-                    vec![Memory(Id::from("m2")).into(),BuiltIn::from(Integer{value: 0}).into()]
-                ).into(),
-            }.into(),
-            Declaration {
-                type_: TupleType(vec![AtomicTypeEnum::BOOL.into(),AtomicTypeEnum::INT.into()]).into(),
+                type_: AtomicTypeEnum::BOOL.into(),
                 memory: Memory(Id::from("m6"))
             }.into(),
             Assignment {
                 target: Memory(Id::from("m6")),
+                value: Value::from(Memory(Id::from("m1"))).into()
+            }.into(),
+            Declaration {
+                type_: TupleType(vec![AtomicTypeEnum::BOOL.into(),AtomicTypeEnum::INT.into()]).into(),
+                memory: Memory(Id::from("m7"))
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("m7")),
                 value: TupleExpression(
-                    vec![Memory(Id::from("m2")).into(),BuiltIn::from(Integer{value: 1}).into()]
+                    vec![
+                        Memory(Id::from("m6")).into(),
+                        BuiltIn::from(Integer{value: 0}).into()
+                    ]
+                ).into(),
+            }.into(),
+            Declaration {
+                type_: TupleType(vec![AtomicTypeEnum::BOOL.into(),AtomicTypeEnum::INT.into()]).into(),
+                memory: Memory(Id::from("m8"))
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("m8")),
+                value: TupleExpression(
+                    vec![
+                        Memory(Id::from("m6")).into(),
+                        BuiltIn::from(Integer{value: 1}).into()
+                    ]
                 ).into(),
             }.into(),
         ];
@@ -1761,7 +1558,7 @@ mod tests {
         let (types, statements) = args_types_statements;
         let mut compiler = Compiler::new();
         compiler.compile_type_defs(types);
-        let compiled_statements = compiler.compile_statements(statements);
+        let (compiled_statements, _) = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
 
@@ -1783,15 +1580,17 @@ mod tests {
                     arg1.clone().into(),
                 ]
             }.into();
-            IntermediateLambda {
+            ILambda {
                 args: vec![arg0.clone(), arg1.clone()],
-                statements: vec![
-                    IntermediateAssignment{
-                        location: y.location.clone(),
-                        expression: y_expression,
-                    }.into()
-                ],
-                ret: y.into()
+                block: IBlock{
+                    statements: vec![
+                        IntermediateAssignment{
+                            location: y.location.clone(),
+                            expression: y_expression,
+                        }.into()
+                    ],
+                    ret: y.into()
+                }
             }
         },
         (
@@ -1859,15 +1658,17 @@ mod tests {
                     y.clone().into()
                 ]
             }.into();
-            IntermediateLambda {
+            ILambda {
                 args: Vec::new(),
-                statements: vec![
-                    IntermediateAssignment{
-                        location: z.location.clone(),
-                        expression: z_expression,
-                    }.into()
-                ],
-                ret: z.into()
+                block: IBlock{
+                    statements: vec![
+                        IntermediateAssignment{
+                            location: z.location.clone(),
+                            expression: z_expression,
+                        }.into()
+                    ],
+                    ret: z.into()
+                },
             }
         },
         (
@@ -1972,15 +1773,17 @@ mod tests {
                     y.clone().into()
                 ]
             }.into();
-            IntermediateLambda {
+            ILambda {
                 args: vec![y.clone()],
-                statements: vec![
-                    IntermediateAssignment{
-                        location: z.location.clone(),
-                        expression: z_expression,
-                    }.into()
-                ],
-                ret: z.into()
+                block: IBlock{
+                    statements: vec![
+                        IntermediateAssignment{
+                            location: z.location.clone(),
+                            expression: z_expression,
+                        }.into()
+                    ],
+                    ret: z.into()
+                },
             }
         },
         (
@@ -2054,7 +1857,7 @@ mod tests {
         "env and argument"
     )]
     fn test_compile_fn_defs(
-        fn_def: IntermediateLambda,
+        fn_def: ILambda,
         expected: (Vec<Statement>, ClosureInstantiation, FnDef),
     ) {
         let (expected_statements, expected_value, expected_fn_def) = expected;
@@ -2086,44 +1889,50 @@ mod tests {
             let y = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             IntermediateProgram {
-                main: IntermediateLambda{
+                main: ILambda{
                     args: Vec::new(),
-                    ret: main_call.clone().into(),
-                    statements: vec![
-                        IntermediateAssignment{
-                            location: identity.location.clone(),
-                            expression: IntermediateLambda{
-                                args: vec![arg.clone()],
-                                statements: Vec::new(),
-                                ret: arg.clone().into()
-                            }.into()
-                        }.into(),
-                        IntermediateAssignment{
-                            location: main.location.clone(),
-                            expression:
-                                IntermediateLambda{
-                                    args: Vec::new(),
-                                    statements: vec![
-                                        IntermediateAssignment{
-                                            location: y.location.clone(),
-                                            expression: IntermediateFnCall{
-                                                fn_: identity.clone().into(),
-                                                args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
-                                            }.into()
-                                        }.into()
-                                    ],
-                                    ret: y.clone().into()
+                    block: IBlock{
+                        ret: main_call.clone().into(),
+                        statements: vec![
+                            IntermediateAssignment{
+                                location: identity.location.clone(),
+                                expression: ILambda{
+                                    args: vec![arg.clone()],
+                                    block: IBlock {
+                                        statements: Vec::new(),
+                                        ret: arg.clone().into()
+                                    },
                                 }.into()
-                        }.into(),
-                        IntermediateAssignment{
-                            location: main_call.location.clone(),
-                            expression:
-                                IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                        }.into(),
-                    ],
+                            }.into(),
+                            IntermediateAssignment{
+                                location: main.location.clone(),
+                                expression:
+                                    ILambda{
+                                        args: Vec::new(),
+                                        block: IBlock{
+                                            statements: vec![
+                                                IntermediateAssignment{
+                                                    location: y.location.clone(),
+                                                    expression: IntermediateFnCall{
+                                                        fn_: identity.clone().into(),
+                                                        args: vec![IntermediateBuiltIn::from(Integer{value: 0}).into()]
+                                                    }.into()
+                                                }.into()
+                                            ],
+                                            ret: y.clone().into()
+                                        },
+                                    }.into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: main_call.location.clone(),
+                                expression:
+                                    IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                            }.into(),
+                        ],
+                    },
                 },
                 types: Vec::new()
             }
@@ -2267,38 +2076,42 @@ mod tests {
                 IntermediateType::from(IntermediateTupleType(vec![IntermediateTupleType(Vec::new()).into()])),
             );
             IntermediateProgram {
-                main: IntermediateLambda{
+                main: ILambda{
                     args: Vec::new(),
-                    ret: main_call.clone().into(),
-                    statements: vec![
-                        IntermediateAssignment{
-                            location: t1.location.clone(),
-                            expression:
-                                IntermediateTupleExpression(Vec::new()).into()
-                        }.into(),
-                        IntermediateAssignment{
-                            location: t2.location.clone(),
-                            expression:
-                                IntermediateTupleExpression(vec![t1.clone().into()]).into()
-                        }.into(),
-                        IntermediateAssignment{
-                            location: main.location.clone(),
-                            expression:
-                                IntermediateLambda{
-                                    args: Vec::new(),
-                                    statements: Vec::new(),
-                                    ret: t2.clone().into()
-                                }.into()
-                        }.into(),
-                        IntermediateAssignment{
-                            location: main_call.location.clone(),
-                            expression:
-                                IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                        }.into(),
-                    ],
+                    block: IBlock{
+                        ret: main_call.clone().into(),
+                        statements: vec![
+                            IntermediateAssignment{
+                                location: t1.location.clone(),
+                                expression:
+                                    IntermediateTupleExpression(Vec::new()).into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: t2.location.clone(),
+                                expression:
+                                    IntermediateTupleExpression(vec![t1.clone().into()]).into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: main.location.clone(),
+                                expression:
+                                    ILambda{
+                                        args: Vec::new(),
+                                        block: IBlock {
+                                            statements: Vec::new(),
+                                            ret: t2.clone().into()
+                                        },
+                                    }.into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: main_call.location.clone(),
+                                expression:
+                                    IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                            }.into(),
+                        ],
+                    },
                 },
                 types: Vec::new()
             }
@@ -2398,44 +2211,38 @@ mod tests {
             ));
             let r = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             IntermediateProgram{
-                main: IntermediateLambda{
+                main: ILambda{
                     args: Vec::new(),
-                    ret: r.clone().into(),
-                    statements: vec![
-                        IntermediateAssignment{
-                            location: c.location.clone(),
-                            expression:
-                                IntermediateCtorCall {
-                                    idx: 0,
-                                    data: None,
-                                    type_: IntermediateUnionType(vec![None,None])
+                    block: IBlock{
+                        statements: vec![
+                            IntermediateAssignment{
+                                location: c.location.clone(),
+                                expression:
+                                    IntermediateCtorCall {
+                                        idx: 0,
+                                        data: None,
+                                        type_: IntermediateUnionType(vec![None,None])
+                                    }.into()
+                            }.into(),
+                            IntermediateAssignment{
+                                location: r.location.clone(),
+                                expression: IMatch {
+                                    subject: c.clone().into(),
+                                    branches: vec![
+                                        IntermediateMatchBranch{
+                                            target: None,
+                                            block: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                        },
+                                        IntermediateMatchBranch{
+                                            target: None,
+                                            block: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
+                                        }
+                                    ]
                                 }.into()
-                        }.into(),
-                        IntermediateMatchStatement {
-                            subject: c.clone().into(),
-                            branches: vec![
-                                IntermediateMatchBranch{
-                                    target: None,
-                                    statements: vec![
-                                        IntermediateAssignment{
-                                            location: r.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                        }.into()
-                                    ]
-                                },
-                                IntermediateMatchBranch{
-                                    target: None,
-                                    statements: vec![
-                                        IntermediateAssignment{
-                                            location: r.location.clone(),
-                                            expression: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                                        }.into()
-                                    ]
-                                }
-                            ]
-                        }.into()
-                    ],
+                            }.into()
+                        ],
+                        ret: r.clone().into(),
+                    },
                 },
                 types: vec![
                     Rc::new(RefCell::new(
@@ -2495,8 +2302,16 @@ mod tests {
                                 }
                             ]
                         }.into(),
+                        Declaration {
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory: Memory(Id::from("m3"))
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m3")),
+                            value: Value::from(Memory(Id::from("m1"))).into(),
+                        }.into()
                     ],
-                    ret: (Memory(Id::from("m1")).into(),AtomicTypeEnum::INT.into()),
+                    ret: (Memory(Id::from("m3")).into(),AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
                     allocations: Vec::new()
                 },
@@ -2509,10 +2324,12 @@ mod tests {
             let arg0: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             let arg1: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             IntermediateProgram{
-                main: IntermediateLambda{
-                    ret: arg1.clone().into(),
-                    args: vec![arg0, arg1],
-                    statements: Vec::new(),
+                main: ILambda{
+                    args: vec![arg0, arg1.clone()],
+                    block: IBlock {
+                        statements: Vec::new(),
+                        ret: arg1.clone().into(),
+                    },
                 },
                 types: Vec::new()
             }
@@ -2553,33 +2370,37 @@ mod tests {
             let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             IntermediateProgram{
                 types: Vec::new(),
-                main: IntermediateLambda{
+                main: ILambda{
                     args: vec![arg.clone()],
-                    ret: main_call.clone().into(),
-                    statements: vec![
-                        IntermediateAssignment{
-                            expression: IntermediateLambda {
-                                args: vec![x.into()],
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: y.location.clone(),
-                                        expression: call,
-                                    }.into()
-                                ],
-                                ret: y.into()
+                    block: IBlock{
+                        statements: vec![
+                            IntermediateAssignment{
+                                expression: ILambda {
+                                    args: vec![x.into()],
+                                    block: IBlock{
+                                        statements: vec![
+                                            IntermediateAssignment{
+                                                location: y.location.clone(),
+                                                expression: call,
+                                            }.into()
+                                        ],
+                                        ret: y.into()
+                                    },
+                                }.into(),
+                                location: fn_.location.clone(),
                             }.into(),
-                            location: fn_.location.clone(),
-                        }.into(),
-                        IntermediateAssignment{
-                            location: main_call.location.clone(),
-                            expression: IntermediateFnCall{
-                                fn_: fn_.clone().into(),
-                                args: vec![
-                                    arg.clone().into(),
-                                ]
-                            }.into(),
-                        }.into()
-                    ]
+                            IntermediateAssignment{
+                                location: main_call.location.clone(),
+                                expression: IntermediateFnCall{
+                                    fn_: fn_.clone().into(),
+                                    args: vec![
+                                        arg.clone().into(),
+                                    ]
+                                }.into(),
+                            }.into()
+                        ],
+                        ret: main_call.clone().into(),
+                    },
                 }
             }
         },
@@ -2715,35 +2536,39 @@ mod tests {
         )));
         let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
         let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
-        let identity_fn = IntermediateLambda {
+        let identity_fn = ILambda {
             args: vec![arg.clone()],
-            statements: Vec::new(),
-            ret: arg.clone().into(),
+            block: IBlock {
+                statements: Vec::new(),
+                ret: arg.clone().into(),
+            },
         };
         let program = IntermediateProgram {
-            main: IntermediateLambda {
+            main: ILambda {
                 args: Vec::new(),
-                ret: main_call.clone().into(),
-                statements: vec![
-                    IntermediateAssignment {
-                        location: identity.location.clone(),
-                        expression: identity_fn.clone().into(),
-                    }
-                    .into(),
-                    IntermediateAssignment {
-                        location: main_call.location.clone(),
-                        expression: IntermediateFnCall {
-                            fn_: identity.clone().into(),
-                            args: Vec::new(),
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment {
+                            location: identity.location.clone(),
+                            expression: identity_fn.clone().into(),
                         }
                         .into(),
-                    }
-                    .into(),
-                ],
+                        IntermediateAssignment {
+                            location: main_call.location.clone(),
+                            expression: IntermediateFnCall {
+                                fn_: identity.clone().into(),
+                                args: Vec::new(),
+                            }
+                            .into(),
+                        }
+                        .into(),
+                    ],
+                    ret: main_call.clone().into(),
+                },
             },
             types: Vec::new(),
         };
-        let identity_vector = CodeVectorCalculator::lambda_vector(&identity_fn).expect("");
+        let identity_vector = CodeVectorCalculator::lambda_vector(&program.main).expect("");
         Compiler::compile(
             program,
             CompilationArgs {

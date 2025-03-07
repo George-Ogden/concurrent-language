@@ -6,14 +6,10 @@ use gcollections::ops::*;
 use interval::ops::*;
 use interval::Interval;
 use itertools::Itertools;
-use lowering::IntermediateIfStatement;
-use lowering::IntermediateLambda;
-use lowering::IntermediateMatchBranch;
-use lowering::IntermediateMatchStatement;
-use lowering::IntermediateStatement;
 use lowering::{
-    BuiltInFn, Id, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateFnCall, IntermediateValue,
+    BuiltInFn, IBlock, IIf, ILambda, IMatch, Id, IntermediateAssignment, IntermediateBuiltIn,
+    IntermediateExpression, IntermediateFnCall, IntermediateMatchBranch, IntermediateStatement,
+    IntermediateValue,
 };
 use once_cell::sync::Lazy;
 use std::fs;
@@ -34,8 +30,8 @@ define_named_vector!(
     ctor_call,
     lambda,
     assignment,
-    if_statement,
-    match_statement,
+    if_,
+    match_,
 );
 
 pub const CODE_SIZE_CONSTANTS: Lazy<CodeVector> = Lazy::new(|| CodeVector {
@@ -50,8 +46,8 @@ pub const CODE_SIZE_CONSTANTS: Lazy<CodeVector> = Lazy::new(|| CodeVector {
     ctor_call: 14,
     lambda: 0,
     assignment: 0,
-    if_statement: 8,
-    match_statement: 8,
+    if_: 8,
+    match_: 8,
     operators: HashMap::from(
         [
             ("**", 12),
@@ -102,17 +98,17 @@ impl CodeSizeEstimator {
         values.iter().map(Self::value_size).sum()
     }
 
-    fn expression_size(expression: &IntermediateExpression) -> usize {
+    fn expression_size(expression: &IntermediateExpression) -> Interval<usize> {
         let values_size = Self::values_size(&expression.values());
         match expression {
             IntermediateExpression::IntermediateValue(_) => {
-                CODE_SIZE_CONSTANTS.value_expression + values_size
+                Interval::singleton(CODE_SIZE_CONSTANTS.value_expression + values_size)
             }
             IntermediateExpression::IntermediateElementAccess(_) => {
-                CODE_SIZE_CONSTANTS.element_access + values_size
+                Interval::singleton(CODE_SIZE_CONSTANTS.element_access + values_size)
             }
             IntermediateExpression::IntermediateTupleExpression(_) => {
-                CODE_SIZE_CONSTANTS.tuple_expression + values_size
+                Interval::singleton(CODE_SIZE_CONSTANTS.tuple_expression + values_size)
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                 fn_:
@@ -121,14 +117,16 @@ impl CodeSizeEstimator {
                         _,
                     ))),
                 args,
-            }) => CODE_SIZE_CONSTANTS.operators[id] + Self::values_size(args),
+            }) => Interval::singleton(CODE_SIZE_CONSTANTS.operators[id] + Self::values_size(args)),
             IntermediateExpression::IntermediateFnCall(_) => {
-                CODE_SIZE_CONSTANTS.fn_call + values_size
+                Interval::singleton(CODE_SIZE_CONSTANTS.fn_call + values_size)
             }
             IntermediateExpression::IntermediateCtorCall(_) => {
-                CODE_SIZE_CONSTANTS.ctor_call + values_size
+                Interval::singleton(CODE_SIZE_CONSTANTS.ctor_call + values_size)
             }
-            IntermediateExpression::IntermediateLambda(_) => CODE_SIZE_CONSTANTS.lambda,
+            IntermediateExpression::ILambda(_) => Interval::singleton(CODE_SIZE_CONSTANTS.lambda),
+            IntermediateExpression::IIf(if_) => Self::if_size(if_),
+            IntermediateExpression::IMatch(match_) => Self::match_size(match_),
         }
     }
 
@@ -137,37 +135,29 @@ impl CodeSizeEstimator {
             IntermediateStatement::IntermediateAssignment(assignment) => {
                 Self::assignment_size(assignment)
             }
-            IntermediateStatement::IntermediateIfStatement(if_statement) => {
-                Self::if_statement_size(if_statement)
-            }
-            IntermediateStatement::IntermediateMatchStatement(match_statement) => {
-                Self::match_statement_size(match_statement)
-            }
         }
     }
     fn assignment_size(assignment: &IntermediateAssignment) -> Interval<usize> {
-        Interval::singleton(
-            Self::expression_size(&assignment.expression) + CODE_SIZE_CONSTANTS.assignment,
-        )
+        Self::expression_size(&assignment.expression) + CODE_SIZE_CONSTANTS.assignment
     }
-    fn if_statement_size(if_statement: &IntermediateIfStatement) -> Interval<usize> {
-        let condition_size = Self::value_size(&if_statement.condition);
-        let branch_sizes = Self::statements_size(&if_statement.branches.0)
-            .hull(&Self::statements_size(&if_statement.branches.1));
-        branch_sizes + condition_size + CODE_SIZE_CONSTANTS.if_statement
+    fn if_size(if_: &IIf) -> Interval<usize> {
+        let condition_size = Self::value_size(&if_.condition);
+        let branch_sizes =
+            Self::block_size(&if_.branches.0).hull(&Self::block_size(&if_.branches.1));
+        branch_sizes + condition_size + CODE_SIZE_CONSTANTS.if_
     }
-    fn match_statement_size(match_statement: &IntermediateMatchStatement) -> Interval<usize> {
-        let subject_size = Self::value_size(&match_statement.subject);
-        let branch_sizes = match_statement
+    fn match_size(match_: &IMatch) -> Interval<usize> {
+        let subject_size = Self::value_size(&match_.subject);
+        let branch_sizes = match_
             .branches
             .iter()
             .map(Self::match_branch_size)
             .reduce(|x, y| Interval::hull(&x, &y))
             .unwrap();
-        branch_sizes + subject_size + CODE_SIZE_CONSTANTS.match_statement
+        branch_sizes + subject_size + CODE_SIZE_CONSTANTS.match_
     }
     fn match_branch_size(match_branch: &IntermediateMatchBranch) -> Interval<usize> {
-        Self::statements_size(&match_branch.statements)
+        Self::block_size(&match_branch.block)
     }
     fn statements_size(statements: &Vec<IntermediateStatement>) -> Interval<usize> {
         statements
@@ -175,9 +165,11 @@ impl CodeSizeEstimator {
             .map(Self::statement_size)
             .fold(Interval::singleton(0), Interval::add)
     }
-    pub fn estimate_size(lambda: &IntermediateLambda) -> (usize, usize) {
-        let size_interval =
-            Self::statements_size(&lambda.statements) + Self::value_size(&lambda.ret);
+    fn block_size(block: &IBlock) -> Interval<usize> {
+        Self::statements_size(&block.statements) + Self::value_size(&block.ret)
+    }
+    pub fn estimate_size(lambda: &ILambda) -> (usize, usize) {
+        let size_interval = Self::block_size(&lambda.block);
         (size_interval.lower(), size_interval.upper())
     }
 }
@@ -191,12 +183,11 @@ mod tests {
     use interval::Interval;
     use itertools::Itertools;
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
-        IntermediateCtorCall, IntermediateElementAccess, IntermediateFnCall, IntermediateFnType,
-        IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
-        IntermediateMatchStatement, IntermediateMemory, IntermediateStatement,
-        IntermediateTupleExpression, IntermediateTupleType, IntermediateUnionType, Location,
-        DEFAULT_CONTEXT,
+        AtomicTypeEnum, Boolean, BuiltInFn, ILambda, Id, Integer, IntermediateArg,
+        IntermediateAssignment, IntermediateCtorCall, IntermediateElementAccess,
+        IntermediateFnCall, IntermediateFnType, IntermediateMatchBranch, IntermediateMemory,
+        IntermediateStatement, IntermediateTupleExpression, IntermediateTupleType,
+        IntermediateUnionType, Location, DEFAULT_CONTEXT,
     };
     use test_case::test_case;
 
@@ -212,8 +203,8 @@ mod tests {
     const CCS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.ctor_call);
     const LS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.lambda);
     const AS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.assignment);
-    const ISS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.if_statement);
-    const MSS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.match_statement);
+    const IS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.if_);
+    const MS: Lazy<usize> = Lazy::new(|| CODE_SIZE_CONSTANTS.match_);
 
     #[test]
     fn exhaustive_operator_test() {
@@ -404,17 +395,19 @@ mod tests {
         "ctor call with data"
     )]
     #[test_case(
-        IntermediateLambda{
+        ILambda{
             args: Vec::new(),
-            statements: Vec::new(),
-            ret: Boolean{value: true}.into()
+            block: IBlock {
+                statements: Vec::new(),
+                ret: Boolean{value: true}.into()
+            },
         }.into(),
         *LS;
         "lambda"
     )]
     fn test_expression_size(expression: IntermediateExpression, expected_size: usize) {
         let size = CodeSizeEstimator::expression_size(&expression);
-        assert_eq!(size, expected_size)
+        assert_eq!(size, Interval::singleton(expected_size))
     }
 
     #[test_case(
@@ -429,13 +422,13 @@ mod tests {
                     ]
                 )
             }.into();
-            let statement_size = *AS + CodeSizeEstimator::expression_size(&expression);
+            let statement_size = CodeSizeEstimator::expression_size(&expression) + *AS;
             (
                 IntermediateAssignment{
                     expression: expression,
                     location: Location::new()
                 }.into(),
-                Interval::new(statement_size, statement_size)
+                statement_size
             )
         };
         "assignment"
@@ -452,11 +445,7 @@ mod tests {
                     type_: AtomicTypeEnum::INT.into()
                 },
             ];
-            let target = Location::new();
-            let small_assignment = IntermediateAssignment{
-                location: target.clone(),
-                expression: IntermediateValue::from(args[0].clone()).into()
-            };
+            let small_value = IntermediateValue::from(args[0].clone());
             let large_assignment = IntermediateAssignment{
                 expression: IntermediateFnCall{
                     fn_: BuiltInFn(
@@ -470,28 +459,29 @@ mod tests {
                 }.into(),
                 location: Location::new()
             };
-            let large_final_assignment = IntermediateAssignment{
-                expression: IntermediateValue::from(large_assignment.clone()).into(),
-                location: target
-            };
             let condition = IntermediateMemory{
                 location: Location::new(),
                 type_: AtomicTypeEnum::BOOL.into()
             };
-            let small_statement_size = CodeSizeEstimator::statement_size(&small_assignment.clone().into()).lower();
-            let large_statements_size = CodeSizeEstimator::statement_size(&large_assignment.clone().into()).lower() + CodeSizeEstimator::statement_size(&large_final_assignment.clone().into()).lower();
+            let small_statement_size = CodeSizeEstimator::value_size(&small_value.clone().into()).lower();
+            let large_statements_size = CodeSizeEstimator::statement_size(&large_assignment.clone().into()).lower() + CodeSizeEstimator::value_size(&large_assignment.clone().into()).lower();
             let condition_size = CodeSizeEstimator::value_size(&condition.clone().into());
-            let (lower_bound, upper_bound) = (small_statement_size + condition_size + *ISS, large_statements_size + condition_size + *ISS);
+            let (lower_bound, upper_bound) = (small_statement_size + condition_size + *IS, large_statements_size + condition_size + *IS);
             (
-                IntermediateIfStatement{
-                    condition: condition.into(),
-                    branches: (
-                        vec![small_assignment.into()],
-                        vec![
-                            large_assignment.into(),
-                            large_final_assignment.into()
-                        ],
-                    )
+                IntermediateAssignment {
+                    location: Location::new(),
+                    expression: IIf{
+                        condition: condition.into(),
+                        branches: (
+                            small_value.into(),
+                            (
+                                vec![
+                                    large_assignment.clone().into(),
+                                ],
+                                large_assignment.into()
+                            ).into()
+                        )
+                    }.into(),
                 }.into(),
                 Interval::new(lower_bound, upper_bound)
             )
@@ -508,59 +498,55 @@ mod tests {
                 location: Location::new(),
                 type_: AtomicTypeEnum::INT.into()
             };
-            let target = Location::new();
-            let small_assignment = IntermediateAssignment{
-                location: target.clone(),
-                expression: IntermediateValue::from(Integer{value: 4}).into()
-            };
-            let medium_assignment = IntermediateAssignment{
-                expression: medium_arg.clone().into(),
-                location: target.clone()
-            };
-            let large_assignment = IntermediateAssignment{
-                expression: IntermediateFnCall{
-                    fn_: BuiltInFn(
-                        Id::from("*"),
-                        IntermediateFnType(
-                            vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
-                            Box::new(AtomicTypeEnum::INT.into())
-                        ).into()
-                    ).into(),
-                    args: vec![
-                        Integer{value: 9}.into(),
-                        large_arg.clone().into()
-                    ]
-                }.into(),
-                location: target
-            };
+            let small_expression = IntermediateValue::from(Integer{value: 4});
+            let medium_expression = IntermediateValue::from(medium_arg.clone());
+            let large_expression: IntermediateAssignment = IntermediateExpression::from(IntermediateFnCall{
+                fn_: BuiltInFn(
+                    Id::from("*"),
+                    IntermediateFnType(
+                        vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                        Box::new(AtomicTypeEnum::INT.into())
+                    ).into()
+                ).into(),
+                args: vec![
+                    Integer{value: 9}.into(),
+                    large_arg.clone().into()
+                ]
+            }).into();
             let subject = IntermediateMemory{
                 location: Location::new(),
                 type_: IntermediateUnionType(
                     vec![Some(AtomicTypeEnum::INT.into()), None, Some(AtomicTypeEnum::INT.into())]
                 ).into()
             };
-            let small_statement_size = CodeSizeEstimator::statement_size(&small_assignment.clone().into()).lower();
-            let medium_statement_size = CodeSizeEstimator::statement_size(&medium_assignment.clone().into()).lower();
-            let large_statement_size = CodeSizeEstimator::statement_size(&large_assignment.clone().into()).lower();
+            let small_expression_size = CodeSizeEstimator::expression_size(&small_expression.clone().into()).lower();
+            let medium_expression_size = CodeSizeEstimator::expression_size(&medium_expression.clone().into()).lower();
+            let large_expression_size = CodeSizeEstimator::assignment_size(&large_expression.clone().into()).lower() + CodeSizeEstimator::value_size(&large_expression.clone().into());
             let subject_size = CodeSizeEstimator::value_size(&subject.clone().into());
-            let (lower_bound, upper_bound) = (min(small_statement_size, medium_statement_size) + subject_size + *MSS, large_statement_size + subject_size + *MSS);
+            let (lower_bound, upper_bound) = (min(small_expression_size, medium_expression_size) + subject_size + *MS, large_expression_size + subject_size + *MS);
             (
-                IntermediateMatchStatement{
-                    subject: subject.into(),
-                    branches: vec![
-                        IntermediateMatchBranch{
-                            target: None,
-                            statements: vec![small_assignment.into()],
-                        },
-                        IntermediateMatchBranch{
-                            target: Some(medium_arg),
-                            statements: vec![medium_assignment.into()],
-                        },
-                        IntermediateMatchBranch{
-                            target: Some(large_arg),
-                            statements: vec![large_assignment.into()],
-                        },
-                    ]
+                IntermediateAssignment {
+                    location: Location::new(),
+                    expression: IMatch {
+                        subject: subject.into(),
+                        branches: vec![
+                            IntermediateMatchBranch{
+                                target: None,
+                                block: small_expression.into(),
+                            },
+                            IntermediateMatchBranch{
+                                target: Some(medium_arg),
+                                block: medium_expression.into(),
+                            },
+                            IntermediateMatchBranch{
+                                target: Some(large_arg),
+                                block: IBlock {
+                                    statements: vec![large_expression.clone().into()],
+                                    ret: large_expression.clone().into()
+                                }
+                            },
+                        ]
+                    }.into()
                 }.into(),
                 Interval::new(lower_bound, upper_bound)
             )
@@ -580,10 +566,12 @@ mod tests {
                     type_: AtomicTypeEnum::INT.into(),
                     location: Location::new()
                 };
-                IntermediateLambda {
+                ILambda {
                     args: vec![arg.clone()],
-                    statements: Vec::new(),
-                    ret: arg.clone().into()
+                    block: IBlock {
+                        statements: Vec::new(),
+                        ret: arg.clone().into()
+                    },
                 }.into()
             },
             (*MAS, *MAS)
@@ -600,43 +588,38 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new()
             };
-            let statement = IntermediateIfStatement{
-                condition: arg.clone().into(),
-                branches:(
-                    vec![
-                        IntermediateAssignment{
-                            location: target.location.clone(),
-                            expression: IntermediateValue::from(Integer{ value: 1 }).into(),
-                        }.into()
-                    ],
-                    vec![
-                        IntermediateAssignment{
-                            location: target.location.clone(),
-                            expression: IntermediateValue::from(IntermediateMemory{
-                                location: Location::new(),
-                                type_: AtomicTypeEnum::INT.into()
-                            }).into(),
-                        }.into()
-                    ]
-                )
+            let statement = IntermediateAssignment {
+                location: target.location.clone(),
+                expression: IIf{
+                    condition: arg.clone().into(),
+                    branches:(
+                        IntermediateValue::from(Integer{ value: 1 }).into(),
+                        IntermediateValue::from(IntermediateMemory{
+                            location: Location::new(),
+                            type_: AtomicTypeEnum::INT.into()
+                        }).into(),
+                    )
+                }.into()
             };
-            let range = CodeSizeEstimator::if_statement_size(&statement);
+            let range = CodeSizeEstimator::statement_size(&statement.clone().into());
             let lower_bound = range.lower() + *MAS;
             let upper_bound = range.upper() + *MAS;
             (
-                IntermediateLambda {
+                ILambda {
                     args: vec![arg.clone()],
-                    statements: vec![
-                        statement.into()
-                    ],
-                    ret: target.into()
+                    block: IBlock{
+                        statements: vec![
+                            statement.into()
+                        ],
+                        ret: target.into()
+                    }
                 }.into(),
                 (lower_bound, upper_bound)
             )
         };
         "lambda if statement"
     )]
-    fn test_lambda_size(lambda_size: (IntermediateLambda, (usize, usize))) {
+    fn test_lambda_size(lambda_size: (ILambda, (usize, usize))) {
         let (lambda, expected_size) = lambda_size;
         let size = CodeSizeEstimator::estimate_size(&lambda);
         assert_eq!(size, expected_size)
