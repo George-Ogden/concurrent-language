@@ -288,7 +288,9 @@ pub enum IntermediateExpression {
     IntermediateTupleExpression(IntermediateTupleExpression),
     IntermediateFnCall(IntermediateFnCall),
     IntermediateCtorCall(IntermediateCtorCall),
-    IntermediateLambda(IntermediateLambda),
+    ILambda(ILambda),
+    IIf(IIf),
+    IMatch(IMatch),
 }
 
 impl fmt::Debug for IntermediateExpression {
@@ -299,7 +301,9 @@ impl fmt::Debug for IntermediateExpression {
             Self::IntermediateTupleExpression(tuple) => tuple.fmt(f),
             Self::IntermediateFnCall(fn_call) => fn_call.fmt(f),
             Self::IntermediateCtorCall(ctor_call) => ctor_call.fmt(f),
-            Self::IntermediateLambda(lambda) => lambda.fmt(f),
+            Self::ILambda(lambda) => lambda.fmt(f),
+            IntermediateExpression::IIf(if_) => if_.fmt(f),
+            IntermediateExpression::IMatch(match_) => match_.fmt(f),
         }
     }
 }
@@ -307,11 +311,22 @@ impl fmt::Debug for IntermediateExpression {
 impl IntermediateExpression {
     pub fn targets(&self) -> Vec<Location> {
         match self {
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                statements,
-                args: _,
-                ret: _,
-            }) => IntermediateStatement::all_targets(statements),
+            IntermediateExpression::ILambda(ILambda { block, args: _ }) => block.targets(),
+            IntermediateExpression::IIf(IIf {
+                condition: _,
+                branches,
+            }) => {
+                let mut targets = branches.0.targets();
+                targets.extend(branches.1.targets());
+                targets
+            }
+            IntermediateExpression::IMatch(IMatch {
+                subject: _,
+                branches,
+            }) => branches
+                .iter()
+                .flat_map(|branch| branch.block.targets())
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -338,7 +353,29 @@ impl IntermediateExpression {
                 None => Vec::new(),
                 Some(v) => vec![v.clone()],
             },
-            IntermediateExpression::IntermediateLambda(lambda) => lambda.find_open_vars(),
+            IntermediateExpression::ILambda(lambda) => lambda.find_open_vars(),
+            IntermediateExpression::IIf(IIf {
+                condition,
+                branches,
+            }) => {
+                let mut values = branches.0.values();
+                values.extend(branches.1.values());
+                values.push(condition.clone());
+                values
+            }
+            IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+                let mut values = branches
+                    .iter()
+                    .flat_map(|IntermediateMatchBranch { target, block }| {
+                        block.values().into_iter().filter(|value| match value {
+                            IntermediateValue::IntermediateArg(arg) => Some(arg) != target.as_ref(),
+                            _ => true,
+                        })
+                    })
+                    .collect_vec();
+                values.push(subject.clone());
+                values
+            }
         }
     }
     pub fn substitute(&mut self, substitution: &Substitution) {
@@ -361,6 +398,20 @@ impl IntermediateExpression {
                 *fn_ = fn_.substitute(substitution);
                 IntermediateValue::substitute_all(args, substitution)
             }
+            IntermediateExpression::IIf(IIf {
+                condition,
+                branches,
+            }) => {
+                *condition = condition.substitute(substitution);
+                branches.0.substitute(substitution);
+                branches.1.substitute(substitution);
+            }
+            IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+                *subject = subject.substitute(substitution);
+                for branch in branches {
+                    branch.block.substitute(substitution);
+                }
+            }
             IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
                 idx: _,
                 data,
@@ -369,7 +420,7 @@ impl IntermediateExpression {
                 None => (),
                 Some(data) => *data = data.substitute(substitution),
             },
-            IntermediateExpression::IntermediateLambda(lambda) => lambda.substitute(substitution),
+            IntermediateExpression::ILambda(lambda) => lambda.substitute(substitution),
         }
     }
     pub fn type_(&self) -> IntermediateType {
@@ -379,7 +430,9 @@ impl IntermediateExpression {
             IntermediateExpression::IntermediateTupleExpression(tuple) => tuple.type_().into(),
             IntermediateExpression::IntermediateFnCall(fn_call) => fn_call.type_(),
             IntermediateExpression::IntermediateCtorCall(ctor_call) => ctor_call.type_().into(),
-            IntermediateExpression::IntermediateLambda(lambda) => lambda.type_().into(),
+            IntermediateExpression::ILambda(lambda) => lambda.type_().into(),
+            IntermediateExpression::IIf(if_) => if_.type_().into(),
+            IntermediateExpression::IMatch(match_) => match_.type_().into(),
         }
     }
 }
@@ -550,23 +603,51 @@ impl ExpressionEqualityChecker {
                 assert_eq!(t1, t2)
             }
             (
-                IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                IntermediateExpression::ILambda(ILambda {
                     args: a1,
-                    statements: s1,
-                    ret: r1,
+                    block: b1,
                 }),
-                IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                IntermediateExpression::ILambda(ILambda {
                     args: a2,
-                    statements: s2,
-                    ret: r2,
+                    block: b2,
                 }),
             ) => {
                 self.assert_equal_args(a1, a2);
-                self.assert_equal_statements(&s1, &s2);
-                self.assert_equal_value(&r1, &r2)
+                self.assert_equal_block(&b1, &b2);
+            }
+            (
+                IntermediateExpression::IIf(IIf {
+                    condition: c1,
+                    branches: b1,
+                }),
+                IntermediateExpression::IIf(IIf {
+                    condition: c2,
+                    branches: b2,
+                }),
+            ) => {
+                self.assert_equal_value(c1, c2);
+                self.assert_equal_block(&b1.0, &b2.0);
+                self.assert_equal_block(&b1.1, &b2.1);
+            }
+            (
+                IntermediateExpression::IMatch(IMatch {
+                    subject: s1,
+                    branches: b1,
+                }),
+                IntermediateExpression::IMatch(IMatch {
+                    subject: s2,
+                    branches: b2,
+                }),
+            ) => {
+                self.assert_equal_value(s1, s2);
+                self.assert_equal_branches(b1, b2);
             }
             _ => assert!(false),
         }
+    }
+    fn assert_equal_block(&mut self, b1: &IBlock, b2: &IBlock) {
+        self.assert_equal_statements(&b1.statements, &b2.statements);
+        self.assert_equal_value(&b1.ret, &b2.ret)
     }
     fn assert_equal_value(&mut self, v1: &IntermediateValue, v2: &IntermediateValue) {
         match (v1, v2) {
@@ -612,34 +693,6 @@ impl ExpressionEqualityChecker {
                 IntermediateStatement::IntermediateAssignment(m1),
                 IntermediateStatement::IntermediateAssignment(m2),
             ) => self.assert_equal_assignment(m1, m2),
-            (
-                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                    condition: c1,
-                    branches: b1,
-                }),
-                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                    condition: c2,
-                    branches: b2,
-                }),
-            ) => {
-                self.assert_equal_value(c1, c2);
-                self.assert_equal_statements(&b1.0, &b2.0);
-                self.assert_equal_statements(&b1.1, &b2.1)
-            }
-            (
-                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                    subject: s1,
-                    branches: b1,
-                }),
-                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                    subject: s2,
-                    branches: b2,
-                }),
-            ) => {
-                self.assert_equal_value(s1, s2);
-                self.assert_equal_branches(b1, b2)
-            }
-            _ => assert!(false),
         }
     }
     fn assert_equal_branch(
@@ -649,18 +702,18 @@ impl ExpressionEqualityChecker {
     ) {
         let IntermediateMatchBranch {
             target: t1,
-            statements: s1,
+            block: b1,
         } = branch1;
         let IntermediateMatchBranch {
             target: t2,
-            statements: s2,
+            block: b2,
         } = branch2;
         (match (t1, t2) {
             (None, None) => {}
             (Some(a1), Some(a2)) => self.assert_equal_arg(a1, a2),
             _ => assert!(false),
         });
-        self.assert_equal_statements(s1, s2)
+        self.assert_equal_block(b1, b2)
     }
     fn assert_equal_branches(
         &mut self,
@@ -815,15 +868,57 @@ impl IntermediateCtorCall {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IntermediateLambda {
-    pub args: Vec<IntermediateArg>,
+pub struct IBlock {
     pub statements: Vec<IntermediateStatement>,
     pub ret: IntermediateValue,
 }
 
+impl IBlock {
+    fn targets(&self) -> Vec<Location> {
+        IntermediateStatement::all_targets(&self.statements)
+    }
+
+    fn values(&self) -> Vec<IntermediateValue> {
+        let mut values = IntermediateStatement::all_values(&self.statements);
+        values.push(self.ret.clone());
+        values
+    }
+    fn substitute(&mut self, substitution: &Substitution) {
+        IntermediateStatement::substitute_all(&mut self.statements, substitution);
+        self.ret = self.ret.substitute(substitution);
+    }
+    fn type_(&self) -> IntermediateType {
+        self.ret.type_()
+    }
+}
+
+impl From<IntermediateValue> for IBlock {
+    fn from(value: IntermediateValue) -> Self {
+        IBlock {
+            statements: Vec::new(),
+            ret: value,
+        }
+    }
+}
+
+impl From<(Vec<IntermediateStatement>, IntermediateValue)> for IBlock {
+    fn from(value: (Vec<IntermediateStatement>, IntermediateValue)) -> Self {
+        IBlock {
+            statements: value.0,
+            ret: value.1,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ILambda {
+    pub args: Vec<IntermediateArg>,
+    pub block: IBlock,
+}
+
 type Substitution = HashMap<Location, Location>;
 
-impl IntermediateLambda {
+impl ILambda {
     pub fn type_(&self) -> IntermediateFnType {
         IntermediateFnType(
             IntermediateValue::types(
@@ -834,16 +929,14 @@ impl IntermediateLambda {
                     .map(IntermediateValue::from)
                     .collect(),
             ),
-            Box::new(self.ret.type_()),
+            Box::new(self.block.type_()),
         )
     }
 
     pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
-        let mut targets: HashSet<Location> =
-            HashSet::from_iter(IntermediateStatement::all_targets(&self.statements));
+        let mut targets: HashSet<Location> = HashSet::from_iter(self.block.targets());
         targets.extend(self.args.iter().map(|arg| arg.location.clone()));
-        let mut values = IntermediateStatement::all_values(&self.statements);
-        values.push(self.ret.clone());
+        let values = self.block.values();
         values
             .into_iter()
             .unique()
@@ -867,24 +960,19 @@ impl IntermediateLambda {
             .collect()
     }
     pub fn substitute(&mut self, substitution: &Substitution) {
-        IntermediateStatement::substitute_all(&mut self.statements, substitution);
-        self.ret = self.ret.substitute(substitution);
+        self.block.substitute(substitution)
     }
 }
 
 #[derive(Clone, PartialEq, FromVariants, Eq, Hash)]
 pub enum IntermediateStatement {
     IntermediateAssignment(IntermediateAssignment),
-    IntermediateIfStatement(IntermediateIfStatement),
-    IntermediateMatchStatement(IntermediateMatchStatement),
 }
 
 impl fmt::Debug for IntermediateStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::IntermediateAssignment(assignment) => assignment.fmt(f),
-            Self::IntermediateIfStatement(if_statement) => if_statement.fmt(f),
-            Self::IntermediateMatchStatement(match_statement) => match_statement.fmt(f),
         }
     }
 }
@@ -896,35 +984,6 @@ impl IntermediateStatement {
                 expression,
                 location: _,
             }) => expression.values(),
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => {
-                let mut values = IntermediateStatement::all_values(&branches.0);
-                values.extend(IntermediateStatement::all_values(&branches.1));
-                values.push(condition.clone());
-                values
-            }
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject,
-                branches,
-            }) => {
-                let mut values = branches
-                    .iter()
-                    .flat_map(|IntermediateMatchBranch { target, statements }| {
-                        IntermediateStatement::all_values(&statements)
-                            .into_iter()
-                            .filter(|value| match value {
-                                IntermediateValue::IntermediateArg(arg) => {
-                                    Some(arg) != target.as_ref()
-                                }
-                                _ => true,
-                            })
-                    })
-                    .collect_vec();
-                values.push(subject.clone());
-                values
-            }
         }
     }
     fn all_values(statements: &Vec<Self>) -> Vec<IntermediateValue> {
@@ -943,21 +1002,6 @@ impl IntermediateStatement {
                 targets.push(location.clone());
                 targets
             }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition: _,
-                branches,
-            }) => {
-                let mut targets = IntermediateStatement::all_targets(&branches.0);
-                targets.extend(IntermediateStatement::all_targets(&branches.1));
-                targets
-            }
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject: _,
-                branches,
-            }) => branches
-                .iter()
-                .flat_map(|branch| IntermediateStatement::all_targets(&branch.statements))
-                .collect(),
         }
     }
     pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
@@ -977,23 +1021,6 @@ impl IntermediateStatement {
                 }
                 expression.substitute(substitution);
             }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => {
-                *condition = condition.substitute(substitution);
-                IntermediateStatement::substitute_all(&mut branches.0, substitution);
-                IntermediateStatement::substitute_all(&mut branches.1, substitution);
-            }
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject,
-                branches,
-            }) => {
-                *subject = subject.substitute(substitution);
-                for branch in branches {
-                    IntermediateStatement::substitute_all(&mut branch.statements, substitution);
-                }
-            }
         }
     }
     fn substitute_all(statements: &mut Vec<Self>, substitution: &Substitution) {
@@ -1004,25 +1031,37 @@ impl IntermediateStatement {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IntermediateIfStatement {
+pub struct IIf {
     pub condition: IntermediateValue,
-    pub branches: (Vec<IntermediateStatement>, Vec<IntermediateStatement>),
+    pub branches: (IBlock, IBlock),
+}
+
+impl IIf {
+    pub fn type_(&self) -> IntermediateType {
+        self.branches.0.type_()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IntermediateMatchStatement {
+pub struct IMatch {
     pub subject: IntermediateValue,
     pub branches: Vec<IntermediateMatchBranch>,
+}
+
+impl IMatch {
+    pub fn type_(&self) -> IntermediateType {
+        self.branches[0].block.type_()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateMatchBranch {
     pub target: Option<IntermediateArg>,
-    pub statements: Vec<IntermediateStatement>,
+    pub block: IBlock,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntermediateProgram {
-    pub main: IntermediateLambda,
+    pub main: ILambda,
     pub types: Vec<Rc<RefCell<IntermediateType>>>,
 }

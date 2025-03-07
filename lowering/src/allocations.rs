@@ -25,12 +25,23 @@ impl AllocationOptimizer {
                     location,
                 }) => {
                     match &expression {
-                        IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                            args: _,
-                            statements,
-                            ret: _,
+                        IntermediateExpression::ILambda(ILambda { args: _, block }) => {
+                            self.register_memory(&block.statements);
+                        }
+                        IntermediateExpression::IIf(IIf {
+                            condition: _,
+                            branches,
                         }) => {
-                            self.register_memory(statements);
+                            self.register_memory(&branches.0.statements);
+                            self.register_memory(&branches.1.statements);
+                        }
+                        IntermediateExpression::IMatch(IMatch {
+                            subject: _,
+                            branches,
+                        }) => {
+                            for branch in branches {
+                                self.register_memory(&branch.block.statements)
+                            }
                         }
                         _ => {}
                     }
@@ -41,27 +52,6 @@ impl AllocationOptimizer {
                         .get_mut(&location)
                         .unwrap()
                         .push(expression.clone());
-                }
-                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                    condition: _,
-                    branches,
-                }) => {
-                    self.register_memory(&branches.0);
-                    self.register_memory(&branches.1);
-                }
-                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                    subject: _,
-                    branches,
-                }) => {
-                    for branch in branches {
-                        self.register_memory(&branch.statements)
-                    }
-                    if branches.len() == 1 {
-                        let statements = branches[0].statements.clone();
-                        if statements.len() > 0 {
-                            self.register_memory(&vec![statements[statements.len() - 1].clone()])
-                        }
-                    }
                 }
             }
         }
@@ -106,14 +96,33 @@ impl AllocationOptimizer {
                 type_,
             }
             .into(),
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
+            IntermediateExpression::ILambda(ILambda { args, block }) => ILambda {
                 args,
-                statements,
-                ret,
-            }) => IntermediateLambda {
-                args,
-                statements: self.remove_wasted_allocations_from_statements(statements),
-                ret: self.remove_wasted_allocations_from_value(ret),
+                block: self.remove_wasted_allocations_from_block(block),
+            }
+            .into(),
+            IntermediateExpression::IIf(IIf {
+                condition,
+                branches,
+            }) => IIf {
+                condition: self.remove_wasted_allocations_from_value(condition),
+                branches: (
+                    self.remove_wasted_allocations_from_block(branches.0),
+                    self.remove_wasted_allocations_from_block(branches.1),
+                ),
+            }
+            .into(),
+            IntermediateExpression::IMatch(IMatch { subject, branches }) => IMatch {
+                subject: self.remove_wasted_allocations_from_value(subject),
+                branches: branches
+                    .into_iter()
+                    .map(
+                        |IntermediateMatchBranch { target, block }| IntermediateMatchBranch {
+                            target,
+                            block: self.remove_wasted_allocations_from_block(block),
+                        },
+                    )
+                    .collect(),
             }
             .into(),
         }
@@ -177,38 +186,6 @@ impl AllocationOptimizer {
                     .into(),
                 ))
             }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => Some(
-                IntermediateIfStatement {
-                    condition: self.remove_wasted_allocations_from_value(condition),
-                    branches: (
-                        self.remove_wasted_allocations_from_statements(branches.0),
-                        self.remove_wasted_allocations_from_statements(branches.1),
-                    ),
-                }
-                .into(),
-            ),
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject,
-                branches,
-            }) => Some(
-                IntermediateMatchStatement {
-                    subject: self.remove_wasted_allocations_from_value(subject),
-                    branches: branches
-                        .into_iter()
-                        .map(|IntermediateMatchBranch { target, statements }| {
-                            IntermediateMatchBranch {
-                                target,
-                                statements: self
-                                    .remove_wasted_allocations_from_statements(statements),
-                            }
-                        })
-                        .collect(),
-                }
-                .into(),
-            ),
         }
     }
     pub fn remove_wasted_allocations_from_statements(
@@ -219,5 +196,14 @@ impl AllocationOptimizer {
             .into_iter()
             .filter_map(|statement| self.remove_wasted_allocations_from_statement(statement))
             .collect()
+    }
+    pub fn remove_wasted_allocations_from_block(
+        &self,
+        IBlock { statements, ret }: IBlock,
+    ) -> IBlock {
+        IBlock {
+            statements: self.remove_wasted_allocations_from_statements(statements),
+            ret: self.remove_wasted_allocations_from_value(ret),
+        }
     }
 }
