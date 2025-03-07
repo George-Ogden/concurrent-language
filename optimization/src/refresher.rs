@@ -192,3 +192,128 @@ impl Refresher {
         arg.location = location;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use lowering::{
+        AtomicTypeEnum, BuiltInFn, ExpressionEqualityChecker, Id, IntermediateBuiltIn,
+        IntermediateFnType, IntermediateLambda, IntermediateType,
+    };
+
+    use super::*;
+    use test_case::test_case;
+
+    #[test_case(
+        {
+            let args = vec![
+                IntermediateArg{
+                    type_: AtomicTypeEnum::INT.into(),
+                    location: Location::new(),
+                },
+                IntermediateArg{
+                    type_: AtomicTypeEnum::INT.into(),
+                    location: Location::new(),
+                },
+            ];
+            let ret = IntermediateMemory {
+                type_: AtomicTypeEnum::INT.into(),
+                location: Location::new()
+            };
+            IntermediateLambda {
+                args: args.clone(),
+                statements: vec![
+                    IntermediateAssignment {
+                        expression: IntermediateFnCall {
+                            fn_: IntermediateBuiltIn::from(BuiltInFn(
+                                Id::from("+"),
+                                IntermediateFnType(
+                                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                )
+                            )).into(),
+                            args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
+                        }.into(),
+                        location: ret.location.clone()
+                    }.into()
+                ],
+                ret: ret.clone().into()
+            }
+        };
+        "plus fn"
+    )]
+    #[test_case(
+        {
+            let foo = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let z = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            IntermediateLambda{
+                args: vec![z.clone()],
+                statements: vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![x.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: bar_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: bar.clone().into(),
+                                        args: vec![x.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: bar_call.clone().into()
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![y.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: vec![y.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: foo_call.clone().into()
+                        }.into(),
+                        location: bar.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        location: main_call.location.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: foo.clone().into(),
+                            args: vec![z.clone().into()]
+                        }.into()
+                    }.into()
+                ],
+                ret: main_call.clone().into()
+            }
+        };
+        "mutually recursive fns"
+    )]
+    fn test_refresh_lambda(lambda: IntermediateLambda) {
+        let mut refreshed = lambda.clone();
+        Refresher::refresh(&mut refreshed);
+        dbg!(&lambda, &refreshed);
+        ExpressionEqualityChecker::assert_equal(&refreshed.into(), &lambda.into());
+    }
+}

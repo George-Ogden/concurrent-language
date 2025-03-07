@@ -381,8 +381,8 @@ mod tests {
         AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
         IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateFnCall,
         IntermediateFnType, IntermediateIfStatement, IntermediateMatchBranch,
-        IntermediateMatchStatement, IntermediateMemory, IntermediateUnionType, IntermediateValue,
-        Location,
+        IntermediateMatchStatement, IntermediateMemory, IntermediateType, IntermediateUnionType,
+        IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -1671,6 +1671,125 @@ mod tests {
         dbg!(&main, &optimized.main);
         ExpressionEqualityChecker::assert_equal(&optimized.main.into(), &main.into());
         assert_eq!(types, optimized.types)
+    }
+
+    #[test_case(
+        {
+            let foo = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            IntermediateLambda {
+                statements: vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: foo_call.clone().into()
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        location: main_call.location.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: foo.clone().into(),
+                            args: Vec::new()
+                        }.into()
+                    }.into()
+                ],
+                args: Vec::new(),
+                ret: main_call.clone().into(),
+            }
+        };
+        "self recursive fn"
+    )]
+    #[test_case(
+        {
+            let foo = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            IntermediateLambda {
+                statements: vec![
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: bar_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: bar.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: bar_call.clone().into()
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: Vec::new(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: foo_call.clone().into()
+                        }.into(),
+                        location: bar.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        location: main_call.location.clone(),
+                        expression: IntermediateFnCall{
+                            fn_: foo.clone().into(),
+                            args: Vec::new()
+                        }.into()
+                    }.into()
+                ],
+                args: Vec::new(),
+                ret: main_call.clone().into(),
+            }
+        };
+        "mutually recursive fns"
+    )]
+    fn test_iterative_inlining(lambda: IntermediateLambda) {
+        let mut program = IntermediateProgram {
+            main: lambda,
+            types: Vec::new(),
+        };
+        for _ in 1..5 {
+            let size = CodeSizeEstimator::estimate_size(&program.main);
+            program = Inliner::inline_up_to_size(program, Some(size.1));
+            assert!(program.main.find_open_vars().is_empty());
+        }
     }
 
     #[test]

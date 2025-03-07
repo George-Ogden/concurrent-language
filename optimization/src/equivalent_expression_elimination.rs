@@ -12,12 +12,14 @@ use crate::refresher::Refresher;
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
 type Definitions = HashMap<Location, IntermediateExpression>;
 type NormalizedLocations = HashMap<Location, Location>;
+type OpenVars = HashMap<IntermediateLambda, Vec<IntermediateValue>>;
 
 #[derive(Clone)]
 pub struct EquivalentExpressionEliminator {
     historical_expressions: HistoricalExpressions,
     definitions: Definitions,
     normalized_locations: NormalizedLocations,
+    open_vars: OpenVars,
 }
 
 impl EquivalentExpressionEliminator {
@@ -26,6 +28,7 @@ impl EquivalentExpressionEliminator {
             historical_expressions: HistoricalExpressions::new(),
             normalized_locations: NormalizedLocations::new(),
             definitions: Definitions::new(),
+            open_vars: OpenVars::new(),
         }
     }
 
@@ -35,6 +38,36 @@ impl EquivalentExpressionEliminator {
     ) -> IntermediateExpression {
         expression.substitute(&self.normalized_locations);
         expression
+    }
+
+    pub fn required_memory(&self, expression: &IntermediateExpression) -> Vec<IntermediateMemory> {
+        if let IntermediateExpression::IntermediateLambda(lambda) = &expression {
+            self.open_vars
+                .get(lambda)
+                .cloned()
+                .unwrap_or_else(|| lambda.find_open_vars())
+                .into_iter()
+                .filter_map(|value| {
+                    if let IntermediateValue::IntermediateMemory(memory) = value {
+                        Some(memory)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            expression
+                .values()
+                .into_iter()
+                .filter_map(|value| {
+                    if let IntermediateValue::IntermediateMemory(memory) = value {
+                        Some(memory)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
     }
 
     fn eliminate_from_lambda(&mut self, lambda: IntermediateLambda) -> IntermediateLambda {
@@ -69,13 +102,12 @@ impl EquivalentExpressionEliminator {
                     location,
                 }) => {
                     let mut new_expression = self.normalize_expression(expression.clone());
-                    if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                        args: _,
-                        ref mut statements,
-                        ret: _,
-                    }) = new_expression
+                    if let IntermediateExpression::IntermediateLambda(ref mut lambda) =
+                        new_expression
                     {
-                        self.prepare_history(statements);
+                        let open_vars = lambda.find_open_vars();
+                        self.prepare_history(&mut lambda.statements);
+                        self.open_vars.insert(lambda.clone(), open_vars.clone());
                     }
                     let new_location = match self.historical_expressions.get(&new_expression) {
                         None => {
@@ -141,13 +173,13 @@ impl EquivalentExpressionEliminator {
         }
 
         for statement in statements {
-            for dependency in statement
-                .values()
+            let values = statement.values();
+            for value in values
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
             {
                 self.weakly_process_location(
-                    dependency,
+                    value,
                     defined,
                     &weakly_required_locations,
                     &mut definitions,
@@ -252,8 +284,16 @@ impl EquivalentExpressionEliminator {
             return;
         };
 
-        let values = if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression
-        {
+        for memory in self.required_memory(&expression) {
+            self.weakly_process_location(
+                memory.location,
+                defined,
+                weakly_required_locations,
+                definitions,
+                new_statements,
+            );
+        }
+        if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression {
             lambda.statements = self.weakly_reorder(
                 lambda.statements.clone(),
                 &lambda
@@ -261,29 +301,7 @@ impl EquivalentExpressionEliminator {
                     .filter_memory_location()
                     .into_iter()
                     .collect_vec(),
-                defined,
-            );
-
-            lambda
-                .find_open_vars()
-                .into_iter()
-                .map(|memory| memory.location)
-                .collect_vec()
-        } else {
-            expression
-                .values()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-                .collect_vec()
-        };
-
-        for location in values {
-            self.weakly_process_location(
-                location,
-                defined,
-                weakly_required_locations,
-                definitions,
-                new_statements,
+                &mut defined.clone(),
             );
         }
 
@@ -318,11 +336,9 @@ impl EquivalentExpressionEliminator {
                 };
                 let mut locations = vec![location.clone()];
                 locations.extend(
-                    expression
-                        .values()
-                        .iter()
-                        .filter_map(IntermediateValue::filter_memory_location)
-                        .collect_vec(),
+                    self.required_memory(&expression)
+                        .into_iter()
+                        .map(|memory| memory.location),
                 );
                 locations
             }
@@ -387,29 +403,19 @@ impl EquivalentExpressionEliminator {
             }
         }
 
-        for mut statement in statements {
-            let locations =
-                if let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-                    expression: IntermediateExpression::IntermediateLambda(ref mut lambda),
-                    location: _,
-                }) = &mut statement
-                {
-                    lambda
-                        .find_open_vars()
-                        .into_iter()
-                        .map(|memory| memory.location)
-                        .collect_vec()
-                } else {
-                    statement
-                        .values()
-                        .iter()
-                        .filter_map(IntermediateValue::filter_memory_location)
-                        .collect_vec()
-                };
-            for dependency in locations {
-                if strongly_required_locations.contains(&dependency) {
+        for statement in statements {
+            if let IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
+                condition: value,
+                branches: _,
+            })
+            | IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
+                subject: value,
+                branches: _,
+            }) = &statement
+            {
+                if let Some(value) = value.filter_memory_location() {
                     self.strongly_process_location(
-                        dependency,
+                        value,
                         defined,
                         &strongly_required_locations,
                         &mut definitions,
@@ -517,16 +523,16 @@ impl EquivalentExpressionEliminator {
             return;
         };
 
+        for memory in self.required_memory(&expression) {
+            self.strongly_process_location(
+                memory.location,
+                defined,
+                strongly_required_locations,
+                definitions,
+                new_statements,
+            );
+        }
         if let IntermediateExpression::IntermediateLambda(ref mut lambda) = expression {
-            for memory in lambda.find_open_vars() {
-                self.strongly_process_location(
-                    memory.location,
-                    defined,
-                    strongly_required_locations,
-                    definitions,
-                    new_statements,
-                );
-            }
             lambda.statements = self.strongly_reorder(
                 lambda.statements.clone(),
                 &lambda
@@ -534,23 +540,9 @@ impl EquivalentExpressionEliminator {
                     .filter_memory_location()
                     .into_iter()
                     .collect_vec(),
-                defined,
+                &mut defined.clone(),
             );
-        } else {
-            for location in expression
-                .values()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-            {
-                self.strongly_process_location(
-                    location,
-                    defined,
-                    strongly_required_locations,
-                    definitions,
-                    new_statements,
-                );
-            }
-        };
+        }
 
         new_statements.push(
             IntermediateAssignment {
@@ -573,22 +565,11 @@ impl EquivalentExpressionEliminator {
                     location,
                 }) => {
                     if strongly_required_locations.contains(location) {
-                        let locations = if let IntermediateExpression::IntermediateLambda(lambda) =
-                            expression
-                        {
-                            lambda
-                                .find_open_vars()
+                        strongly_required_locations.extend(
+                            self.required_memory(expression)
                                 .into_iter()
-                                .map(|memory| memory.location)
-                                .collect_vec()
-                        } else {
-                            expression
-                                .values()
-                                .iter()
-                                .filter_map(IntermediateValue::filter_memory_location)
-                                .collect_vec()
-                        };
-                        strongly_required_locations.extend(locations);
+                                .map(|memory| memory.location),
+                        );
                     }
                 }
                 IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
@@ -1525,11 +1506,11 @@ mod tests {
                 ret: original_location.clone().into(),
             });
         let allocation_optimizer = AllocationOptimizer::from_statements(&optimized_fn.statements);
-        eprintln!("optimized: {:?}", &optimized_fn.statements);
+        dbg!(&optimized_fn.statements);
         let optimized_fn =
             allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
-        eprintln!("expected: {:?}", &expected_fn);
-        eprintln!("optimized: {:?}", &optimized_fn);
+        dbg!(&expected_fn);
+        dbg!(&optimized_fn);
         ExpressionEqualityChecker::assert_equal(&optimized_fn, &expected_fn.into());
     }
 

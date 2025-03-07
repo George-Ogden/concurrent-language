@@ -476,12 +476,12 @@ impl Compiler {
         let open_vars = fn_def.find_open_vars();
         let new_locations = open_vars
             .iter()
-            .map(|val| IntermediateMemory::from(val.type_.clone()))
+            .map(|val| IntermediateMemory::from(val.type_().clone()))
             .collect_vec();
         let substitution = open_vars
             .iter()
             .zip(new_locations.iter())
-            .map(|(var, mem)| (var.location.clone(), mem.location.clone()))
+            .map(|(var, mem)| (var.location().unwrap().clone(), mem.location.clone()))
             .collect::<HashMap<_, _>>();
         fn_def.substitute(&substitution);
         open_vars
