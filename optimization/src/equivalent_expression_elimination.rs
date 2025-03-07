@@ -404,25 +404,6 @@ impl EquivalentExpressionEliminator {
         }
 
         for statement in statements {
-            if let IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition: value,
-                branches: _,
-            })
-            | IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject: value,
-                branches: _,
-            }) = &statement
-            {
-                if let Some(value) = value.filter_memory_location() {
-                    self.strongly_process_location(
-                        value,
-                        defined,
-                        &strongly_required_locations,
-                        &mut definitions,
-                        &mut new_statements,
-                    );
-                }
-            }
             match statement {
                 IntermediateStatement::IntermediateAssignment(assignment) => {
                     if strongly_required_locations.contains(&assignment.location) {
@@ -1416,22 +1397,6 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         expression: IntermediateLambda{
-                            args: vec![y.clone()],
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: foo_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: foo.clone().into(),
-                                        args: vec![y.clone().into()]
-                                    }.into()
-                                }.into()
-                            ],
-                            ret: foo_call.clone().into()
-                        }.into(),
-                        location: bar.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        expression: IntermediateLambda{
                             args: vec![x.clone()],
                             statements: vec![
                                 IntermediateAssignment{
@@ -1445,6 +1410,22 @@ mod tests {
                             ret: bar_call.clone().into()
                         }.into(),
                         location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: IntermediateLambda{
+                            args: vec![y.clone()],
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: foo.clone().into(),
+                                        args: vec![y.clone().into()]
+                                    }.into()
+                                }.into()
+                            ],
+                            ret: foo_call.clone().into()
+                        }.into(),
+                        location: bar.location.clone()
                     }.into(),
                 ],
                 vec![
