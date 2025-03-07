@@ -178,6 +178,13 @@ impl IntermediateValue {
             IntermediateValue::IntermediateArg(arg) => arg.type_(),
         }
     }
+    pub fn location(&self) -> Option<Location> {
+        match self {
+            IntermediateValue::IntermediateBuiltIn(_) => None,
+            IntermediateValue::IntermediateMemory(memory) => Some(memory.location.clone()),
+            IntermediateValue::IntermediateArg(arg) => Some(arg.location.clone()),
+        }
+    }
     fn types(values: &Vec<Self>) -> Vec<IntermediateType> {
         values.iter().map(Self::type_).collect()
     }
@@ -331,22 +338,7 @@ impl IntermediateExpression {
                 None => Vec::new(),
                 Some(v) => vec![v.clone()],
             },
-            IntermediateExpression::IntermediateLambda(lambda) => {
-                let IntermediateLambda {
-                    args,
-                    statements,
-                    ret: return_value,
-                } = lambda;
-                let mut values: Vec<_> = IntermediateStatement::all_values(statements);
-                values.push(return_value.clone());
-                values
-                    .into_iter()
-                    .filter(|value| match value {
-                        IntermediateValue::IntermediateArg(arg) => !args.contains(&arg),
-                        _ => true,
-                    })
-                    .collect()
-            }
+            IntermediateExpression::IntermediateLambda(lambda) => lambda.find_open_vars(),
         }
     }
     pub fn substitute(&mut self, substitution: &Substitution) {
@@ -846,14 +838,15 @@ impl IntermediateLambda {
         )
     }
 
-    pub fn find_open_vars(&self) -> Vec<IntermediateMemory> {
+    pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
         let mut targets: HashSet<Location> =
             HashSet::from_iter(IntermediateStatement::all_targets(&self.statements));
         let mut args: HashSet<IntermediateArg> =
             HashSet::from_iter(IntermediateStatement::all_arguments(&self.statements));
         args.extend(self.args.clone());
         targets.extend(args.into_iter().map(|arg| arg.location));
-        let values = IntermediateExpression::from(self.clone()).values();
+        let mut values = IntermediateStatement::all_values(&self.statements);
+        values.push(self.ret.clone());
         values
             .into_iter()
             .unique()
@@ -862,15 +855,18 @@ impl IntermediateLambda {
                 IntermediateValue::IntermediateBuiltIn(_) => None,
                 IntermediateValue::IntermediateMemory(memory) => {
                     if !targets.contains(&memory.location) {
-                        Some(memory)
+                        Some(memory.into())
                     } else {
                         None
                     }
                 }
-                IntermediateValue::IntermediateArg(arg) => Some(IntermediateMemory {
-                    location: arg.location,
-                    type_: arg.type_,
-                }),
+                IntermediateValue::IntermediateArg(arg) => {
+                    if !targets.contains(&arg.location) {
+                        Some(arg.into())
+                    } else {
+                        None
+                    }
+                }
             })
             .collect()
     }
