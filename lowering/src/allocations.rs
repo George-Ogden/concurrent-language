@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::intermediate_nodes::*;
 
-pub type MemoryMap = HashMap<Location, Vec<IntermediateExpression>>;
+pub type MemoryMap = HashMap<Location, IntermediateExpression>;
 
 pub struct AllocationOptimizer {
     memory: MemoryMap,
@@ -45,13 +45,7 @@ impl AllocationOptimizer {
                         }
                         _ => {}
                     }
-                    if !self.memory.contains_key(&location) {
-                        self.memory.insert(location.clone(), Vec::new());
-                    }
-                    self.memory
-                        .get_mut(&location)
-                        .unwrap()
-                        .push(expression.clone());
+                    self.memory.insert(location.clone(), expression.clone());
                 }
             }
         }
@@ -135,13 +129,10 @@ impl AllocationOptimizer {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
             IntermediateValue::IntermediateArg(arg) => arg.into(),
             IntermediateValue::IntermediateMemory(memory) => {
-                let expressions = self.memory.get(&memory.location);
-                if expressions.map(Vec::len) == Some(1) {
-                    let expressions = expressions.unwrap();
-                    let expression = expressions[0].clone();
+                if let Some(expression) = self.memory.get(&memory.location) {
                     match expression {
                         IntermediateExpression::IntermediateValue(value) => {
-                            self.remove_wasted_allocations_from_value(value)
+                            self.remove_wasted_allocations_from_value(value.clone())
                         }
                         _ => memory.into(),
                     }
@@ -170,9 +161,7 @@ impl AllocationOptimizer {
                     expression,
                     location,
                 } = assignment;
-                if matches!(&expression, IntermediateExpression::IntermediateValue(_))
-                    && self.memory.get(&location).map(Vec::len) == Some(1)
-                {
+                if matches!(&expression, IntermediateExpression::IntermediateValue(_)) {
                     return None;
                 }
                 let condensed_expression =

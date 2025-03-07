@@ -50,8 +50,7 @@ impl Lowerer {
         lowerer
     }
     fn update_memory(&mut self, location: Location, expression: IntermediateExpression) {
-        let values = self.memory.entry(location).or_insert(Vec::new());
-        values.push(expression);
+        self.memory.insert(location, expression);
     }
     fn get_cached_value(
         &mut self,
@@ -2474,7 +2473,7 @@ mod tests {
             let expression = match value {
                 IntermediateValue::IntermediateMemory(memory) => allocation_optimizer
                     .remove_wasted_allocations_from_expression(
-                        lowerer.memory[&memory.location][0].clone(),
+                        lowerer.memory[&memory.location].clone(),
                     ),
                 v => v.into(),
             };

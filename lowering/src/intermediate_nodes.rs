@@ -887,7 +887,7 @@ impl IBlock {
         IntermediateStatement::substitute_all(&mut self.statements, substitution);
         self.ret = self.ret.substitute(substitution);
     }
-    fn type_(&self) -> IntermediateType {
+    pub fn type_(&self) -> IntermediateType {
         self.ret.type_()
     }
 }
