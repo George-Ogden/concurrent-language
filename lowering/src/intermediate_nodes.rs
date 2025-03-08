@@ -878,7 +878,7 @@ impl IBlock {
         IntermediateStatement::all_targets(&self.statements)
     }
 
-    fn values(&self) -> Vec<IntermediateValue> {
+    pub fn values(&self) -> Vec<IntermediateValue> {
         let mut values = IntermediateStatement::all_values(&self.statements);
         values.push(self.ret.clone());
         values

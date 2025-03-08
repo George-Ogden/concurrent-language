@@ -412,7 +412,6 @@ impl Compiler {
                 args: _
             })
         ) {
-            dbg!(&value);
             allocations.push(declaration.into());
             statements.push(assignment.into());
         } else {
