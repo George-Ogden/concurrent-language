@@ -1,8 +1,7 @@
 use lowering::{
-    IntermediateArg, IntermediateAssignment, IntermediateCtorCall, IntermediateElementAccess,
-    IntermediateExpression, IntermediateFnCall, IntermediateIfStatement, IntermediateLambda,
-    IntermediateMatchStatement, IntermediateMemory, IntermediateStatement,
-    IntermediateTupleExpression, IntermediateValue, Location,
+    IBlock, ILambda, IntermediateArg, IntermediateAssignment, IntermediateCtorCall,
+    IntermediateElementAccess, IntermediateExpression, IntermediateFnCall, IntermediateMemory,
+    IntermediateStatement, IntermediateTupleExpression, IntermediateValue, Location,
 };
 use std::collections::HashMap;
 
@@ -17,7 +16,7 @@ impl Refresher {
             locations: HashMap::new(),
         }
     }
-    pub fn refresh_for_inlining(lambda: &mut IntermediateLambda) {
+    pub fn refresh_for_inlining(lambda: &mut ILambda) {
         let mut refresher = Refresher::new();
         for arg in lambda.args.iter_mut() {
             let IntermediateArg { type_, location } = arg.clone();
@@ -25,19 +24,15 @@ impl Refresher {
             refresher.locations.insert(location, memory.clone().into());
             arg.location = memory.location;
         }
-        refresher.refresh_statements(&mut lambda.statements);
-        refresher.refresh_value(&mut lambda.ret);
+        refresher.refresh_block(&mut lambda.block);
     }
-    pub fn refresh(lambda: &mut IntermediateLambda) {
+    pub fn refresh(lambda: &mut ILambda) {
         Refresher::new().refresh_lambda(lambda);
     }
     pub fn register_statements(&mut self, statements: &Vec<IntermediateStatement>) {
         let targets = statements.iter().filter_map(|statement| {
-            if let IntermediateStatement::IntermediateAssignment(assignment) = statement {
-                Some(assignment.clone())
-            } else {
-                None
-            }
+            let IntermediateStatement::IntermediateAssignment(assignment) = statement;
+            Some(assignment.clone())
         });
         for target in targets {
             self.locations.entry(target.location).or_insert(
@@ -49,41 +44,23 @@ impl Refresher {
             );
         }
     }
-    fn refresh_lambda(mut self, lambda: &mut IntermediateLambda) {
+    fn refresh_lambda(mut self, lambda: &mut ILambda) {
         for arg in &mut lambda.args {
             self.refresh_arg(arg);
         }
-        self.refresh_statements(&mut lambda.statements);
-        self.refresh_value(&mut lambda.ret);
+        self.refresh_block(&mut lambda.block);
     }
-    fn refresh_statements(
-        &mut self,
-        statements: &mut Vec<IntermediateStatement>,
-    ) -> Option<(Location, IntermediateValue)> {
+    fn refresh_block(&mut self, block: &mut IBlock) {
+        self.refresh_statements(&mut block.statements);
+        self.refresh_value(&mut block.ret);
+    }
+    fn refresh_statements(&mut self, statements: &mut Vec<IntermediateStatement>) {
         self.register_statements(statements);
-        let mut it = statements.iter_mut().peekable();
-        while let Some(statement) = it.next() {
-            let last = self.refresh_statement(statement);
-            if it.peek().is_none() {
-                return last;
-            }
+        for statement in statements {
+            self.refresh_statement(statement);
         }
-        None
     }
-    fn refresh_branch_statements(
-        &mut self,
-        statements: &mut Vec<IntermediateStatement>,
-    ) -> Option<(Location, IntermediateValue)> {
-        let last = self.clone().refresh_statements(statements);
-        if let Some((k, v)) = last.clone() {
-            self.locations.insert(k, v);
-        }
-        last
-    }
-    fn refresh_statement(
-        &mut self,
-        statement: &mut IntermediateStatement,
-    ) -> Option<(Location, IntermediateValue)> {
+    fn refresh_statement(&mut self, statement: &mut IntermediateStatement) {
         match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
@@ -93,37 +70,8 @@ impl Refresher {
                 if let Some(IntermediateValue::IntermediateMemory(memory)) =
                     self.refresh_location(location)
                 {
-                    let previous_location = location.clone();
                     *location = memory.location.clone();
-                    Some((previous_location, memory.into()))
-                } else {
-                    None
                 }
-            }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => {
-                self.refresh_value(condition);
-                self.refresh_branch_statements(&mut branches.1);
-                self.refresh_branch_statements(&mut branches.0)
-            }
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject,
-                branches,
-            }) => {
-                self.refresh_value(subject);
-                let mut it = branches.iter_mut().peekable();
-                while let Some(branch) = it.next() {
-                    if let Some(arg) = &mut branch.target {
-                        self.refresh_arg(arg);
-                    }
-                    let last = self.refresh_branch_statements(&mut branch.statements);
-                    if it.peek().is_none() {
-                        return last;
-                    }
-                }
-                None
             }
         }
     }
@@ -155,8 +103,20 @@ impl Refresher {
                 None => (),
                 Some(data) => self.refresh_value(data),
             },
-            IntermediateExpression::IntermediateLambda(lambda) => {
-                self.clone().refresh_lambda(lambda)
+            IntermediateExpression::ILambda(lambda) => self.clone().refresh_lambda(lambda),
+            IntermediateExpression::IIf(if_) => {
+                self.refresh_value(&mut if_.condition);
+                self.clone().refresh_block(&mut if_.branches.0);
+                self.clone().refresh_block(&mut if_.branches.1);
+            }
+            IntermediateExpression::IMatch(match_) => {
+                for branch in &mut match_.branches {
+                    let mut refresher = self.clone();
+                    if let Some(arg) = &mut branch.target {
+                        refresher.refresh_arg(arg);
+                    }
+                    refresher.refresh_block(&mut branch.block);
+                }
             }
         }
     }
@@ -197,8 +157,8 @@ impl Refresher {
 mod tests {
     use itertools::Itertools;
     use lowering::{
-        AtomicTypeEnum, BuiltInFn, ExpressionEqualityChecker, Id, IntermediateBuiltIn,
-        IntermediateFnType, IntermediateLambda, IntermediateType,
+        AtomicTypeEnum, BuiltInFn, ExpressionEqualityChecker, ILambda, Id, IntermediateBuiltIn,
+        IntermediateFnType, IntermediateType,
     };
 
     use super::*;
@@ -220,24 +180,26 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new()
             };
-            IntermediateLambda {
+            ILambda {
                 args: args.clone(),
-                statements: vec![
-                    IntermediateAssignment {
-                        expression: IntermediateFnCall {
-                            fn_: IntermediateBuiltIn::from(BuiltInFn(
-                                Id::from("+"),
-                                IntermediateFnType(
-                                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
-                                    Box::new(AtomicTypeEnum::INT.into()),
-                                )
-                            )).into(),
-                            args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
-                        }.into(),
-                        location: ret.location.clone()
-                    }.into()
-                ],
-                ret: ret.clone().into()
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment {
+                            expression: IntermediateFnCall {
+                                fn_: IntermediateBuiltIn::from(BuiltInFn(
+                                    Id::from("+"),
+                                    IntermediateFnType(
+                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::INT.into()),
+                                    )
+                                )).into(),
+                                args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
+                            }.into(),
+                            location: ret.location.clone()
+                        }.into()
+                    ],
+                    ret: ret.clone().into()
+                },
             }
         };
         "plus fn"
@@ -262,55 +224,61 @@ mod tests {
             let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
             let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
             let z = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
-            IntermediateLambda{
+            ILambda{
                 args: vec![z.clone()],
-                statements: vec![
-                    IntermediateAssignment{
-                        expression: IntermediateLambda{
-                            args: vec![x.clone()],
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: bar_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: bar.clone().into(),
-                                        args: vec![x.clone().into()]
-                                    }.into()
-                                }.into()
-                            ],
-                            ret: bar_call.clone().into()
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment{
+                            expression: ILambda{
+                                args: vec![x.clone()],
+                                block: IBlock {
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: bar_call.location.clone(),
+                                            expression: IntermediateFnCall{
+                                                fn_: bar.clone().into(),
+                                                args: vec![x.clone().into()]
+                                            }.into()
+                                        }.into()
+                                    ],
+                                    ret: bar_call.clone().into()
+                                },
+                            }.into(),
+                            location: foo.location.clone()
                         }.into(),
-                        location: foo.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        expression: IntermediateLambda{
-                            args: vec![y.clone()],
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: foo_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: foo.clone().into(),
-                                        args: vec![y.clone().into()]
-                                    }.into()
-                                }.into()
-                            ],
-                            ret: foo_call.clone().into()
+                        IntermediateAssignment{
+                            expression: ILambda{
+                                args: vec![y.clone()],
+                                block: IBlock {
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: foo_call.location.clone(),
+                                            expression: IntermediateFnCall{
+                                                fn_: foo.clone().into(),
+                                                args: vec![y.clone().into()]
+                                            }.into()
+                                        }.into()
+                                    ],
+                                    ret: foo_call.clone().into()
+                                },
+                            }.into(),
+                            location: bar.location.clone()
                         }.into(),
-                        location: bar.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        location: main_call.location.clone(),
-                        expression: IntermediateFnCall{
-                            fn_: foo.clone().into(),
-                            args: vec![z.clone().into()]
+                        IntermediateAssignment{
+                            location: main_call.location.clone(),
+                            expression: IntermediateFnCall{
+                                fn_: foo.clone().into(),
+                                args: vec![z.clone().into()]
+                            }.into()
                         }.into()
-                    }.into()
-                ],
-                ret: main_call.clone().into()
+                    ],
+                    ret: main_call.clone().into()
+                },
             }
         };
         "mutually recursive fns"
     )]
-    fn test_refresh_lambda(lambda: IntermediateLambda) {
+    fn test_refresh_lambda(lambda: ILambda) {
         let mut refreshed = lambda.clone();
         Refresher::refresh(&mut refreshed);
         dbg!(&lambda, &refreshed);

@@ -6,7 +6,7 @@ use lowering::{
     IntermediateMemory, IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
 };
 
-// use crate::refresher::Refresher;
+use crate::refresher::Refresher;
 
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
 type Definitions = HashMap<Location, IntermediateExpression>;
@@ -46,7 +46,7 @@ impl EquivalentExpressionEliminator {
         self.refresh_history(&block);
         let block = self.strongly_reorder(block, &mut HashSet::new());
         let mut lambda = ILambda { args, block };
-        // Refresher::refresh(&mut lambda);
+        Refresher::refresh(&mut lambda);
         lambda
     }
     fn prepare_history(&mut self, block: &mut IBlock) {
@@ -138,18 +138,6 @@ impl EquivalentExpressionEliminator {
         let IBlock { statements, ret } = block;
 
         for statement in statements {
-            let values = statement.values();
-            for value in values
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-            {
-                self.weakly_process_location(
-                    value,
-                    defined,
-                    &weakly_required_locations,
-                    &mut new_statements,
-                );
-            }
             match statement {
                 IntermediateStatement::IntermediateAssignment(assignment) => {
                     self.weakly_process_location(
@@ -296,11 +284,9 @@ impl EquivalentExpressionEliminator {
         expression: &IntermediateExpression,
     ) -> HashSet<Location> {
         match &expression {
-            IntermediateExpression::ILambda(lambda) => self.open_vars[&lambda.block]
-                .clone()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-                .collect(),
+            IntermediateExpression::ILambda(lambda) => {
+                self.very_weak_block_locations(&lambda.block)
+            }
             IntermediateExpression::IIf(if_) => {
                 let mut required = self.very_weak_block_locations(&if_.branches.0);
                 required.extend(self.very_weak_block_locations(&if_.branches.1));
@@ -414,12 +400,8 @@ impl EquivalentExpressionEliminator {
                 new_statements,
             );
         }
-        let undefined = strongly_required_locations
-            .clone()
-            .difference(&defined)
-            .cloned()
-            .collect_vec();
-        defined.extend(undefined.clone());
+        let previously_defined = defined.clone();
+        defined.extend(strongly_required_locations.clone());
         match &mut expression {
             IntermediateExpression::ILambda(lambda) => {
                 lambda.block = self.strongly_reorder(lambda.block.clone(), defined);
@@ -435,9 +417,7 @@ impl EquivalentExpressionEliminator {
             }
             _ => {}
         }
-        for undefined in undefined {
-            assert!(defined.remove(&undefined));
-        }
+        *defined = previously_defined;
 
         new_statements.push(
             IntermediateAssignment {
@@ -468,42 +448,41 @@ impl EquivalentExpressionEliminator {
     pub fn strong_expression_locations(
         &self,
         expression: &IntermediateExpression,
-    ) -> Vec<Location> {
+    ) -> HashSet<Location> {
         let merge = |a, b| {
             HashSet::intersection(&a, &b)
                 .cloned()
                 .collect::<HashSet<_>>()
         };
-        let values = match &expression {
-            IntermediateExpression::ILambda(lambda) => lambda.find_open_vars(),
+        match &expression {
+            IntermediateExpression::ILambda(lambda) => lambda
+                .find_open_vars()
+                .iter()
+                .filter_map(IntermediateValue::filter_memory_location)
+                .collect(),
             IntermediateExpression::IIf(if_) => {
-                let required = merge(
-                    HashSet::<IntermediateValue>::from_iter(if_.branches.0.values()),
-                    HashSet::from_iter(if_.branches.1.values()),
+                let mut required = merge(
+                    self.weak_block_locations(&if_.branches.0),
+                    self.weak_block_locations(&if_.branches.1),
                 );
-                let mut required = Vec::from_iter(required);
-                required.push(if_.condition.clone());
+                required.extend(if_.condition.filter_memory_location().into_iter());
                 required
             }
             IntermediateExpression::IMatch(match_) => {
                 let mut required = None;
                 if match_.branches.len() > 1 {
                     for branch in &match_.branches {
-                        let extra = HashSet::from_iter(branch.block.values());
+                        let extra = self.weak_block_locations(&branch.block);
                         required = match required {
                             Some(current) => Some(merge(extra, current)),
                             None => Some(extra),
                         }
                     }
                 }
-                Vec::from_iter(required.unwrap_or_default())
+                required.unwrap_or_default()
             }
-            expression => expression.values(),
-        };
-        values
-            .iter()
-            .filter_map(IntermediateValue::filter_memory_location)
-            .collect()
+            expression => self.weak_expression_locations(&expression),
+        }
     }
 
     pub fn eliminate_equivalent_expressions(program: IntermediateProgram) -> IntermediateProgram {
@@ -1337,24 +1316,6 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         expression: ILambda{
-                            args: vec![x.clone()],
-                            block: IBlock {
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: bar_call.location.clone(),
-                                        expression: IntermediateFnCall{
-                                            fn_: bar.clone().into(),
-                                            args: vec![x.clone().into()]
-                                        }.into()
-                                    }.into()
-                                ],
-                                ret: bar_call.clone().into()
-                            },
-                        }.into(),
-                        location: foo.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        expression: ILambda{
                             args: vec![y.clone()],
                             block: IBlock {
                                 statements: vec![
@@ -1370,6 +1331,24 @@ mod tests {
                             },
                         }.into(),
                         location: bar.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: ILambda{
+                            args: vec![x.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: bar_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: bar.clone().into(),
+                                            args: vec![x.clone().into()]
+                                        }.into()
+                                    }.into()
+                                ],
+                                ret: bar_call.clone().into()
+                            },
+                        }.into(),
+                        location: foo.location.clone()
                     }.into(),
                 ],
                 vec![
@@ -1593,7 +1572,11 @@ mod tests {
                 ret: target.clone().into(),
             },
         });
-        let optimized_statements = optimized_lambda.block.statements;
+        let allocation_optimizer =
+            AllocationOptimizer::from_statements(&optimized_lambda.block.statements);
+        let optimized_block =
+            allocation_optimizer.remove_wasted_allocations_from_block(optimized_lambda.block);
+        let optimized_statements = optimized_block.statements;
         assert_eq!(optimized_statements.len(), 1);
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             expression:
@@ -1628,6 +1611,7 @@ mod tests {
             location: _,
         }) = branches.1.statements[0].clone()
         else {
+            dbg!(branches.1.statements);
             panic!()
         };
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
@@ -1635,6 +1619,7 @@ mod tests {
             location: location_0,
         }) = true_branches.1.statements[0].clone()
         else {
+            dbg!(true_branches.1.statements);
             panic!()
         };
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
@@ -1642,6 +1627,7 @@ mod tests {
             location: location_1,
         }) = false_branches.1.statements[0].clone()
         else {
+            dbg!(false_branches.1.statements);
             panic!()
         };
         assert_ne!(location_0, location_1);
