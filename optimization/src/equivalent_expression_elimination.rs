@@ -179,15 +179,15 @@ impl EquivalentExpressionEliminator {
         }
         match &mut expression {
             IntermediateExpression::ILambda(lambda) => {
-                lambda.block = self.weakly_reorder(lambda.block.clone(), defined);
+                lambda.block = self.weakly_reorder(lambda.block.clone(), &mut defined.clone());
             }
             IntermediateExpression::IIf(if_) => {
-                if_.branches.0 = self.weakly_reorder(if_.branches.0.clone(), defined);
-                if_.branches.1 = self.weakly_reorder(if_.branches.1.clone(), defined);
+                if_.branches.0 = self.weakly_reorder(if_.branches.0.clone(), &mut defined.clone());
+                if_.branches.1 = self.weakly_reorder(if_.branches.1.clone(), &mut defined.clone());
             }
             IntermediateExpression::IMatch(match_) => {
                 for branch in &mut match_.branches {
-                    branch.block = self.weakly_reorder(branch.block.clone(), defined);
+                    branch.block = self.weakly_reorder(branch.block.clone(), &mut defined.clone());
                 }
             }
             _ => {}
@@ -245,8 +245,11 @@ impl EquivalentExpressionEliminator {
                 .collect::<HashSet<_>>()
         };
         match &expression {
-            IntermediateExpression::ILambda(lambda) => self.open_vars[&lambda.block]
-                .clone()
+            IntermediateExpression::ILambda(lambda) => self
+                .open_vars
+                .get(&lambda.block)
+                .cloned()
+                .unwrap_or_else(|| lambda.find_open_vars())
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
                 .collect(),
@@ -292,11 +295,15 @@ impl EquivalentExpressionEliminator {
                 required.extend(if_.condition.filter_memory_location().into_iter());
                 required
             }
-            IntermediateExpression::IMatch(match_) => match_
-                .branches
-                .iter()
-                .flat_map(|branch| self.very_weak_block_locations(&branch.block))
-                .collect(),
+            IntermediateExpression::IMatch(match_) => {
+                let mut required = match_
+                    .branches
+                    .iter()
+                    .flat_map(|branch| self.very_weak_block_locations(&branch.block))
+                    .collect::<HashSet<_>>();
+                required.extend(match_.subject.filter_memory_location().into_iter());
+                required
+            }
             expression => expression
                 .values()
                 .iter()
@@ -454,11 +461,6 @@ impl EquivalentExpressionEliminator {
                 .collect::<HashSet<_>>()
         };
         match &expression {
-            IntermediateExpression::ILambda(lambda) => lambda
-                .find_open_vars()
-                .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
-                .collect(),
             IntermediateExpression::IIf(if_) => {
                 let mut required = merge(
                     self.weak_block_locations(&if_.branches.0),
@@ -505,8 +507,8 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AllocationOptimizer, AtomicTypeEnum, BuiltInFn, ExpressionEqualityChecker, IIf, ILambda,
-        IMatch, Id, Integer, IntermediateArg, IntermediateAssignment, IntermediateBuiltIn,
+        AllocationOptimizer, AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, IIf,
+        ILambda, IMatch, Id, Integer, IntermediateArg, IntermediateAssignment, IntermediateBuiltIn,
         IntermediateElementAccess, IntermediateFnCall, IntermediateFnType, IntermediateMatchBranch,
         IntermediateMemory, IntermediateProgram, IntermediateTupleExpression,
         IntermediateTupleType, IntermediateType, IntermediateUnionType, IntermediateValue,
@@ -1357,6 +1359,138 @@ mod tests {
             )
         };
         "mutually recursive fns"
+    )]
+    #[test_case(
+        {
+            let foo = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let bar_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let branch = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let y = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            (
+                vec![
+                    IntermediateAssignment{
+                        expression: ILambda{
+                            args: vec![x.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: bar_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: bar.clone().into(),
+                                            args: vec![x.clone().into()]
+                                        }.into()
+                                    }.into()
+                                ],
+                                ret: bar_call.clone().into()
+                            },
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: ILambda{
+                            args: vec![y.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: branch.location.clone(),
+                                        expression: IIf{
+                                            condition: Boolean{value: true}.into(),
+                                            branches: (
+                                                (
+                                                    vec![
+                                                        IntermediateAssignment{
+                                                            location: foo_call.location.clone(),
+                                                            expression: IntermediateFnCall{
+                                                                fn_: foo.clone().into(),
+                                                                args: vec![y.clone().into()]
+                                                            }.into()
+                                                        }.into()
+                                                    ],
+                                                    IntermediateValue::from(foo_call.clone()).clone().into()
+                                                ).into(),
+                                                IntermediateValue::from(Integer{value: 0}).into(),
+                                            )
+                                        }.into()
+                                    }.into(),
+                                ],
+                                ret: branch.clone().into()
+                            },
+                        }.into(),
+                        location: bar.location.clone()
+                    }.into(),
+                ],
+                vec![
+                    IntermediateAssignment{
+                        expression: ILambda{
+                            args: vec![y.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: branch.location.clone(),
+                                        expression: IIf{
+                                            condition: Boolean{value: true}.into(),
+                                            branches: (
+                                                (
+                                                    vec![
+                                                        IntermediateAssignment{
+                                                            location: foo_call.location.clone(),
+                                                            expression: IntermediateFnCall{
+                                                                fn_: foo.clone().into(),
+                                                                args: vec![y.clone().into()]
+                                                            }.into()
+                                                        }.into()
+                                                    ],
+                                                    IntermediateValue::from(foo_call.clone()).clone().into()
+                                                ).into(),
+                                                IntermediateValue::from(Integer{value: 0}).into(),
+                                            )
+                                        }.into()
+                                    }.into(),
+                                ],
+                                ret: branch.clone().into()
+                            },
+                        }.into(),
+                        location: bar.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: ILambda{
+                            args: vec![x.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: bar_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: bar.clone().into(),
+                                            args: vec![x.clone().into()]
+                                        }.into()
+                                    }.into()
+                                ],
+                                ret: bar_call.clone().into()
+                            },
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                ],
+                vec![
+                    foo.location.clone(),
+                    bar.location.clone(),
+                ]
+            )
+        };
+        "mutually recursive conditional fns"
     )]
     fn test_eliminate(
         statements: (

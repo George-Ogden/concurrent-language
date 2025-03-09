@@ -110,6 +110,7 @@ impl Refresher {
                 self.clone().refresh_block(&mut if_.branches.1);
             }
             IntermediateExpression::IMatch(match_) => {
+                self.refresh_value(&mut match_.subject);
                 for branch in &mut match_.branches {
                     let mut refresher = self.clone();
                     if let Some(arg) = &mut branch.target {
@@ -132,11 +133,16 @@ impl Refresher {
             | IntermediateValue::IntermediateArg(IntermediateArg { type_: _, location }) => {
                 if let Some(updated_value) = self.refresh_location(location) {
                     *value = updated_value;
+                } else {
+                    if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                        dbg!(&location);
+                        panic!();
+                    }
                 }
             }
         }
     }
-    fn refresh_location(&mut self, location: &mut Location) -> Option<IntermediateValue> {
+    fn refresh_location(&mut self, location: &Location) -> Option<IntermediateValue> {
         self.locations.get(location).cloned()
     }
     fn refresh_arg(&mut self, arg: &mut IntermediateArg) {
