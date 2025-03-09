@@ -1,28 +1,25 @@
-use counter::Counter;
 use itertools::Itertools;
 use lowering::{
-    BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateFnCall, IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
-    IntermediateMatchStatement, IntermediateMemory, IntermediateProgram, IntermediateStatement,
-    IntermediateValue, Location,
+    BuiltInFn, IBlock, IIf, ILambda, IMatch, IntermediateAssignment, IntermediateBuiltIn,
+    IntermediateExpression, IntermediateFnCall, IntermediateMatchBranch, IntermediateMemory,
+    IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
 };
 use std::{collections::HashMap, convert::identity};
 
 use crate::{
-    dead_code_analysis::DeadCodeAnalyzer,
     equivalent_expression_elimination::EquivalentExpressionEliminator, refresher::Refresher,
 };
 use compilation::CodeSizeEstimator;
 
 #[derive(Debug, PartialEq, Clone)]
 enum FnInst {
-    Lambda(IntermediateLambda),
+    Lambda(ILambda),
     BuiltIn(BuiltInFn),
     Ref(Location),
 }
 
-impl From<IntermediateLambda> for FnInst {
-    fn from(value: IntermediateLambda) -> Self {
+impl From<ILambda> for FnInst {
+    fn from(value: ILambda) -> Self {
         FnInst::Lambda(value)
     }
 }
@@ -59,7 +56,6 @@ impl Inliner {
         while should_continue && i < MAX_INLINING_ITERATIONS {
             (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
             program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
-            program = DeadCodeAnalyzer::remove_dead_code(program);
             i += 1;
         }
         program
@@ -76,12 +72,6 @@ impl Inliner {
             IntermediateStatement::IntermediateAssignment(assignment) => {
                 Self::collect_fns_defs_from_assignment(assignment, fn_defs)
             }
-            IntermediateStatement::IntermediateIfStatement(if_statement) => {
-                Self::collect_fn_defs_from_if_statement(if_statement, fn_defs)
-            }
-            IntermediateStatement::IntermediateMatchStatement(match_statement) => {
-                Self::collect_fn_defs_from_match_statement(match_statement, fn_defs);
-            }
         }
     }
     fn collect_fns_defs_from_assignment(
@@ -92,9 +82,9 @@ impl Inliner {
         fn_defs: &mut FnDefs,
     ) {
         match expression {
-            IntermediateExpression::IntermediateLambda(lambda) => {
+            IntermediateExpression::ILambda(lambda) => {
                 fn_defs.insert(location.clone(), lambda.clone().into());
-                Self::collect_fn_defs_from_statements(&lambda.statements, fn_defs);
+                Self::collect_fn_defs_from_statements(&lambda.block.statements, fn_defs);
             }
             IntermediateExpression::IntermediateValue(IntermediateValue::IntermediateBuiltIn(
                 IntermediateBuiltIn::BuiltInFn(fn_),
@@ -106,50 +96,17 @@ impl Inliner {
             )) if fn_defs.contains_key(&memory.location) => {
                 fn_defs.insert(location.clone(), memory.location.clone().into());
             }
+            IntermediateExpression::IIf(if_) => {
+                Self::collect_fn_defs_from_statements(&if_.branches.0.statements, fn_defs);
+                Self::collect_fn_defs_from_statements(&if_.branches.1.statements, fn_defs);
+            }
+            IntermediateExpression::IMatch(match_) => {
+                for branch in &match_.branches {
+                    Self::collect_fn_defs_from_statements(&branch.block.statements, fn_defs);
+                }
+            }
             _ => {}
         }
-    }
-    fn collect_fn_defs_from_if_statement(
-        IntermediateIfStatement {
-            condition: _,
-            branches,
-        }: &IntermediateIfStatement,
-        fn_defs: &mut FnDefs,
-    ) {
-        let mut branch_fn_defs = (fn_defs.clone(), fn_defs.clone());
-        Self::collect_fn_defs_from_statements(&branches.0, &mut branch_fn_defs.0);
-        Self::collect_fn_defs_from_statements(&branches.1, &mut branch_fn_defs.1);
-        fn_defs.extend(Self::merge_fn_defs(vec![
-            branch_fn_defs.0,
-            branch_fn_defs.1,
-        ]))
-    }
-    fn collect_fn_defs_from_match_statement(
-        IntermediateMatchStatement {
-            subject: _,
-            branches,
-        }: &IntermediateMatchStatement,
-        fn_defs: &mut FnDefs,
-    ) {
-        let mut branch_fn_defs = branches
-            .iter()
-            .map(|branch| {
-                let mut fn_defs = fn_defs.clone();
-                Self::collect_fn_defs_from_statements(&branch.statements, &mut fn_defs);
-                fn_defs
-            })
-            .collect_vec();
-        if branches.len() == 1 {
-            let statements = &branches[0].statements.clone();
-            if let Some(IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-                expression: _,
-                location,
-            })) = &statements.get(statements.len() - 1)
-            {
-                branch_fn_defs[0].remove(location);
-            }
-        }
-        fn_defs.extend(Self::merge_fn_defs(branch_fn_defs));
     }
     fn collect_fn_defs_from_statements(
         statements: &Vec<IntermediateStatement>,
@@ -159,26 +116,8 @@ impl Inliner {
             Self::collect_fn_defs_from_statement(statement, fn_defs);
         }
     }
-    fn merge_fn_defs(fn_defs: Vec<FnDefs>) -> FnDefs {
-        let counter = fn_defs
-            .iter()
-            .flat_map(HashMap::keys)
-            .collect::<Counter<_>>();
-        let keys = counter
-            .into_iter()
-            .filter_map(|(key, count)| if count == 1 { Some(key.clone()) } else { None })
-            .collect_vec();
-        let combined = fn_defs.into_iter().flatten().collect::<HashMap<_, _>>();
-        keys.into_iter()
-            .map(|k| (k.clone(), combined[&k].clone()))
-            .collect()
-    }
 
-    fn inline(
-        &self,
-        mut lambda: IntermediateLambda,
-        args: Vec<IntermediateValue>,
-    ) -> (Vec<IntermediateStatement>, IntermediateValue) {
+    fn inline(&self, mut lambda: ILambda, args: Vec<IntermediateValue>) -> IBlock {
         Refresher::refresh_for_inlining(&mut lambda);
         let assignments = lambda
             .args
@@ -193,24 +132,20 @@ impl Inliner {
             })
             .collect_vec();
         let mut statements = assignments;
-        statements.extend(lambda.statements);
-        (statements, lambda.ret)
+        statements.extend(lambda.block.statements);
+        (statements, lambda.block.ret).into()
     }
 
-    fn inline_iteration(
-        lambda: IntermediateLambda,
-        size_limit: Option<usize>,
-    ) -> (IntermediateLambda, bool) {
+    fn inline_iteration(lambda: ILambda, size_limit: Option<usize>) -> (ILambda, bool) {
         let bounds = CodeSizeEstimator::estimate_size(&lambda);
         if let Some(size) = size_limit {
             if bounds.1 >= size {
                 return (lambda, false);
             }
         }
-        let IntermediateLambda {
+        let ILambda {
             args,
-            statements,
-            ret,
+            block: IBlock { statements, ret },
         } = lambda;
         let mut inliner = Inliner::from(&statements);
         if let Some(size) = size_limit {
@@ -219,10 +154,9 @@ impl Inliner {
         let inliner = inliner;
         let (statements, should_continue) = inliner.inline_statements(statements);
         (
-            IntermediateLambda {
+            ILambda {
                 args,
-                statements,
-                ret,
+                block: IBlock { statements, ret },
             },
             should_continue,
         )
@@ -244,12 +178,6 @@ impl Inliner {
         match statement {
             IntermediateStatement::IntermediateAssignment(assignment) => {
                 self.inline_assignment(assignment)
-            }
-            IntermediateStatement::IntermediateIfStatement(if_statement) => {
-                self.inline_if_statement(if_statement)
-            }
-            IntermediateStatement::IntermediateMatchStatement(match_statement) => {
-                self.inline_match_statement(match_statement)
             }
         }
     }
@@ -275,7 +203,10 @@ impl Inliner {
                     Some(FnInst::Lambda(lambda))
                         if CodeSizeEstimator::estimate_size(lambda).1 < self.size_limit =>
                     {
-                        let (extra_statements, value) = self.inline(lambda.clone(), args);
+                        let IBlock {
+                            statements: extra_statements,
+                            ret: value,
+                        } = self.inline(lambda.clone(), args);
                         statements = extra_statements;
                         should_continue = true;
                         value.into()
@@ -293,22 +224,57 @@ impl Inliner {
                     .into(),
                 }
             }
-            IntermediateExpression::IntermediateLambda(lambda)
+            IntermediateExpression::ILambda(lambda)
                 if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
             {
-                let IntermediateLambda {
+                let ILambda {
                     args,
-                    statements,
-                    ret,
+                    block: IBlock { statements, ret },
                 } = lambda;
                 let (statements, internal_continue) = self.inline_statements(statements);
                 should_continue |= internal_continue;
-                IntermediateLambda {
+                ILambda {
                     args,
-                    statements,
-                    ret,
+                    block: IBlock { statements, ret },
                 }
                 .into()
+            }
+            IntermediateExpression::IIf(IIf {
+                condition,
+                branches,
+            }) => {
+                let (statements_0, continue_0) = self.inline_statements(branches.0.statements);
+                should_continue |= continue_0;
+                let (statements_1, continue_1) = self.inline_statements(branches.1.statements);
+                should_continue |= continue_1;
+                IIf {
+                    condition,
+                    branches: (
+                        (statements_0, branches.0.ret).into(),
+                        (statements_1, branches.1.ret).into(),
+                    ),
+                }
+                .into()
+            }
+            IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+                let branches = branches
+                    .into_iter()
+                    .map(
+                        |IntermediateMatchBranch {
+                             target,
+                             block: IBlock { statements, ret },
+                         }| {
+                            let (statements, internal_continue) =
+                                self.inline_statements(statements);
+                            should_continue |= internal_continue;
+                            IntermediateMatchBranch {
+                                target,
+                                block: IBlock { statements, ret },
+                            }
+                        },
+                    )
+                    .collect();
+                IMatch { subject, branches }.into()
             }
             _ => expression,
         };
@@ -320,46 +286,6 @@ impl Inliner {
             .into(),
         );
         (statements, should_continue)
-    }
-    fn inline_if_statement(
-        &self,
-        IntermediateIfStatement {
-            condition,
-            branches,
-        }: IntermediateIfStatement,
-    ) -> (Vec<IntermediateStatement>, bool) {
-        let branches = (
-            self.inline_statements(branches.0),
-            self.inline_statements(branches.1),
-        );
-        (
-            vec![IntermediateIfStatement {
-                condition,
-                branches: (branches.0 .0, branches.1 .0),
-            }
-            .into()],
-            branches.0 .1 || branches.1 .1,
-        )
-    }
-    fn inline_match_statement(
-        &self,
-        IntermediateMatchStatement { subject, branches }: IntermediateMatchStatement,
-    ) -> (Vec<IntermediateStatement>, bool) {
-        let (branches, continues): (Vec<_>, Vec<_>) = branches
-            .into_iter()
-            .map(|IntermediateMatchBranch { target, statements }| {
-                let (statements, should_continue) = self.inline_statements(statements);
-                (
-                    IntermediateMatchBranch { target, statements },
-                    should_continue,
-                )
-            })
-            .unzip();
-        let should_continue = continues.into_iter().any(identity);
-        (
-            vec![IntermediateMatchStatement { subject, branches }.into()],
-            should_continue,
-        )
     }
 }
 
@@ -378,11 +304,10 @@ mod tests {
 
     use super::*;
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
+        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, IIf, IMatch, Id, Integer,
         IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateFnCall,
-        IntermediateFnType, IntermediateIfStatement, IntermediateMatchBranch,
-        IntermediateMatchStatement, IntermediateMemory, IntermediateType, IntermediateUnionType,
-        IntermediateValue, Location,
+        IntermediateFnType, IntermediateMatchBranch, IntermediateMemory, IntermediateType,
+        IntermediateUnionType, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -415,10 +340,12 @@ mod tests {
     #[test_case(
         {
             let location = Location::new();
-            let lambda = IntermediateLambda {
+            let lambda = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
             (
                 vec![
@@ -438,19 +365,23 @@ mod tests {
         {
             let location_a = Location::new();
             let location_b = Location::new();
-            let lambda_a = IntermediateLambda {
+            let lambda_a = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
             let arg = IntermediateArg{
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new()
             };
-            let lambda_b = IntermediateLambda {
+            let lambda_b = ILambda {
                 args: vec![arg.clone()],
-                statements: Vec::new(),
-                ret: arg.clone().into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: arg.clone().into()
+                },
             };
             (
                 vec![
@@ -505,10 +436,12 @@ mod tests {
                 ).into()
             };
             let location = Location::new();
-            let lambda = IntermediateLambda {
+            let lambda = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
             (
                 vec![
@@ -531,162 +464,136 @@ mod tests {
     )]
     #[test_case(
         {
-            let location_0 = Location::new();
-            let location_1 = Location::new();
-            let lambda_0 = IntermediateLambda {
+            let lambda_0 = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
-            let lambda_1 = IntermediateLambda {
+            let assignment_0 = IntermediateAssignment {
+                expression: lambda_0.clone().into(),
+                location: Location::new()
+            };
+            let lambda_1 = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 13}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 13}.into()
+                },
+            };
+            let assignment_1 = IntermediateAssignment {
+                expression: lambda_1.clone().into(),
+                location: Location::new()
             };
             (
                 vec![
-                    IntermediateIfStatement {
-                        condition: IntermediateArg{
-                            location: Location::new(),
-                            type_: AtomicTypeEnum::BOOL.into()
+                    IntermediateAssignment {
+                        location: Location::new(),
+                        expression: IIf {
+                            condition: IntermediateArg{
+                                location: Location::new(),
+                                type_: AtomicTypeEnum::BOOL.into()
+                            }.into(),
+                            branches: (
+                                (
+                                    vec![
+                                        assignment_0.clone().into()
+                                    ],
+                                    IntermediateValue::from(assignment_0.clone()).into()
+                                ).into(),
+                                (
+                                    vec![
+                                        assignment_1.clone().into()
+                                    ],
+                                    IntermediateValue::from(assignment_1.clone()).into()
+                                ).into(),
+                            )
                         }.into(),
-                        branches: (
-                            vec![
-                                IntermediateAssignment {
-                                    location: location_0.clone(),
-                                    expression: lambda_0.clone().into()
-                                }.into()
-                            ],
-                            vec![
-                                IntermediateAssignment {
-                                    location: location_1.clone(),
-                                    expression: lambda_1.clone().into()
-                                }.into()
-                            ]
-                        )
-                    }.into(),
+                    }.into()
                 ],
                 FnDefs::from([
-                    (location_0, lambda_0.into()),
-                    (location_1, lambda_1.into()),
+                    (assignment_0.location, lambda_0.into()),
+                    (assignment_1.location, lambda_1.into()),
                 ])
             )
         };
-        "if statement single appearances"
+        "if statement"
     )]
     #[test_case(
         {
-            let location = Location::new();
-            let lambda_0 = IntermediateLambda {
+            let lambda_0 = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
-            let lambda_1 = IntermediateLambda {
+            let lambda_1 = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 13}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 13}.into()
+                },
+            };
+            let lambda_2 = ILambda {
+                args: Vec::new(),
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 13}.into()
+                },
+            };
+            let assignment_0 = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda_0.clone().into(),
+            };
+            let assignment_1 = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda_1.clone().into(),
+            };
+            let assignment_2 = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda_2.clone().into(),
             };
             (
                 vec![
-                    IntermediateIfStatement {
-                        condition: IntermediateArg{
-                            location: Location::new(),
-                            type_: AtomicTypeEnum::BOOL.into()
-                        }.into(),
-                        branches: (
-                            vec![
-                                IntermediateAssignment {
-                                    location: location.clone(),
-                                    expression: lambda_0.clone().into()
-                                }.into()
-                            ],
-                            vec![
-                                IntermediateAssignment {
-                                    location: location.clone(),
-                                    expression: lambda_1.clone().into()
-                                }.into()
+                    IntermediateAssignment {
+                        location: Location::new(),
+                        expression: IMatch {
+                            subject: IntermediateArg{
+                                location: Location::new(),
+                                type_: IntermediateUnionType(vec![None,None,None]).into()
+                            }.into(),
+                            branches: vec![
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![assignment_0.clone().into()],
+                                        IntermediateValue::from(assignment_0.clone()).clone().into()
+                                    ).into()
+                                },
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![assignment_1.clone().into()],
+                                        IntermediateValue::from(assignment_1.clone()).clone().into()
+                                    ).into()
+                                },
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![assignment_2.clone().into()],
+                                        IntermediateValue::from(assignment_2.clone()).clone().into()
+                                    ).into()
+                                },
                             ]
-                        )
-                    }.into(),
-                ],
-                FnDefs::new()
-            )
-        };
-        "if statement double appearance"
-    )]
-    #[test_case(
-        {
-            let location_1 = Location::new();
-            let location_2 = Location::new();
-            let location_3 = Location::new();
-            let lambda_0 = IntermediateLambda {
-                args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
-            };
-            let lambda_1 = IntermediateLambda {
-                args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 13}.into()
-            };
-            let lambda_2 = IntermediateLambda {
-                args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 13}.into()
-            };
-            (
-                vec![
-                    IntermediateMatchStatement {
-                        subject: IntermediateArg{
-                            location: Location::new(),
-                            type_: IntermediateUnionType(vec![None,None,None]).into()
                         }.into(),
-                        branches: vec![
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location_1.clone(),
-                                        expression: lambda_0.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: location_3.clone(),
-                                        expression: lambda_0.clone().into()
-                                    }.into(),
-                                ]
-                            },
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location_2.clone(),
-                                        expression: lambda_1.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: location_3.clone(),
-                                        expression: lambda_1.clone().into()
-                                    }.into(),
-                                ]
-                            },
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location_2.clone(),
-                                        expression: lambda_2.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: location_3.clone(),
-                                        expression: lambda_2.clone().into()
-                                    }.into(),
-                                ]
-                            },
-                        ]
-                    }.into(),
+                    }.into()
                 ],
                 FnDefs::from([
-                    (location_1, lambda_0.into())
+                    (assignment_0.location, lambda_0.into()),
+                    (assignment_1.location, lambda_1.into()),
+                    (assignment_2.location, lambda_2.into()),
                 ])
             )
         };
@@ -694,57 +601,72 @@ mod tests {
     )]
     #[test_case(
         {
-            let location_0 = Location::new();
-            let location_1 = Location::new();
-            let lambda_0 = IntermediateLambda {
+            let lambda_0 = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
-            let lambda_1 = IntermediateLambda {
+            let lambda_1 = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 13}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 13}.into()
+                },
+            };
+            let lambda_2 = ILambda {
+                args: Vec::new(),
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 13}.into()
+                },
+            };
+            let assignment_0 = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda_0.clone().into(),
+            };
+            let assignment_1 = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda_1.clone().into(),
+            };
+            let assignment_2 = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda_2.clone().into(),
             };
             (
                 vec![
+                    assignment_0.clone().into(),
                     IntermediateAssignment {
-                        location: location_0.clone(),
-                        expression: lambda_0.clone().into()
-                    }.into(),
-                    IntermediateMatchStatement {
-                        subject: IntermediateArg{
-                            location: Location::new(),
-                            type_: IntermediateUnionType(vec![None]).into()
+                        location: Location::new(),
+                        expression: IMatch {
+                            subject: IntermediateArg{
+                                location: Location::new(),
+                                type_: IntermediateUnionType(vec![None,None,None]).into()
+                            }.into(),
+                            branches: vec![
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![assignment_1.clone().into()],
+                                        IntermediateValue::from(assignment_1.clone()).clone().into()
+                                    ).into()
+                                },
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![assignment_2.clone().into()],
+                                        IntermediateValue::from(assignment_2.clone()).clone().into()
+                                    ).into()
+                                },
+                            ]
                         }.into(),
-                        branches: vec![
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location_1.clone(),
-                                        expression: lambda_1.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: Location::new(),
-                                        expression: IntermediateValue::from(
-                                            IntermediateMemory {
-                                                location: location_1.clone(),
-                                                type_: IntermediateFnType(
-                                                    Vec::new(),
-                                                    Box::new(AtomicTypeEnum::INT.into())
-                                                ).into(),
-                                            }
-                                        ).into()
-                                    }.into(),
-                                ]
-                            },
-                        ]
-                    }.into(),
+                    }.into()
                 ],
                 FnDefs::from([
-                    (location_0, lambda_0.into()),
-                    (location_1, lambda_1.into()),
+                    (assignment_0.location, lambda_0.into()),
+                    (assignment_1.location, lambda_1.into()),
+                    (assignment_2.location, lambda_2.into()),
                 ])
             )
         };
@@ -752,44 +674,41 @@ mod tests {
     )]
     #[test_case(
         {
-            let location_0 = Location::new();
-            let location_1 = Location::new();
-            let lambda_0 = IntermediateLambda {
+            let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let lambda = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: arg.clone().into()
+                },
             };
-            let lambda_1 = IntermediateLambda {
-                args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 13}.into()
+            let assignment = IntermediateAssignment {
+                location: Location::new(),
+                expression: lambda.clone().into(),
             };
             (
                 vec![
-                    IntermediateMatchStatement {
-                        subject: IntermediateArg{
-                            location: Location::new(),
-                            type_: IntermediateUnionType(vec![None,None,None]).into()
+                    IntermediateAssignment {
+                        location: Location::new(),
+                        expression: IMatch {
+                            subject: IntermediateArg{
+                                location: Location::new(),
+                                type_: IntermediateUnionType(vec![None,None,None]).into()
+                            }.into(),
+                            branches: vec![
+                                IntermediateMatchBranch {
+                                    target: Some(arg.clone()),
+                                    block: (
+                                        vec![assignment.clone().into()],
+                                        IntermediateValue::from(assignment.clone()).clone().into()
+                                    ).into()
+                                },
+                            ]
                         }.into(),
-                        branches: vec![
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: location_0.clone(),
-                                        expression: lambda_0.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: location_1.clone(),
-                                        expression: lambda_1.clone().into()
-                                    }.into(),
-                                ]
-                            },
-                        ]
-                    }.into(),
+                    }.into()
                 ],
                 FnDefs::from([
-                    (location_0, lambda_0.into())
+                    (assignment.location, lambda.into()),
                 ])
             )
         };
@@ -800,36 +719,40 @@ mod tests {
             let internal_location = Location::new();
             let external_location = Location::new();
             let ret_loc = Location::new();
-            let internal_lambda = IntermediateLambda {
+            let internal_lambda = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             };
-            let external_lambda = IntermediateLambda {
+            let external_lambda = ILambda {
                 args: Vec::new(),
-                statements: vec![
-                    IntermediateAssignment {
-                        location: internal_location.clone(),
-                        expression: internal_lambda.clone().into()
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment {
+                            location: internal_location.clone(),
+                            expression: internal_lambda.clone().into()
+                        }.into(),
+                        IntermediateAssignment {
+                            location: ret_loc.clone(),
+                            expression: IntermediateFnCall{
+                                fn_: IntermediateMemory {
+                                    location: internal_location.clone(),
+                                    type_: IntermediateFnType(
+                                        Vec::new(),
+                                        Box::new(AtomicTypeEnum::INT.into())
+                                    ).into()
+                                }.into(),
+                                args: Vec::new()
+                            }.into()
+                        }.into(),
+                    ],
+                    ret: IntermediateMemory {
+                        location: ret_loc,
+                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
-                    IntermediateAssignment {
-                        location: ret_loc.clone(),
-                        expression: IntermediateFnCall{
-                            fn_: IntermediateMemory {
-                                location: internal_location.clone(),
-                                type_: IntermediateFnType(
-                                    Vec::new(),
-                                    Box::new(AtomicTypeEnum::INT.into())
-                                ).into()
-                            }.into(),
-                            args: Vec::new()
-                        }.into()
-                    }.into(),
-                ],
-                ret: IntermediateMemory {
-                    location: ret_loc,
-                    type_: AtomicTypeEnum::INT.into()
-                }.into()
+                }
             };
             (
                 vec![
@@ -855,10 +778,12 @@ mod tests {
 
     #[test_case(
         (
-            IntermediateLambda {
+            ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 11}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 11}.into()
+                },
             },
             Vec::new(),
             (
@@ -879,10 +804,12 @@ mod tests {
                 location: Location::new()
             };
             (
-                IntermediateLambda {
+                ILambda {
                     args: vec![arg.clone()],
-                    statements: Vec::new(),
-                    ret: arg.clone().into()
+                    block: IBlock{
+                        statements: Vec::new(),
+                        ret: arg.clone().into()
+                    },
                 },
                 vec![Integer{value: 22}.into()],
                 (
@@ -919,24 +846,26 @@ mod tests {
                 location: Location::new()
             };
             (
-                IntermediateLambda {
+                ILambda {
                     args: args.clone(),
-                    statements: vec![
-                        IntermediateAssignment {
-                            expression: IntermediateFnCall {
-                                fn_: IntermediateBuiltIn::from(BuiltInFn(
-                                    Id::from("+"),
-                                    IntermediateFnType(
-                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
-                                        Box::new(AtomicTypeEnum::INT.into()),
-                                    )
-                                )).into(),
-                                args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
-                            }.into(),
-                            location: ret.location.clone()
-                        }.into()
-                    ],
-                    ret: ret.clone().into()
+                    block: IBlock {
+                        statements: vec![
+                            IntermediateAssignment {
+                                expression: IntermediateFnCall {
+                                    fn_: IntermediateBuiltIn::from(BuiltInFn(
+                                        Id::from("+"),
+                                        IntermediateFnType(
+                                            vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                            Box::new(AtomicTypeEnum::INT.into()),
+                                        )
+                                    )).into(),
+                                    args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
+                                }.into(),
+                                location: ret.location.clone()
+                            }.into()
+                        ],
+                        ret: ret.clone().into()
+                    },
                 },
                 vec![Integer{value: 11}.into(), Integer{value: -11}.into()],
                 (
@@ -971,30 +900,31 @@ mod tests {
     )]
     fn test_inline_fn(
         lambda_args_expected: (
-            IntermediateLambda,
+            ILambda,
             Vec<IntermediateValue>,
             (Vec<IntermediateStatement>, IntermediateValue),
         ),
     ) {
         let (lambda, args, expected) = lambda_args_expected;
         let inliner = Inliner::new();
-        let mut fn_targets = IntermediateStatement::all_targets(&lambda.statements);
+        let mut fn_targets = IntermediateStatement::all_targets(&lambda.block.statements);
         fn_targets.extend(lambda.args.iter().map(|arg| arg.location.clone()));
         let result = inliner.inline(lambda, args);
-        let targets = IntermediateStatement::all_targets(&result.0);
+        let targets = IntermediateStatement::all_targets(&result.statements);
 
         dbg!(&expected, &result);
         ExpressionEqualityChecker::assert_equal(
-            &IntermediateLambda {
+            &ILambda {
                 args: Vec::new(),
-                statements: result.0,
-                ret: result.1,
+                block: result,
             }
             .into(),
-            &IntermediateLambda {
+            &ILambda {
                 args: Vec::new(),
-                statements: expected.0,
-                ret: expected.1,
+                block: IBlock {
+                    statements: expected.0,
+                    ret: expected.1,
+                },
             }
             .into(),
         );
@@ -1010,10 +940,12 @@ mod tests {
             type_: AtomicTypeEnum::INT.into(),
             location: Location::new(),
         };
-        let id = IntermediateLambda {
+        let id = ILambda {
             args: vec![id_arg.clone()],
-            statements: Vec::new(),
-            ret: id_arg.clone().into(),
+            block: IBlock {
+                statements: Vec::new(),
+                ret: id_arg.clone().into(),
+            },
         };
         let id_fn = IntermediateMemory {
             type_: IntermediateFnType(
@@ -1032,25 +964,27 @@ mod tests {
             type_: AtomicTypeEnum::INT.into(),
             location: Location::new(),
         };
-        let idea = IntermediateLambda {
+        let idea = ILambda {
             args: vec![idea_arg.clone()],
-            statements: vec![
-                IntermediateAssignment {
-                    location: id_fn.location.clone(),
-                    expression: id.clone().into(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: idea_ret.location.clone(),
-                    expression: IntermediateFnCall {
-                        fn_: id_fn.clone().into(),
-                        args: vec![idea_arg.clone().into()],
+            block: IBlock {
+                statements: vec![
+                    IntermediateAssignment {
+                        location: id_fn.location.clone(),
+                        expression: id.clone().into(),
                     }
                     .into(),
-                }
-                .into(),
-            ],
-            ret: idea_ret.clone().into(),
+                    IntermediateAssignment {
+                        location: idea_ret.location.clone(),
+                        expression: IntermediateFnCall {
+                            fn_: id_fn.clone().into(),
+                            args: vec![idea_arg.clone().into()],
+                        }
+                        .into(),
+                    }
+                    .into(),
+                ],
+                ret: idea_ret.clone().into(),
+            },
         };
 
         let inliner = Inliner::new();
@@ -1086,29 +1020,25 @@ mod tests {
 
         dbg!(&expected, &result);
         ExpressionEqualityChecker::assert_equal(
-            &IntermediateLambda {
+            &ILambda {
                 args: Vec::new(),
-                statements: result.0.clone(),
-                ret: result.1,
+                block: result.clone(),
             }
             .into(),
-            &IntermediateLambda {
+            &ILambda {
                 args: Vec::new(),
-                statements: expected.0,
-                ret: expected.1,
+                block: IBlock {
+                    statements: expected.0,
+                    ret: expected.1,
+                },
             }
             .into(),
         );
 
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-            expression:
-                IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                    args,
-                    statements: _,
-                    ret: _,
-                }),
+            expression: IntermediateExpression::ILambda(ILambda { args, block: _ }),
             location: _,
-        }) = &result.0[1]
+        }) = &result.statements[1]
         else {
             panic!()
         };
@@ -1125,10 +1055,12 @@ mod tests {
                 ).into()
             };
             let ret_location = Location::new();
-            let lambda = IntermediateLambda {
+            let lambda = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Integer{value: 1}.into()
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Integer{value: 1}.into()
+                },
             };
             (
                 vec![
@@ -1214,10 +1146,12 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new(),
             };
-            let id = IntermediateLambda {
+            let id = ILambda {
                 args: vec![id_arg.clone()],
-                statements: Vec::new(),
-                ret: id_arg.clone().into(),
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: id_arg.clone().into(),
+                },
             };
             let id_fn = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
@@ -1232,25 +1166,27 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new(),
             };
-            let idea = IntermediateLambda {
+            let idea = ILambda {
                 args: vec![idea_arg.clone()],
-                statements: vec![
-                    IntermediateAssignment {
-                        location: id_fn.location.clone(),
-                        expression: id.clone().into(),
-                    }
-                    .into(),
-                    IntermediateAssignment {
-                        location: idea_ret.location.clone(),
-                        expression: IntermediateFnCall {
-                            fn_: id_fn.clone().into(),
-                            args: vec![idea_arg.clone().into()],
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment {
+                            location: id_fn.location.clone(),
+                            expression: id.clone().into(),
                         }
                         .into(),
-                    }
-                    .into(),
-                ],
-                ret: idea_ret.clone().into(),
+                        IntermediateAssignment {
+                            location: idea_ret.location.clone(),
+                            expression: IntermediateFnCall {
+                                fn_: id_fn.clone().into(),
+                                args: vec![idea_arg.clone().into()],
+                            }
+                            .into(),
+                        }
+                        .into(),
+                    ],
+                    ret: idea_ret.clone().into(),
+                },
             };
             let idea_fn = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
@@ -1291,27 +1227,29 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         location: idea_fn.location.clone(),
-                        expression: IntermediateLambda {
+                        expression: ILambda {
                             args: vec![idea_arg.clone()],
-                            ret: idea_ret.clone().into(),
-                            statements: vec![
-                                IntermediateAssignment {
-                                    location: Location::new(),
-                                    expression: id.clone().into(),
-                                }.into(),
-                                IntermediateAssignment{
-                                    location: inner_arg.location.clone(),
-                                    expression: IntermediateValue::from(
-                                        idea_arg.clone()
-                                    ).into()
-                                }.into(),
-                                IntermediateAssignment{
-                                    location: idea_ret.location.clone(),
-                                    expression: IntermediateValue::from(
-                                        inner_arg.clone()
-                                    ).into()
-                                }.into(),
-                            ]
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment {
+                                        location: Location::new(),
+                                        expression: id.clone().into(),
+                                    }.into(),
+                                    IntermediateAssignment{
+                                        location: inner_arg.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            idea_arg.clone()
+                                        ).into()
+                                    }.into(),
+                                    IntermediateAssignment{
+                                        location: idea_ret.location.clone(),
+                                        expression: IntermediateValue::from(
+                                            inner_arg.clone()
+                                        ).into()
+                                    }.into(),
+                                ],
+                                ret: idea_ret.clone().into(),
+                            },
                         }.into()
                     }.into(),
                     IntermediateAssignment{
@@ -1322,10 +1260,12 @@ mod tests {
                     }.into(),
                     IntermediateAssignment{
                         location: id_fn.location.clone(),
-                        expression: IntermediateLambda {
+                        expression: ILambda {
                             args: vec![fresh_id_arg.clone()],
-                            statements: Vec::new(),
-                            ret: fresh_id_arg.clone().into(),
+                            block: IBlock{
+                                statements: Vec::new(),
+                                ret: fresh_id_arg.clone().into(),
+                            },
                         }.into()
                     }.into(),
                     IntermediateAssignment{
@@ -1367,15 +1307,25 @@ mod tests {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
                 location: Location::new(),
             };
+            let t0 = IntermediateMemory {
+                type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
+                location: Location::new(),
+            };
+            let t1 = IntermediateMemory {
+                type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
+                location: Location::new(),
+            };
 
             let id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new(),
             };
-            let id = IntermediateLambda {
+            let id = ILambda {
                 args: vec![id_arg.clone()],
-                statements: Vec::new(),
-                ret: id_arg.clone().into(),
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: id_arg.clone().into(),
+                },
             };
             let id_fn = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
@@ -1393,35 +1343,44 @@ mod tests {
             };
             (
                 vec![
-                    IntermediateIfStatement {
-                        condition: condition.clone().into(),
-                        branches: (
-                            vec![
-                                IntermediateAssignment {
-                                    location: id_fn.location.clone(),
-                                    expression: id.clone().into()
-                                }.into(),
-                                IntermediateAssignment {
-                                    location: Location::new(),
-                                    expression: IntermediateFnCall{
-                                        fn_: id_fn.clone().into(),
-                                        args: vec![
-                                            IntermediateValue::from(Integer{value: -7}).into()
-                                        ]
-                                    }.into()
-                                }.into(),
-                                IntermediateAssignment {
-                                    location: op.location.clone(),
-                                    expression: inc.clone().into()
-                                }.into(),
-                            ],
-                            vec![
-                                IntermediateAssignment {
-                                    location: op.location.clone(),
-                                    expression: dec.clone().into()
-                                }.into(),
-                            ],
-                        )
+                    IntermediateAssignment {
+                        location: op.location.clone(),
+                        expression: IIf {
+                            condition: condition.clone().into(),
+                            branches: (
+                                (
+                                    vec![
+                                        IntermediateAssignment {
+                                            location: id_fn.location.clone(),
+                                            expression: id.clone().into()
+                                        }.into(),
+                                        IntermediateAssignment {
+                                            location: Location::new(),
+                                            expression: IntermediateFnCall{
+                                                fn_: id_fn.clone().into(),
+                                                args: vec![
+                                                    IntermediateValue::from(Integer{value: -7}).into()
+                                                ]
+                                            }.into()
+                                        }.into(),
+                                        IntermediateAssignment {
+                                            location: t0.location.clone(),
+                                            expression: inc.clone().into()
+                                        }.into(),
+                                    ],
+                                    t0.clone().into()
+                                ).into(),
+                                (
+                                    vec![
+                                        IntermediateAssignment {
+                                            location: t1.location.clone(),
+                                            expression: dec.clone().into()
+                                        }.into(),
+                                    ],
+                                    t1.clone().into()
+                                ).into()
+                            )
+                        }.into(),
                     }.into(),
                     IntermediateAssignment {
                         location: ret_location.clone(),
@@ -1434,38 +1393,47 @@ mod tests {
                     }.into(),
                 ],
                 vec![
-                    IntermediateIfStatement {
-                        condition: condition.clone().into(),
-                        branches: (
-                            vec![
-                                IntermediateAssignment {
-                                    location: Location::new(),
-                                    expression: id.clone().into(),
-                                }.into(),
-                                IntermediateAssignment{
-                                    location: extra.location.clone(),
-                                    expression: IntermediateValue::from(
-                                        Integer{value: -7}
-                                    ).into()
-                                }.into(),
-                                IntermediateAssignment{
-                                    location: Location::new(),
-                                    expression: IntermediateValue::from(
-                                        extra.clone()
-                                    ).into()
-                                }.into(),
-                                IntermediateAssignment {
-                                    location: op.location.clone(),
-                                    expression: inc.clone().into()
-                                }.into(),
-                            ],
-                            vec![
-                                IntermediateAssignment {
-                                    location: op.location.clone(),
-                                    expression: dec.clone().into()
-                                }.into(),
-                            ],
-                        )
+                    IntermediateAssignment {
+                        location: op.location.clone(),
+                        expression: IIf {
+                            condition: condition.clone().into(),
+                            branches: (
+                                (
+                                    vec![
+                                        IntermediateAssignment {
+                                            location: Location::new(),
+                                            expression: id.clone().into(),
+                                        }.into(),
+                                        IntermediateAssignment{
+                                            location: extra.location.clone(),
+                                            expression: IntermediateValue::from(
+                                                Integer{value: -7}
+                                            ).into()
+                                        }.into(),
+                                        IntermediateAssignment{
+                                            location: Location::new(),
+                                            expression: IntermediateValue::from(
+                                                extra.clone()
+                                            ).into()
+                                        }.into(),
+                                        IntermediateAssignment {
+                                            location: t0.location.clone(),
+                                            expression: inc.clone().into()
+                                        }.into(),
+                                    ],
+                                    t0.clone().into()
+                                ).into(),
+                                (
+                                    vec![
+                                        IntermediateAssignment {
+                                            location: t1.location.clone(),
+                                            expression: dec.clone().into()
+                                        }.into(),
+                                    ],
+                                    t1.clone().into()
+                                ).into()
+                            )
+                        }.into(),
                     }.into(),
                     IntermediateAssignment {
                         location: ret_location.clone(),
@@ -1475,7 +1443,8 @@ mod tests {
                                 IntermediateValue::from(Integer{value: -8}).into()
                             ]
                         }.into()
-                    }.into(),               ]
+                    }.into(),
+                ]
             )
         },
         true;
@@ -1483,18 +1452,21 @@ mod tests {
     )]
     #[test_case(
         {
-            let lambda = IntermediateLambda {
+            let lambda = ILambda {
                 args: Vec::new(),
-                statements: Vec::new(),
-                ret: Boolean{value: false}.into(),
+                block: IBlock{
+                    statements: Vec::new(),
+                    ret: Boolean{value: false}.into(),
+                },
             };
             let memory = IntermediateMemory {
                 type_: IntermediateFnType(
-                    vec![AtomicTypeEnum::INT.into()],
+                    Vec::new(),
                     Box::new(AtomicTypeEnum::BOOL.into())
                 ).into(),
                 location: Location::new(),
             };
+            let target = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
 
             let subject = IntermediateArg{
                 type_: IntermediateUnionType(vec![None]).into(),
@@ -1502,48 +1474,60 @@ mod tests {
             };
             (
                 vec![
-                    IntermediateMatchStatement {
-                        subject: subject.clone().into(),
-                        branches: vec![
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: memory.location.clone(),
-                                        expression: lambda.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: Location::new(),
-                                        expression: IntermediateFnCall{
-                                            fn_: memory.clone().into(),
-                                            args: Vec::new()
-                                        }.into()
-                                    }.into(),
-                                ]
-                            },
-                        ],
+                    IntermediateAssignment {
+                        location: Location::new(),
+                            expression: IMatch {
+                            subject: subject.clone().into(),
+                            branches: vec![
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![
+                                            IntermediateAssignment {
+                                                location: memory.location.clone(),
+                                                expression: lambda.clone().into()
+                                            }.into(),
+                                            IntermediateAssignment {
+                                                location: target.location.clone(),
+                                                expression: IntermediateFnCall{
+                                                    fn_: memory.clone().into(),
+                                                    args: Vec::new()
+                                                }.into()
+                                            }.into(),
+                                        ],
+                                        target.clone().into()
+                                    ).into()
+                                },
+                            ],
+                        }.into()
                     }.into(),
                 ],
                 vec![
-                    IntermediateMatchStatement {
-                        subject: subject.clone().into(),
-                        branches: vec![
-                            IntermediateMatchBranch {
-                                target: None,
-                                statements: vec![
-                                    IntermediateAssignment {
-                                        location: memory.location.clone(),
-                                        expression: lambda.clone().into()
-                                    }.into(),
-                                    IntermediateAssignment {
-                                        location: Location::new(),
-                                        expression: IntermediateValue::from(
-                                            Boolean{value: false}
-                                        ).into()
-                                    }.into(),
-                                ]
-                            },
-                        ],
+                    IntermediateAssignment {
+                        location: Location::new(),
+                            expression: IMatch {
+                            subject: subject.clone().into(),
+                            branches: vec![
+                                IntermediateMatchBranch {
+                                    target: None,
+                                    block: (
+                                        vec![
+                                            IntermediateAssignment {
+                                                location: memory.location.clone(),
+                                                expression: lambda.clone().into()
+                                            }.into(),
+                                            IntermediateAssignment {
+                                                location: target.location.clone(),
+                                                expression: IntermediateValue::from(
+                                                    Boolean{value: false}
+                                                ).into()
+                                            }.into(),
+                                        ],
+                                        target.clone().into()
+                                    ).into()
+                                },
+                            ],
+                        }.into()
                     }.into(),
                 ]
             )
@@ -1556,18 +1540,22 @@ mod tests {
         expect_continue: bool,
     ) {
         let (statements, expected) = statements_expected;
-        let lambda = IntermediateLambda {
+        let lambda = ILambda {
             args: Vec::new(),
-            ret: Integer { value: 0 }.into(),
-            statements,
+            block: IBlock {
+                ret: Integer { value: 0 }.into(),
+                statements,
+            },
         };
         let (optimized, should_continue) = Inliner::inline_iteration(lambda, None);
         assert_eq!(expect_continue, should_continue);
 
-        let expected = IntermediateLambda {
+        let expected = ILambda {
             args: Vec::new(),
-            ret: Integer { value: 0 }.into(),
-            statements: expected,
+            block: IBlock {
+                ret: Integer { value: 0 }.into(),
+                statements: expected,
+            },
         };
         dbg!(&expected, &optimized);
         ExpressionEqualityChecker::assert_equal(&optimized.into(), &expected.into())
@@ -1583,30 +1571,34 @@ mod tests {
             location: Location::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
-        let simplified = IntermediateLambda {
+        let simplified = ILambda {
             args: Vec::new(),
-            ret: Integer { value: 0 }.into(),
-            statements: Vec::new(),
+            block: IBlock {
+                ret: Integer { value: 0 }.into(),
+                statements: Vec::new(),
+            },
         };
-        let main = IntermediateLambda {
+        let main = ILambda {
             args: Vec::new(),
-            statements: vec![
-                IntermediateAssignment {
-                    expression: simplified.clone().into(),
-                    location: premain.location.clone(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: call.location.clone().into(),
-                    expression: IntermediateFnCall {
-                        fn_: premain.clone().into(),
-                        args: Vec::new(),
+            block: IBlock {
+                statements: vec![
+                    IntermediateAssignment {
+                        expression: simplified.clone().into(),
+                        location: premain.location.clone(),
                     }
                     .into(),
-                }
-                .into(),
-            ],
-            ret: call.clone().into(),
+                    IntermediateAssignment {
+                        location: call.location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: premain.clone().into(),
+                            args: Vec::new(),
+                        }
+                        .into(),
+                    }
+                    .into(),
+                ],
+                ret: call.clone().into(),
+            },
         };
         let types = vec![Rc::new(RefCell::new(
             IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()), None]).into(),
@@ -1633,30 +1625,34 @@ mod tests {
             location: Location::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
-        let simplified = IntermediateLambda {
+        let simplified = ILambda {
             args: Vec::new(),
-            ret: Integer { value: 0 }.into(),
-            statements: Vec::new(),
+            block: IBlock {
+                ret: Integer { value: 0 }.into(),
+                statements: Vec::new(),
+            },
         };
-        let main = IntermediateLambda {
+        let main = ILambda {
             args: Vec::new(),
-            statements: vec![
-                IntermediateAssignment {
-                    expression: simplified.clone().into(),
-                    location: premain.location.clone(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: call.location.clone().into(),
-                    expression: IntermediateFnCall {
-                        fn_: premain.clone().into(),
-                        args: Vec::new(),
+            block: IBlock {
+                statements: vec![
+                    IntermediateAssignment {
+                        expression: simplified.clone().into(),
+                        location: premain.location.clone(),
                     }
                     .into(),
-                }
-                .into(),
-            ],
-            ret: call.clone().into(),
+                    IntermediateAssignment {
+                        location: call.location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: premain.clone().into(),
+                            args: Vec::new(),
+                        }
+                        .into(),
+                    }
+                    .into(),
+                ],
+                ret: call.clone().into(),
+            },
         };
         let types = vec![Rc::new(RefCell::new(
             IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()), None]).into(),
@@ -1683,34 +1679,38 @@ mod tests {
             );
             let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
-            IntermediateLambda {
-                statements: vec![
-                    IntermediateAssignment{
-                        expression: IntermediateLambda{
-                            args: Vec::new(),
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: foo_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: foo.clone().into(),
-                                        args: Vec::new()
-                                    }.into()
-                                }.into()
-                            ],
-                            ret: foo_call.clone().into()
+            ILambda {
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment{
+                            expression: ILambda{
+                                args: Vec::new(),
+                                block: IBlock {
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: foo_call.location.clone(),
+                                            expression: IntermediateFnCall{
+                                                fn_: foo.clone().into(),
+                                                args: Vec::new()
+                                            }.into()
+                                        }.into()
+                                    ],
+                                    ret: foo_call.clone().into()
+                                },
+                            }.into(),
+                            location: foo.location.clone()
                         }.into(),
-                        location: foo.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        location: main_call.location.clone(),
-                        expression: IntermediateFnCall{
-                            fn_: foo.clone().into(),
-                            args: Vec::new()
+                        IntermediateAssignment{
+                            location: main_call.location.clone(),
+                            expression: IntermediateFnCall{
+                                fn_: foo.clone().into(),
+                                args: Vec::new()
+                            }.into()
                         }.into()
-                    }.into()
-                ],
+                    ],
+                    ret: main_call.clone().into(),
+                },
                 args: Vec::new(),
-                ret: main_call.clone().into(),
             }
         };
         "self recursive fn"
@@ -1732,55 +1732,61 @@ mod tests {
             let bar_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
-            IntermediateLambda {
-                statements: vec![
-                    IntermediateAssignment{
-                        expression: IntermediateLambda{
-                            args: Vec::new(),
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: bar_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: bar.clone().into(),
-                                        args: Vec::new()
-                                    }.into()
-                                }.into()
-                            ],
-                            ret: bar_call.clone().into()
+            ILambda {
+                block: IBlock {
+                    statements: vec![
+                        IntermediateAssignment{
+                        expression: ILambda{
+                                args: Vec::new(),
+                                block: IBlock {
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: bar_call.location.clone(),
+                                            expression: IntermediateFnCall{
+                                                fn_: bar.clone().into(),
+                                                args: Vec::new()
+                                            }.into()
+                                        }.into()
+                                    ],
+                                    ret: bar_call.clone().into()
+                                },
+                            }.into(),
+                            location: foo.location.clone()
                         }.into(),
-                        location: foo.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        expression: IntermediateLambda{
-                            args: Vec::new(),
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: foo_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: foo.clone().into(),
-                                        args: Vec::new()
-                                    }.into()
-                                }.into()
-                            ],
-                            ret: foo_call.clone().into()
+                        IntermediateAssignment{
+                            expression: ILambda{
+                                args: Vec::new(),
+                                block: IBlock {
+                                    statements: vec![
+                                        IntermediateAssignment{
+                                            location: foo_call.location.clone(),
+                                            expression: IntermediateFnCall{
+                                                fn_: foo.clone().into(),
+                                                args: Vec::new()
+                                            }.into()
+                                        }.into()
+                                    ],
+                                    ret: foo_call.clone().into()
+                                },
+                            }.into(),
+                            location: bar.location.clone()
                         }.into(),
-                        location: bar.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        location: main_call.location.clone(),
-                        expression: IntermediateFnCall{
-                            fn_: foo.clone().into(),
-                            args: Vec::new()
+                        IntermediateAssignment{
+                            location: main_call.location.clone(),
+                            expression: IntermediateFnCall{
+                                fn_: foo.clone().into(),
+                                args: Vec::new()
+                            }.into()
                         }.into()
-                    }.into()
-                ],
+                    ],
+                    ret: main_call.clone().into(),
+                },
                 args: Vec::new(),
-                ret: main_call.clone().into(),
             }
         };
         "mutually recursive fns"
     )]
-    fn test_iterative_inlining(lambda: IntermediateLambda) {
+    fn test_iterative_inlining(lambda: ILambda) {
         let mut program = IntermediateProgram {
             main: lambda,
             types: Vec::new(),
@@ -1825,66 +1831,70 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
             },
         ];
-        let recursive = IntermediateLambda {
+        let recursive = ILambda {
             args: vec![arg.clone()],
-            ret: ret.clone().into(),
-            statements: vec![
-                IntermediateAssignment {
-                    location: calls[0].location.clone().into(),
-                    expression: IntermediateFnCall {
-                        fn_: premain.clone().into(),
-                        args: vec![arg.clone().into()],
+            block: IBlock {
+                statements: vec![
+                    IntermediateAssignment {
+                        location: calls[0].location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: premain.clone().into(),
+                            args: vec![arg.clone().into()],
+                        }
+                        .into(),
                     }
                     .into(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: calls[1].location.clone().into(),
-                    expression: IntermediateFnCall {
-                        fn_: premain.clone().into(),
-                        args: vec![arg.clone().into()],
+                    IntermediateAssignment {
+                        location: calls[1].location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: premain.clone().into(),
+                            args: vec![arg.clone().into()],
+                        }
+                        .into(),
                     }
                     .into(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: ret.location.clone().into(),
-                    expression: IntermediateFnCall {
-                        fn_: BuiltInFn(
-                            Id::from("+"),
-                            IntermediateFnType(
-                                vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
-                                Box::new(AtomicTypeEnum::INT.into()),
+                    IntermediateAssignment {
+                        location: ret.location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: BuiltInFn(
+                                Id::from("+"),
+                                IntermediateFnType(
+                                    vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::INT.into()),
+                                )
+                                .into(),
                             )
                             .into(),
-                        )
+                            args: vec![calls[0].clone().into(), calls[1].clone().into()],
+                        }
                         .into(),
-                        args: vec![calls[0].clone().into(), calls[1].clone().into()],
                     }
                     .into(),
-                }
-                .into(),
-            ],
+                ],
+                ret: ret.clone().into(),
+            },
         };
-        let main = IntermediateLambda {
+        let main = ILambda {
             args: Vec::new(),
-            statements: vec![
-                IntermediateAssignment {
-                    expression: recursive.clone().into(),
-                    location: premain.location.clone(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: call.location.clone().into(),
-                    expression: IntermediateFnCall {
-                        fn_: premain.clone().into(),
-                        args: vec![Integer { value: 10 }.into()],
+            block: IBlock {
+                statements: vec![
+                    IntermediateAssignment {
+                        expression: recursive.clone().into(),
+                        location: premain.location.clone(),
                     }
                     .into(),
-                }
-                .into(),
-            ],
-            ret: call.clone().into(),
+                    IntermediateAssignment {
+                        location: call.location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: premain.clone().into(),
+                            args: vec![Integer { value: 10 }.into()],
+                        }
+                        .into(),
+                    }
+                    .into(),
+                ],
+                ret: call.clone().into(),
+            },
         };
         let current_size = CodeSizeEstimator::estimate_size(&recursive).1;
         let optimized = Inliner::inline_up_to_size(
@@ -1919,38 +1929,42 @@ mod tests {
             location: Location::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
-        let recursive = IntermediateLambda {
+        let recursive = ILambda {
             args: vec![arg.clone()],
-            ret: ret.clone().into(),
-            statements: vec![IntermediateAssignment {
-                location: ret.location.clone().into(),
-                expression: IntermediateFnCall {
-                    fn_: premain.clone().into(),
-                    args: vec![arg.clone().into()],
-                }
-                .into(),
-            }
-            .into()],
-        };
-        let main = IntermediateLambda {
-            args: Vec::new(),
-            statements: vec![
-                IntermediateAssignment {
-                    expression: recursive.clone().into(),
-                    location: premain.location.clone(),
-                }
-                .into(),
-                IntermediateAssignment {
-                    location: call.location.clone().into(),
+            block: IBlock {
+                statements: vec![IntermediateAssignment {
+                    location: ret.location.clone().into(),
                     expression: IntermediateFnCall {
                         fn_: premain.clone().into(),
-                        args: vec![Integer { value: -10 }.into()],
+                        args: vec![arg.clone().into()],
                     }
                     .into(),
                 }
-                .into(),
-            ],
-            ret: call.clone().into(),
+                .into()],
+                ret: ret.clone().into(),
+            },
+        };
+        let main = ILambda {
+            args: Vec::new(),
+            block: IBlock {
+                statements: vec![
+                    IntermediateAssignment {
+                        expression: recursive.clone().into(),
+                        location: premain.location.clone(),
+                    }
+                    .into(),
+                    IntermediateAssignment {
+                        location: call.location.clone().into(),
+                        expression: IntermediateFnCall {
+                            fn_: premain.clone().into(),
+                            args: vec![Integer { value: -10 }.into()],
+                        }
+                        .into(),
+                    }
+                    .into(),
+                ],
+                ret: call.clone().into(),
+            },
         };
         let current_size = CodeSizeEstimator::estimate_size(&recursive).1;
         Inliner::inline_up_to_size(

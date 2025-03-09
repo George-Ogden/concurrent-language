@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
 use lowering::{
     AllocationOptimizer, IBlock, ILambda, IntermediateAssignment, IntermediateExpression,
     IntermediateMemory, IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
