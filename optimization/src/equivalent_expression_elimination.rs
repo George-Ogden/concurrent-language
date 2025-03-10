@@ -10,14 +10,12 @@ use crate::refresher::Refresher;
 type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
 type Definitions = HashMap<Location, IntermediateExpression>;
 type NormalizedLocations = HashMap<Location, Location>;
-type OpenVars = HashMap<IBlock, Vec<IntermediateValue>>;
 
 #[derive(Clone)]
 pub struct EquivalentExpressionEliminator {
     historical_expressions: HistoricalExpressions,
     definitions: Definitions,
     normalized_locations: NormalizedLocations,
-    open_vars: OpenVars,
 }
 
 impl EquivalentExpressionEliminator {
@@ -26,7 +24,6 @@ impl EquivalentExpressionEliminator {
             historical_expressions: HistoricalExpressions::new(),
             normalized_locations: NormalizedLocations::new(),
             definitions: Definitions::new(),
-            open_vars: OpenVars::new(),
         }
     }
 
@@ -42,8 +39,14 @@ impl EquivalentExpressionEliminator {
         let ILambda { args, mut block } = lambda;
         self.prepare_history(&mut block);
         let block = self.weakly_reorder(block, &mut HashSet::new());
+
+        let mut lambda = ILambda { args, block };
+        Refresher::refresh(&mut lambda);
+
+        let ILambda { args, block } = lambda;
         self.refresh_history(&block);
         let block = self.strongly_reorder(block, &mut HashSet::new());
+
         let mut lambda = ILambda { args, block };
         Refresher::refresh(&mut lambda);
         lambda
@@ -55,19 +58,14 @@ impl EquivalentExpressionEliminator {
                     expression,
                     location,
                 }) => {
-                    let mut new_expression = self.normalize_expression(expression.clone());
-                    match new_expression {
+                    *expression = self.normalize_expression(expression.clone());
+                    match expression {
                         IntermediateExpression::ILambda(ref mut lambda) => {
-                            let open_vars = lambda.find_open_vars();
                             self.prepare_history(&mut lambda.block);
-                            self.open_vars
-                                .insert(lambda.block.clone(), open_vars.clone());
                         }
                         IntermediateExpression::IIf(ref mut if_) => {
                             for block in [&mut if_.branches.0, &mut if_.branches.1] {
-                                let open_vars = block.values();
                                 self.prepare_history(block);
-                                self.open_vars.insert(block.clone(), open_vars.clone());
                             }
                         }
                         IntermediateExpression::IMatch(ref mut match_) => {
@@ -77,29 +75,22 @@ impl EquivalentExpressionEliminator {
                         }
                         _ => {}
                     }
-                    let new_location = match self.historical_expressions.get(&new_expression) {
+                    let new_location = match self.historical_expressions.get(&expression) {
                         None => {
-                            let new_location = Location::new();
                             self.historical_expressions
-                                .insert(new_expression.clone(), new_location.clone());
-                            self.definitions
-                                .insert(new_location.clone(), new_expression.clone());
-                            new_location
+                                .insert(expression.clone(), location.clone());
+                            location.clone()
                         }
                         Some(new_location) => new_location.clone(),
                     };
-                    let value = IntermediateValue::from(IntermediateMemory {
-                        type_: expression.type_(),
-                        location: new_location.clone(),
-                    });
                     self.definitions
-                        .insert(location.clone(), value.clone().into());
+                        .insert(location.clone(), expression.clone());
                     self.normalized_locations
                         .insert(location.clone(), new_location);
-                    *expression = value.into();
                 }
             }
         }
+        block.ret = block.ret.substitute(&self.normalized_locations);
     }
     fn refresh_history(&mut self, block: &IBlock) {
         for statement in &block.statements {
@@ -147,6 +138,14 @@ impl EquivalentExpressionEliminator {
                     );
                 }
             }
+        }
+        if let Some(location) = ret.filter_memory_location() {
+            self.weakly_process_location(
+                location,
+                defined,
+                &weakly_required_locations,
+                &mut new_statements,
+            );
         }
         IBlock {
             statements: new_statements,
@@ -245,11 +244,8 @@ impl EquivalentExpressionEliminator {
                 .collect::<HashSet<_>>()
         };
         match &expression {
-            IntermediateExpression::ILambda(lambda) => self
-                .open_vars
-                .get(&lambda.block)
-                .cloned()
-                .unwrap_or_else(|| lambda.find_open_vars())
+            IntermediateExpression::ILambda(lambda) => lambda
+                .find_open_vars()
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
                 .collect(),
@@ -272,7 +268,9 @@ impl EquivalentExpressionEliminator {
                         }
                     }
                 }
-                required.unwrap_or_default()
+                let mut required = required.unwrap_or_default();
+                required.extend(match_.subject.filter_memory_location().into_iter());
+                required
             }
             expression => expression
                 .values()
@@ -406,24 +404,24 @@ impl EquivalentExpressionEliminator {
                 new_statements,
             );
         }
-        let previously_defined = defined.clone();
-        defined.extend(strongly_required_locations.clone());
         match &mut expression {
             IntermediateExpression::ILambda(lambda) => {
-                lambda.block = self.strongly_reorder(lambda.block.clone(), defined);
+                lambda.block = self.strongly_reorder(lambda.block.clone(), &mut defined.clone());
             }
             IntermediateExpression::IIf(if_) => {
-                if_.branches.0 = self.strongly_reorder(if_.branches.0.clone(), defined);
-                if_.branches.1 = self.strongly_reorder(if_.branches.1.clone(), defined);
+                if_.branches.0 =
+                    self.strongly_reorder(if_.branches.0.clone(), &mut defined.clone());
+                if_.branches.1 =
+                    self.strongly_reorder(if_.branches.1.clone(), &mut defined.clone());
             }
             IntermediateExpression::IMatch(match_) => {
                 for branch in &mut match_.branches {
-                    branch.block = self.strongly_reorder(branch.block.clone(), defined);
+                    branch.block =
+                        self.strongly_reorder(branch.block.clone(), &mut defined.clone());
                 }
             }
             _ => {}
         }
-        *defined = previously_defined;
 
         new_statements.push(
             IntermediateAssignment {
@@ -480,7 +478,9 @@ impl EquivalentExpressionEliminator {
                         }
                     }
                 }
-                required.unwrap_or_default()
+                let mut required = required.unwrap_or_default();
+                required.extend(match_.subject.filter_memory_location().into_iter());
+                required
             }
             expression => self.weak_expression_locations(&expression),
         }
@@ -1317,24 +1317,6 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         expression: ILambda{
-                            args: vec![y.clone()],
-                            block: IBlock {
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: foo_call.location.clone(),
-                                        expression: IntermediateFnCall{
-                                            fn_: foo.clone().into(),
-                                            args: vec![y.clone().into()]
-                                        }.into()
-                                    }.into()
-                                ],
-                                ret: foo_call.clone().into()
-                            },
-                        }.into(),
-                        location: bar.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        expression: ILambda{
                             args: vec![x.clone()],
                             block: IBlock {
                                 statements: vec![
@@ -1350,6 +1332,24 @@ mod tests {
                             },
                         }.into(),
                         location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: ILambda{
+                            args: vec![y.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: foo_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: foo.clone().into(),
+                                            args: vec![y.clone().into()]
+                                        }.into()
+                                    }.into()
+                                ],
+                                ret: foo_call.clone().into()
+                            },
+                        }.into(),
+                        location: bar.location.clone()
                     }.into(),
                 ],
                 vec![
@@ -1435,6 +1435,24 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         expression: ILambda{
+                            args: vec![x.clone()],
+                            block: IBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: bar_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: bar.clone().into(),
+                                            args: vec![x.clone().into()]
+                                        }.into()
+                                    }.into()
+                                ],
+                                ret: bar_call.clone().into()
+                            },
+                        }.into(),
+                        location: foo.location.clone()
+                    }.into(),
+                    IntermediateAssignment{
+                        expression: ILambda{
                             args: vec![y.clone()],
                             block: IBlock {
                                 statements: vec![
@@ -1464,24 +1482,6 @@ mod tests {
                             },
                         }.into(),
                         location: bar.location.clone()
-                    }.into(),
-                    IntermediateAssignment{
-                        expression: ILambda{
-                            args: vec![x.clone()],
-                            block: IBlock {
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: bar_call.location.clone(),
-                                        expression: IntermediateFnCall{
-                                            fn_: bar.clone().into(),
-                                            args: vec![x.clone().into()]
-                                        }.into()
-                                    }.into()
-                                ],
-                                ret: bar_call.clone().into()
-                            },
-                        }.into(),
-                        location: foo.location.clone()
                     }.into(),
                 ],
                 vec![

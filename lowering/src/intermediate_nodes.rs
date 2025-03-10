@@ -129,7 +129,7 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
 static LOCATION_ID: AtomicUsize = AtomicUsize::new(0);
-#[derive(Clone, PartialEq, Ord, PartialOrd, Hash, Eq)]
+#[derive(Clone, Ord, Hash, Eq, PartialEq, PartialOrd)]
 pub struct Location(usize);
 
 impl Location {
@@ -145,7 +145,7 @@ impl fmt::Debug for Location {
 }
 
 impl IntermediateValue {
-    fn substitute(&self, substitution: &Substitution) -> IntermediateValue {
+    pub fn substitute(&self, substitution: &Substitution) -> IntermediateValue {
         match self {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.clone().into(),
             IntermediateValue::IntermediateMemory(memory) => IntermediateMemory {

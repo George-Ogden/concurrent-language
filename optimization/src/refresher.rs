@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+
 use lowering::{
     IBlock, ILambda, IntermediateArg, IntermediateAssignment, IntermediateCtorCall,
     IntermediateElementAccess, IntermediateExpression, IntermediateFnCall, IntermediateMemory,
     IntermediateStatement, IntermediateTupleExpression, IntermediateValue, Location,
 };
-use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct Refresher {
@@ -32,17 +33,12 @@ impl Refresher {
     pub fn register_statements(&mut self, statements: &Vec<IntermediateStatement>) {
         let targets = statements.iter().filter_map(|statement| {
             let IntermediateStatement::IntermediateAssignment(assignment) = statement;
-            Some(assignment.clone())
+            Some((
+                assignment.location.clone(),
+                IntermediateMemory::from(assignment.expression.type_()).into(),
+            ))
         });
-        for target in targets {
-            self.locations.entry(target.location).or_insert(
-                IntermediateMemory {
-                    location: Location::new(),
-                    type_: target.expression.type_(),
-                }
-                .into(),
-            );
-        }
+        self.locations.extend(targets.clone());
     }
     fn refresh_lambda(mut self, lambda: &mut ILambda) {
         for arg in &mut lambda.args {
@@ -133,11 +129,6 @@ impl Refresher {
             | IntermediateValue::IntermediateArg(IntermediateArg { type_: _, location }) => {
                 if let Some(updated_value) = self.refresh_location(location) {
                     *value = updated_value;
-                } else {
-                    if flag.load(std::sync::atomic::Ordering::SeqCst) {
-                        dbg!(&location);
-                        panic!();
-                    }
                 }
             }
         }
@@ -150,8 +141,8 @@ impl Refresher {
         self.locations.insert(
             arg.location.clone(),
             IntermediateArg {
-                location: location.clone(),
                 type_: arg.type_.clone(),
+                location: location.clone(),
             }
             .into(),
         );
