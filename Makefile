@@ -18,11 +18,11 @@ BACKEND := backend/bin/main
 TARGET := backend/include/main/main.hpp
 
 FRONTEND_FLAGS :=
-FLAGS_HASH := $(shell sha256sum $(FRONTEND_FLAGS) 2>/dev/null | cut -d' ' -f1)
+FLAGS_HASH := $(shell sha256sum '$(FRONTEND_FLAGS)' 2>/dev/null | cut -d' ' -f1)
 
 FILE := samples/main.txt
 LAST_FILE_PREFIX := .last-file-hash-
-LAST_FILE_HASH = $(shell sha256sum $(FILE) 2>/dev/null | cut -d' ' -f1)
+LAST_FILE_HASH = $(shell sha256sum '$(FILE)' 2>/dev/null | cut -d' ' -f1)
 LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)$(FLAGS_HASH)
 
 all: $(PIPELINE) $(BACKEND)
@@ -120,7 +120,7 @@ $(LOG_DIR):
 	git log --format="%H" -n 1 > $@/git
 
 benchmark: | $(LOG_DIR)
-	touch $^/title.txt
+	touch $(LOG_DIR)/title.txt
 
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 	for i in `seq 1 $(REPEATS)`; do \
@@ -132,7 +132,7 @@ benchmark: | $(LOG_DIR)
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
-				| xargs -0 echo >> $(LOG_FILE) \
+				| xargs -0 echo >> $(LOG_FILE); \
 			done < $$program/input.txt; \
 		done; \
 	done;
