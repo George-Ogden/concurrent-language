@@ -25,17 +25,20 @@ impl AllocationOptimizer {
                     location,
                 }) => {
                     match &expression {
-                        IntermediateExpression::ILambda(ILambda { args: _, block }) => {
+                        IntermediateExpression::IntermediateLambda(IntermediateLambda {
+                            args: _,
+                            block,
+                        }) => {
                             self.register_memory(&block.statements);
                         }
-                        IntermediateExpression::IIf(IIf {
+                        IntermediateExpression::IntermediateIf(IntermediateIf {
                             condition: _,
                             branches,
                         }) => {
                             self.register_memory(&branches.0.statements);
                             self.register_memory(&branches.1.statements);
                         }
-                        IntermediateExpression::IMatch(IMatch {
+                        IntermediateExpression::IntermediateMatch(IntermediateMatch {
                             subject: _,
                             branches,
                         }) => {
@@ -90,15 +93,17 @@ impl AllocationOptimizer {
                 type_,
             }
             .into(),
-            IntermediateExpression::ILambda(ILambda { args, block }) => ILambda {
-                args,
-                block: self.remove_wasted_allocations_from_block(block),
+            IntermediateExpression::IntermediateLambda(IntermediateLambda { args, block }) => {
+                IntermediateLambda {
+                    args,
+                    block: self.remove_wasted_allocations_from_block(block),
+                }
+                .into()
             }
-            .into(),
-            IntermediateExpression::IIf(IIf {
+            IntermediateExpression::IntermediateIf(IntermediateIf {
                 condition,
                 branches,
-            }) => IIf {
+            }) => IntermediateIf {
                 condition: self.remove_wasted_allocations_from_value(condition),
                 branches: (
                     self.remove_wasted_allocations_from_block(branches.0),
@@ -106,19 +111,21 @@ impl AllocationOptimizer {
                 ),
             }
             .into(),
-            IntermediateExpression::IMatch(IMatch { subject, branches }) => IMatch {
-                subject: self.remove_wasted_allocations_from_value(subject),
-                branches: branches
-                    .into_iter()
-                    .map(
-                        |IntermediateMatchBranch { target, block }| IntermediateMatchBranch {
-                            target,
-                            block: self.remove_wasted_allocations_from_block(block),
-                        },
-                    )
-                    .collect(),
+            IntermediateExpression::IntermediateMatch(IntermediateMatch { subject, branches }) => {
+                IntermediateMatch {
+                    subject: self.remove_wasted_allocations_from_value(subject),
+                    branches: branches
+                        .into_iter()
+                        .map(
+                            |IntermediateMatchBranch { target, block }| IntermediateMatchBranch {
+                                target,
+                                block: self.remove_wasted_allocations_from_block(block),
+                            },
+                        )
+                        .collect(),
+                }
+                .into()
             }
-            .into(),
         }
     }
     pub fn remove_wasted_allocations_from_value(
@@ -188,9 +195,9 @@ impl AllocationOptimizer {
     }
     pub fn remove_wasted_allocations_from_block(
         &self,
-        IBlock { statements, ret }: IBlock,
-    ) -> IBlock {
-        IBlock {
+        IntermediateBlock { statements, ret }: IntermediateBlock,
+    ) -> IntermediateBlock {
+        IntermediateBlock {
             statements: self.remove_wasted_allocations_from_statements(statements),
             ret: self.remove_wasted_allocations_from_value(ret),
         }

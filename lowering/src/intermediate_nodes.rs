@@ -288,9 +288,9 @@ pub enum IntermediateExpression {
     IntermediateTupleExpression(IntermediateTupleExpression),
     IntermediateFnCall(IntermediateFnCall),
     IntermediateCtorCall(IntermediateCtorCall),
-    ILambda(ILambda),
-    IIf(IIf),
-    IMatch(IMatch),
+    IntermediateLambda(IntermediateLambda),
+    IntermediateIf(IntermediateIf),
+    IntermediateMatch(IntermediateMatch),
 }
 
 impl fmt::Debug for IntermediateExpression {
@@ -301,9 +301,9 @@ impl fmt::Debug for IntermediateExpression {
             Self::IntermediateTupleExpression(tuple) => tuple.fmt(f),
             Self::IntermediateFnCall(fn_call) => fn_call.fmt(f),
             Self::IntermediateCtorCall(ctor_call) => ctor_call.fmt(f),
-            Self::ILambda(lambda) => lambda.fmt(f),
-            IntermediateExpression::IIf(if_) => if_.fmt(f),
-            IntermediateExpression::IMatch(match_) => match_.fmt(f),
+            Self::IntermediateLambda(lambda) => lambda.fmt(f),
+            IntermediateExpression::IntermediateIf(if_) => if_.fmt(f),
+            IntermediateExpression::IntermediateMatch(match_) => match_.fmt(f),
         }
     }
 }
@@ -311,8 +311,10 @@ impl fmt::Debug for IntermediateExpression {
 impl IntermediateExpression {
     pub fn targets(&self) -> Vec<Location> {
         match self {
-            IntermediateExpression::ILambda(ILambda { block, args: _ }) => block.targets(),
-            IntermediateExpression::IIf(IIf {
+            IntermediateExpression::IntermediateLambda(IntermediateLambda { block, args: _ }) => {
+                block.targets()
+            }
+            IntermediateExpression::IntermediateIf(IntermediateIf {
                 condition: _,
                 branches,
             }) => {
@@ -320,7 +322,7 @@ impl IntermediateExpression {
                 targets.extend(branches.1.targets());
                 targets
             }
-            IntermediateExpression::IMatch(IMatch {
+            IntermediateExpression::IntermediateMatch(IntermediateMatch {
                 subject: _,
                 branches,
             }) => branches
@@ -353,8 +355,8 @@ impl IntermediateExpression {
                 None => Vec::new(),
                 Some(v) => vec![v.clone()],
             },
-            IntermediateExpression::ILambda(lambda) => lambda.find_open_vars(),
-            IntermediateExpression::IIf(IIf {
+            IntermediateExpression::IntermediateLambda(lambda) => lambda.find_open_vars(),
+            IntermediateExpression::IntermediateIf(IntermediateIf {
                 condition,
                 branches,
             }) => {
@@ -363,7 +365,7 @@ impl IntermediateExpression {
                 values.push(condition.clone());
                 values
             }
-            IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+            IntermediateExpression::IntermediateMatch(IntermediateMatch { subject, branches }) => {
                 let mut values = branches
                     .iter()
                     .flat_map(|IntermediateMatchBranch { target, block }| {
@@ -398,7 +400,7 @@ impl IntermediateExpression {
                 *fn_ = fn_.substitute(substitution);
                 IntermediateValue::substitute_all(args, substitution)
             }
-            IntermediateExpression::IIf(IIf {
+            IntermediateExpression::IntermediateIf(IntermediateIf {
                 condition,
                 branches,
             }) => {
@@ -406,7 +408,7 @@ impl IntermediateExpression {
                 branches.0.substitute(substitution);
                 branches.1.substitute(substitution);
             }
-            IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+            IntermediateExpression::IntermediateMatch(IntermediateMatch { subject, branches }) => {
                 *subject = subject.substitute(substitution);
                 for branch in branches {
                     branch.block.substitute(substitution);
@@ -420,7 +422,7 @@ impl IntermediateExpression {
                 None => (),
                 Some(data) => *data = data.substitute(substitution),
             },
-            IntermediateExpression::ILambda(lambda) => lambda.substitute(substitution),
+            IntermediateExpression::IntermediateLambda(lambda) => lambda.substitute(substitution),
         }
     }
     pub fn type_(&self) -> IntermediateType {
@@ -430,9 +432,9 @@ impl IntermediateExpression {
             IntermediateExpression::IntermediateTupleExpression(tuple) => tuple.type_().into(),
             IntermediateExpression::IntermediateFnCall(fn_call) => fn_call.type_(),
             IntermediateExpression::IntermediateCtorCall(ctor_call) => ctor_call.type_().into(),
-            IntermediateExpression::ILambda(lambda) => lambda.type_().into(),
-            IntermediateExpression::IIf(if_) => if_.type_().into(),
-            IntermediateExpression::IMatch(match_) => match_.type_().into(),
+            IntermediateExpression::IntermediateLambda(lambda) => lambda.type_().into(),
+            IntermediateExpression::IntermediateIf(if_) => if_.type_().into(),
+            IntermediateExpression::IntermediateMatch(match_) => match_.type_().into(),
         }
     }
 }
@@ -603,11 +605,11 @@ impl ExpressionEqualityChecker {
                 assert_eq!(t1, t2)
             }
             (
-                IntermediateExpression::ILambda(ILambda {
+                IntermediateExpression::IntermediateLambda(IntermediateLambda {
                     args: a1,
                     block: b1,
                 }),
-                IntermediateExpression::ILambda(ILambda {
+                IntermediateExpression::IntermediateLambda(IntermediateLambda {
                     args: a2,
                     block: b2,
                 }),
@@ -616,11 +618,11 @@ impl ExpressionEqualityChecker {
                 self.assert_equal_block(&b1, &b2);
             }
             (
-                IntermediateExpression::IIf(IIf {
+                IntermediateExpression::IntermediateIf(IntermediateIf {
                     condition: c1,
                     branches: b1,
                 }),
-                IntermediateExpression::IIf(IIf {
+                IntermediateExpression::IntermediateIf(IntermediateIf {
                     condition: c2,
                     branches: b2,
                 }),
@@ -630,11 +632,11 @@ impl ExpressionEqualityChecker {
                 self.assert_equal_block(&b1.1, &b2.1);
             }
             (
-                IntermediateExpression::IMatch(IMatch {
+                IntermediateExpression::IntermediateMatch(IntermediateMatch {
                     subject: s1,
                     branches: b1,
                 }),
-                IntermediateExpression::IMatch(IMatch {
+                IntermediateExpression::IntermediateMatch(IntermediateMatch {
                     subject: s2,
                     branches: b2,
                 }),
@@ -645,7 +647,7 @@ impl ExpressionEqualityChecker {
             _ => assert!(false),
         }
     }
-    fn assert_equal_block(&mut self, b1: &IBlock, b2: &IBlock) {
+    fn assert_equal_block(&mut self, b1: &IntermediateBlock, b2: &IntermediateBlock) {
         self.assert_equal_statements(&b1.statements, &b2.statements);
         self.assert_equal_value(&b1.ret, &b2.ret)
     }
@@ -868,12 +870,12 @@ impl IntermediateCtorCall {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IBlock {
+pub struct IntermediateBlock {
     pub statements: Vec<IntermediateStatement>,
     pub ret: IntermediateValue,
 }
 
-impl IBlock {
+impl IntermediateBlock {
     fn targets(&self) -> Vec<Location> {
         IntermediateStatement::all_targets(&self.statements)
     }
@@ -892,18 +894,18 @@ impl IBlock {
     }
 }
 
-impl From<IntermediateValue> for IBlock {
+impl From<IntermediateValue> for IntermediateBlock {
     fn from(value: IntermediateValue) -> Self {
-        IBlock {
+        IntermediateBlock {
             statements: Vec::new(),
             ret: value,
         }
     }
 }
 
-impl From<(Vec<IntermediateStatement>, IntermediateValue)> for IBlock {
+impl From<(Vec<IntermediateStatement>, IntermediateValue)> for IntermediateBlock {
     fn from(value: (Vec<IntermediateStatement>, IntermediateValue)) -> Self {
-        IBlock {
+        IntermediateBlock {
             statements: value.0,
             ret: value.1,
         }
@@ -911,14 +913,14 @@ impl From<(Vec<IntermediateStatement>, IntermediateValue)> for IBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ILambda {
+pub struct IntermediateLambda {
     pub args: Vec<IntermediateArg>,
-    pub block: IBlock,
+    pub block: IntermediateBlock,
 }
 
 type Substitution = HashMap<Location, Location>;
 
-impl ILambda {
+impl IntermediateLambda {
     pub fn type_(&self) -> IntermediateFnType {
         IntermediateFnType(
             IntermediateValue::types(
@@ -1031,24 +1033,24 @@ impl IntermediateStatement {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IIf {
+pub struct IntermediateIf {
     pub condition: IntermediateValue,
-    pub branches: (IBlock, IBlock),
+    pub branches: (IntermediateBlock, IntermediateBlock),
 }
 
-impl IIf {
+impl IntermediateIf {
     pub fn type_(&self) -> IntermediateType {
         self.branches.0.type_()
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IMatch {
+pub struct IntermediateMatch {
     pub subject: IntermediateValue,
     pub branches: Vec<IntermediateMatchBranch>,
 }
 
-impl IMatch {
+impl IntermediateMatch {
     pub fn type_(&self) -> IntermediateType {
         self.branches[0].block.type_()
     }
@@ -1057,11 +1059,11 @@ impl IMatch {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateMatchBranch {
     pub target: Option<IntermediateArg>,
-    pub block: IBlock,
+    pub block: IntermediateBlock,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntermediateProgram {
-    pub main: ILambda,
+    pub main: IntermediateLambda,
     pub types: Vec<Rc<RefCell<IntermediateType>>>,
 }

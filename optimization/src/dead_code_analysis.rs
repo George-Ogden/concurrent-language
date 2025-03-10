@@ -7,10 +7,10 @@ use std::{
 
 use itertools::{zip_eq, Itertools};
 use lowering::{
-    IBlock, IIf, ILambda, IMatch, IntermediateArg, IntermediateAssignment, IntermediateExpression,
-    IntermediateFnCall, IntermediateFnType, IntermediateMatchBranch, IntermediateMemory,
-    IntermediateProgram, IntermediateStatement, IntermediateTupleExpression, IntermediateType,
-    IntermediateValue, Location,
+    IntermediateArg, IntermediateAssignment, IntermediateBlock, IntermediateExpression,
+    IntermediateFnCall, IntermediateFnType, IntermediateIf, IntermediateLambda, IntermediateMatch,
+    IntermediateMatchBranch, IntermediateMemory, IntermediateProgram, IntermediateStatement,
+    IntermediateTupleExpression, IntermediateType, IntermediateValue, Location,
 };
 
 pub struct DeadCodeAnalyzer {
@@ -79,10 +79,10 @@ impl DeadCodeAnalyzer {
                     expression,
                     location,
                 }) => match &expression {
-                    IntermediateExpression::ILambda(ILambda {
+                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
                         args,
                         block:
-                            IBlock {
+                            IntermediateBlock {
                                 statements: _,
                                 ret: _,
                             },
@@ -100,15 +100,15 @@ impl DeadCodeAnalyzer {
                     expression,
                     location,
                 }) => match &expression {
-                    IntermediateExpression::ILambda(ILambda {
+                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
                         args: _,
-                        block: IBlock { statements, ret },
+                        block: IntermediateBlock { statements, ret },
                     }) => {
                         self.generate_constraints(statements);
                         let dependents = self.used_value(&ret).iter().cloned().collect_vec();
                         self.add_single_constraint(location.clone(), dependents);
                     }
-                    IntermediateExpression::IIf(IIf {
+                    IntermediateExpression::IntermediateIf(IntermediateIf {
                         condition,
                         branches,
                     }) => {
@@ -124,7 +124,10 @@ impl DeadCodeAnalyzer {
                         self.generate_constraints(&branches.0.statements);
                         self.generate_constraints(&branches.1.statements);
                     }
-                    IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+                    IntermediateExpression::IntermediateMatch(IntermediateMatch {
+                        subject,
+                        branches,
+                    }) => {
                         let dependents = iter::once(self.used_value(subject))
                             .chain(branches.iter().map(|branch| {
                                 self.generate_constraints(&branch.block.statements);
@@ -252,9 +255,9 @@ impl DeadCodeAnalyzer {
                     location,
                 }) => {
                     if self.variables.contains(&location) {
-                        if let IntermediateExpression::ILambda(ILambda {
+                        if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
                             args,
-                            block: IBlock { ret, statements },
+                            block: IntermediateBlock { ret, statements },
                         }) = expression.clone()
                         {
                             let used_args = self.filter_args(&location, args.clone());
@@ -264,9 +267,9 @@ impl DeadCodeAnalyzer {
                                     .map(|arg| IntermediateArg::from(arg.type_.clone()))
                                     .collect_vec();
                                 let fn_mem = IntermediateMemory::from(IntermediateType::from(
-                                    ILambda {
+                                    IntermediateLambda {
                                         args: used_args.clone(),
-                                        block: IBlock {
+                                        block: IntermediateBlock {
                                             statements: statements.clone(),
                                             ret: ret.clone(),
                                         },
@@ -278,9 +281,9 @@ impl DeadCodeAnalyzer {
                                 self.variables.insert(ret_mem.location.clone());
                                 self.fn_updates
                                     .insert(location.clone(), fn_mem.location.clone());
-                                let unoptimized_fn = ILambda {
+                                let unoptimized_fn = IntermediateLambda {
                                     args: fresh_args.clone(),
-                                    block: IBlock {
+                                    block: IntermediateBlock {
                                         statements: vec![IntermediateAssignment {
                                             location: ret_mem.location.clone(),
                                             expression: IntermediateFnCall {
@@ -302,9 +305,9 @@ impl DeadCodeAnalyzer {
                                 .into();
                                 return vec![
                                     IntermediateAssignment {
-                                        expression: ILambda {
+                                        expression: IntermediateLambda {
                                             args: used_args,
-                                            block: IBlock { ret, statements },
+                                            block: IntermediateBlock { ret, statements },
                                         }
                                         .into(),
                                         location: fn_mem.location,
@@ -339,12 +342,12 @@ impl DeadCodeAnalyzer {
                             IntermediateAssignment {
                                 location: location.clone(),
                                 expression: match expression {
-                                    IntermediateExpression::ILambda(ILambda {
+                                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
                                         args,
-                                        block: IBlock { statements, ret },
-                                    }) => ILambda {
+                                        block: IntermediateBlock { statements, ret },
+                                    }) => IntermediateLambda {
                                         args,
-                                        block: IBlock {
+                                        block: IntermediateBlock {
                                             statements: self.remove_redundancy(statements),
                                             ret,
                                         },
@@ -380,10 +383,10 @@ impl DeadCodeAnalyzer {
                                         }
                                         .into()
                                     }
-                                    IntermediateExpression::IIf(IIf {
+                                    IntermediateExpression::IntermediateIf(IntermediateIf {
                                         condition,
                                         branches,
-                                    }) => IIf {
+                                    }) => IntermediateIf {
                                         condition,
                                         branches: (
                                             (
@@ -399,16 +402,16 @@ impl DeadCodeAnalyzer {
                                         ),
                                     }
                                     .into(),
-                                    IntermediateExpression::IMatch(IMatch {
+                                    IntermediateExpression::IntermediateMatch(IntermediateMatch {
                                         subject,
                                         branches,
-                                    }) => IMatch {
+                                    }) => IntermediateMatch {
                                         subject,
                                         branches: branches.into_iter().map(
-                                            |IntermediateMatchBranch { target, block : IBlock { statements, ret }}| {
+                                            |IntermediateMatchBranch { target, block : IntermediateBlock { statements, ret }}| {
                                                 IntermediateMatchBranch {
                                                     target: target.filter(|IntermediateArg { type_: _, location }| self.variables.contains(location)),
-                                                    block: IBlock {
+                                                    block: IntermediateBlock {
                                                         statements: self
                                                             .remove_redundancy(statements),
                                                         ret,
@@ -432,17 +435,17 @@ impl DeadCodeAnalyzer {
     }
     pub fn remove_dead_code(program: IntermediateProgram) -> IntermediateProgram {
         let mut optimizer = DeadCodeAnalyzer::new();
-        let ILambda {
+        let IntermediateLambda {
             args,
-            block: IBlock { statements, ret },
+            block: IntermediateBlock { statements, ret },
         } = program.main;
         optimizer.generate_constraints(&statements);
         let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }) = &ret
         else {
             return IntermediateProgram {
-                main: ILambda {
+                main: IntermediateLambda {
                     args,
-                    block: IBlock {
+                    block: IntermediateBlock {
                         statements: Vec::new(),
                         ret,
                     },
@@ -454,9 +457,9 @@ impl DeadCodeAnalyzer {
         optimizer.variables = optimizer.solve_constraints(initial_solution);
         let statements = optimizer.remove_redundancy(statements);
         IntermediateProgram {
-            main: ILambda {
+            main: IntermediateLambda {
                 args,
-                block: IBlock { statements, ret },
+                block: IntermediateBlock { statements, ret },
             },
             types: program.types,
         }
@@ -471,11 +474,12 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, IIf, ILambda, IMatch, Id,
-        Integer, IntermediateArg, IntermediateBuiltIn, IntermediateCtorCall,
-        IntermediateElementAccess, IntermediateFnCall, IntermediateFnType, IntermediateMatchBranch,
-        IntermediateProgram, IntermediateStatement, IntermediateTupleExpression,
-        IntermediateTupleType, IntermediateType, IntermediateUnionType, IntermediateValue,
+        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
+        IntermediateArg, IntermediateBuiltIn, IntermediateCtorCall, IntermediateElementAccess,
+        IntermediateFnCall, IntermediateFnType, IntermediateIf, IntermediateLambda,
+        IntermediateMatch, IntermediateMatchBranch, IntermediateProgram, IntermediateStatement,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        IntermediateUnionType, IntermediateValue,
     };
     use test_case::test_case;
 
@@ -640,9 +644,9 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: ILambda{
+                        expression: IntermediateLambda{
                             args: vec![arg.clone()],
-                            block: IBlock{
+                            block: IntermediateBlock{
                                 statements: Vec::new(),
                                 ret: arg.clone().into()
                             },
@@ -744,9 +748,9 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: ILambda{
+                        expression: IntermediateLambda{
                             args: vec![x.clone(), y.clone()],
-                            block: IBlock {
+                            block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
                                         location: z.location.clone(),
@@ -800,9 +804,9 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: ILambda{
+                        expression: IntermediateLambda{
                             args: vec![x.clone()],
-                            block: IBlock {
+                            block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
                                         location: bar_call.location.clone(),
@@ -818,9 +822,9 @@ mod tests {
                         location: foo.location.clone()
                     }.into(),
                     IntermediateAssignment{
-                        expression: ILambda{
+                        expression: IntermediateLambda{
                             args: vec![y.clone()],
-                            block: IBlock {
+                            block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
                                         location: foo_call.location.clone(),
@@ -870,9 +874,9 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        expression: ILambda{
+                        expression: IntermediateLambda{
                             args: vec![arg.clone()],
-                            block: IBlock{
+                            block: IntermediateBlock{
                                 statements: Vec::new(),
                                 ret: arg.clone().into()
                             },
@@ -915,7 +919,7 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         location: z.location.clone(),
-                        expression: IIf{
+                        expression: IntermediateIf{
                             condition: c.clone().into(),
                             branches: (
                                 (
@@ -954,7 +958,7 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         location: z.location.clone(),
-                        expression: IMatch{
+                        expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
                                 IntermediateMatchBranch{
@@ -1115,9 +1119,9 @@ mod tests {
             let unused = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock {
+                        block: IntermediateBlock {
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1133,9 +1137,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: w.location.clone(),
@@ -1192,9 +1196,9 @@ mod tests {
                     types: Vec::new(),
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1205,9 +1209,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: y.location.clone(),
@@ -1284,20 +1288,20 @@ mod tests {
             );
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: args.clone(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![
                                                 IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
                                                 IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
                                             ],
-                                            block: IBlock{
+                                            block: IntermediateBlock{
                                                 statements: Vec::new(),
                                                 ret: Boolean{value: true}.into()
                                             },
@@ -1316,16 +1320,16 @@ mod tests {
                     types: Vec::new(),
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: args.clone(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: opt_main.location.clone(),
-                                    expression: ILambda{
+                                    expression: IntermediateLambda{
                                         args: Vec::new(),
-                                        block: IBlock{
+                                        block: IntermediateBlock{
                                             statements: Vec::new(),
                                             ret: Boolean{value: true}.into()
                                         },
@@ -1333,12 +1337,12 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: un_opt_main.location.clone(),
-                                    expression: ILambda{
+                                    expression: IntermediateLambda{
                                         args: vec![
                                             IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
                                             IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
                                         ],
-                                        block: IBlock {
+                                        block: IntermediateBlock {
                                             statements: vec![
                                                 IntermediateAssignment{
                                                     location: opt_call.location.clone(),
@@ -1386,9 +1390,9 @@ mod tests {
             );
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1398,7 +1402,7 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: z.location.clone(),
-                                    expression: IIf{
+                                    expression: IntermediateIf{
                                         condition: c.clone().into(),
                                         branches: (
                                             (
@@ -1432,9 +1436,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: Vec::new(),
                                                 ret: z.clone().into(),
                                             },
@@ -1453,9 +1457,9 @@ mod tests {
                     types: Vec::new()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1465,7 +1469,7 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: z.location.clone(),
-                                    expression: IIf{
+                                    expression: IntermediateIf{
                                         condition: c.clone().into(),
                                         branches: (
                                             IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into(),
@@ -1484,9 +1488,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock{
+                                            block: IntermediateBlock{
                                                 statements: Vec::new(),
                                                 ret: z.clone().into(),
                                             },
@@ -1524,9 +1528,9 @@ mod tests {
             );
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1541,7 +1545,7 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: x.location.clone(),
-                                    expression: IIf{
+                                    expression: IntermediateIf{
                                         condition: c.clone().into(),
                                         branches: (
                                             IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into(),
@@ -1552,9 +1556,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock{
+                                            block: IntermediateBlock{
                                                 statements: Vec::new(),
                                                 ret: y.clone().into(),
                                             },
@@ -1573,9 +1577,9 @@ mod tests {
                     types: Vec::new()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1585,9 +1589,9 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: main.location.clone(),
-                                    expression: ILambda{
+                                    expression: IntermediateLambda{
                                         args: Vec::new(),
-                                        block: IBlock{
+                                        block: IntermediateBlock{
                                             statements: Vec::new(),
                                             ret: y.clone().into(),
                                         },
@@ -1632,9 +1636,9 @@ mod tests {
             ];
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1647,7 +1651,7 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: z.location.clone(),
-                                    expression: IMatch{
+                                    expression: IntermediateMatch{
                                         subject: s.clone().into(),
                                         branches: vec![
                                             IntermediateMatchBranch {
@@ -1657,7 +1661,7 @@ mod tests {
                                                         location: Location::new()
                                                     }
                                                 ),
-                                                block: IBlock{
+                                                block: IntermediateBlock{
                                                     statements: vec![
                                                         IntermediateAssignment{
                                                             location: x.location.clone(),
@@ -1672,7 +1676,7 @@ mod tests {
                                                     type_: AtomicTypeEnum::INT.into(),
                                                     location: y.location.clone()
                                                 }),
-                                                block: IBlock {
+                                                block: IntermediateBlock {
                                                     statements: vec![
                                                         IntermediateAssignment{
                                                             location: w.location.clone(),
@@ -1688,9 +1692,9 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: main.location.clone(),
-                                    expression: ILambda{
+                                    expression: IntermediateLambda{
                                         args: Vec::new(),
-                                        block: IBlock {
+                                        block: IntermediateBlock {
                                             statements: Vec::new(),
                                             ret: z.clone().into(),
                                         },
@@ -1709,9 +1713,9 @@ mod tests {
                     types: types.clone()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1724,7 +1728,7 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: z.location.clone(),
-                                    expression: IMatch{
+                                    expression: IntermediateMatch{
                                         subject: s.clone().into(),
                                         branches: vec![
                                             IntermediateMatchBranch {
@@ -1744,9 +1748,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: Vec::new(),
                                                 ret: z.clone().into(),
                                             },
@@ -1790,9 +1794,9 @@ mod tests {
             ];
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
@@ -1806,7 +1810,7 @@ mod tests {
                                 }.into(),
                                 IntermediateAssignment{
                                     location: z.location.clone(),
-                                    expression: IMatch {
+                                    expression: IntermediateMatch {
                                         subject: s.clone().into(),
                                         branches: vec![
                                             IntermediateMatchBranch {
@@ -1831,9 +1835,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: Vec::new(),
                                                 ret: IntermediateBuiltIn::from(Integer{value: -8}).into(),
                                             },
@@ -1852,17 +1856,17 @@ mod tests {
                     types: types.clone()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: Vec::new(),
                                                 ret: IntermediateBuiltIn::from(Integer{value: -8}).into(),
                                             },
@@ -1935,17 +1939,17 @@ mod tests {
             );
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: foo.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![arg.clone()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_call.location.clone(),
@@ -1963,9 +1967,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: apply.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![f.clone(), x.clone()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: f_call.location.clone(),
@@ -1983,9 +1987,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_main_call.location.clone(),
@@ -2032,17 +2036,17 @@ mod tests {
                     types: Vec::new()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: main_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: foo_opt.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_call.location.clone(),
@@ -2060,9 +2064,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: foo.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![arg.clone().into()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_opt_call.location.clone(),
@@ -2080,9 +2084,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: apply.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![f.clone(), x.clone()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: f_call.location.clone(),
@@ -2100,9 +2104,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_main_call.location.clone(),
@@ -2196,17 +2200,17 @@ mod tests {
             );
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: last_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: foo.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![foo_arg.clone()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_call.location.clone(),
@@ -2224,9 +2228,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: bar.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![bar_arg.clone()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: bar_call.location.clone(),
@@ -2244,9 +2248,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: main_call.location.clone(),
@@ -2274,17 +2278,17 @@ mod tests {
                     types: Vec::new()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: Vec::new(),
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: last_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: foo_opt.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_call.location.clone(),
@@ -2302,9 +2306,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: foo.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![foo_arg.clone().into()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: foo_un_opt_call.location.clone(),
@@ -2322,9 +2326,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: bar_opt.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: bar_call.location.clone(),
@@ -2342,9 +2346,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: bar.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![bar_arg.clone().into()],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: bar_un_opt_call.location.clone(),
@@ -2362,9 +2366,9 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: main_call.location.clone(),
@@ -2420,21 +2424,21 @@ mod tests {
             );
             (
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: vec![arg.clone().into()],
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: last_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![
                                                 IntermediateArg::from(
                                                     IntermediateType::from(AtomicTypeEnum::INT)
                                                 )
                                             ],
-                                            block: IBlock{
+                                            block: IntermediateBlock{
                                                 statements: Vec::new(),
                                                 ret: Integer{value: 0}.into()
                                             },
@@ -2453,17 +2457,17 @@ mod tests {
                     types: Vec::new()
                 },
                 IntermediateProgram{
-                    main: ILambda{
+                    main: IntermediateLambda{
                         args: vec![arg.clone().into()],
-                        block: IBlock{
+                        block: IntermediateBlock{
                             ret: last_call.clone().into(),
                             statements: vec![
                                 IntermediateAssignment{
                                     location: main_opt.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: Vec::new(),
-                                            block: IBlock{
+                                            block: IntermediateBlock{
                                                 statements: Vec::new(),
                                                 ret: Integer{value: 0}.into()
                                             },
@@ -2472,13 +2476,13 @@ mod tests {
                                 IntermediateAssignment{
                                     location: main.location.clone(),
                                     expression:
-                                        ILambda{
+                                        IntermediateLambda{
                                             args: vec![
                                                 IntermediateArg::from(
                                                     IntermediateType::from(AtomicTypeEnum::INT)
                                                 )
                                             ],
-                                            block: IBlock {
+                                            block: IntermediateBlock {
                                                 statements: vec![
                                                     IntermediateAssignment{
                                                         location: main_call.location.clone(),

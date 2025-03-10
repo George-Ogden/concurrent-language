@@ -7,9 +7,9 @@ use interval::ops::*;
 use interval::Interval;
 use itertools::Itertools;
 use lowering::{
-    BuiltInFn, IBlock, IIf, ILambda, IMatch, Id, IntermediateAssignment, IntermediateBuiltIn,
-    IntermediateExpression, IntermediateFnCall, IntermediateMatchBranch, IntermediateStatement,
-    IntermediateValue,
+    BuiltInFn, Id, IntermediateAssignment, IntermediateBlock, IntermediateBuiltIn,
+    IntermediateExpression, IntermediateFnCall, IntermediateIf, IntermediateLambda,
+    IntermediateMatch, IntermediateMatchBranch, IntermediateStatement, IntermediateValue,
 };
 use once_cell::sync::Lazy;
 use std::fs;
@@ -124,9 +124,11 @@ impl CodeSizeEstimator {
             IntermediateExpression::IntermediateCtorCall(_) => {
                 Interval::singleton(CODE_SIZE_CONSTANTS.ctor_call + values_size)
             }
-            IntermediateExpression::ILambda(_) => Interval::singleton(CODE_SIZE_CONSTANTS.lambda),
-            IntermediateExpression::IIf(if_) => Self::if_size(if_),
-            IntermediateExpression::IMatch(match_) => Self::match_size(match_),
+            IntermediateExpression::IntermediateLambda(_) => {
+                Interval::singleton(CODE_SIZE_CONSTANTS.lambda)
+            }
+            IntermediateExpression::IntermediateIf(if_) => Self::if_size(if_),
+            IntermediateExpression::IntermediateMatch(match_) => Self::match_size(match_),
         }
     }
 
@@ -140,13 +142,13 @@ impl CodeSizeEstimator {
     fn assignment_size(assignment: &IntermediateAssignment) -> Interval<usize> {
         Self::expression_size(&assignment.expression) + CODE_SIZE_CONSTANTS.assignment
     }
-    fn if_size(if_: &IIf) -> Interval<usize> {
+    fn if_size(if_: &IntermediateIf) -> Interval<usize> {
         let condition_size = Self::value_size(&if_.condition);
         let branch_sizes =
             Self::block_size(&if_.branches.0).hull(&Self::block_size(&if_.branches.1));
         branch_sizes + condition_size + CODE_SIZE_CONSTANTS.if_
     }
-    fn match_size(match_: &IMatch) -> Interval<usize> {
+    fn match_size(match_: &IntermediateMatch) -> Interval<usize> {
         let subject_size = Self::value_size(&match_.subject);
         let branch_sizes = match_
             .branches
@@ -165,10 +167,10 @@ impl CodeSizeEstimator {
             .map(Self::statement_size)
             .fold(Interval::singleton(0), Interval::add)
     }
-    fn block_size(block: &IBlock) -> Interval<usize> {
+    fn block_size(block: &IntermediateBlock) -> Interval<usize> {
         Self::statements_size(&block.statements) + Self::value_size(&block.ret)
     }
-    pub fn estimate_size(lambda: &ILambda) -> (usize, usize) {
+    pub fn estimate_size(lambda: &IntermediateLambda) -> (usize, usize) {
         let size_interval = Self::block_size(&lambda.block);
         (size_interval.lower(), size_interval.upper())
     }
@@ -183,11 +185,11 @@ mod tests {
     use interval::Interval;
     use itertools::Itertools;
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, ILambda, Id, Integer, IntermediateArg,
-        IntermediateAssignment, IntermediateCtorCall, IntermediateElementAccess,
-        IntermediateFnCall, IntermediateFnType, IntermediateMatchBranch, IntermediateMemory,
-        IntermediateStatement, IntermediateTupleExpression, IntermediateTupleType,
-        IntermediateUnionType, Location, DEFAULT_CONTEXT,
+        AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
+        IntermediateCtorCall, IntermediateElementAccess, IntermediateFnCall, IntermediateFnType,
+        IntermediateLambda, IntermediateMatchBranch, IntermediateMemory, IntermediateStatement,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateUnionType, Location,
+        DEFAULT_CONTEXT,
     };
     use test_case::test_case;
 
@@ -395,9 +397,9 @@ mod tests {
         "ctor call with data"
     )]
     #[test_case(
-        ILambda{
+        IntermediateLambda{
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: Vec::new(),
                 ret: Boolean{value: true}.into()
             },
@@ -470,7 +472,7 @@ mod tests {
             (
                 IntermediateAssignment {
                     location: Location::new(),
-                    expression: IIf{
+                    expression: IntermediateIf{
                         condition: condition.into(),
                         branches: (
                             small_value.into(),
@@ -527,7 +529,7 @@ mod tests {
             (
                 IntermediateAssignment {
                     location: Location::new(),
-                    expression: IMatch {
+                    expression: IntermediateMatch {
                         subject: subject.into(),
                         branches: vec![
                             IntermediateMatchBranch{
@@ -540,7 +542,7 @@ mod tests {
                             },
                             IntermediateMatchBranch{
                                 target: Some(large_arg),
-                                block: IBlock {
+                                block: IntermediateBlock {
                                     statements: vec![large_expression.clone().into()],
                                     ret: large_expression.clone().into()
                                 }
@@ -566,9 +568,9 @@ mod tests {
                     type_: AtomicTypeEnum::INT.into(),
                     location: Location::new()
                 };
-                ILambda {
+                IntermediateLambda {
                     args: vec![arg.clone()],
-                    block: IBlock {
+                    block: IntermediateBlock {
                         statements: Vec::new(),
                         ret: arg.clone().into()
                     },
@@ -590,7 +592,7 @@ mod tests {
             };
             let statement = IntermediateAssignment {
                 location: target.location.clone(),
-                expression: IIf{
+                expression: IntermediateIf{
                     condition: arg.clone().into(),
                     branches:(
                         IntermediateValue::from(Integer{ value: 1 }).into(),
@@ -605,9 +607,9 @@ mod tests {
             let lower_bound = range.lower() + *MAS;
             let upper_bound = range.upper() + *MAS;
             (
-                ILambda {
+                IntermediateLambda {
                     args: vec![arg.clone()],
-                    block: IBlock{
+                    block: IntermediateBlock{
                         statements: vec![
                             statement.into()
                         ],
@@ -619,7 +621,7 @@ mod tests {
         };
         "lambda if statement"
     )]
-    fn test_lambda_size(lambda_size: (ILambda, (usize, usize))) {
+    fn test_lambda_size(lambda_size: (IntermediateLambda, (usize, usize))) {
         let (lambda, expected_size) = lambda_size;
         let size = CodeSizeEstimator::estimate_size(&lambda);
         assert_eq!(size, expected_size)

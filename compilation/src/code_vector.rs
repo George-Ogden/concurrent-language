@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use lowering::{
-    BuiltInFn, IBlock, IIf, ILambda, IMatch, IntermediateAssignment, IntermediateBuiltIn,
-    IntermediateExpression, IntermediateFnCall, IntermediateMatchBranch, IntermediateStatement,
-    IntermediateValue,
+    BuiltInFn, IntermediateAssignment, IntermediateBlock, IntermediateBuiltIn,
+    IntermediateExpression, IntermediateFnCall, IntermediateIf, IntermediateLambda,
+    IntermediateMatch, IntermediateMatchBranch, IntermediateStatement, IntermediateValue,
 };
 
 use crate::code_size::{CodeVector, CODE_SIZE_CONSTANTS};
@@ -55,9 +55,9 @@ impl CodeVectorCalculator {
             IntermediateExpression::IntermediateCtorCall(_) => {
                 CodeVector::ctor_call() + values_vector
             }
-            IntermediateExpression::ILambda(_) => CodeVector::lambda(),
-            IntermediateExpression::IIf(if_) => Self::if_vector(if_)?,
-            IntermediateExpression::IMatch(match_) => Self::match_vector(match_)?,
+            IntermediateExpression::IntermediateLambda(_) => CodeVector::lambda(),
+            IntermediateExpression::IntermediateIf(if_) => Self::if_vector(if_)?,
+            IntermediateExpression::IntermediateMatch(match_) => Self::match_vector(match_)?,
         })
     }
 
@@ -71,7 +71,7 @@ impl CodeVectorCalculator {
     fn assignment_vector(assignment: &IntermediateAssignment) -> Result<CodeVector, String> {
         Ok(Self::expression_vector(&assignment.expression)? + CodeVector::assignment())
     }
-    fn if_vector(if_statement: &IIf) -> Result<CodeVector, String> {
+    fn if_vector(if_statement: &IntermediateIf) -> Result<CodeVector, String> {
         let condition_vector = Self::value_vector(&if_statement.condition);
         let branch_vectors = (
             Self::block_vector(&if_statement.branches.0)?,
@@ -83,7 +83,7 @@ impl CodeVectorCalculator {
             Err(String::from("If statement branches are not equal"))
         }
     }
-    fn match_vector(match_statement: &IMatch) -> Result<CodeVector, String> {
+    fn match_vector(match_statement: &IntermediateMatch) -> Result<CodeVector, String> {
         let subject_vector = Self::value_vector(&match_statement.subject);
         let branch_vectors = match_statement
             .branches
@@ -102,10 +102,10 @@ impl CodeVectorCalculator {
     fn statements_vector(statements: &Vec<IntermediateStatement>) -> Result<CodeVector, String> {
         statements.iter().map(Self::statement_vector).sum()
     }
-    fn block_vector(block: &IBlock) -> Result<CodeVector, String> {
+    fn block_vector(block: &IntermediateBlock) -> Result<CodeVector, String> {
         Ok(Self::statements_vector(&block.statements)? + Self::value_vector(&block.ret))
     }
-    pub fn lambda_vector(lambda: &ILambda) -> Result<CodeVector, String> {
+    pub fn lambda_vector(lambda: &IntermediateLambda) -> Result<CodeVector, String> {
         let mut default = CodeVector::new();
         default.operators =
             HashMap::from_iter(CODE_SIZE_CONSTANTS.operators.keys().map(|k| (k.clone(), 0)));
@@ -120,11 +120,11 @@ mod tests {
 
     use itertools::Itertools;
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, ILambda, Id, Integer, IntermediateArg,
-        IntermediateAssignment, IntermediateCtorCall, IntermediateElementAccess,
-        IntermediateFnCall, IntermediateFnType, IntermediateMatchBranch, IntermediateMemory,
-        IntermediateStatement, IntermediateTupleExpression, IntermediateTupleType,
-        IntermediateType, IntermediateUnionType, Location, DEFAULT_CONTEXT,
+        AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
+        IntermediateCtorCall, IntermediateElementAccess, IntermediateFnCall, IntermediateFnType,
+        IntermediateLambda, IntermediateMatchBranch, IntermediateMemory, IntermediateStatement,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        IntermediateUnionType, Location, DEFAULT_CONTEXT,
     };
     use once_cell::sync::Lazy;
     use test_case::test_case;
@@ -324,9 +324,9 @@ mod tests {
         "ctor call with data"
     )]
     #[test_case(
-        ILambda{
+        IntermediateLambda{
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: Vec::new(),
                 ret: Boolean{value: true}.into()
             },
@@ -387,7 +387,7 @@ mod tests {
             let value_vector = CodeVectorCalculator::value_vector(&values.0.clone().into());
             (
                 IntermediateAssignment {
-                    expression: IIf{
+                    expression: IntermediateIf{
                         condition: condition.into(),
                         branches: (
                             values.0.clone().into(),
@@ -434,7 +434,7 @@ mod tests {
             (
                 IntermediateAssignment{
                     location: Location::new(),
-                    expression: IIf{
+                    expression: IntermediateIf{
                         condition: condition.into(),
                         branches: (
                             small_value.into(),
@@ -478,7 +478,7 @@ mod tests {
             (
                 IntermediateAssignment {
                     location: target,
-                    expression: IMatch {
+                    expression: IntermediateMatch {
                         subject: subject.into(),
                         branches: vec![
                             IntermediateMatchBranch{
@@ -535,7 +535,7 @@ mod tests {
             (
                 IntermediateAssignment {
                     location: Location::new(),
-                    expression: IMatch {
+                    expression: IntermediateMatch {
                         subject: subject.into(),
                         branches: vec![
                             IntermediateMatchBranch{
@@ -583,9 +583,9 @@ mod tests {
                     type_: AtomicTypeEnum::INT.into(),
                     location: Location::new()
                 };
-                ILambda {
+                IntermediateLambda {
                     args: vec![arg.clone()],
-                    block: IBlock {
+                    block: IntermediateBlock {
                         statements: Vec::new(),
                         ret: arg.clone().into()
                     },
@@ -607,7 +607,7 @@ mod tests {
             };
             let assignment = IntermediateAssignment{
                 location: target.location.clone(),
-                expression: IIf {
+                expression: IntermediateIf {
                     condition: arg.clone().into(),
                     branches: (
                         IntermediateValue::from(Integer{ value: 1 }).into(),
@@ -617,9 +617,9 @@ mod tests {
             };
             let if_statement_vector = CodeVectorCalculator::assignment_vector(&assignment).expect("");
             (
-                ILambda {
+                IntermediateLambda {
                     args: vec![arg.clone()],
-                    block: IBlock{
+                    block: IntermediateBlock{
                         statements: vec![
                             assignment.into()
                         ],
@@ -643,7 +643,7 @@ mod tests {
             };
             let assignment = IntermediateAssignment{
                 location: target.location.clone(),
-                expression: IIf {
+                expression: IntermediateIf {
                     condition: arg.clone().into(),
                     branches: (
                         IntermediateValue::from(Integer{ value: 1 }).into(),
@@ -652,9 +652,9 @@ mod tests {
                 }.into()
             };
             (
-                ILambda {
+                IntermediateLambda {
                     args: vec![arg.clone()],
-                    block: IBlock{
+                    block: IntermediateBlock{
                         statements: vec![
                             assignment.into()
                         ],
@@ -666,7 +666,7 @@ mod tests {
         };
         "lambda if statement unbalanced"
     )]
-    fn test_lambda_vector(lambda_vector: (ILambda, Result<CodeVector, ()>)) {
+    fn test_lambda_vector(lambda_vector: (IntermediateLambda, Result<CodeVector, ()>)) {
         let (lambda, result) = lambda_vector;
         match result {
             Ok(expected_vector) => {
@@ -684,9 +684,9 @@ mod tests {
 
     #[test]
     fn exhaustive_operator_test() {
-        let lambda = ILambda {
+        let lambda = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: Vec::new(),
                 ret: Integer { value: 0 }.into(),
             },

@@ -1,8 +1,9 @@
 use itertools::Itertools;
 use lowering::{
-    BuiltInFn, IBlock, IIf, ILambda, IMatch, IntermediateAssignment, IntermediateBuiltIn,
-    IntermediateExpression, IntermediateFnCall, IntermediateMatchBranch, IntermediateMemory,
-    IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
+    BuiltInFn, IntermediateAssignment, IntermediateBlock, IntermediateBuiltIn,
+    IntermediateExpression, IntermediateFnCall, IntermediateIf, IntermediateLambda,
+    IntermediateMatch, IntermediateMatchBranch, IntermediateMemory, IntermediateProgram,
+    IntermediateStatement, IntermediateValue, Location,
 };
 use std::{collections::HashMap, convert::identity};
 
@@ -13,13 +14,13 @@ use compilation::CodeSizeEstimator;
 
 #[derive(Debug, PartialEq, Clone)]
 enum FnInst {
-    Lambda(ILambda),
+    Lambda(IntermediateLambda),
     BuiltIn(BuiltInFn),
     Ref(Location),
 }
 
-impl From<ILambda> for FnInst {
-    fn from(value: ILambda) -> Self {
+impl From<IntermediateLambda> for FnInst {
+    fn from(value: IntermediateLambda) -> Self {
         FnInst::Lambda(value)
     }
 }
@@ -82,7 +83,7 @@ impl Inliner {
         fn_defs: &mut FnDefs,
     ) {
         match expression {
-            IntermediateExpression::ILambda(lambda) => {
+            IntermediateExpression::IntermediateLambda(lambda) => {
                 fn_defs.insert(location.clone(), lambda.clone().into());
                 Self::collect_fn_defs_from_statements(&lambda.block.statements, fn_defs);
             }
@@ -96,11 +97,11 @@ impl Inliner {
             )) if fn_defs.contains_key(&memory.location) => {
                 fn_defs.insert(location.clone(), memory.location.clone().into());
             }
-            IntermediateExpression::IIf(if_) => {
+            IntermediateExpression::IntermediateIf(if_) => {
                 Self::collect_fn_defs_from_statements(&if_.branches.0.statements, fn_defs);
                 Self::collect_fn_defs_from_statements(&if_.branches.1.statements, fn_defs);
             }
-            IntermediateExpression::IMatch(match_) => {
+            IntermediateExpression::IntermediateMatch(match_) => {
                 for branch in &match_.branches {
                     Self::collect_fn_defs_from_statements(&branch.block.statements, fn_defs);
                 }
@@ -117,7 +118,11 @@ impl Inliner {
         }
     }
 
-    fn inline(&self, mut lambda: ILambda, args: Vec<IntermediateValue>) -> IBlock {
+    fn inline(
+        &self,
+        mut lambda: IntermediateLambda,
+        args: Vec<IntermediateValue>,
+    ) -> IntermediateBlock {
         Refresher::refresh_for_inlining(&mut lambda);
         let assignments = lambda
             .args
@@ -136,16 +141,19 @@ impl Inliner {
         (statements, lambda.block.ret).into()
     }
 
-    fn inline_iteration(lambda: ILambda, size_limit: Option<usize>) -> (ILambda, bool) {
+    fn inline_iteration(
+        lambda: IntermediateLambda,
+        size_limit: Option<usize>,
+    ) -> (IntermediateLambda, bool) {
         let bounds = CodeSizeEstimator::estimate_size(&lambda);
         if let Some(size) = size_limit {
             if bounds.1 >= size {
                 return (lambda, false);
             }
         }
-        let ILambda {
+        let IntermediateLambda {
             args,
-            block: IBlock { statements, ret },
+            block: IntermediateBlock { statements, ret },
         } = lambda;
         let mut inliner = Inliner::from(&statements);
         if let Some(size) = size_limit {
@@ -154,9 +162,9 @@ impl Inliner {
         let inliner = inliner;
         let (statements, should_continue) = inliner.inline_statements(statements);
         (
-            ILambda {
+            IntermediateLambda {
                 args,
-                block: IBlock { statements, ret },
+                block: IntermediateBlock { statements, ret },
             },
             should_continue,
         )
@@ -203,7 +211,7 @@ impl Inliner {
                     Some(FnInst::Lambda(lambda))
                         if CodeSizeEstimator::estimate_size(lambda).1 < self.size_limit =>
                     {
-                        let IBlock {
+                        let IntermediateBlock {
                             statements: extra_statements,
                             ret: value,
                         } = self.inline(lambda.clone(), args);
@@ -224,22 +232,22 @@ impl Inliner {
                     .into(),
                 }
             }
-            IntermediateExpression::ILambda(lambda)
+            IntermediateExpression::IntermediateLambda(lambda)
                 if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
             {
-                let ILambda {
+                let IntermediateLambda {
                     args,
-                    block: IBlock { statements, ret },
+                    block: IntermediateBlock { statements, ret },
                 } = lambda;
                 let (statements, internal_continue) = self.inline_statements(statements);
                 should_continue |= internal_continue;
-                ILambda {
+                IntermediateLambda {
                     args,
-                    block: IBlock { statements, ret },
+                    block: IntermediateBlock { statements, ret },
                 }
                 .into()
             }
-            IntermediateExpression::IIf(IIf {
+            IntermediateExpression::IntermediateIf(IntermediateIf {
                 condition,
                 branches,
             }) => {
@@ -247,7 +255,7 @@ impl Inliner {
                 should_continue |= continue_0;
                 let (statements_1, continue_1) = self.inline_statements(branches.1.statements);
                 should_continue |= continue_1;
-                IIf {
+                IntermediateIf {
                     condition,
                     branches: (
                         (statements_0, branches.0.ret).into(),
@@ -256,25 +264,25 @@ impl Inliner {
                 }
                 .into()
             }
-            IntermediateExpression::IMatch(IMatch { subject, branches }) => {
+            IntermediateExpression::IntermediateMatch(IntermediateMatch { subject, branches }) => {
                 let branches = branches
                     .into_iter()
                     .map(
                         |IntermediateMatchBranch {
                              target,
-                             block: IBlock { statements, ret },
+                             block: IntermediateBlock { statements, ret },
                          }| {
                             let (statements, internal_continue) =
                                 self.inline_statements(statements);
                             should_continue |= internal_continue;
                             IntermediateMatchBranch {
                                 target,
-                                block: IBlock { statements, ret },
+                                block: IntermediateBlock { statements, ret },
                             }
                         },
                     )
                     .collect();
-                IMatch { subject, branches }.into()
+                IntermediateMatch { subject, branches }.into()
             }
             _ => expression,
         };
@@ -304,10 +312,10 @@ mod tests {
 
     use super::*;
     use lowering::{
-        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, IIf, IMatch, Id, Integer,
+        AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
         IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateFnCall,
-        IntermediateFnType, IntermediateMatchBranch, IntermediateMemory, IntermediateType,
-        IntermediateUnionType, IntermediateValue, Location,
+        IntermediateFnType, IntermediateIf, IntermediateMatch, IntermediateMatchBranch,
+        IntermediateMemory, IntermediateType, IntermediateUnionType, IntermediateValue, Location,
     };
     use test_case::test_case;
 
@@ -340,9 +348,9 @@ mod tests {
     #[test_case(
         {
             let location = Location::new();
-            let lambda = ILambda {
+            let lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
@@ -365,9 +373,9 @@ mod tests {
         {
             let location_a = Location::new();
             let location_b = Location::new();
-            let lambda_a = ILambda {
+            let lambda_a = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
@@ -376,9 +384,9 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new()
             };
-            let lambda_b = ILambda {
+            let lambda_b = IntermediateLambda {
                 args: vec![arg.clone()],
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: arg.clone().into()
                 },
@@ -436,9 +444,9 @@ mod tests {
                 ).into()
             };
             let location = Location::new();
-            let lambda = ILambda {
+            let lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
@@ -464,9 +472,9 @@ mod tests {
     )]
     #[test_case(
         {
-            let lambda_0 = ILambda {
+            let lambda_0 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
@@ -475,9 +483,9 @@ mod tests {
                 expression: lambda_0.clone().into(),
                 location: Location::new()
             };
-            let lambda_1 = ILambda {
+            let lambda_1 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 13}.into()
                 },
@@ -490,7 +498,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: Location::new(),
-                        expression: IIf {
+                        expression: IntermediateIf {
                             condition: IntermediateArg{
                                 location: Location::new(),
                                 type_: AtomicTypeEnum::BOOL.into()
@@ -522,23 +530,23 @@ mod tests {
     )]
     #[test_case(
         {
-            let lambda_0 = ILambda {
+            let lambda_0 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
             };
-            let lambda_1 = ILambda {
+            let lambda_1 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 13}.into()
                 },
             };
-            let lambda_2 = ILambda {
+            let lambda_2 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 13}.into()
                 },
@@ -559,7 +567,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: Location::new(),
-                        expression: IMatch {
+                        expression: IntermediateMatch {
                             subject: IntermediateArg{
                                 location: Location::new(),
                                 type_: IntermediateUnionType(vec![None,None,None]).into()
@@ -601,23 +609,23 @@ mod tests {
     )]
     #[test_case(
         {
-            let lambda_0 = ILambda {
+            let lambda_0 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
             };
-            let lambda_1 = ILambda {
+            let lambda_1 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 13}.into()
                 },
             };
-            let lambda_2 = ILambda {
+            let lambda_2 = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 13}.into()
                 },
@@ -639,7 +647,7 @@ mod tests {
                     assignment_0.clone().into(),
                     IntermediateAssignment {
                         location: Location::new(),
-                        expression: IMatch {
+                        expression: IntermediateMatch {
                             subject: IntermediateArg{
                                 location: Location::new(),
                                 type_: IntermediateUnionType(vec![None,None,None]).into()
@@ -675,9 +683,9 @@ mod tests {
     #[test_case(
         {
             let arg = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
-            let lambda = ILambda {
+            let lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: arg.clone().into()
                 },
@@ -690,7 +698,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: Location::new(),
-                        expression: IMatch {
+                        expression: IntermediateMatch {
                             subject: IntermediateArg{
                                 location: Location::new(),
                                 type_: IntermediateUnionType(vec![None,None,None]).into()
@@ -719,16 +727,16 @@ mod tests {
             let internal_location = Location::new();
             let external_location = Location::new();
             let ret_loc = Location::new();
-            let internal_lambda = ILambda {
+            let internal_lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
             };
-            let external_lambda = ILambda {
+            let external_lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock {
+                block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
                             location: internal_location.clone(),
@@ -778,9 +786,9 @@ mod tests {
 
     #[test_case(
         (
-            ILambda {
+            IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 11}.into()
                 },
@@ -804,9 +812,9 @@ mod tests {
                 location: Location::new()
             };
             (
-                ILambda {
+                IntermediateLambda {
                     args: vec![arg.clone()],
-                    block: IBlock{
+                    block: IntermediateBlock{
                         statements: Vec::new(),
                         ret: arg.clone().into()
                     },
@@ -846,9 +854,9 @@ mod tests {
                 location: Location::new()
             };
             (
-                ILambda {
+                IntermediateLambda {
                     args: args.clone(),
-                    block: IBlock {
+                    block: IntermediateBlock {
                         statements: vec![
                             IntermediateAssignment {
                                 expression: IntermediateFnCall {
@@ -900,7 +908,7 @@ mod tests {
     )]
     fn test_inline_fn(
         lambda_args_expected: (
-            ILambda,
+            IntermediateLambda,
             Vec<IntermediateValue>,
             (Vec<IntermediateStatement>, IntermediateValue),
         ),
@@ -914,14 +922,14 @@ mod tests {
 
         dbg!(&expected, &result);
         ExpressionEqualityChecker::assert_equal(
-            &ILambda {
+            &IntermediateLambda {
                 args: Vec::new(),
                 block: result,
             }
             .into(),
-            &ILambda {
+            &IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock {
+                block: IntermediateBlock {
                     statements: expected.0,
                     ret: expected.1,
                 },
@@ -940,9 +948,9 @@ mod tests {
             type_: AtomicTypeEnum::INT.into(),
             location: Location::new(),
         };
-        let id = ILambda {
+        let id = IntermediateLambda {
             args: vec![id_arg.clone()],
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: Vec::new(),
                 ret: id_arg.clone().into(),
             },
@@ -964,9 +972,9 @@ mod tests {
             type_: AtomicTypeEnum::INT.into(),
             location: Location::new(),
         };
-        let idea = ILambda {
+        let idea = IntermediateLambda {
             args: vec![idea_arg.clone()],
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
                         location: id_fn.location.clone(),
@@ -1020,14 +1028,14 @@ mod tests {
 
         dbg!(&expected, &result);
         ExpressionEqualityChecker::assert_equal(
-            &ILambda {
+            &IntermediateLambda {
                 args: Vec::new(),
                 block: result.clone(),
             }
             .into(),
-            &ILambda {
+            &IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock {
+                block: IntermediateBlock {
                     statements: expected.0,
                     ret: expected.1,
                 },
@@ -1036,7 +1044,8 @@ mod tests {
         );
 
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
-            expression: IntermediateExpression::ILambda(ILambda { args, block: _ }),
+            expression:
+                IntermediateExpression::IntermediateLambda(IntermediateLambda { args, block: _ }),
             location: _,
         }) = &result.statements[1]
         else {
@@ -1055,9 +1064,9 @@ mod tests {
                 ).into()
             };
             let ret_location = Location::new();
-            let lambda = ILambda {
+            let lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Integer{value: 1}.into()
                 },
@@ -1146,9 +1155,9 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new(),
             };
-            let id = ILambda {
+            let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: id_arg.clone().into(),
                 },
@@ -1166,9 +1175,9 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new(),
             };
-            let idea = ILambda {
+            let idea = IntermediateLambda {
                 args: vec![idea_arg.clone()],
-                block: IBlock {
+                block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
                             location: id_fn.location.clone(),
@@ -1227,9 +1236,9 @@ mod tests {
                 vec![
                     IntermediateAssignment{
                         location: idea_fn.location.clone(),
-                        expression: ILambda {
+                        expression: IntermediateLambda {
                             args: vec![idea_arg.clone()],
-                            block: IBlock {
+                            block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment {
                                         location: Location::new(),
@@ -1260,9 +1269,9 @@ mod tests {
                     }.into(),
                     IntermediateAssignment{
                         location: id_fn.location.clone(),
-                        expression: ILambda {
+                        expression: IntermediateLambda {
                             args: vec![fresh_id_arg.clone()],
-                            block: IBlock{
+                            block: IntermediateBlock{
                                 statements: Vec::new(),
                                 ret: fresh_id_arg.clone().into(),
                             },
@@ -1320,9 +1329,9 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
                 location: Location::new(),
             };
-            let id = ILambda {
+            let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: id_arg.clone().into(),
                 },
@@ -1345,7 +1354,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: op.location.clone(),
-                        expression: IIf {
+                        expression: IntermediateIf {
                             condition: condition.clone().into(),
                             branches: (
                                 (
@@ -1395,7 +1404,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: op.location.clone(),
-                        expression: IIf {
+                        expression: IntermediateIf {
                             condition: condition.clone().into(),
                             branches: (
                                 (
@@ -1452,9 +1461,9 @@ mod tests {
     )]
     #[test_case(
         {
-            let lambda = ILambda {
+            let lambda = IntermediateLambda {
                 args: Vec::new(),
-                block: IBlock{
+                block: IntermediateBlock{
                     statements: Vec::new(),
                     ret: Boolean{value: false}.into(),
                 },
@@ -1476,7 +1485,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: Location::new(),
-                            expression: IMatch {
+                            expression: IntermediateMatch {
                             subject: subject.clone().into(),
                             branches: vec![
                                 IntermediateMatchBranch {
@@ -1505,7 +1514,7 @@ mod tests {
                 vec![
                     IntermediateAssignment {
                         location: Location::new(),
-                            expression: IMatch {
+                            expression: IntermediateMatch {
                             subject: subject.clone().into(),
                             branches: vec![
                                 IntermediateMatchBranch {
@@ -1540,9 +1549,9 @@ mod tests {
         expect_continue: bool,
     ) {
         let (statements, expected) = statements_expected;
-        let lambda = ILambda {
+        let lambda = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 ret: Integer { value: 0 }.into(),
                 statements,
             },
@@ -1550,9 +1559,9 @@ mod tests {
         let (optimized, should_continue) = Inliner::inline_iteration(lambda, None);
         assert_eq!(expect_continue, should_continue);
 
-        let expected = ILambda {
+        let expected = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 ret: Integer { value: 0 }.into(),
                 statements: expected,
             },
@@ -1571,16 +1580,16 @@ mod tests {
             location: Location::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
-        let simplified = ILambda {
+        let simplified = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 ret: Integer { value: 0 }.into(),
                 statements: Vec::new(),
             },
         };
-        let main = ILambda {
+        let main = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
                         expression: simplified.clone().into(),
@@ -1625,16 +1634,16 @@ mod tests {
             location: Location::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
-        let simplified = ILambda {
+        let simplified = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 ret: Integer { value: 0 }.into(),
                 statements: Vec::new(),
             },
         };
-        let main = ILambda {
+        let main = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
                         expression: simplified.clone().into(),
@@ -1679,13 +1688,13 @@ mod tests {
             );
             let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
-            ILambda {
-                block: IBlock {
+            IntermediateLambda {
+                block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment{
-                            expression: ILambda{
+                            expression: IntermediateLambda{
                                 args: Vec::new(),
-                                block: IBlock {
+                                block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
                                             location: foo_call.location.clone(),
@@ -1732,13 +1741,13 @@ mod tests {
             let bar_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let foo_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let main_call = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
-            ILambda {
-                block: IBlock {
+            IntermediateLambda {
+                block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment{
-                        expression: ILambda{
+                        expression: IntermediateLambda{
                                 args: Vec::new(),
-                                block: IBlock {
+                                block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
                                             location: bar_call.location.clone(),
@@ -1754,9 +1763,9 @@ mod tests {
                             location: foo.location.clone()
                         }.into(),
                         IntermediateAssignment{
-                            expression: ILambda{
+                            expression: IntermediateLambda{
                                 args: Vec::new(),
-                                block: IBlock {
+                                block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
                                             location: foo_call.location.clone(),
@@ -1786,7 +1795,7 @@ mod tests {
         };
         "mutually recursive fns"
     )]
-    fn test_iterative_inlining(lambda: ILambda) {
+    fn test_iterative_inlining(lambda: IntermediateLambda) {
         let mut program = IntermediateProgram {
             main: lambda,
             types: Vec::new(),
@@ -1831,9 +1840,9 @@ mod tests {
                 type_: AtomicTypeEnum::INT.into(),
             },
         ];
-        let recursive = ILambda {
+        let recursive = IntermediateLambda {
             args: vec![arg.clone()],
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
                         location: calls[0].location.clone().into(),
@@ -1874,9 +1883,9 @@ mod tests {
                 ret: ret.clone().into(),
             },
         };
-        let main = ILambda {
+        let main = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
                         expression: recursive.clone().into(),
@@ -1929,9 +1938,9 @@ mod tests {
             location: Location::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
-        let recursive = ILambda {
+        let recursive = IntermediateLambda {
             args: vec![arg.clone()],
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![IntermediateAssignment {
                     location: ret.location.clone().into(),
                     expression: IntermediateFnCall {
@@ -1944,9 +1953,9 @@ mod tests {
                 ret: ret.clone().into(),
             },
         };
-        let main = ILambda {
+        let main = IntermediateLambda {
             args: Vec::new(),
-            block: IBlock {
+            block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
                         expression: recursive.clone().into(),
