@@ -14,6 +14,7 @@ impl Optimizer {
     ) -> IntermediateProgram {
         if !args.dead_code_analysis_args.no_dead_code_analysis {
             program = DeadCodeAnalyzer::remove_dead_code(program);
+            program = DeadCodeAnalyzer::remove_dead_code(program);
         }
         if !args
             .equivalent_elimination_args
