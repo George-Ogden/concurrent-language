@@ -1,13 +1,15 @@
 use std::{
     cmp::minmax,
     collections::{HashMap, HashSet, VecDeque},
+    convert::identity,
+    iter,
 };
 
 use itertools::{zip_eq, Itertools};
 use lowering::{
-    IntermediateArg, IntermediateAssignment, IntermediateExpression, IntermediateFnCall,
-    IntermediateIfStatement, IntermediateLambda, IntermediateMatchBranch,
-    IntermediateMatchStatement, IntermediateMemory, IntermediateProgram, IntermediateStatement,
+    IntermediateArg, IntermediateAssignment, IntermediateBlock, IntermediateExpression,
+    IntermediateFnCall, IntermediateFnType, IntermediateIf, IntermediateLambda, IntermediateMatch,
+    IntermediateMatchBranch, IntermediateMemory, IntermediateProgram, IntermediateStatement,
     IntermediateTupleExpression, IntermediateType, IntermediateValue, Location,
 };
 
@@ -79,15 +81,17 @@ impl DeadCodeAnalyzer {
                 }) => match &expression {
                     IntermediateExpression::IntermediateLambda(IntermediateLambda {
                         args,
-                        statements: _,
-                        ret: _,
+                        block:
+                            IntermediateBlock {
+                                statements: _,
+                                ret: _,
+                            },
                     }) => {
                         let args = args.into_iter().map(|arg| arg.location.clone()).collect();
                         self.fn_args.insert(location.clone(), args);
                     }
                     _ => {}
                 },
-                _ => {}
             }
         }
         for statement in statements {
@@ -98,25 +102,53 @@ impl DeadCodeAnalyzer {
                 }) => match &expression {
                     IntermediateExpression::IntermediateLambda(IntermediateLambda {
                         args: _,
-                        statements,
-                        ret,
+                        block: IntermediateBlock { statements, ret },
                     }) => {
                         self.generate_constraints(statements);
                         let dependents = self.used_value(&ret).iter().cloned().collect_vec();
+                        self.add_single_constraint(location.clone(), dependents);
+                    }
+                    IntermediateExpression::IntermediateIf(IntermediateIf {
+                        condition,
+                        branches,
+                    }) => {
+                        let dependents = [
+                            self.used_value(&branches.0.ret),
+                            self.used_value(&branches.1.ret),
+                            self.used_value(&condition),
+                        ]
+                        .into_iter()
+                        .filter_map(identity)
+                        .collect();
+                        self.add_single_constraint(location.clone(), dependents);
+                        self.generate_constraints(&branches.0.statements);
+                        self.generate_constraints(&branches.1.statements);
+                    }
+                    IntermediateExpression::IntermediateMatch(IntermediateMatch {
+                        subject,
+                        branches,
+                    }) => {
+                        let dependents = iter::once(self.used_value(subject))
+                            .chain(branches.iter().map(|branch| {
+                                self.generate_constraints(&branch.block.statements);
+                                self.used_value(&branch.block.ret)
+                            }))
+                            .filter_map(identity)
+                            .collect();
                         self.add_single_constraint(location.clone(), dependents);
                     }
                     IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                         fn_,
                         args,
                     }) => match fn_ {
-                        lowering::IntermediateValue::IntermediateBuiltIn(_) => {
+                        IntermediateValue::IntermediateBuiltIn(_) => {
                             let dependents = args
                                 .iter()
                                 .filter_map(|value| self.used_value(value))
                                 .collect();
                             self.add_single_constraint(location.clone(), dependents);
                         }
-                        lowering::IntermediateValue::IntermediateMemory(fn_) => {
+                        IntermediateValue::IntermediateMemory(fn_) => {
                             self.add_single_constraint(
                                 location.clone(),
                                 vec![fn_.location.clone()],
@@ -157,56 +189,6 @@ impl DeadCodeAnalyzer {
                         self.add_single_constraint(location.clone(), used_values)
                     }
                 },
-                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                    condition,
-                    branches,
-                }) => {
-                    let targets = (
-                        HashSet::<Location>::from_iter(IntermediateStatement::all_targets(
-                            &branches.0,
-                        )),
-                        HashSet::<Location>::from_iter(IntermediateStatement::all_targets(
-                            &branches.1,
-                        )),
-                    );
-                    self.generate_constraints(&branches.0);
-                    self.generate_constraints(&branches.1);
-                    let shared_targets = targets.0.intersection(&targets.1);
-                    for target in shared_targets {
-                        let dependents = self.used_value(condition).iter().cloned().collect();
-                        self.add_single_constraint(target.clone(), dependents);
-                    }
-                }
-                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                    subject,
-                    branches,
-                }) => {
-                    let mut shared_targets: Option<HashSet<Location>> = None;
-                    let subject_dependents: Vec<_> =
-                        self.used_value(subject).iter().cloned().collect();
-                    for branch in branches {
-                        match &branch.target {
-                            Some(IntermediateArg { type_: _, location }) => {
-                                self.add_single_constraint(
-                                    location.clone(),
-                                    subject_dependents.clone(),
-                                );
-                            }
-                            None => {}
-                        }
-                        self.generate_constraints(&branch.statements);
-                        let targets = HashSet::from_iter(IntermediateStatement::all_targets(
-                            &branch.statements,
-                        ));
-                        shared_targets = Some(match shared_targets {
-                            None => targets,
-                            Some(set) => set.intersection(&targets).cloned().collect(),
-                        })
-                    }
-                    for target in shared_targets.unwrap_or_default() {
-                        self.add_single_constraint(target, subject_dependents.clone());
-                    }
-                }
             }
         }
     }
@@ -275,8 +257,7 @@ impl DeadCodeAnalyzer {
                     if self.variables.contains(&location) {
                         if let IntermediateExpression::IntermediateLambda(IntermediateLambda {
                             args,
-                            ret,
-                            statements,
+                            block: IntermediateBlock { ret, statements },
                         }) = expression.clone()
                         {
                             let used_args = self.filter_args(&location, args.clone());
@@ -287,9 +268,11 @@ impl DeadCodeAnalyzer {
                                     .collect_vec();
                                 let fn_mem = IntermediateMemory::from(IntermediateType::from(
                                     IntermediateLambda {
-                                        args,
-                                        statements: statements.clone(),
-                                        ret: ret.clone(),
+                                        args: used_args.clone(),
+                                        block: IntermediateBlock {
+                                            statements: statements.clone(),
+                                            ret: ret.clone(),
+                                        },
                                     }
                                     .type_(),
                                 ));
@@ -300,30 +283,31 @@ impl DeadCodeAnalyzer {
                                     .insert(location.clone(), fn_mem.location.clone());
                                 let unoptimized_fn = IntermediateLambda {
                                     args: fresh_args.clone(),
-                                    statements: vec![IntermediateAssignment {
-                                        location: ret_mem.location.clone(),
-                                        expression: IntermediateFnCall {
-                                            fn_: fn_mem.clone().into(),
-                                            args: self.filter_args(
-                                                &location,
-                                                fresh_args
-                                                    .into_iter()
-                                                    .map(Into::into)
-                                                    .collect_vec(),
-                                            ),
+                                    block: IntermediateBlock {
+                                        statements: vec![IntermediateAssignment {
+                                            location: ret_mem.location.clone(),
+                                            expression: IntermediateFnCall {
+                                                fn_: fn_mem.clone().into(),
+                                                args: self.filter_args(
+                                                    &location,
+                                                    fresh_args
+                                                        .into_iter()
+                                                        .map(Into::into)
+                                                        .collect_vec(),
+                                                ),
+                                            }
+                                            .into(),
                                         }
-                                        .into(),
-                                    }
-                                    .into()],
-                                    ret: ret_mem.into(),
+                                        .into()],
+                                        ret: ret_mem.into(),
+                                    },
                                 }
                                 .into();
                                 return vec![
                                     IntermediateAssignment {
                                         expression: IntermediateLambda {
                                             args: used_args,
-                                            ret,
-                                            statements,
+                                            block: IntermediateBlock { ret, statements },
                                         }
                                         .into(),
                                         location: fn_mem.location,
@@ -344,7 +328,6 @@ impl DeadCodeAnalyzer {
                     }
                     .into()]
                 }
-                statement => vec![statement],
             })
             .collect_vec();
         statements
@@ -355,113 +338,97 @@ impl DeadCodeAnalyzer {
                     location,
                 }) => {
                     if self.variables.contains(&location) {
-                        match expression.clone() {
-                            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                                args,
-                                statements,
-                                ret,
-                            }) => Some(
-                                IntermediateAssignment {
-                                    expression: IntermediateLambda {
+                        Some(
+                            IntermediateAssignment {
+                                location: location.clone(),
+                                expression: match expression {
+                                    IntermediateExpression::IntermediateLambda(IntermediateLambda {
                                         args,
-                                        statements: self.remove_redundancy(statements),
-                                        ret,
+                                        block: IntermediateBlock { statements, ret },
+                                    }) => IntermediateLambda {
+                                        args,
+                                        block: IntermediateBlock {
+                                            statements: self.remove_redundancy(statements),
+                                            ret,
+                                        },
                                     }
                                     .into(),
-                                    location,
-                                }
-                                .into(),
-                            ),
-                            IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
-                                fn_: IntermediateValue::IntermediateMemory(memory),
-                                args,
-                            }) if self.fn_updates.contains_key(&memory.location)
-                                && !self.fn_updates.values().contains(&location) =>
-                            {
-                                Some(
-                                    IntermediateAssignment {
-                                        expression: IntermediateFnCall {
-                                            args: self.filter_args(&memory.location, args),
+                                    IntermediateExpression::IntermediateFnCall(
+                                        IntermediateFnCall {
+                                            fn_: IntermediateValue::IntermediateMemory(memory),
+                                            args,
+                                        },
+                                    ) if self.fn_updates.contains_key(&memory.location)
+                                        && !self.fn_updates.values().contains(&location) =>
+                                    {
+                                        let IntermediateType::IntermediateFnType(
+                                            IntermediateFnType(_, ret_type),
+                                        ) = memory.type_
+                                        else {
+                                            panic!("Calling non-fn")
+                                        };
+                                        let args = self.filter_args(&memory.location, args);
+                                        let type_ = IntermediateFnType(
+                                            args.iter().map(|arg| arg.type_()).collect(),
+                                            ret_type.clone(),
+                                        )
+                                        .into();
+                                        IntermediateFnCall {
+                                            args,
                                             fn_: IntermediateMemory {
-                                                type_: memory.type_,
+                                                type_,
                                                 location: self.fn_updates[&memory.location].clone(),
                                             }
                                             .into(),
                                         }
-                                        .into(),
-                                        location,
+                                        .into()
+                                    }
+                                    IntermediateExpression::IntermediateIf(IntermediateIf {
+                                        condition,
+                                        branches,
+                                    }) => IntermediateIf {
+                                        condition,
+                                        branches: (
+                                            (
+                                                self.remove_redundancy(branches.0.statements),
+                                                branches.0.ret,
+                                            )
+                                                .into(),
+                                            (
+                                                self.remove_redundancy(branches.1.statements),
+                                                branches.1.ret,
+                                            )
+                                                .into(),
+                                        ),
                                     }
                                     .into(),
-                                )
+                                    IntermediateExpression::IntermediateMatch(IntermediateMatch {
+                                        subject,
+                                        branches,
+                                    }) => IntermediateMatch {
+                                        subject,
+                                        branches: branches.into_iter().map(
+                                            |IntermediateMatchBranch { target, block : IntermediateBlock { statements, ret }}| {
+                                                IntermediateMatchBranch {
+                                                    target: target.filter(|IntermediateArg { type_: _, location }| self.variables.contains(location)),
+                                                    block: IntermediateBlock {
+                                                        statements: self
+                                                            .remove_redundancy(statements),
+                                                        ret,
+                                                    },
+                                                }
+                                            },
+                                        ).collect_vec(),
+                                    }
+                                    .into(),
+                                    expression => expression,
+                                },
                             }
-                            _ => Some(
-                                IntermediateAssignment {
-                                    expression,
-                                    location,
-                                }
-                                .into(),
-                            ),
-                        }
+                            .into(),
+                        )
                     } else {
                         None
                     }
-                }
-                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                    condition,
-                    branches,
-                }) => {
-                    if let IntermediateValue::IntermediateMemory(memory) = &condition {
-                        if !self.variables.contains(&memory.location) {
-                            return None;
-                        }
-                    }
-                    Some(
-                        IntermediateIfStatement {
-                            condition,
-                            branches: (
-                                self.remove_redundancy(branches.0),
-                                self.remove_redundancy(branches.1),
-                            ),
-                        }
-                        .into(),
-                    )
-                }
-                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                    subject,
-                    branches,
-                }) => {
-                    if let IntermediateValue::IntermediateMemory(memory) = &subject {
-                        if !self.variables.contains(&memory.location) {
-                            return None;
-                        }
-                    }
-                    Some(
-                        IntermediateMatchStatement {
-                            subject,
-                            branches: branches
-                                .into_iter()
-                                .map(
-                                    |IntermediateMatchBranch {
-                                         mut target,
-                                         statements,
-                                     }| {
-                                        if let Some(IntermediateArg { type_: _, location }) =
-                                            &target
-                                        {
-                                            if !self.variables.contains(location) {
-                                                target = None;
-                                            }
-                                        }
-                                        IntermediateMatchBranch {
-                                            target,
-                                            statements: self.remove_redundancy(statements),
-                                        }
-                                    },
-                                )
-                                .collect(),
-                        }
-                        .into(),
-                    )
                 }
             })
             .collect_vec()
@@ -470,8 +437,7 @@ impl DeadCodeAnalyzer {
         let mut optimizer = DeadCodeAnalyzer::new();
         let IntermediateLambda {
             args,
-            statements,
-            ret,
+            block: IntermediateBlock { statements, ret },
         } = program.main;
         optimizer.generate_constraints(&statements);
         let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }) = &ret
@@ -479,8 +445,10 @@ impl DeadCodeAnalyzer {
             return IntermediateProgram {
                 main: IntermediateLambda {
                     args,
-                    statements: Vec::new(),
-                    ret,
+                    block: IntermediateBlock {
+                        statements: Vec::new(),
+                        ret,
+                    },
                 },
                 types: program.types,
             };
@@ -491,8 +459,7 @@ impl DeadCodeAnalyzer {
         IntermediateProgram {
             main: IntermediateLambda {
                 args,
-                statements,
-                ret,
+                block: IntermediateBlock { statements, ret },
             },
             types: program.types,
         }
@@ -509,10 +476,10 @@ mod tests {
     use lowering::{
         AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
         IntermediateArg, IntermediateBuiltIn, IntermediateCtorCall, IntermediateElementAccess,
-        IntermediateFnCall, IntermediateFnType, IntermediateIfStatement, IntermediateLambda,
-        IntermediateMatchBranch, IntermediateMatchStatement, IntermediateProgram,
-        IntermediateStatement, IntermediateTupleExpression, IntermediateTupleType,
-        IntermediateType, IntermediateUnionType, IntermediateValue,
+        IntermediateFnCall, IntermediateFnType, IntermediateIf, IntermediateLambda,
+        IntermediateMatch, IntermediateMatchBranch, IntermediateProgram, IntermediateStatement,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        IntermediateUnionType, IntermediateValue,
     };
     use test_case::test_case;
 
@@ -679,8 +646,10 @@ mod tests {
                     IntermediateAssignment{
                         expression: IntermediateLambda{
                             args: vec![arg.clone()],
-                            statements: Vec::new(),
-                            ret: arg.clone().into()
+                            block: IntermediateBlock{
+                                statements: Vec::new(),
+                                ret: arg.clone().into()
+                            },
                         }.into(),
                         location: id.location.clone()
                     }.into(),
@@ -781,24 +750,26 @@ mod tests {
                     IntermediateAssignment{
                         expression: IntermediateLambda{
                             args: vec![x.clone(), y.clone()],
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: z.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: IntermediateValue::from(
-                                            BuiltInFn(
-                                                Id::from("+"),
-                                                IntermediateFnType(
-                                                    vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
-                                                    Box::new(AtomicTypeEnum::INT.into())
-                                                ).into()
-                                            )
-                                        ),
-                                        args: vec![y.clone().into(), IntermediateBuiltIn::from(Integer{value: 9}).into()]
+                            block: IntermediateBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: z.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: IntermediateValue::from(
+                                                BuiltInFn(
+                                                    Id::from("+"),
+                                                    IntermediateFnType(
+                                                        vec![AtomicTypeEnum::INT.into(),AtomicTypeEnum::INT.into()],
+                                                        Box::new(AtomicTypeEnum::INT.into())
+                                                    ).into()
+                                                )
+                                            ),
+                                            args: vec![y.clone().into(), IntermediateBuiltIn::from(Integer{value: 9}).into()]
+                                        }.into()
                                     }.into()
-                                }.into()
-                            ],
-                            ret: x.clone().into()
+                                ],
+                                ret: x.clone().into()
+                            },
                         }.into(),
                         location: fn_.clone()
                     }.into(),
@@ -835,32 +806,36 @@ mod tests {
                     IntermediateAssignment{
                         expression: IntermediateLambda{
                             args: vec![x.clone()],
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: bar_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: bar.clone().into(),
-                                        args: vec![x.clone().into()]
+                            block: IntermediateBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: bar_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: bar.clone().into(),
+                                            args: vec![x.clone().into()]
+                                        }.into()
                                     }.into()
-                                }.into()
-                            ],
-                            ret: bar_call.clone().into()
+                                ],
+                                ret: bar_call.clone().into()
+                            },
                         }.into(),
                         location: foo.location.clone()
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
                             args: vec![y.clone()],
-                            statements: vec![
-                                IntermediateAssignment{
-                                    location: foo_call.location.clone(),
-                                    expression: IntermediateFnCall{
-                                        fn_: foo.clone().into(),
-                                        args: vec![y.clone().into()]
+                            block: IntermediateBlock {
+                                statements: vec![
+                                    IntermediateAssignment{
+                                        location: foo_call.location.clone(),
+                                        expression: IntermediateFnCall{
+                                            fn_: foo.clone().into(),
+                                            args: vec![y.clone().into()]
+                                        }.into()
                                     }.into()
-                                }.into()
-                            ],
-                            ret: foo_call.clone().into()
+                                ],
+                                ret: foo_call.clone().into()
+                            },
                         }.into(),
                         location: bar.location.clone()
                     }.into(),
@@ -901,8 +876,10 @@ mod tests {
                     IntermediateAssignment{
                         expression: IntermediateLambda{
                             args: vec![arg.clone()],
-                            statements: Vec::new(),
-                            ret: arg.clone().into()
+                            block: IntermediateBlock{
+                                statements: Vec::new(),
+                                ret: arg.clone().into()
+                            },
                         }.into(),
                         location: f.location.clone()
                     }.into(),
@@ -935,50 +912,29 @@ mod tests {
     #[test_case(
         {
             let c = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
-            (
-                vec![
-                    IntermediateIfStatement{
-                        condition: c.clone().into(),
-                        branches: (Vec::new(), Vec::new())
-                    }.into()
-                ],
-                Vec::new(),
-                Vec::new()
-            )
-        };
-        "empty if statement"
-    )]
-    #[test_case(
-        {
-            let c = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
             let x = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let y = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let z = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             (
                 vec![
-                    IntermediateIfStatement{
-                        condition: c.clone().into(),
-                        branches: (
-                            vec![
-                                IntermediateAssignment{
-                                    location: x.location.clone(),
-                                    expression:
-                                        IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                }.into(),
-                                IntermediateAssignment{
-                                    location: z.location.clone(),
-                                    expression:
-                                        IntermediateValue::from(x.clone()).into()
-                                }.into(),
-                            ],
-                            vec![
-                                IntermediateAssignment{
-                                    location: z.location.clone(),
-                                    expression:
-                                        IntermediateValue::from(y.clone()).into()
-                                }.into(),
-                            ],
-                        )
+                    IntermediateAssignment{
+                        location: z.location.clone(),
+                        expression: IntermediateIf{
+                            condition: c.clone().into(),
+                            branches: (
+                                (
+                                    vec![
+                                        IntermediateAssignment{
+                                            location: x.location.clone(),
+                                            expression:
+                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                        }.into(),
+                                    ],
+                                    IntermediateValue::from(x.clone()).into()
+                                ).into(),
+                                IntermediateValue::from(y.clone()).into()
+                            )
+                        }.into()
                     }.into()
                 ],
                 vec![(
@@ -993,38 +949,6 @@ mod tests {
     #[test_case(
         {
             let s = IntermediateMemory::from(IntermediateType::from(
-                IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into())])
-            ));
-            let t = IntermediateArg::from(IntermediateType::from(
-                AtomicTypeEnum::INT
-            ));
-            (
-                vec![
-                    IntermediateMatchStatement{
-                        subject: s.clone().into(),
-                        branches: vec![
-                            IntermediateMatchBranch{
-                                target: Some(t.clone()),
-                                statements: Vec::new()
-                            },
-                            IntermediateMatchBranch{
-                                target: None,
-                                statements: Vec::new()
-                            },
-                        ]
-                    }.into()
-                ],
-                vec![
-                    (t.location, vec![s.location])
-                ],
-                Vec::new()
-            )
-        };
-        "empty match statement"
-    )]
-    #[test_case(
-        {
-            let s = IntermediateMemory::from(IntermediateType::from(
                 IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::BOOL.into())])
             ));
             let x = IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT));
@@ -1032,37 +956,26 @@ mod tests {
             let z = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             (
                 vec![
-                    IntermediateMatchStatement{
-                        subject: s.clone().into(),
-                        branches: vec![
-                            IntermediateMatchBranch{
-                                target: Some(x.clone()),
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: z.location.clone(),
-                                        expression:
-                                            IntermediateValue::from(x.clone()).into()
-                                    }.into(),
-                                ]
-                            },
-                            IntermediateMatchBranch{
-                                target: Some(y.clone()),
-                                statements: vec![
-                                    IntermediateAssignment{
-                                        location: z.location.clone(),
-                                        expression:
-                                            IntermediateValue::from(
-                                                IntermediateBuiltIn::from(Integer{value: 0})
-                                            ).into()
-                                    }.into(),
-                                ]
-                            },
-                        ]
+                    IntermediateAssignment{
+                        location: z.location.clone(),
+                        expression: IntermediateMatch{
+                            subject: s.clone().into(),
+                            branches: vec![
+                                IntermediateMatchBranch{
+                                    target: Some(x.clone()),
+                                    block: IntermediateValue::from(x.clone()).into()
+                                },
+                                IntermediateMatchBranch{
+                                    target: Some(y.clone()),
+                                    block: IntermediateValue::from(
+                                        IntermediateBuiltIn::from(Integer{value: 0})
+                                    ).into()
+                                },
+                            ]
+                        }.into()
                     }.into()
                 ],
                 vec![
-                    (x.location.clone(), vec![s.location.clone()]),
-                    (y.location.clone(), vec![s.location.clone()]),
                     (z.location.clone(), vec![x.location, s.location]),
                 ],
                 Vec::new()
@@ -1208,120 +1121,128 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: unused.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: false})).into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: x.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 3})).into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: w.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: -1})).into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: y.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        fn_: BuiltInFn(
-                                                            Id::from("--"),
-                                                            IntermediateFnType(
-                                                                vec![AtomicTypeEnum::INT.into()],
-                                                                Box::new(AtomicTypeEnum::INT.into())
-                                                            ).into()
-                                                        ).into(),
-                                                        args: vec![
-                                                            x.clone().into()
-                                                        ]
+                        block: IntermediateBlock {
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: unused.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: false})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 3})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: w.location.clone(),
+                                                        expression:
+                                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: -1})).into()
                                                     }.into(),
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        fn_: BuiltInFn(
-                                                            Id::from("++"),
-                                                            IntermediateFnType(
-                                                                vec![AtomicTypeEnum::INT.into()],
-                                                                Box::new(AtomicTypeEnum::INT.into())
-                                                            ).into()
-                                                        ).into(),
-                                                        args: vec![
-                                                            w.clone().into()
-                                                        ]
+                                                    IntermediateAssignment{
+                                                        location: y.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                fn_: BuiltInFn(
+                                                                    Id::from("--"),
+                                                                    IntermediateFnType(
+                                                                        vec![AtomicTypeEnum::INT.into()],
+                                                                        Box::new(AtomicTypeEnum::INT.into())
+                                                                    ).into()
+                                                                ).into(),
+                                                                args: vec![
+                                                                    x.clone().into()
+                                                                ]
+                                                            }.into(),
                                                     }.into(),
-                                            }.into(),
-                                        ],
-                                        ret: y.clone().into(),
+                                                    IntermediateAssignment{
+                                                        location: z.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                fn_: BuiltInFn(
+                                                                    Id::from("++"),
+                                                                    IntermediateFnType(
+                                                                        vec![AtomicTypeEnum::INT.into()],
+                                                                        Box::new(AtomicTypeEnum::INT.into())
+                                                                    ).into()
+                                                                ).into(),
+                                                                args: vec![
+                                                                    w.clone().into()
+                                                                ]
+                                                            }.into(),
+                                                    }.into(),
+                                                ],
+                                                ret: y.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new(),
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: x.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 3})).into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: y.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        fn_: BuiltInFn(
-                                                            Id::from("--"),
-                                                            IntermediateFnType(
-                                                                vec![AtomicTypeEnum::INT.into()],
-                                                                Box::new(AtomicTypeEnum::INT.into())
-                                                            ).into()
-                                                        ).into(),
-                                                        args: vec![
-                                                            x.clone().into()
-                                                        ]
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 3})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: y.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                fn_: BuiltInFn(
+                                                                    Id::from("--"),
+                                                                    IntermediateFnType(
+                                                                        vec![AtomicTypeEnum::INT.into()],
+                                                                        Box::new(AtomicTypeEnum::INT.into())
+                                                                    ).into()
+                                                                ).into(),
+                                                                args: vec![
+                                                                    x.clone().into()
+                                                                ]
+                                                            }.into(),
                                                     }.into(),
-                                            }.into(),
-                                        ],
-                                        ret: y.clone().into(),
+                                                ],
+                                                ret: y.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new(),
                 },
@@ -1369,71 +1290,81 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: args.clone(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![
-                                            IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
-                                            IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
-                                        ],
-                                        statements: Vec::new(),
-                                        ret: Boolean{value: true}.into()
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![
+                                                IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
+                                                IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
+                                            ],
+                                            block: IntermediateBlock{
+                                                statements: Vec::new(),
+                                                ret: Boolean{value: true}.into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: args.iter().cloned().map(IntermediateValue::from).collect()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: args.iter().cloned().map(IntermediateValue::from).collect()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new(),
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: args.clone(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: opt_main.location.clone(),
-                                expression: IntermediateLambda{
-                                    args: Vec::new(),
-                                    statements: Vec::new(),
-                                    ret: Boolean{value: true}.into()
-                                }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: un_opt_main.location.clone(),
-                                expression: IntermediateLambda{
-                                    args: vec![
-                                        IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
-                                        IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
-                                    ],
-                                    statements: vec![
-                                        IntermediateAssignment{
-                                            location: opt_call.location.clone(),
-                                            expression: IntermediateFnCall{
-                                                fn_: opt_main.clone().into(),
-                                                args: Vec::new()
-                                            }.into()
-                                        }.into()
-                                    ],
-                                    ret: opt_call.clone().into()
-                                }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: opt_main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ]
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: opt_main.location.clone(),
+                                    expression: IntermediateLambda{
+                                        args: Vec::new(),
+                                        block: IntermediateBlock{
+                                            statements: Vec::new(),
+                                            ret: Boolean{value: true}.into()
+                                        },
+                                    }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: un_opt_main.location.clone(),
+                                    expression: IntermediateLambda{
+                                        args: vec![
+                                            IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT)),
+                                            IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::BOOL))
+                                        ],
+                                        block: IntermediateBlock {
+                                            statements: vec![
+                                                IntermediateAssignment{
+                                                    location: opt_call.location.clone(),
+                                                    expression: IntermediateFnCall{
+                                                        fn_: opt_main.clone().into(),
+                                                        args: Vec::new()
+                                                    }.into()
+                                                }.into()
+                                            ],
+                                            ret: opt_call.clone().into()
+                                        },
+                                    }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: opt_main.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into(),
+                            ]
+                        },
                     },
                     types: Vec::new(),
                 },
@@ -1461,118 +1392,119 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: c.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
-                            }.into(),
-                            IntermediateIfStatement{
-                                condition: c.clone().into(),
-                                branches: (
-                                    vec![
-                                        IntermediateAssignment{
-                                            location: x.location.clone(),
-                                            expression:
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: c.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: IntermediateIf{
+                                        condition: c.clone().into(),
+                                        branches: (
+                                            (
+                                                vec![
+                                                    IntermediateAssignment{
+                                                        location: x.location.clone(),
+                                                        expression:
+                                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                                    }.into(),
+                                                ],
                                                 IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                        }.into(),
-                                        IntermediateAssignment{
-                                            location: z.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                        }.into(),
-                                    ],
-                                    vec![
-                                        IntermediateAssignment{
-                                            location: y.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()
-                                        }.into(),
-                                        IntermediateAssignment{
-                                            location: w.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 7})).into()
-                                        }.into(),
-                                        IntermediateAssignment{
-                                            location: z.location.clone(),
-                                            expression:
+                                            ).into(),
+                                            (
+                                                vec![
+                                                    IntermediateAssignment{
+                                                        location: y.location.clone(),
+                                                        expression:
+                                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()
+                                                    }.into(),
+                                                    IntermediateAssignment{
+                                                        location: w.location.clone(),
+                                                        expression:
+                                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 7})).into()
+                                                    }.into(),
+                                                ],
                                                 IntermediateValue::from(y.clone()).into()
-                                        }.into(),
-                                    ],
-                                )
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: z.clone().into(),
+                                            ).into()
+                                        )
+                                    }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: Vec::new(),
+                                                ret: z.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new()
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: c.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
-                            }.into(),
-                            IntermediateIfStatement{
-                                condition: c.clone().into(),
-                                branches: (
-                                    vec![
-                                        IntermediateAssignment{
-                                            location: z.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                        }.into(),
-                                    ],
-                                    vec![
-                                        IntermediateAssignment{
-                                            location: y.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()
-                                        }.into(),
-                                        IntermediateAssignment{
-                                            location: z.location.clone(),
-                                            expression:
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: c.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: IntermediateIf{
+                                        condition: c.clone().into(),
+                                        branches: (
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into(),
+                                            (
+                                                vec![
+                                                    IntermediateAssignment{
+                                                        location: y.location.clone(),
+                                                        expression: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 4})).into()
+                                                    }.into(),
+                                                ],
                                                 IntermediateValue::from(y.clone()).into()
-                                        }.into(),
-                                    ],
-                                )
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: z.clone().into(),
+                                            ).into()
+                                        )
+                                    }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock{
+                                                statements: Vec::new(),
+                                                ret: z.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new()
                 }
@@ -1598,84 +1530,82 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: c.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: y.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 2})).into()
-                            }.into(),
-                            IntermediateIfStatement{
-                                condition: c.clone().into(),
-                                branches: (
-                                    vec![
-                                        IntermediateAssignment{
-                                            location: x.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                        }.into(),
-                                    ],
-                                    vec![
-                                        IntermediateAssignment{
-                                            location: x.location.clone(),
-                                            expression:
-                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
-                                        }.into(),
-                                    ],
-                                )
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: y.clone().into(),
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: c.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Boolean{value: true})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 2})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: x.location.clone(),
+                                    expression: IntermediateIf{
+                                        condition: c.clone().into(),
+                                        branches: (
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into(),
+                                            IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 1})).into()
+                                        )
+                                    }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock{
+                                                statements: Vec::new(),
+                                                ret: y.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        }.into()
                     },
                     types: Vec::new()
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: y.location.clone(),
-                                expression:
-                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 2})).into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: y.location.clone(),
+                                    expression:
+                                        IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 2})).into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression: IntermediateLambda{
                                         args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: y.clone().into(),
+                                        block: IntermediateBlock{
+                                            statements: Vec::new(),
+                                            ret: y.clone().into(),
+                                        },
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new()
                 },
@@ -1708,145 +1638,139 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: s.location.clone(),
-                                expression:
-                                    IntermediateCtorCall{
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: s.location.clone(),
+                                    expression: IntermediateCtorCall{
                                         idx: 0,
                                         data: None,
                                         type_: IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into()),])
                                     }.into()
-                            }.into(),
-                            IntermediateMatchStatement{
-                                subject: s.clone().into(),
-                                branches: vec![
-                                    IntermediateMatchBranch {
-                                        target: Some(
-                                            IntermediateArg {
-                                                type_: AtomicTypeEnum::INT.into(),
-                                                location: Location::new()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: IntermediateMatch{
+                                        subject: s.clone().into(),
+                                        branches: vec![
+                                            IntermediateMatchBranch {
+                                                target: Some(
+                                                    IntermediateArg {
+                                                        type_: AtomicTypeEnum::INT.into(),
+                                                        location: Location::new()
+                                                    }
+                                                ),
+                                                block: IntermediateBlock{
+                                                    statements: vec![
+                                                        IntermediateAssignment{
+                                                            location: x.location.clone(),
+                                                            expression: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                                        }.into(),
+                                                    ],
+                                                    ret: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                                }
+                                            },
+                                            IntermediateMatchBranch {
+                                                target: Some(IntermediateArg {
+                                                    type_: AtomicTypeEnum::INT.into(),
+                                                    location: y.location.clone()
+                                                }),
+                                                block: IntermediateBlock {
+                                                    statements: vec![
+                                                        IntermediateAssignment{
+                                                            location: w.location.clone(),
+                                                            expression:
+                                                                IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 7})).into()
+                                                        }.into(),
+                                                    ],
+                                                    ret: IntermediateValue::from(y.clone()).into()
+                                                }
                                             }
-                                        ),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: x.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                            }.into(),
                                         ],
-                                    },
-                                    IntermediateMatchBranch {
-                                        target: Some(IntermediateArg {
-                                            type_: AtomicTypeEnum::INT.into(),
-                                            location: y.location.clone()
-                                        }),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: w.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 7})).into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(y.clone()).into()
-                                            }.into(),
-                                        ],
-                                    }
-                                ],
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
+                                    }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression: IntermediateLambda{
                                         args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: z.clone().into(),
+                                        block: IntermediateBlock {
+                                            statements: Vec::new(),
+                                            ret: z.clone().into(),
+                                        },
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into(),
+                            ],
+                        },
                     },
                     types: types.clone()
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: s.location.clone(),
-                                expression:
-                                    IntermediateCtorCall{
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: s.location.clone(),
+                                    expression: IntermediateCtorCall{
                                         idx: 0,
                                         data: None,
                                         type_: IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into()),])
                                     }.into()
-                            }.into(),
-                            IntermediateMatchStatement{
-                                subject: s.clone().into(),
-                                branches: vec![
-                                    IntermediateMatchBranch {
-                                        target: None,
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
-                                            }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: IntermediateMatch{
+                                        subject: s.clone().into(),
+                                        branches: vec![
+                                            IntermediateMatchBranch {
+                                                target: None,
+                                                block: IntermediateValue::from(IntermediateBuiltIn::from(Integer{value: 0})).into()
+                                            },
+                                            IntermediateMatchBranch {
+                                                target: Some(IntermediateArg {
+                                                    type_: AtomicTypeEnum::INT.into(),
+                                                    location: y.location.clone()
+                                                }),
+                                                block: IntermediateValue::from(y.clone()).into()
+                                            }
                                         ],
-                                    },
-                                    IntermediateMatchBranch {
-                                        target: Some(IntermediateArg {
-                                            type_: AtomicTypeEnum::INT.into(),
-                                            location: y.location.clone()
-                                        }),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(y.clone()).into()
-                                            }.into(),
-                                        ],
-                                    }
-                                ],
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: z.clone().into(),
+                                    }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: Vec::new(),
+                                                ret: z.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: types.clone()
                 },
             )
         };
-        "unused in match statement"
+        "unused in match"
     )]
     #[test_case(
         {
@@ -1872,92 +1796,91 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: s.location.clone(),
-                                expression:
-                                    IntermediateCtorCall{
-                                        idx: 0,
-                                        data: None,
-                                        type_: IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into()),])
-                                    }.into()
-                            }.into(),
-                            IntermediateMatchStatement{
-                                subject: s.clone().into(),
-                                branches: vec![
-                                    IntermediateMatchBranch {
-                                        target: Some(
-                                            IntermediateArg {
-                                                type_: AtomicTypeEnum::INT.into(),
-                                                location: x.location.clone()
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: s.location.clone(),
+                                    expression:
+                                        IntermediateCtorCall{
+                                            idx: 0,
+                                            data: None,
+                                            type_: IntermediateUnionType(vec![Some(AtomicTypeEnum::INT.into()),Some(AtomicTypeEnum::INT.into()),])
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: z.location.clone(),
+                                    expression: IntermediateMatch {
+                                        subject: s.clone().into(),
+                                        branches: vec![
+                                            IntermediateMatchBranch {
+                                                target: Some(
+                                                    IntermediateArg {
+                                                        type_: AtomicTypeEnum::INT.into(),
+                                                        location: x.location.clone()
+                                                    }
+                                                ),
+                                                block: IntermediateValue::from(x.clone()).into(),
+                                            },
+                                            IntermediateMatchBranch {
+                                                target: Some(IntermediateArg {
+                                                    type_: AtomicTypeEnum::INT.into(),
+                                                    location: y.location.clone()
+                                                }),
+                                                block: IntermediateValue::from(y.clone()).into(),
                                             }
-                                        ),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(x.clone()).into()
-                                            }.into(),
                                         ],
-                                    },
-                                    IntermediateMatchBranch {
-                                        target: Some(IntermediateArg {
-                                            type_: AtomicTypeEnum::INT.into(),
-                                            location: y.location.clone()
-                                        }),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: z.location.clone(),
-                                                expression:
-                                                    IntermediateValue::from(y.clone()).into()
-                                            }.into(),
-                                        ],
-                                    }
-                                ],
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: IntermediateBuiltIn::from(Integer{value: -8}).into(),
+                                    }.into(),
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: Vec::new(),
+                                                ret: IntermediateBuiltIn::from(Integer{value: -8}).into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: types.clone()
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: Vec::new(),
-                                        ret: IntermediateBuiltIn::from(Integer{value: -8}).into(),
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: Vec::new(),
+                                                ret: IntermediateBuiltIn::from(Integer{value: -8}).into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: types.clone()
                 },
@@ -2018,196 +1941,214 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: foo.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![arg.clone()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![arg.clone().into()],
-                                                        fn_: foo.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: foo_call.clone().into()
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![arg.clone()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![arg.clone().into()],
+                                                                fn_: foo.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: foo_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: apply.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![f.clone(), x.clone()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: f_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![x.clone().into()],
+                                                                fn_: f.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: f_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_main_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![IntermediateBuiltIn::from(Integer{value: 3}).into()],
+                                                                fn_: foo.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                    IntermediateAssignment{
+                                                        location: apply_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![
+                                                                    foo.clone().into(),
+                                                                    IntermediateBuiltIn::from(Integer{value: 3}).into()
+                                                                ],
+                                                                fn_: apply.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                    IntermediateAssignment{
+                                                        location: tuple.location.clone(),
+                                                        expression:
+                                                            IntermediateTupleExpression(vec![
+                                                                foo_main_call.clone().into(),
+                                                                apply_call.clone().into(),
+                                                            ]).into()
+                                                    }.into(),
+                                                ],
+                                                ret: tuple.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: apply.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![f.clone(), x.clone()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: f_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![x.clone().into()],
-                                                        fn_: f.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: f_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_main_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![IntermediateBuiltIn::from(Integer{value: 3}).into()],
-                                                        fn_: foo.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: apply_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![
-                                                            foo.clone().into(),
-                                                            IntermediateBuiltIn::from(Integer{value: 3}).into()
-                                                        ],
-                                                        fn_: apply.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: tuple.location.clone(),
-                                                expression:
-                                                    IntermediateTupleExpression(vec![
-                                                        foo_main_call.clone().into(),
-                                                        apply_call.clone().into(),
-                                                    ]).into()
-                                            }.into(),
-                                        ],
-                                        ret: tuple.clone().into(),
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new()
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: main_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: foo_opt.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: foo_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: foo_call.clone().into()
+                        block: IntermediateBlock{
+                            ret: main_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_opt.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: foo_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: foo_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: foo.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![arg.clone().into()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_opt_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: foo_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: foo_opt_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: apply.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![f.clone(), x.clone()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: f_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![x.clone().into()],
+                                                                fn_: f.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: f_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_main_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: foo_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                    IntermediateAssignment{
+                                                        location: apply_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![
+                                                                    foo.clone().into(),
+                                                                    IntermediateBuiltIn::from(Integer{value: 3}).into()
+                                                                ],
+                                                                fn_: apply.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                    IntermediateAssignment{
+                                                        location: tuple.location.clone(),
+                                                        expression:
+                                                            IntermediateTupleExpression(vec![
+                                                                foo_main_call.clone().into(),
+                                                                apply_call.clone().into(),
+                                                            ]).into()
+                                                    }.into(),
+                                                ],
+                                                ret: tuple.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: foo.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![arg.clone().into()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_opt_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: foo_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: foo_opt_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: apply.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![f.clone(), x.clone()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: f_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![x.clone().into()],
-                                                        fn_: f.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: f_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_main_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: foo_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: apply_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![
-                                                            foo.clone().into(),
-                                                            IntermediateBuiltIn::from(Integer{value: 3}).into()
-                                                        ],
-                                                        fn_: apply.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                            IntermediateAssignment{
-                                                location: tuple.location.clone(),
-                                                expression:
-                                                    IntermediateTupleExpression(vec![
-                                                        foo_main_call.clone().into(),
-                                                        apply_call.clone().into(),
-                                                    ]).into()
-                                            }.into(),
-                                        ],
-                                        ret: tuple.clone().into(),
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new()
                 },
@@ -2261,176 +2202,196 @@ mod tests {
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: last_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: foo.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![foo_arg.clone()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![foo_arg.clone().into()],
-                                                        fn_: bar.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: foo_call.clone().into()
+                        block: IntermediateBlock{
+                            ret: last_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![foo_arg.clone()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![foo_arg.clone().into()],
+                                                                fn_: bar.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: foo_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: bar.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![bar_arg.clone()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: bar_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![bar_arg.clone().into()],
+                                                                fn_: foo.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: bar_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: main_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: vec![IntermediateBuiltIn::from(Integer{value: 3}).into()],
+                                                                fn_: foo.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: main_call.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: last_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: bar.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![bar_arg.clone()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: bar_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![bar_arg.clone().into()],
-                                                        fn_: foo.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: bar_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: main_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: vec![IntermediateBuiltIn::from(Integer{value: 3}).into()],
-                                                        fn_: foo.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: main_call.clone().into(),
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: last_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new()
                 },
                 IntermediateProgram{
                     main: IntermediateLambda{
                         args: Vec::new(),
-                        ret: last_call.clone().into(),
-                        statements: vec![
-                            IntermediateAssignment{
-                                location: foo_opt.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: bar_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: foo_call.clone().into()
+                        block: IntermediateBlock{
+                            ret: last_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: foo_opt.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: bar_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: foo_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: foo.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![foo_arg.clone().into()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: foo_un_opt_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: foo_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: foo_un_opt_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: bar_opt.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: bar_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: foo_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: bar_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: bar.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![bar_arg.clone().into()],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: bar_un_opt_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: bar_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: bar_un_opt_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: main_call.location.clone(),
+                                                        expression:
+                                                            IntermediateFnCall{
+                                                                args: Vec::new(),
+                                                                fn_: foo_opt.clone().into()
+                                                            }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: main_call.clone().into(),
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: last_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: Vec::new()
                                     }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: foo.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![foo_arg.clone().into()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: foo_un_opt_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: foo_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: foo_un_opt_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: bar_opt.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: bar_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: foo_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: bar_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: bar.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: vec![bar_arg.clone().into()],
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: bar_un_opt_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: bar_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: bar_un_opt_call.clone().into()
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: main.location.clone(),
-                                expression:
-                                    IntermediateLambda{
-                                        args: Vec::new(),
-                                        statements: vec![
-                                            IntermediateAssignment{
-                                                location: main_call.location.clone(),
-                                                expression:
-                                                    IntermediateFnCall{
-                                                        args: Vec::new(),
-                                                        fn_: foo_opt.clone().into()
-                                                    }.into()
-                                            }.into(),
-                                        ],
-                                        ret: main_call.clone().into(),
-                                    }.into()
-                            }.into(),
-                            IntermediateAssignment{
-                                location: last_call.location.clone(),
-                                expression: IntermediateFnCall{
-                                    fn_: main.clone().into(),
-                                    args: Vec::new()
-                                }.into()
-                            }.into(),
-                        ],
+                                }.into(),
+                            ],
+                        },
                     },
                     types: Vec::new(),
                 },
@@ -2438,15 +2399,127 @@ mod tests {
         };
         "unused shared arguments"
     )]
+    #[test_case(
+        {
+            let main = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    vec![AtomicTypeEnum::INT.into()],
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let main_opt = IntermediateMemory::from(
+                IntermediateType::from(IntermediateFnType(
+                    Vec::new(),
+                    Box::new(AtomicTypeEnum::INT.into()),
+                ))
+            );
+            let main_call = IntermediateMemory::from(
+                IntermediateType::from(AtomicTypeEnum::INT)
+            );
+            let arg = IntermediateArg::from(
+                IntermediateType::from(AtomicTypeEnum::INT)
+            );
+            let last_call = IntermediateMemory::from(
+                IntermediateType::from(AtomicTypeEnum::INT)
+            );
+            (
+                IntermediateProgram{
+                    main: IntermediateLambda{
+                        args: vec![arg.clone().into()],
+                        block: IntermediateBlock{
+                            ret: last_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![
+                                                IntermediateArg::from(
+                                                    IntermediateType::from(AtomicTypeEnum::INT)
+                                                )
+                                            ],
+                                            block: IntermediateBlock{
+                                                statements: Vec::new(),
+                                                ret: Integer{value: 0}.into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: last_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main.clone().into(),
+                                        args: vec![arg.clone().into()]
+                                    }.into()
+                                }.into(),
+                            ],
+                        },
+                    },
+                    types: Vec::new()
+                },
+                IntermediateProgram{
+                    main: IntermediateLambda{
+                        args: vec![arg.clone().into()],
+                        block: IntermediateBlock{
+                            ret: last_call.clone().into(),
+                            statements: vec![
+                                IntermediateAssignment{
+                                    location: main_opt.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: Vec::new(),
+                                            block: IntermediateBlock{
+                                                statements: Vec::new(),
+                                                ret: Integer{value: 0}.into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: main.location.clone(),
+                                    expression:
+                                        IntermediateLambda{
+                                            args: vec![
+                                                IntermediateArg::from(
+                                                    IntermediateType::from(AtomicTypeEnum::INT)
+                                                )
+                                            ],
+                                            block: IntermediateBlock {
+                                                statements: vec![
+                                                    IntermediateAssignment{
+                                                        location: main_call.location.clone(),
+                                                        expression: IntermediateFnCall{
+                                                            fn_: main_opt.clone().into(),
+                                                            args: Vec::new()
+                                                        }.into()
+                                                    }.into(),
+                                                ],
+                                                ret: main_call.clone().into()
+                                            },
+                                        }.into()
+                                }.into(),
+                                IntermediateAssignment{
+                                    location: last_call.location.clone(),
+                                    expression: IntermediateFnCall{
+                                        fn_: main_opt.clone().into(),
+                                        args: Vec::new()
+                                    }.into()
+                                }.into(),
+                            ],
+                        },
+                    },
+                    types: Vec::new(),
+                },
+            )
+        };
+        "unused main arg"
+    )]
     fn test_remove_program_dead_code(program_expected: (IntermediateProgram, IntermediateProgram)) {
         let (program, expected_program) = program_expected;
         let optimized_program = DeadCodeAnalyzer::remove_dead_code(program);
-        dbg!(&optimized_program);
-        dbg!(&expected_program);
+        dbg!(&expected_program, &optimized_program);
         assert_eq!(optimized_program.types, expected_program.types);
-        assert!(ExpressionEqualityChecker::equal(
+        ExpressionEqualityChecker::assert_equal(
             &optimized_program.main.into(),
-            &expected_program.main.into()
-        ))
+            &expected_program.main.into(),
+        )
     }
 }

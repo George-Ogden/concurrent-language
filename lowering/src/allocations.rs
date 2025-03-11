@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::intermediate_nodes::*;
 
-pub type MemoryMap = HashMap<Location, Vec<IntermediateExpression>>;
+pub type MemoryMap = HashMap<Location, IntermediateExpression>;
 
 pub struct AllocationOptimizer {
     memory: MemoryMap,
@@ -27,39 +27,28 @@ impl AllocationOptimizer {
                     match &expression {
                         IntermediateExpression::IntermediateLambda(IntermediateLambda {
                             args: _,
-                            statements,
-                            ret: _,
+                            block,
                         }) => {
-                            self.register_memory(statements);
+                            self.register_memory(&block.statements);
+                        }
+                        IntermediateExpression::IntermediateIf(IntermediateIf {
+                            condition: _,
+                            branches,
+                        }) => {
+                            self.register_memory(&branches.0.statements);
+                            self.register_memory(&branches.1.statements);
+                        }
+                        IntermediateExpression::IntermediateMatch(IntermediateMatch {
+                            subject: _,
+                            branches,
+                        }) => {
+                            for branch in branches {
+                                self.register_memory(&branch.block.statements)
+                            }
                         }
                         _ => {}
                     }
-                    if !self.memory.contains_key(&location) {
-                        self.memory.insert(location.clone(), Vec::new());
-                    }
-                    self.memory
-                        .get_mut(&location)
-                        .unwrap()
-                        .push(expression.clone());
-                }
-                IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                    condition: _,
-                    branches,
-                }) => {
-                    self.register_memory(&branches.0);
-                    self.register_memory(&branches.1);
-                }
-                IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                    subject: _,
-                    branches,
-                }) => {
-                    for branch in branches {
-                        self.register_memory(&branch.statements)
-                    }
-                    if branches.len() == 1 {
-                        let statements = branches[0].statements.clone();
-                        self.register_memory(&vec![statements[statements.len() - 1].clone()])
-                    }
+                    self.memory.insert(location.clone(), expression.clone());
                 }
             }
         }
@@ -104,16 +93,39 @@ impl AllocationOptimizer {
                 type_,
             }
             .into(),
-            IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                args,
-                statements,
-                ret,
-            }) => IntermediateLambda {
-                args,
-                statements: self.remove_wasted_allocations_from_statements(statements),
-                ret: self.remove_wasted_allocations_from_value(ret),
+            IntermediateExpression::IntermediateLambda(IntermediateLambda { args, block }) => {
+                IntermediateLambda {
+                    args,
+                    block: self.remove_wasted_allocations_from_block(block),
+                }
+                .into()
+            }
+            IntermediateExpression::IntermediateIf(IntermediateIf {
+                condition,
+                branches,
+            }) => IntermediateIf {
+                condition: self.remove_wasted_allocations_from_value(condition),
+                branches: (
+                    self.remove_wasted_allocations_from_block(branches.0),
+                    self.remove_wasted_allocations_from_block(branches.1),
+                ),
             }
             .into(),
+            IntermediateExpression::IntermediateMatch(IntermediateMatch { subject, branches }) => {
+                IntermediateMatch {
+                    subject: self.remove_wasted_allocations_from_value(subject),
+                    branches: branches
+                        .into_iter()
+                        .map(
+                            |IntermediateMatchBranch { target, block }| IntermediateMatchBranch {
+                                target,
+                                block: self.remove_wasted_allocations_from_block(block),
+                            },
+                        )
+                        .collect(),
+                }
+                .into()
+            }
         }
     }
     pub fn remove_wasted_allocations_from_value(
@@ -124,13 +136,10 @@ impl AllocationOptimizer {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
             IntermediateValue::IntermediateArg(arg) => arg.into(),
             IntermediateValue::IntermediateMemory(memory) => {
-                let expressions = self.memory.get(&memory.location);
-                if expressions.map(Vec::len) == Some(1) {
-                    let expressions = expressions.unwrap();
-                    let expression = expressions[0].clone();
+                if let Some(expression) = self.memory.get(&memory.location) {
                     match expression {
                         IntermediateExpression::IntermediateValue(value) => {
-                            self.remove_wasted_allocations_from_value(value)
+                            self.remove_wasted_allocations_from_value(value.clone())
                         }
                         _ => memory.into(),
                     }
@@ -159,9 +168,7 @@ impl AllocationOptimizer {
                     expression,
                     location,
                 } = assignment;
-                if matches!(&expression, IntermediateExpression::IntermediateValue(_))
-                    && self.memory.get(&location).map(Vec::len) == Some(1)
-                {
+                if matches!(&expression, IntermediateExpression::IntermediateValue(_)) {
                     return None;
                 }
                 let condensed_expression =
@@ -175,38 +182,6 @@ impl AllocationOptimizer {
                     .into(),
                 ))
             }
-            IntermediateStatement::IntermediateIfStatement(IntermediateIfStatement {
-                condition,
-                branches,
-            }) => Some(
-                IntermediateIfStatement {
-                    condition: self.remove_wasted_allocations_from_value(condition),
-                    branches: (
-                        self.remove_wasted_allocations_from_statements(branches.0),
-                        self.remove_wasted_allocations_from_statements(branches.1),
-                    ),
-                }
-                .into(),
-            ),
-            IntermediateStatement::IntermediateMatchStatement(IntermediateMatchStatement {
-                subject,
-                branches,
-            }) => Some(
-                IntermediateMatchStatement {
-                    subject: self.remove_wasted_allocations_from_value(subject),
-                    branches: branches
-                        .into_iter()
-                        .map(|IntermediateMatchBranch { target, statements }| {
-                            IntermediateMatchBranch {
-                                target,
-                                statements: self
-                                    .remove_wasted_allocations_from_statements(statements),
-                            }
-                        })
-                        .collect(),
-                }
-                .into(),
-            ),
         }
     }
     pub fn remove_wasted_allocations_from_statements(
@@ -217,5 +192,14 @@ impl AllocationOptimizer {
             .into_iter()
             .filter_map(|statement| self.remove_wasted_allocations_from_statement(statement))
             .collect()
+    }
+    pub fn remove_wasted_allocations_from_block(
+        &self,
+        IntermediateBlock { statements, ret }: IntermediateBlock,
+    ) -> IntermediateBlock {
+        IntermediateBlock {
+            statements: self.remove_wasted_allocations_from_statements(statements),
+            ret: self.remove_wasted_allocations_from_value(ret),
+        }
     }
 }

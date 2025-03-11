@@ -4,3 +4,4 @@ kaleido
 numpy
 pandas
 plotly
+scikit-learn
