@@ -36,6 +36,8 @@ struct IdentityInt : TypedClosureI<Empty, Int, Int> {
     LazyT<Int> body(LazyT<Int> &x) override { return x; }
 
   public:
+    constexpr std::size_t lower_size_bound() const override { return 1; };
+    constexpr std::size_t upper_size_bound() const override { return 1; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<IdentityInt>(args);
     }
@@ -74,6 +76,8 @@ struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> {
         }
         return res3;
     }
+    constexpr std::size_t lower_size_bound() const override { return 50; };
+    constexpr std::size_t upper_size_bound() const override { return 50; };
     static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>>
     init(const ArgsT &args) {
         return std::make_unique<FourWayPlus>(args);
@@ -106,6 +110,8 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
             throw stack_inversion{};
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 80; };
 
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<DelayedIncrement>(args);
@@ -157,6 +163,8 @@ struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
         WorkManager::enqueue(call3);
         return res3;
     }
+    constexpr std::size_t lower_size_bound() const override { return 100; };
+    constexpr std::size_t upper_size_bound() const override { return 100; };
     static std::unique_ptr<TypedFnI<Int, Int, Int, Int>>
     init(const ArgsT &args) {
         return std::make_unique<BranchingExample>(args);
@@ -197,6 +205,8 @@ struct HigherOrderCall : public TypedClosureI<Empty, Int, FnT<Int, Int>, Int> {
         WorkManager::enqueue(call);
         return res;
     }
+    constexpr std::size_t lower_size_bound() const override { return 60; };
+    constexpr std::size_t upper_size_bound() const override { return 60; };
     static std::unique_ptr<TypedFnI<Int, FnT<Int, Int>, Int>>
     init(const ArgsT &args) {
         return std::make_unique<HigherOrderCall>(args);
@@ -235,6 +245,8 @@ struct RecursiveDouble : public TypedClosureI<Empty, Int, Int> {
             return make_lazy<Int>(0);
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 150; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<RecursiveDouble>(args);
     }
@@ -267,6 +279,8 @@ struct PairIntBool
         std::tie(work, z) = Work::fn_call(Negation__BuiltIn_G, y);
         return std::make_tuple(x, std::make_tuple(z));
     }
+    constexpr std::size_t lower_size_bound() const override { return 60; };
+    constexpr std::size_t upper_size_bound() const override { return 60; };
     static std::unique_ptr<TypedFnI<TupleT<Int, TupleT<Bool>>, Int, Bool>>
     init(const ArgsT &args) {
         return std::make_unique<PairIntBool>(args);
@@ -300,6 +314,8 @@ struct BoolUnion : public TypedClosureI<Empty, Bool, Bull> {
         WorkManager::await(x);
         return make_lazy<Bool>(x->value().tag == 0);
     }
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 20; };
     static std::unique_ptr<TypedFnI<Bool, Bull>> init(const ArgsT &args) {
         return std::make_unique<BoolUnion>(args);
     }
@@ -354,6 +370,8 @@ struct EitherIntBoolFn : public TypedClosureI<Empty, Bool, EitherIntBool> {
         }
         return 0;
     }
+    constexpr std::size_t lower_size_bound() const override { return 50; };
+    constexpr std::size_t upper_size_bound() const override { return 50; };
     static std::unique_ptr<TypedFnI<Bool, EitherIntBool>>
     init(const ArgsT &args) {
         return std::make_unique<EitherIntBoolFn>(args);
@@ -406,6 +424,8 @@ struct EitherIntBoolEdgeCaseFn
         }
         return y;
     }
+    constexpr std::size_t lower_size_bound() const override { return 30; };
+    constexpr std::size_t upper_size_bound() const override { return 90; };
     static std::unique_ptr<TypedFnI<Bool, EitherIntBool>>
     init(const ArgsT &args) {
         return std::make_unique<EitherIntBoolEdgeCaseFn>(args);
@@ -476,6 +496,8 @@ struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
         }
         return nullptr;
     }
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 200; };
     static std::unique_ptr<TypedFnI<Int, ListInt>> init(const ArgsT &args) {
         return std::make_unique<ListIntSum>(args);
     }
@@ -533,6 +555,8 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
         }
         return nullptr;
     }
+    constexpr std::size_t lower_size_bound() const override { return 30; };
+    constexpr std::size_t upper_size_bound() const override { return 200; };
     static std::unique_ptr<TypedFnI<ListInt, ListInt>> init(const ArgsT &args) {
         return std::make_unique<ListIntDec>(args);
     }
@@ -605,6 +629,8 @@ struct PredFn : public TypedClosureI<Empty, Nat, Nat> {
         }
         return nullptr;
     }
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 40; };
     static std::unique_ptr<TypedFnI<Nat, Nat>> init(const ArgsT &args) {
         return std::make_unique<PredFn>(args);
     }
@@ -644,6 +670,8 @@ struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
             return x;
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 5; };
+    constexpr std::size_t upper_size_bound() const override { return 100; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
                                                     const EnvT &env) {
         return std::make_unique<RecursiveFn>(args, env);
@@ -687,6 +715,8 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
             return make_lazy<Bool>(true);
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 120; };
     static std::unique_ptr<TypedFnI<Bool, Int>> init(const ArgsT &args,
                                                      const EnvT &env) {
         return std::make_unique<IsEven>(args, env);
@@ -710,6 +740,8 @@ struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
             return make_lazy<Bool>(false);
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 120; };
     static std::unique_ptr<TypedFnI<Bool, Int>> init(const ArgsT &args,
                                                      const EnvT &env) {
         return std::make_unique<IsOdd>(args, env);

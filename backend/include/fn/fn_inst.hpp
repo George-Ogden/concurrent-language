@@ -22,6 +22,8 @@ template <typename Ret, typename... Args> class TypedFnI {
     explicit TypedFnI(const ArgsT &);
     RetT run();
     virtual void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn);
+    virtual constexpr std::size_t lower_size_bound() const = 0;
+    virtual constexpr std::size_t upper_size_bound() const = 0;
 };
 
 template <typename E, typename Ret, typename... Args>

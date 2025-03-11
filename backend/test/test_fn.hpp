@@ -17,6 +17,8 @@ class PlusFn : public TypedClosureI<Empty, Int, Int, Int> {
     }
 
   public:
+    constexpr std::size_t lower_size_bound() const override { return 100; };
+    constexpr std::size_t upper_size_bound() const override { return 100; };
     static std::unique_ptr<TypedFnI<Int, Int, Int>> init(const ArgsT &args) {
         return std::make_unique<PlusFn>(args);
     }
@@ -48,6 +50,8 @@ class AdderFn : public TypedClosureI<Int, Int, Int> {
     }
 
   public:
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 20; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
                                                     const EnvT &env) {
         return std::make_unique<AdderFn>(args, env);
@@ -87,6 +91,8 @@ class FibFn : public TypedClosureI<WeakFnT<Int, Int>, Int, Int> {
     }
 
   public:
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 250; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
                                                     const EnvT &env) {
         return std::make_unique<FibFn>(args, env);
