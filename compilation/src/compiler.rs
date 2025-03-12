@@ -2,9 +2,10 @@ use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
     code_vector::CodeVectorCalculator, weakener::Weakener, Assignment, Await, BuiltIn,
-    ClosureInstantiation, CompilationArgs, ConstructorCall, Declaration, ElementAccess, Expression,
-    FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name,
-    Program, Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
+    ClosureInstantiation, CodeSizeEstimator, CompilationArgs, ConstructorCall, Declaration,
+    ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch,
+    MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
+    UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -501,6 +502,7 @@ impl Compiler {
             .map(|(value, location)| (location.clone(), self.compile_type(&value.type_())))
             .collect_vec();
 
+        let size = CodeSizeEstimator::estimate_size(&lambda);
         let IntermediateLambda {
             args,
             block:
@@ -528,6 +530,7 @@ impl Compiler {
             ret: (ret_val, ret_type),
             env: env_types.clone(),
             allocations,
+            size_bounds: size,
         });
 
         if env_mapping.len() > 0 {
@@ -590,6 +593,8 @@ impl Compiler {
 mod tests {
 
     use std::{fs, path::PathBuf};
+
+    use crate::CodeSizeEstimator;
 
     use super::*;
 
@@ -1646,8 +1651,9 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new()
-            }
+                allocations: Vec::new(),
+                size_bounds: (0, 0),
+            },
         );
         "env-free closure"
     )]
@@ -1761,7 +1767,8 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new()
+                allocations: Vec::new(),
+                size_bounds: (0, 0),
             }
         );
         "env closure"
@@ -1862,7 +1869,8 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new()
+                allocations: Vec::new(),
+                size_bounds: (0, 0),
             }
         );
         "env and argument"
@@ -1874,10 +1882,12 @@ mod tests {
         let (expected_statements, expected_value, expected_fn_def) = expected;
 
         let mut compiler = Compiler::new();
+        let size = CodeSizeEstimator::estimate_size(&fn_def);
         let compiled = compiler.compile_lambda(fn_def);
         assert_eq!(compiled, (expected_statements, expected_value));
         let compiled_fn_def = &compiler.fn_defs[0];
         assert_eq!(compiled_fn_def, &expected_fn_def);
+        assert_eq!(compiled_fn_def.size_bounds, size);
     }
 
     #[test_case(
@@ -1957,7 +1967,8 @@ mod tests {
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0, 0),
                 },
                 FnDef {
                     name: Name::from("F1"),
@@ -2003,7 +2014,8 @@ mod tests {
                             type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m3"))
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2063,7 +2075,8 @@ mod tests {
                             type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m6"))
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
                 }
             ]
         };
@@ -2148,7 +2161,8 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m2")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
                     env: vec![TupleType(vec![TupleType(Vec::new()).into()]).into()].into(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0, 0),
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2209,7 +2223,8 @@ mod tests {
                             type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
                             memory: Memory(Id::from("m5"))
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
                 },
             ]
         };
@@ -2324,7 +2339,8 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m3")).into(),AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0, 0),
                 },
             ]
         };
@@ -2357,7 +2373,8 @@ mod tests {
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m1")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0,0)
                 }
             ]
         };
@@ -2463,7 +2480,8 @@ mod tests {
                             memory: Memory(Id::from("m3")),
                             type_: AtomicTypeEnum::INT.into()
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2520,7 +2538,8 @@ mod tests {
                             memory: Memory(Id::from("m6")),
                             type_: AtomicTypeEnum::INT.into()
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
                 }
             ],
         };
@@ -2528,8 +2547,11 @@ mod tests {
     )]
     fn test_compile_program(program: IntermediateProgram, expected_program: Program) {
         let mut compiler = Compiler::new();
+        let main_size = CodeSizeEstimator::estimate_size(&program.main);
         let compiled_program = compiler.compile_program(program);
         assert_eq!(compiled_program, expected_program);
+        let main = compiled_program.fn_defs.last().unwrap();
+        assert_eq!(main.size_bounds, main_size);
     }
 
     #[fixture]
