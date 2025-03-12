@@ -3,11 +3,16 @@
 #include "lazy/types.hpp"
 #include "types/compound.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 
+class Work;
+
 template <typename Ret, typename... Args> struct TypedFnG;
 template <typename Ret, typename... Args> class TypedFnI {
+    static const inline std::size_t IMMEDIATE_THRESHOLD = 50;
+
   protected:
     using ArgsT = LazyT<TupleT<std::decay_t<Args>...>>;
     using RetT = LazyT<std::decay_t<Ret>>;
@@ -24,6 +29,8 @@ template <typename Ret, typename... Args> class TypedFnI {
     virtual void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn);
     virtual constexpr std::size_t lower_size_bound() const = 0;
     virtual constexpr std::size_t upper_size_bound() const = 0;
+    void process(std::shared_ptr<Work> &work) const;
+    constexpr bool execute_immediately() const;
 };
 
 template <typename E, typename Ret, typename... Args>

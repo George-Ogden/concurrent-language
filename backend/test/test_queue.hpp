@@ -193,6 +193,6 @@ TEST_P(QueueTest, TestQueue) {
     ASSERT_EQ(total, 1000 * 999 / 2 * num_cpus);
 }
 
-std::vector<unsigned> cpu_counts = {1, 2, 3, 4, 6, 8};
+std::vector<unsigned> queue_test_cpu_counts = {1, 2, 3, 4, 6, 8};
 INSTANTIATE_TEST_SUITE_P(QueueTests, QueueTest,
-                         ::testing::ValuesIn(cpu_counts));
+                         ::testing::ValuesIn(queue_test_cpu_counts));
