@@ -31,7 +31,7 @@ void TypedFnI<Ret, Args...>::process(WorkT &work) const {
 
 template <typename Ret, typename... Args>
 constexpr bool TypedFnI<Ret, Args...>::execute_immediately() const {
-    return upper_size_bound() < IMMEDIATE_THRESHOLD;
+    return !is_recursive() && upper_size_bound() < IMMEDIATE_EXECUTION_THRESHOLD;
 }
 
 template <typename Ret, typename... Args>

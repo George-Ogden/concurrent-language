@@ -19,6 +19,7 @@ class PlusFn : public TypedClosureI<Empty, Int, Int, Int> {
   public:
     constexpr std::size_t lower_size_bound() const override { return 100; };
     constexpr std::size_t upper_size_bound() const override { return 100; };
+    constexpr bool is_recursive() const override { return false; };
     static std::unique_ptr<TypedFnI<Int, Int, Int>> init(const ArgsT &args) {
         return std::make_unique<PlusFn>(args);
     }
@@ -26,8 +27,10 @@ class PlusFn : public TypedClosureI<Empty, Int, Int, Int> {
 
 TEST(FnTest, TestFnCall) {
     TypedClosureG<Empty, Int, Int, Int> plus_fn{PlusFn::init};
-    ASSERT_EQ(
-        plus_fn.init(make_lazy<Int>(3), make_lazy<Int>(4))->run()->value(), 7);
+    std::unique_ptr<TypedFnI<Int, Int, Int>> plus_inst =
+        plus_fn.init(make_lazy<Int>(3), make_lazy<Int>(4));
+    ASSERT_FALSE(plus_inst->execute_immediately());
+    ASSERT_EQ(plus_inst->run()->value(), 7);
 }
 
 class ClosureTest : public ::testing::Test {
@@ -48,10 +51,11 @@ class AdderFn : public TypedClosureI<Int, Int, Int> {
     LazyT<Int> body(LazyT<Int> &a) override {
         return make_lazy<Int>(a->value() + env->value());
     }
+    constexpr bool is_recursive() const override { return false; };
 
   public:
-    constexpr std::size_t lower_size_bound() const override { return 20; };
-    constexpr std::size_t upper_size_bound() const override { return 20; };
+    constexpr std::size_t lower_size_bound() const override { return 60; };
+    constexpr std::size_t upper_size_bound() const override { return 60; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
                                                     const EnvT &env) {
         return std::make_unique<AdderFn>(args, env);
@@ -61,7 +65,11 @@ class AdderFn : public TypedClosureI<Int, Int, Int> {
 TEST_F(ClosureTest, TestClosureCall) {
     LazyT<Int> env = make_lazy<Int>(7);
     TypedClosureG<Int, Int, Int> adder_fn{AdderFn::init, env};
-    ASSERT_EQ(adder_fn.init(make_lazy<Int>(4))->run()->value(), 11);
+    std::unique_ptr<TypedFnI<Int, Int>> adder_inst =
+        adder_fn.init(make_lazy<Int>(4));
+    ASSERT_GT(adder_inst->upper_size_bound(), IMMEDIATE_EXECUTION_THRESHOLD);
+    ASSERT_FALSE(adder_inst->execute_immediately());
+    ASSERT_EQ(adder_inst->run()->value(), 11);
 }
 
 LazyT<Int> call_closure(TypedFnG<Int, Int> &f, LazyT<Int> a) {
@@ -91,6 +99,7 @@ class FibFn : public TypedClosureI<WeakFnT<Int, Int>, Int, Int> {
     }
 
   public:
+    constexpr bool is_recursive() const override { return true; };
     constexpr std::size_t lower_size_bound() const override { return 10; };
     constexpr std::size_t upper_size_bound() const override { return 250; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
@@ -108,4 +117,6 @@ TEST_F(ClosureTest, TestRecursiveClosure) {
         ->env = store_env<typename FibFn::EnvT>(fib_fn);
 
     ASSERT_EQ(call_closure(*fib_fn->lvalue(), make_lazy<Int>(5))->value(), 8);
+    ASSERT_FALSE(
+        fib_fn->value()->init(make_lazy<Int>(5))->execute_immediately());
 }
