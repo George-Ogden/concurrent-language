@@ -29,6 +29,7 @@
         constexpr std::size_t upper_size_bound() const override {              \
             return size;                                                       \
         };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Int, Int, Int> fn##_G =                                                \
         std::make_shared<TypedClosureG<Empty, Int, Int, Int>>(fn##_I::init);
@@ -49,6 +50,7 @@
         constexpr std::size_t upper_size_bound() const override {              \
             return size;                                                       \
         };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Int, Int> fn##_G =                                                     \
         std::make_shared<TypedClosureG<Empty, Int, Int>>(fn##_I::init);
@@ -69,6 +71,7 @@
         constexpr std::size_t upper_size_bound() const override {              \
             return size;                                                       \
         };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Bool, Bool> fn##_G =                                                   \
         std::make_shared<TypedClosureG<Empty, Bool, Bool>>(fn##_I::init);
@@ -92,6 +95,7 @@
         constexpr std::size_t upper_size_bound() const override {              \
             return size;                                                       \
         };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Bool, Int, Int> fn##_G =                                               \
         std::make_shared<TypedClosureG<Empty, Bool, Int, Int>>(fn##_I::init);

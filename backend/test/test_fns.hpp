@@ -41,6 +41,7 @@ struct IdentityInt : TypedClosureI<Empty, Int, Int> {
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<IdentityInt>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
@@ -82,6 +83,7 @@ struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> {
     init(const ArgsT &args) {
         return std::make_unique<FourWayPlus>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, FourWayPlusTest) {
@@ -116,6 +118,7 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<DelayedIncrement>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 TEST_P(FnCorrectnessTest, PersistenceTest) {
     ThreadManager::register_self(0);
@@ -169,6 +172,7 @@ struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
     init(const ArgsT &args) {
         return std::make_unique<BranchingExample>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, PositiveBranchingExampleTest) {
@@ -211,6 +215,7 @@ struct HigherOrderCall : public TypedClosureI<Empty, Int, FnT<Int, Int>, Int> {
     init(const ArgsT &args) {
         return std::make_unique<HigherOrderCall>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, HigherOrderFnExampleTest) {
@@ -250,6 +255,7 @@ struct RecursiveDouble : public TypedClosureI<Empty, Int, Int> {
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<RecursiveDouble>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, RecursiveDoubleTest1) {
@@ -288,6 +294,7 @@ struct PairIntBool
     static inline FnT<TupleT<Int, TupleT<Bool>>, Int, Bool> G =
         std::make_shared<
             TypedClosureG<Empty, TupleT<Int, TupleT<Bool>>, Int, Bool>>(init);
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, TupleTest) {
@@ -319,6 +326,7 @@ struct BoolUnion : public TypedClosureI<Empty, Bool, Bull> {
     static std::unique_ptr<TypedFnI<Bool, Bull>> init(const ArgsT &args) {
         return std::make_unique<BoolUnion>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
@@ -376,6 +384,7 @@ struct EitherIntBoolFn : public TypedClosureI<Empty, Bool, EitherIntBool> {
     init(const ArgsT &args) {
         return std::make_unique<EitherIntBoolFn>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
@@ -430,6 +439,7 @@ struct EitherIntBoolEdgeCaseFn
     init(const ArgsT &args) {
         return std::make_unique<EitherIntBoolEdgeCaseFn>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, EdgeCaseTest) {
@@ -501,6 +511,7 @@ struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
     static std::unique_ptr<TypedFnI<Int, ListInt>> init(const ArgsT &args) {
         return std::make_unique<ListIntSum>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest1) {
@@ -560,6 +571,7 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
     static std::unique_ptr<TypedFnI<ListInt, ListInt>> init(const ArgsT &args) {
         return std::make_unique<ListIntDec>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest2) {
@@ -634,6 +646,7 @@ struct PredFn : public TypedClosureI<Empty, Nat, Nat> {
     static std::unique_ptr<TypedFnI<Nat, Nat>> init(const ArgsT &args) {
         return std::make_unique<PredFn>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
@@ -676,6 +689,7 @@ struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
                                                     const EnvT &env) {
         return std::make_unique<RecursiveFn>(args, env);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
@@ -724,6 +738,7 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     static inline FnT<Bool, Int> G =
         std::make_shared<TypedClosureG<TupleT<WeakFnT<Bool, Int>>, Bool, Int>>(
             init);
+    constexpr bool is_recursive() const override { return true; };
 };
 
 struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
@@ -749,6 +764,7 @@ struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     static inline FnT<Bool, Int> G =
         std::make_shared<TypedClosureG<TupleT<WeakFnT<Bool, Int>>, Bool, Int>>(
             init);
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {
