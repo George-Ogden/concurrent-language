@@ -196,6 +196,9 @@ class PriorityChecker
                                                const EnvT &env) {
         return std::make_unique<PriorityChecker>(args, env);
     }
+    constexpr std::size_t lower_size_bound() const override { return 0; };
+    constexpr std::size_t upper_size_bound() const override { return 0; };
+    constexpr bool is_recursive() const override { return false; };
 };
 
 struct WorkRunnerCurrentWorkOverrider : WorkRunner {
@@ -286,6 +289,9 @@ class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
     init(const ArgsT &args) {
         return std::make_unique<PairFn>(args);
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 10; };
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST(TupleWorkTest, CorrectValue) {
