@@ -266,7 +266,7 @@ impl Translator {
         let condition_code = self.translate_value(if_statement.condition);
         let if_branch = self.translate_statements(if_statement.branches.0, declared.clone());
         let else_branch = self.translate_statements(if_statement.branches.1, declared.clone());
-        format!("if ({condition_code}->value()) {{ {if_branch} }} else {{ {else_branch} }}",)
+        format!("if (extract_lazy({condition_code})) {{ {if_branch} }} else {{ {else_branch} }}",)
     }
     fn translate_match_statement(
         &self,
@@ -276,7 +276,7 @@ impl Translator {
         let UnionType(types) = match_statement.expression.1;
         let subject = self.translate_memory(match_statement.auxiliary_memory);
         let extraction = format!(
-            "auto {subject} = {}->value();",
+            "auto {subject} = extract_lazy({});",
             self.translate_value(match_statement.expression.0)
         );
         let branches_code = match_statement
@@ -1064,6 +1064,7 @@ mod tests {
     )]
     #[test_case(
         vec![
+            Await(vec![Memory(Id::from("z"))]).into(),
             Declaration {
                 type_: AtomicTypeEnum::INT.into(),
                 memory: Memory(Id::from("x"))
@@ -1082,11 +1083,12 @@ mod tests {
                 )
             }.into()
         ],
-        "LazyT<Int> x; if (z->value()) { x = ensure_lazy(Int{1LL}); } else { x = ensure_lazy(Int{-1LL}); }";
+        "LazyT<Int> x; WorkManager::await(z); if (extract_lazy(z)) { x = ensure_lazy(Int{1LL}); } else { x = ensure_lazy(Int{-1LL}); }";
         "if-else statement"
     )]
     #[test_case(
         vec![
+            Await(vec![Memory(Id::from("z"))]).into(),
             Declaration {
                 type_: AtomicTypeEnum::INT.into(),
                 memory: Memory(Id::from("x"))
@@ -1134,7 +1136,7 @@ mod tests {
                 )
             }.into()
         ],
-        "LazyT<Int> x; LazyT<Bool> r; if (z->value()) { if (y->value()) { x = ensure_lazy(Int{1LL}); } else { x = ensure_lazy(Int{-1LL}); } r = ensure_lazy(Bool{true}); } else { x = ensure_lazy(Int{0LL}); r = ensure_lazy(Bool{false}); }";
+        "LazyT<Int> x; LazyT<Bool> r; WorkManager::await(z); if (extract_lazy(z)) { if (extract_lazy(y)) { x = ensure_lazy(Int{1LL}); } else { x = ensure_lazy(Int{-1LL}); } r = ensure_lazy(Bool{true}); } else { x = ensure_lazy(Int{0LL}); r = ensure_lazy(Bool{false}); }";
         "nested if-else statement"
     )]
     #[test_case(
@@ -1313,6 +1315,7 @@ mod tests {
     )]
     #[test_case(
         vec![
+            Await(vec![Memory(Id::from("bull"))]).into(),
             Declaration {
                 type_: AtomicTypeEnum::BOOL.into(),
                 memory: Memory(Id::from("r"))
@@ -1342,7 +1345,7 @@ mod tests {
                 ]
             }.into()
         ],
-        "LazyT<Bool> r; auto tmp = bull->value(); switch (tmp.tag) { case 0ULL: { r = ensure_lazy(Bool{true}); break; } case 1ULL: { r = ensure_lazy(Bool{false}); break; }}";
+        "LazyT<Bool> r; WorkManager::await(bull); auto tmp = extract_lazy(bull); switch (tmp.tag) { case 0ULL: { r = ensure_lazy(Bool{true}); break; } case 1ULL: { r = ensure_lazy(Bool{false}); break; }}";
         "match statement no values"
     )]
     #[test_case(
@@ -1394,7 +1397,7 @@ mod tests {
                 ]
             }.into(),
         ],
-        "LazyT<Int> call; auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = ensure_lazy(Comparison_GE__BuiltIn(x,y)); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = ensure_lazy(x); break; }}";
+        "LazyT<Int> call; auto tmp = extract_lazy(either); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = ensure_lazy(Comparison_GE__BuiltIn(x,y)); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = ensure_lazy(x); break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1428,7 +1431,7 @@ mod tests {
                 ]
             }.into(),
         ],
-        "LazyT<Nat> r; auto nat_ = nat->value(); switch (nat_.tag) { case 0ULL: { LazyT<Suc::type> s = reinterpret_cast<Suc*>(&nat_.value)->value; r = ensure_lazy(s); break; } case 1ULL: { r = ensure_lazy(nil); break; }}";
+        "LazyT<Nat> r; auto nat_ = extract_lazy(nat); switch (nat_.tag) { case 0ULL: { LazyT<Suc::type> s = reinterpret_cast<Suc*>(&nat_.value)->value; r = ensure_lazy(s); break; } case 1ULL: { r = ensure_lazy(nil); break; }}";
         "match statement recursive type"
     )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
