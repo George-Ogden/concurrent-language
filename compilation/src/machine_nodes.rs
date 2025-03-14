@@ -112,6 +112,7 @@ pub struct FnCall {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorCall {
+    pub type_: Name,
     pub idx: usize,
     pub data: Option<(Name, Value)>,
 }

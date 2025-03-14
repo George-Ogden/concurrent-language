@@ -42,7 +42,7 @@ const OPERATOR_NAMES: Lazy<HashMap<Id, Id>> = Lazy::new(|| {
 
 type ReferenceNames = HashMap<*mut IntermediateType, MachineType>;
 type MemoryIds = HashMap<Location, Memory>;
-type TypeLookup = HashMap<IntermediateUnionType, UnionType>;
+type TypeLookup = HashMap<IntermediateUnionType, (Name, UnionType)>;
 type FnDefs = Vec<FnDef>;
 
 pub struct Compiler {
@@ -79,7 +79,7 @@ impl Compiler {
                 .into()
             }
             IntermediateType::IntermediateUnionType(union_type) => {
-                self.type_lookup[union_type].clone().into()
+                self.type_lookup[union_type].1.clone().into()
             }
             IntermediateType::Reference(reference) => {
                 match self.reference_names.get(&reference.as_ptr()) {
@@ -116,10 +116,11 @@ impl Compiler {
                     .enumerate()
                     .map(|(j, _)| format!("T{i}C{j}"))
                     .collect_vec();
+                let name = format!("T{i}");
                 let intermediate_type = UnionType(names);
                 self.type_lookup.insert(
                     IntermediateUnionType(types.clone()),
-                    intermediate_type.clone(),
+                    (name, intermediate_type.clone()),
                 );
                 (format!("T{i}"), intermediate_type)
             })
@@ -242,9 +243,11 @@ impl Compiler {
                 type_,
             }) => {
                 let value = data.map(|data| self.compile_value(data));
+                let (name, _) = &self.type_lookup[&type_];
                 (
                     Vec::new(),
                     ConstructorCall {
+                        type_: name.clone(),
                         idx,
                         data: value.map(|value| {
                             let MachineType::UnionType(UnionType(variants)) =
@@ -910,21 +913,6 @@ mod tests {
         );
         "fn call higher-order call from args"
     )]
-    #[test_case(
-        IntermediateCtorCall{
-            idx: 0,
-            data: None,
-            type_: IntermediateUnionType(vec![None,None])
-        }.into(),
-        (
-            Vec::new(),
-            ConstructorCall{
-                idx: 0,
-                data: None
-            }.into()
-        );
-        "no data constructor call"
-    )]
     fn test_compile_expressions(
         expression: IntermediateExpression,
         expected: (Vec<Statement>, Expression),
@@ -933,6 +921,29 @@ mod tests {
         let (statements, expression, _) = compiler.compile_expression(expression);
         assert_eq!((statements, expression), expected);
     }
+
+    #[test_case(
+        {
+            let type_ = IntermediateUnionType(vec![None, None]);
+            (
+                IntermediateCtorCall{
+                    idx: 0,
+                    data: None,
+                    type_: type_.clone()
+                }.into(),
+                Rc::new(RefCell::new(type_.into()))
+            )
+        },
+        (
+            Vec::new(),
+            ConstructorCall{
+                type_: Name::from("T0"),
+                idx: 0,
+                data: None
+            }.into()
+        );
+        "no data constructor call"
+    )]
     #[test_case(
         {
             let type_ = IntermediateUnionType(vec![Some(AtomicTypeEnum::BOOL.into()),Some(AtomicTypeEnum::INT.into())]);
@@ -948,6 +959,7 @@ mod tests {
         (
             Vec::new(),
             ConstructorCall{
+                type_: Name::from("T0"),
                 idx: 1,
                 data: Some((Name::from("T0C1"), BuiltIn::from(Integer{value: 9}).into()))
             }.into()
@@ -971,6 +983,7 @@ mod tests {
         (
             Vec::new(),
             ConstructorCall{
+                type_: Name::from("T0"),
                 idx: 0,
                 data: Some((Name::from("T0C0"), Memory(Id::from("m0")).into()))
             }.into()
@@ -2282,7 +2295,7 @@ mod tests {
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("m0")),
-                            value: ConstructorCall { idx: 0, data: None }.into(),
+                            value: ConstructorCall { idx: 0, data: None, type_: Name::from("T0"), }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m0"))]).into(),
                         Declaration {
