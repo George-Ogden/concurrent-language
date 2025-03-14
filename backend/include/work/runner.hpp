@@ -34,7 +34,7 @@ struct WorkRunner {
 
     template <typename... Vs> void await_restricted(Vs &...vs);
     template <typename... Vs> bool all_done(Vs &&...vs);
-    template <typename... Vs> void await(Vs &...vs);
+    template <typename... Vs> auto await(Vs &...vs);
     template <typename... Vs> void await_all(Vs &...vs);
     template <typename T> void await_variants(T &v);
     template <typename... Ts>

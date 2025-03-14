@@ -42,8 +42,8 @@ std::monostate WorkManager::main(std::atomic<WorkT> *ref) {
 }
 
 template <typename... Vs>
-void WorkManager::await(Vs &...vs) {
-    runners[ThreadManager::get_id()]->await(vs...);
+auto WorkManager::await(Vs &...vs) {
+    return runners[ThreadManager::get_id()]->await(vs...);
 }
 
 template <typename... Vs>

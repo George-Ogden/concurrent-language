@@ -11,10 +11,15 @@
 #include <memory>
 
 #define Binary_Int_Int_Int_Op__BuiltIn(fn)                                     \
+    template <typename T, typename U> Int fn(T t, U u) {                       \
+        auto [x, y] = WorkManager::await(t, u);                                \
+        return fn(x, y);                                                       \
+    }                                                                          \
+                                                                               \
     class fn##_I : public TypedFnI<Int, Int, Int> {                            \
       protected:                                                               \
         LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y) override {               \
-            return fn(x, y);                                                   \
+            return make_lazy<Int>(fn(x, y));                                   \
         }                                                                      \
                                                                                \
       public:                                                                  \
@@ -28,9 +33,16 @@
         std::make_shared<TypedClosureG<Empty, Int, Int, Int>>(fn##_I::init);
 
 #define Unary_Int_Int_Op__BuiltIn(fn)                                          \
+    template <typename T> Int fn(T t) {                                        \
+        auto [x] = WorkManager::await(t);                                      \
+        return fn(x);                                                          \
+    }                                                                          \
+                                                                               \
     class fn##_I : public TypedFnI<Int, Int> {                                 \
       protected:                                                               \
-        LazyT<Int> body(LazyT<Int> &x) override { return fn(x); }              \
+        LazyT<Int> body(LazyT<Int> &x) override {                              \
+            return make_lazy<Int>(fn(x));                                      \
+        }                                                                      \
                                                                                \
       public:                                                                  \
         using TypedFnI<Int, Int>::TypedFnI;                                    \
@@ -42,9 +54,16 @@
         std::make_shared<TypedClosureG<Empty, Int, Int>>(fn##_I::init);
 
 #define Unary_Bool_Bool_Op__BuiltIn(fn)                                        \
+    template <typename T> Bool fn(T t) {                                       \
+        auto [x] = WorkManager::await(t);                                      \
+        return fn(x);                                                          \
+    }                                                                          \
+                                                                               \
     class fn##_I : public TypedFnI<Bool, Bool> {                               \
       protected:                                                               \
-        LazyT<Bool> body(LazyT<Bool> &x) override { return fn(x); }            \
+        LazyT<Bool> body(LazyT<Bool> &x) override {                            \
+            return make_lazy<Bool>(fn(x));                                     \
+        }                                                                      \
                                                                                \
       public:                                                                  \
         using TypedFnI<Bool, Bool>::TypedFnI;                                  \
@@ -56,10 +75,15 @@
         std::make_shared<TypedClosureG<Empty, Bool, Bool>>(fn##_I::init);
 
 #define Binary_Int_Int_Bool_Op__BuiltIn(fn)                                    \
+    template <typename T, typename U> Bool fn(T t, U u) {                      \
+        auto [x, y] = WorkManager::await(t, u);                                \
+        return fn(x, y);                                                       \
+    }                                                                          \
+                                                                               \
     class fn##_I : public TypedFnI<Bool, Int, Int> {                           \
       protected:                                                               \
         LazyT<Bool> body(LazyT<Int> &x, LazyT<Int> &y) override {              \
-            return fn(x, y);                                                   \
+            return make_lazy<Bool>(fn(x, y));                                  \
         }                                                                      \
                                                                                \
       public:                                                                  \
@@ -72,125 +96,65 @@
     FnT<Bool, Int, Int> fn##_G =                                               \
         std::make_shared<TypedClosureG<Empty, Bool, Int, Int>>(fn##_I::init);
 
-LazyT<Int> Plus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() + y->value());
-}
+Int Plus__BuiltIn(Int x, Int y) { return x + y; }
 
-LazyT<Int> Minus__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() - y->value());
-}
+Int Minus__BuiltIn(Int x, Int y) { return x - y; }
 
-LazyT<Int> Multiply__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() * y->value());
-}
+Int Multiply__BuiltIn(Int x, Int y) { return x * y; }
 
-LazyT<Int> Divide__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() / y->value());
-}
+Int Divide__BuiltIn(Int x, Int y) { return x / y; }
 
-LazyT<Int> Exponentiate__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(y);
-    if (y->value() < 0)
-        return std::make_shared<LazyConstant<Int>>(0);
-    WorkManager::await(x);
-    Int res = 1, base = x->value(), exp = y->value();
+Int Exponentiate__BuiltIn(Int x, Int y) {
+    if (y < 0)
+        return 0;
+    Int res = 1, base = x, exp = y;
     while (exp) {
         if (exp & 1)
             res *= base;
         exp >>= 1;
         base *= base;
     }
-    return std::make_shared<LazyConstant<Int>>(res);
+    return res;
 }
 
-LazyT<Int> Modulo__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() % y->value());
-}
+Int Modulo__BuiltIn(Int x, Int y) { return x % y; }
 
-LazyT<Int> Right_Shift__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() >> y->value());
-}
+Int Right_Shift__BuiltIn(Int x, Int y) { return x >> y; }
 
-LazyT<Int> Left_Shift__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() << y->value());
-}
+Int Left_Shift__BuiltIn(Int x, Int y) { return x << y; }
 
-LazyT<Int> Spaceship__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    const auto o = (x->value() <=> y->value());
+Int Spaceship__BuiltIn(Int x, Int y) {
+    const auto o = (x <=> y);
     if (o == std::strong_ordering::less)
-        return std::make_shared<LazyConstant<Int>>(-1);
+        return -1;
     if (o == std::strong_ordering::greater)
-        return std::make_shared<LazyConstant<Int>>(1);
-    return std::make_shared<LazyConstant<Int>>(0);
+        return 1;
+    return 0;
 }
 
-LazyT<Int> Bitwise_And__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() & y->value());
-}
+Int Bitwise_And__BuiltIn(Int x, Int y) { return x & y; }
 
-LazyT<Int> Bitwise_Or__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() | y->value());
-}
+Int Bitwise_Or__BuiltIn(Int x, Int y) { return x | y; }
 
-LazyT<Int> Bitwise_Xor__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Int>>(x->value() ^ y->value());
-}
+Int Bitwise_Xor__BuiltIn(Int x, Int y) { return x ^ y; }
 
-LazyT<Int> Increment__BuiltIn(LazyT<Int> x) {
-    WorkManager::await(x);
-    return std::make_shared<LazyConstant<Int>>(x->value() + 1);
-}
+Int Increment__BuiltIn(Int x) { return x + 1; }
 
-LazyT<Int> Decrement__BuiltIn(LazyT<Int> x) {
-    WorkManager::await(x);
-    return std::make_shared<LazyConstant<Int>>(x->value() - 1);
-}
+Int Decrement__BuiltIn(Int x) { return x - 1; }
 
-LazyT<Bool> Negation__BuiltIn(LazyT<Bool> x) {
-    WorkManager::await(x);
-    return std::make_shared<LazyConstant<Bool>>(!x->value());
-}
+Bool Negation__BuiltIn(Bool x) { return !x; }
 
-LazyT<Bool> Comparison_LT__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Bool>>(x->value() < y->value());
-}
+Bool Comparison_LT__BuiltIn(Int x, Int y) { return x < y; }
 
-LazyT<Bool> Comparison_LE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Bool>>(x->value() <= y->value());
-}
+Bool Comparison_LE__BuiltIn(Int x, Int y) { return x <= y; }
 
-LazyT<Bool> Comparison_EQ__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Bool>>(x->value() == y->value());
-}
+Bool Comparison_EQ__BuiltIn(Int x, Int y) { return x == y; }
 
-LazyT<Bool> Comparison_NE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Bool>>(x->value() != y->value());
-}
+Bool Comparison_NE__BuiltIn(Int x, Int y) { return x != y; }
 
-LazyT<Bool> Comparison_GT__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Bool>>(x->value() > y->value());
-}
+Bool Comparison_GT__BuiltIn(Int x, Int y) { return x > y; }
 
-LazyT<Bool> Comparison_GE__BuiltIn(LazyT<Int> x, LazyT<Int> y) {
-    WorkManager::await(x, y);
-    return std::make_shared<LazyConstant<Bool>>(x->value() >= y->value());
-}
+Bool Comparison_GE__BuiltIn(Int x, Int y) { return x >= y; }
 
 Binary_Int_Int_Int_Op__BuiltIn(Plus__BuiltIn);
 Binary_Int_Int_Int_Op__BuiltIn(Minus__BuiltIn);

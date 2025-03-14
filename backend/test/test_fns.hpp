@@ -51,27 +51,12 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
 
 struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> {
     using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI;
-    LazyT<Int> res1;
-    LazyT<Int> res2;
-    LazyT<Int> res3;
     LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
                     LazyT<Int> &d) override {
-        if (res1 == decltype(res1){}) {
-            WorkT work;
-            std::tie(work, res1) = Work::fn_call(Plus__BuiltIn_G, a, b);
-            WorkManager::enqueue(work);
-        }
-        if (res2 == decltype(res2){}) {
-            WorkT work;
-            std::tie(work, res2) = Work::fn_call(Plus__BuiltIn_G, c, d);
-            WorkManager::enqueue(work);
-        }
-        if (res3 == decltype(res3){}) {
-            WorkT work;
-            std::tie(work, res3) = Work::fn_call(Plus__BuiltIn_G, res1, res2);
-            WorkManager::enqueue(work);
-        }
-        return res3;
+        auto res1 = Plus__BuiltIn(a, b);
+        auto res2 = Plus__BuiltIn(c, d);
+        auto res3 = Plus__BuiltIn(res1, res2);
+        return ensure_lazy(res3);
     }
     static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>>
     init(const ArgsT &args) {
@@ -387,7 +372,7 @@ struct EitherIntBoolEdgeCaseFn
         case 0ULL: {
             LazyT<Left::type> i = reinterpret_cast<Left *>(&x.value)->value;
             LazyT<Int> z = make_lazy<Int>(0);
-            y = Comparison_GT__BuiltIn(i, z);
+            y = ensure_lazy(Comparison_GT__BuiltIn(i, z));
             break;
         }
         case 1ULL: {
@@ -514,9 +499,9 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
             auto [call, res] = Work::fn_call(fn, tail);
             WorkManager::enqueue(call);
 
-            return make_lazy<ListInt>(
-                std::integral_constant<std::size_t, 0>(),
-                Cons{std::make_tuple(Decrement__BuiltIn(head), res)});
+            return make_lazy<ListInt>(std::integral_constant<std::size_t, 0>(),
+                                      Cons{ensure_lazy(std::make_tuple(
+                                          Decrement__BuiltIn(head), res))});
         }
         case 1:
             return make_lazy<ListInt>(std::integral_constant<std::size_t, 1>(),
