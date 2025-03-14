@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lazy/fns.hpp"
 #include "lazy/lazy.tpp"
 #include "work/work.tpp"
 
@@ -21,6 +22,16 @@ TEST_F(LazyConstantTest, CorrectValue) { ASSERT_EQ(x->value(), 3); }
 
 TEST(MakeLazyTest, CorrectValue) {
     LazyT<Int> y = make_lazy<Int>(-3);
+    ASSERT_EQ(y->value(), -3);
+}
+
+TEST(EnsureLazyTest, NonLazy) {
+    LazyT<Int> y = ensure_lazy(Int{-3});
+    ASSERT_EQ(y->value(), -3);
+}
+
+TEST(EnsureLazyTest, Lazy) {
+    LazyT<Int> y = ensure_lazy(make_lazy<Int>(-3));
     ASSERT_EQ(y->value(), -3);
 }
 

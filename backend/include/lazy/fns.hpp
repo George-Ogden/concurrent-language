@@ -10,6 +10,14 @@
 #include <type_traits>
 #include <utility>
 
+template <typename T> auto ensure_lazy(T arg) {
+    if constexpr (is_lazy_v<std::decay_t<T>>) {
+        return arg;
+    } else {
+        return make_lazy<T>(arg);
+    }
+}
+
 template <typename F, typename T>
 requires is_shared_ptr_v<T> && std::is_base_of_v<
     Lazy<remove_lazy_t<std::decay_t<typename T::element_type>>>,
