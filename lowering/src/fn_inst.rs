@@ -86,10 +86,10 @@ impl FnInst {
     pub fn get_root_fn(
         fn_defs: &FnDefs,
         location: &Location,
-    ) -> Option<Either<(Location, IntermediateLambda), BuiltInFn>> {
+    ) -> Option<Either<IntermediateLambda, BuiltInFn>> {
         let fn_def = fn_defs.get(&location);
         match fn_def {
-            Some(FnInst::Lambda(lambda)) => Some(Left((location.clone(), lambda.clone()))),
+            Some(FnInst::Lambda(lambda)) => Some(Left(lambda.clone())),
             Some(FnInst::BuiltIn(built_in_fn)) => Some(Right(built_in_fn.clone())),
             Some(FnInst::Ref(location)) => Self::get_root_fn(fn_defs, location),
             None => None,

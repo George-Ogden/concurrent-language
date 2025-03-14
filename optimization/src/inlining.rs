@@ -128,7 +128,7 @@ impl Inliner {
                 args,
             }) if self.fn_defs.contains_key(&location) => {
                 match FnInst::get_root_fn(&self.fn_defs, &location) {
-                    Some(Left((_, lambda)))
+                    Some(Left(lambda))
                         if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
                     {
                         let IntermediateBlock {

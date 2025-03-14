@@ -3,49 +3,44 @@ use std::collections::HashMap;
 use crate::{
     fn_inst::{FnDefs, FnInst},
     IntermediateAssignment, IntermediateExpression, IntermediateFnCall, IntermediateLambda,
-    IntermediateMemory, IntermediateProgram, IntermediateStatement, IntermediateValue, Location,
+    IntermediateMemory, IntermediateProgram, IntermediateStatement, IntermediateValue,
 };
 use itertools::Either::{Left, Right};
 
-type RecursiveFns = HashMap<Location, bool>;
+pub type RecursiveFns = HashMap<IntermediateLambda, bool>;
 
-struct RecursiveFnFinder {
+pub struct RecursiveFnFinder {
     fn_defs: FnDefs,
 }
 
 impl RecursiveFnFinder {
-    pub fn recursive_fns(program: IntermediateProgram) -> RecursiveFns {
+    pub fn recursive_fns(program: &IntermediateProgram) -> RecursiveFns {
         let lambda = &program.main;
         let mut finder = RecursiveFnFinder {
             fn_defs: FnDefs::new(),
         };
         FnInst::collect_fn_defs_from_statements(&lambda.block.statements, &mut finder.fn_defs);
         let mut recursive_fns = RecursiveFns::new();
-        for fn_ in finder.fn_defs.keys() {
-            let is_recursive = finder.find(&fn_, &mut recursive_fns);
-            recursive_fns.insert(fn_.clone(), is_recursive);
+        for value in finder.fn_defs.values() {
+            if let FnInst::Lambda(lambda) = value {
+                finder.find(&lambda, &mut recursive_fns);
+            }
         }
         recursive_fns
     }
-    fn find(&self, fn_: &Location, recursive_fns: &mut RecursiveFns) -> bool {
-        if recursive_fns.contains_key(fn_) {
-            return recursive_fns[fn_];
+    fn find(&self, lambda: &IntermediateLambda, recursive_fns: &mut RecursiveFns) -> bool {
+        if recursive_fns.contains_key(lambda) {
+            return recursive_fns[lambda];
         }
-        recursive_fns.insert(fn_.clone(), true);
-        match FnInst::get_root_fn(&self.fn_defs, fn_) {
-            Some(Left((location, lambda))) => {
-                let is_recursive = self.check(&lambda.block.statements, recursive_fns);
-                recursive_fns.insert(location, is_recursive);
-                is_recursive
-            }
-            Some(Right(_)) => false,
-            None => true,
-        }
+        recursive_fns.insert(lambda.clone(), true);
+        let is_recursive = self.check(&lambda.block.statements, recursive_fns);
+        recursive_fns.insert(lambda.clone(), is_recursive);
+        is_recursive
     }
     fn check(
         &self,
         statements: &Vec<IntermediateStatement>,
-        recursive_fns: &mut HashMap<Location, bool>,
+        recursive_fns: &mut HashMap<IntermediateLambda, bool>,
     ) -> bool {
         statements.iter().any(|statement| match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
@@ -58,7 +53,11 @@ impl RecursiveFnFinder {
                         IntermediateValue::IntermediateMemory(IntermediateMemory {
                             type_: _,
                             location,
-                        }) => self.find(location, recursive_fns),
+                        }) => match FnInst::get_root_fn(&self.fn_defs, location) {
+                            Some(Left(lambda)) => self.find(&lambda, recursive_fns),
+                            Some(Right(_)) => false,
+                            None => true,
+                        },
                         IntermediateValue::IntermediateArg(_) => true,
                     }
                 }
@@ -80,8 +79,8 @@ impl RecursiveFnFinder {
 mod tests {
     use crate::{
         IntermediateArg, IntermediateAssignment, IntermediateBlock, IntermediateFnCall,
-        IntermediateFnType, IntermediateIf, IntermediateMemory, IntermediateStatement,
-        IntermediateType, Location,
+        IntermediateFnType, IntermediateIf, IntermediateLambda, IntermediateMemory,
+        IntermediateStatement, IntermediateType, Location,
     };
 
     use super::*;
@@ -601,9 +600,20 @@ mod tests {
         };
         "mixed fn call"
     )]
-    fn test_recursive_fn_finder(fns: (Vec<IntermediateStatement>, RecursiveFns)) {
+    fn test_recursive_fn_finder(fns: (Vec<IntermediateStatement>, HashMap<Location, bool>)) {
         let (statements, recursive) = fns;
-        let recursive_fns = RecursiveFnFinder::recursive_fns(IntermediateProgram {
+        let mut fn_defs = HashMap::new();
+        FnInst::collect_fn_defs_from_statements(&statements, &mut fn_defs);
+        let expected = recursive
+            .into_iter()
+            .map(
+                |(location, recursive)| match FnInst::get_root_fn(&fn_defs, &location) {
+                    Some(Left(lambda)) => (lambda, recursive),
+                    _ => panic!(),
+                },
+            )
+            .collect();
+        let recursive_fns = RecursiveFnFinder::recursive_fns(&IntermediateProgram {
             main: IntermediateLambda {
                 args: Vec::new(),
                 block: IntermediateBlock {
@@ -613,6 +623,6 @@ mod tests {
             },
             types: Vec::new(),
         });
-        assert_eq!(recursive_fns, recursive);
+        assert_eq!(recursive_fns, expected);
     }
 }

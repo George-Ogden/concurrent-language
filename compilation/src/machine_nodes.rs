@@ -181,6 +181,7 @@ pub struct FnDef {
     pub ret: (Value, MachineType),
     pub env: Vec<MachineType>,
     pub allocations: Vec<Declaration>,
+    pub is_recursive: bool,
     pub size_bounds: (usize, usize),
 }
 
@@ -192,6 +193,7 @@ impl PartialEq for FnDef {
             && self.ret == other.ret
             && self.env == other.env
             && self.allocations == other.allocations
+            && self.is_recursive == other.is_recursive
     }
 }
 

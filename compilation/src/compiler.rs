@@ -51,6 +51,7 @@ pub struct Compiler {
     memory_ids: MemoryIds,
     type_lookup: TypeLookup,
     fn_defs: FnDefs,
+    recursive_fns: RecursiveFns,
 }
 
 impl Compiler {
@@ -60,6 +61,7 @@ impl Compiler {
             memory_ids: MemoryIds::new(),
             type_lookup: TypeLookup::new(),
             fn_defs: FnDefs::new(),
+            recursive_fns: RecursiveFns::new(),
         }
     }
 
@@ -496,6 +498,7 @@ impl Compiler {
         &mut self,
         mut lambda: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
+        let is_recursive = self.recursive_fns.get(&lambda).cloned().unwrap_or(false);
         let env_mapping = self.replace_open_vars(&mut lambda);
         let env_types = env_mapping
             .iter()
@@ -531,6 +534,7 @@ impl Compiler {
             env: env_types.clone(),
             allocations,
             size_bounds: size,
+            is_recursive,
         });
 
         if env_mapping.len() > 0 {
@@ -563,11 +567,13 @@ impl Compiler {
         }
     }
     fn compile_program(&mut self, program: IntermediateProgram) -> Program {
+        self.recursive_fns = RecursiveFnFinder::recursive_fns(&program);
         let IntermediateProgram { main, types } = program;
         let type_defs = self.compile_type_defs(types);
         let (statements, _) = self.compile_lambda(main);
         assert_eq!(statements.len(), 0);
-        self.fn_defs.last_mut().unwrap().name = Name::from("Main");
+        let main = self.fn_defs.last_mut().unwrap();
+        main.name = Name::from("Main");
         let program = Program {
             fn_defs: self.fn_defs.clone(),
             type_defs,
@@ -1653,6 +1659,7 @@ mod tests {
                 ),
                 allocations: Vec::new(),
                 size_bounds: (0, 0),
+                is_recursive: false
             },
         );
         "env-free closure"
@@ -1769,6 +1776,7 @@ mod tests {
                 ),
                 allocations: Vec::new(),
                 size_bounds: (0, 0),
+                is_recursive: false
             }
         );
         "env closure"
@@ -1871,6 +1879,7 @@ mod tests {
                 ),
                 allocations: Vec::new(),
                 size_bounds: (0, 0),
+                is_recursive: false
             }
         );
         "env and argument"
@@ -1969,6 +1978,7 @@ mod tests {
                     env: Vec::new(),
                     allocations: Vec::new(),
                     size_bounds: (0, 0),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("F1"),
@@ -2016,6 +2026,7 @@ mod tests {
                         }
                     ],
                     size_bounds: (0, 0),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2077,6 +2088,7 @@ mod tests {
                         }
                     ],
                     size_bounds: (0, 0),
+                    is_recursive: false
                 }
             ]
         };
@@ -2163,6 +2175,7 @@ mod tests {
                     env: vec![TupleType(vec![TupleType(Vec::new()).into()]).into()].into(),
                     allocations: Vec::new(),
                     size_bounds: (0, 0),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2225,6 +2238,7 @@ mod tests {
                         }
                     ],
                     size_bounds: (0, 0),
+                    is_recursive: false
                 },
             ]
         };
@@ -2341,6 +2355,7 @@ mod tests {
                     env: Vec::new(),
                     allocations: Vec::new(),
                     size_bounds: (0, 0),
+                    is_recursive: false
                 },
             ]
         };
@@ -2374,7 +2389,8 @@ mod tests {
                     ret: (Memory(Id::from("m1")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
                     allocations: Vec::new(),
-                    size_bounds: (0,0)
+                    size_bounds: (0,0),
+                    is_recursive: false
                 }
             ]
         };
@@ -2482,6 +2498,7 @@ mod tests {
                         }
                     ],
                     size_bounds: (0, 0),
+                    is_recursive: true
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2540,6 +2557,7 @@ mod tests {
                         }
                     ],
                     size_bounds: (0, 0),
+                    is_recursive: false
                 }
             ],
         };
