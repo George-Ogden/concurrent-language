@@ -36,9 +36,12 @@ struct IdentityInt : TypedClosureI<Empty, Int, Int> {
     LazyT<Int> body(LazyT<Int> &x) override { return x; }
 
   public:
+    constexpr std::size_t lower_size_bound() const override { return 1; };
+    constexpr std::size_t upper_size_bound() const override { return 1; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<IdentityInt>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, IdentityTest) {
@@ -60,24 +63,27 @@ struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> {
         if (res1 == decltype(res1){}) {
             WorkT work;
             std::tie(work, res1) = Work::fn_call(Plus__BuiltIn_G, a, b);
-            WorkManager::enqueue(work);
+            process(work);
         }
         if (res2 == decltype(res2){}) {
             WorkT work;
             std::tie(work, res2) = Work::fn_call(Plus__BuiltIn_G, c, d);
-            WorkManager::enqueue(work);
+            process(work);
         }
         if (res3 == decltype(res3){}) {
             WorkT work;
             std::tie(work, res3) = Work::fn_call(Plus__BuiltIn_G, res1, res2);
-            WorkManager::enqueue(work);
+            process(work);
         }
         return res3;
     }
+    constexpr std::size_t lower_size_bound() const override { return 50; };
+    constexpr std::size_t upper_size_bound() const override { return 50; };
     static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>>
     init(const ArgsT &args) {
         return std::make_unique<FourWayPlus>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, FourWayPlusTest) {
@@ -98,7 +104,7 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
         if (res == decltype(res){}) {
             WorkT work;
             std::tie(work, res) = Work::fn_call(Increment__BuiltIn_G, x);
-            WorkManager::enqueue(work);
+            process(work);
         }
         if (finish) {
             return res;
@@ -106,10 +112,13 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
             throw stack_inversion{};
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 80; };
 
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<DelayedIncrement>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 TEST_P(FnCorrectnessTest, PersistenceTest) {
     ThreadManager::register_self(0);
@@ -140,27 +149,30 @@ struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
         {
             std::tie(call1, res1) =
                 Work::fn_call(Comparison_GE__BuiltIn_G, x, make_lazy<Int>(0));
-            WorkManager::enqueue(call1);
+            process(call1);
         };
         WorkManager::await(res1);
         if (res1->value()) {
             std::tie(call2, res2) =
                 Work::fn_call(Plus__BuiltIn_G, y, make_lazy<Int>(1));
-            WorkManager::enqueue(call2);
+            process(call2);
         } else {
             std::tie(call2, res2) =
                 Work::fn_call(Plus__BuiltIn_G, z, make_lazy<Int>(1));
-            WorkManager::enqueue(call2);
+            process(call2);
         }
         std::tie(call3, res3) =
             Work::fn_call(Minus__BuiltIn_G, res2, make_lazy<Int>(2));
-        WorkManager::enqueue(call3);
+        process(call3);
         return res3;
     }
+    constexpr std::size_t lower_size_bound() const override { return 100; };
+    constexpr std::size_t upper_size_bound() const override { return 100; };
     static std::unique_ptr<TypedFnI<Int, Int, Int, Int>>
     init(const ArgsT &args) {
         return std::make_unique<BranchingExample>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, PositiveBranchingExampleTest) {
@@ -194,13 +206,16 @@ struct HigherOrderCall : public TypedClosureI<Empty, Int, FnT<Int, Int>, Int> {
         WorkManager::await(f);
         WorkT call;
         std::tie(call, res) = Work::fn_call(f->value(), x);
-        WorkManager::enqueue(call);
+        process(call);
         return res;
     }
+    constexpr std::size_t lower_size_bound() const override { return 60; };
+    constexpr std::size_t upper_size_bound() const override { return 60; };
     static std::unique_ptr<TypedFnI<Int, FnT<Int, Int>, Int>>
     init(const ArgsT &args) {
         return std::make_unique<HigherOrderCall>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, HigherOrderFnExampleTest) {
@@ -226,18 +241,21 @@ struct RecursiveDouble : public TypedClosureI<Empty, Int, Int> {
             FnT<Int, Int> fn = std::make_shared<TypedClosureG<Empty, Int, Int>>(
                 RecursiveDouble::init);
             std::tie(call1, res1) = Work::fn_call(fn, arg);
-            WorkManager::enqueue(call1);
+            process(call1);
             std::tie(call2, res2) =
                 Work::fn_call(Plus__BuiltIn_G, res1, make_lazy<Int>(2));
-            WorkManager::enqueue(call2);
+            process(call2);
             return res2;
         } else {
             return make_lazy<Int>(0);
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 150; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {
         return std::make_unique<RecursiveDouble>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, RecursiveDoubleTest1) {
@@ -267,6 +285,8 @@ struct PairIntBool
         std::tie(work, z) = Work::fn_call(Negation__BuiltIn_G, y);
         return std::make_tuple(x, std::make_tuple(z));
     }
+    constexpr std::size_t lower_size_bound() const override { return 60; };
+    constexpr std::size_t upper_size_bound() const override { return 60; };
     static std::unique_ptr<TypedFnI<TupleT<Int, TupleT<Bool>>, Int, Bool>>
     init(const ArgsT &args) {
         return std::make_unique<PairIntBool>(args);
@@ -274,6 +294,7 @@ struct PairIntBool
     static inline FnT<TupleT<Int, TupleT<Bool>>, Int, Bool> G =
         std::make_shared<
             TypedClosureG<Empty, TupleT<Int, TupleT<Bool>>, Int, Bool>>(init);
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, TupleTest) {
@@ -300,9 +321,12 @@ struct BoolUnion : public TypedClosureI<Empty, Bool, Bull> {
         WorkManager::await(x);
         return make_lazy<Bool>(x->value().tag == 0);
     }
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 20; };
     static std::unique_ptr<TypedFnI<Bool, Bull>> init(const ArgsT &args) {
         return std::make_unique<BoolUnion>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
@@ -354,10 +378,13 @@ struct EitherIntBoolFn : public TypedClosureI<Empty, Bool, EitherIntBool> {
         }
         return 0;
     }
+    constexpr std::size_t lower_size_bound() const override { return 50; };
+    constexpr std::size_t upper_size_bound() const override { return 50; };
     static std::unique_ptr<TypedFnI<Bool, EitherIntBool>>
     init(const ArgsT &args) {
         return std::make_unique<EitherIntBoolFn>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
@@ -406,10 +433,13 @@ struct EitherIntBoolEdgeCaseFn
         }
         return y;
     }
+    constexpr std::size_t lower_size_bound() const override { return 30; };
+    constexpr std::size_t upper_size_bound() const override { return 90; };
     static std::unique_ptr<TypedFnI<Bool, EitherIntBool>>
     init(const ArgsT &args) {
         return std::make_unique<EitherIntBoolEdgeCaseFn>(args);
     }
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, EdgeCaseTest) {
@@ -465,10 +495,10 @@ struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
                 std::make_shared<TypedClosureG<Empty, Int, ListInt>>(
                     ListIntSum::init);
             auto [call1, res1] = Work::fn_call(fn, tail);
-            WorkManager::enqueue(call1);
+            process(call1);
 
             auto [call2, res2] = Work::fn_call(Plus__BuiltIn_G, res1, head);
-            WorkManager::enqueue(call2);
+            process(call2);
             return res2;
         }
         case 1:
@@ -476,9 +506,12 @@ struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
         }
         return nullptr;
     }
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 200; };
     static std::unique_ptr<TypedFnI<Int, ListInt>> init(const ArgsT &args) {
         return std::make_unique<ListIntSum>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest1) {
@@ -521,7 +554,7 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
                 std::make_shared<TypedClosureG<Empty, ListInt, ListInt>>(
                     ListIntDec::init);
             auto [call, res] = Work::fn_call(fn, tail);
-            WorkManager::enqueue(call);
+            process(call);
 
             return make_lazy<ListInt>(
                 std::integral_constant<std::size_t, 0>(),
@@ -533,9 +566,12 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
         }
         return nullptr;
     }
+    constexpr std::size_t lower_size_bound() const override { return 30; };
+    constexpr std::size_t upper_size_bound() const override { return 200; };
     static std::unique_ptr<TypedFnI<ListInt, ListInt>> init(const ArgsT &args) {
         return std::make_unique<ListIntDec>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest2) {
@@ -605,9 +641,12 @@ struct PredFn : public TypedClosureI<Empty, Nat, Nat> {
         }
         return nullptr;
     }
+    constexpr std::size_t lower_size_bound() const override { return 20; };
+    constexpr std::size_t upper_size_bound() const override { return 40; };
     static std::unique_ptr<TypedFnI<Nat, Nat>> init(const ArgsT &args) {
         return std::make_unique<PredFn>(args);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
@@ -638,16 +677,19 @@ struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
             WorkT work;
             LazyT<FnT<Int, Int>> call_fn = load_env(std::get<0>(env));
             std::tie(work, res) = Work::fn_call(call_fn->value(), arg);
-            WorkManager::enqueue(work);
+            process(work);
             return res;
         } else {
             return x;
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 5; };
+    constexpr std::size_t upper_size_bound() const override { return 100; };
     static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
                                                     const EnvT &env) {
         return std::make_unique<RecursiveFn>(args, env);
     }
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
@@ -681,12 +723,14 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
             auto y = Decrement__BuiltIn(x);
             auto [call, res] =
                 Work::fn_call(load_env(std::get<0>(env))->value(), y);
-            WorkManager::enqueue(call);
+            process(call);
             return res;
         } else {
             return make_lazy<Bool>(true);
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 120; };
     static std::unique_ptr<TypedFnI<Bool, Int>> init(const ArgsT &args,
                                                      const EnvT &env) {
         return std::make_unique<IsEven>(args, env);
@@ -694,6 +738,7 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     static inline FnT<Bool, Int> G =
         std::make_shared<TypedClosureG<TupleT<WeakFnT<Bool, Int>>, Bool, Int>>(
             init);
+    constexpr bool is_recursive() const override { return true; };
 };
 
 struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
@@ -704,12 +749,14 @@ struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
             auto y = Decrement__BuiltIn(x);
             auto [call, res] =
                 Work::fn_call(load_env(std::get<0>(env))->value(), y);
-            WorkManager::enqueue(call);
+            process(call);
             return res;
         } else {
             return make_lazy<Bool>(false);
         }
     }
+    constexpr std::size_t lower_size_bound() const override { return 10; };
+    constexpr std::size_t upper_size_bound() const override { return 120; };
     static std::unique_ptr<TypedFnI<Bool, Int>> init(const ArgsT &args,
                                                      const EnvT &env) {
         return std::make_unique<IsOdd>(args, env);
@@ -717,6 +764,7 @@ struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     static inline FnT<Bool, Int> G =
         std::make_shared<TypedClosureG<TupleT<WeakFnT<Bool, Int>>, Bool, Int>>(
             init);
+    constexpr bool is_recursive() const override { return true; };
 };
 
 TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {

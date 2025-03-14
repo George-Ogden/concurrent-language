@@ -2,9 +2,10 @@ use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
     code_vector::CodeVectorCalculator, weakener::Weakener, Assignment, Await, BuiltIn,
-    ClosureInstantiation, CompilationArgs, ConstructorCall, Declaration, ElementAccess, Expression,
-    FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement, Memory, Name,
-    Program, Statement, TupleExpression, TupleType, TypeDef, UnionType, Value,
+    ClosureInstantiation, CodeSizeEstimator, CompilationArgs, ConstructorCall, Declaration,
+    ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch,
+    MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
+    UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -50,6 +51,7 @@ pub struct Compiler {
     memory_ids: MemoryIds,
     type_lookup: TypeLookup,
     fn_defs: FnDefs,
+    recursive_fns: RecursiveFns,
 }
 
 impl Compiler {
@@ -59,6 +61,7 @@ impl Compiler {
             memory_ids: MemoryIds::new(),
             type_lookup: TypeLookup::new(),
             fn_defs: FnDefs::new(),
+            recursive_fns: RecursiveFns::new(),
         }
     }
 
@@ -495,12 +498,14 @@ impl Compiler {
         &mut self,
         mut lambda: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
+        let is_recursive = self.recursive_fns.get(&lambda).cloned().unwrap_or(false);
         let env_mapping = self.replace_open_vars(&mut lambda);
         let env_types = env_mapping
             .iter()
             .map(|(value, location)| (location.clone(), self.compile_type(&value.type_())))
             .collect_vec();
 
+        let size = CodeSizeEstimator::estimate_size(&lambda);
         let IntermediateLambda {
             args,
             block:
@@ -528,6 +533,8 @@ impl Compiler {
             ret: (ret_val, ret_type),
             env: env_types.clone(),
             allocations,
+            size_bounds: size,
+            is_recursive,
         });
 
         if env_mapping.len() > 0 {
@@ -560,11 +567,13 @@ impl Compiler {
         }
     }
     fn compile_program(&mut self, program: IntermediateProgram) -> Program {
+        self.recursive_fns = RecursiveFnFinder::recursive_fns(&program);
         let IntermediateProgram { main, types } = program;
         let type_defs = self.compile_type_defs(types);
         let (statements, _) = self.compile_lambda(main);
         assert_eq!(statements.len(), 0);
-        self.fn_defs.last_mut().unwrap().name = Name::from("Main");
+        let main = self.fn_defs.last_mut().unwrap();
+        main.name = Name::from("Main");
         let program = Program {
             fn_defs: self.fn_defs.clone(),
             type_defs,
@@ -590,6 +599,8 @@ impl Compiler {
 mod tests {
 
     use std::{fs, path::PathBuf};
+
+    use crate::CodeSizeEstimator;
 
     use super::*;
 
@@ -1646,8 +1657,10 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new()
-            }
+                allocations: Vec::new(),
+                size_bounds: (0, 0),
+                is_recursive: false
+            },
         );
         "env-free closure"
     )]
@@ -1761,7 +1774,9 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new()
+                allocations: Vec::new(),
+                size_bounds: (0, 0),
+                is_recursive: false
             }
         );
         "env closure"
@@ -1862,7 +1877,9 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new()
+                allocations: Vec::new(),
+                size_bounds: (0, 0),
+                is_recursive: false
             }
         );
         "env and argument"
@@ -1874,10 +1891,12 @@ mod tests {
         let (expected_statements, expected_value, expected_fn_def) = expected;
 
         let mut compiler = Compiler::new();
+        let size = CodeSizeEstimator::estimate_size(&fn_def);
         let compiled = compiler.compile_lambda(fn_def);
         assert_eq!(compiled, (expected_statements, expected_value));
         let compiled_fn_def = &compiler.fn_defs[0];
         assert_eq!(compiled_fn_def, &expected_fn_def);
+        assert_eq!(compiled_fn_def.size_bounds, size);
     }
 
     #[test_case(
@@ -1957,7 +1976,9 @@ mod tests {
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("F1"),
@@ -2003,7 +2024,9 @@ mod tests {
                             type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m3"))
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2063,7 +2086,9 @@ mod tests {
                             type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m6"))
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 }
             ]
         };
@@ -2148,7 +2173,9 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m2")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
                     env: vec![TupleType(vec![TupleType(Vec::new()).into()]).into()].into(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2209,7 +2236,9 @@ mod tests {
                             type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
                             memory: Memory(Id::from("m5"))
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 },
             ]
         };
@@ -2324,7 +2353,9 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m3")).into(),AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 },
             ]
         };
@@ -2357,7 +2388,9 @@ mod tests {
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m1")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new()
+                    allocations: Vec::new(),
+                    size_bounds: (0,0),
+                    is_recursive: false
                 }
             ]
         };
@@ -2463,7 +2496,9 @@ mod tests {
                             memory: Memory(Id::from("m3")),
                             type_: AtomicTypeEnum::INT.into()
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
+                    is_recursive: true
                 },
                 FnDef {
                     name: Name::from("Main"),
@@ -2520,7 +2555,9 @@ mod tests {
                             memory: Memory(Id::from("m6")),
                             type_: AtomicTypeEnum::INT.into()
                         }
-                    ]
+                    ],
+                    size_bounds: (0, 0),
+                    is_recursive: false
                 }
             ],
         };
@@ -2528,8 +2565,11 @@ mod tests {
     )]
     fn test_compile_program(program: IntermediateProgram, expected_program: Program) {
         let mut compiler = Compiler::new();
+        let main_size = CodeSizeEstimator::estimate_size(&program.main);
         let compiled_program = compiler.compile_program(program);
         assert_eq!(compiled_program, expected_program);
+        let main = compiled_program.fn_defs.last().unwrap();
+        assert_eq!(main.size_bounds, main_size);
     }
 
     #[fixture]
