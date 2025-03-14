@@ -375,7 +375,7 @@ struct EitherIntBoolFn : public TypedClosureI<Empty, Bool, EitherIntBool> {
     LazyT<Bool> body(LazyT<EitherIntBool> &either) override {
         WorkManager::await(either);
         EitherIntBool x = either->value();
-        switch (x.tag) {
+        switch (extract_lazy(either).tag) {
         case 0ULL: {
             auto left = reinterpret_cast<Left *>(&x.value)->value;
             WorkManager::await(left);
@@ -674,8 +674,9 @@ struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
     using TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int>::TypedClosureI;
     LazyT<Int> res;
     LazyT<Int> body(LazyT<Int> &x) override {
-        WorkManager::await(x);
-        if (x->value() > 0) {
+        auto y = Comparison_GT__BuiltIn(x, Int{0});
+        WorkManager::await(y);
+        if (extract_lazy(y)) {
             auto arg = Decrement__BuiltIn(x);
             WorkT work;
             LazyT<FnT<Int, Int>> call_fn = load_env(std::get<0>(env));
@@ -720,8 +721,9 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
 struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     using TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int>::TypedClosureI;
     LazyT<Bool> body(LazyT<Int> &x) override {
-        WorkManager::await(x);
-        if (x->value() > 0) {
+        auto c = Comparison_GT__BuiltIn(x, Int{0});
+        WorkManager::await(c);
+        if (extract_lazy(c)) {
             auto y = Decrement__BuiltIn(x);
             auto [call, res] =
                 Work::fn_call(load_env(std::get<0>(env))->value(), y);
@@ -746,8 +748,9 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
 struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     using TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int>::TypedClosureI;
     LazyT<Bool> body(LazyT<Int> &x) override {
-        WorkManager::await(x);
-        if (x->value() > 0) {
+        auto c = Comparison_GT__BuiltIn(x, Int{0});
+        WorkManager::await(c);
+        if (extract_lazy(c)) {
             auto y = Decrement__BuiltIn(x);
             auto [call, res] =
                 Work::fn_call(load_env(std::get<0>(env))->value(), y);
