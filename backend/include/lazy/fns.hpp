@@ -18,6 +18,26 @@ template <typename T> auto ensure_lazy(T arg) {
     }
 }
 
+template <typename... Ts> auto ensure_lazy(std::tuple<Ts...> arg) {
+    return std::apply(
+        [](auto... args) { return std::make_tuple(ensure_lazy(args)...); },
+        arg);
+}
+
+template <typename T> auto extract_lazy(T arg) {
+    if constexpr (is_lazy_v<std::decay_t<T>>) {
+        return arg->value();
+    } else {
+        return arg;
+    }
+}
+
+template <typename... Ts> auto extract_lazy(std::tuple<Ts...> arg) {
+    return std::apply(
+        [](auto... args) { return std::make_tuple(extract_lazy(args)...); },
+        arg);
+}
+
 template <typename F, typename T>
 requires is_shared_ptr_v<T> && std::is_base_of_v<
     Lazy<remove_lazy_t<std::decay_t<typename T::element_type>>>,
