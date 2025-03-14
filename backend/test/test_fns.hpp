@@ -45,8 +45,7 @@ TEST_P(FnCorrectnessTest, IdentityTest) {
     FnT<Int, Int> identity_int =
         std::make_shared<TypedClosureG<Empty, Int, Int>>(IdentityInt::init);
 
-    LazyT<Int> x = make_lazy<Int>(5);
-    LazyT<Int> y = WorkManager::run(identity_int, x);
+    LazyT<Int> y = WorkManager::run(identity_int, Int{5});
     ASSERT_EQ(y->value(), 5);
 }
 
@@ -85,8 +84,7 @@ TEST_P(FnCorrectnessTest, FourWayPlusTest) {
         std::make_shared<TypedClosureG<Empty, Int, Int, Int, Int, Int>>(
             FourWayPlus::init);
     Int w = 11, x = 5, y = 10, z = 22;
-    auto res = WorkManager::run(plus_fn, make_lazy<Int>(w), make_lazy<Int>(x),
-                                make_lazy<Int>(y), make_lazy<Int>(z));
+    auto res = WorkManager::run(plus_fn, w, x, y, z);
     ASSERT_EQ(res->value(), 48);
 }
 
@@ -169,8 +167,7 @@ TEST_P(FnCorrectnessTest, PositiveBranchingExampleTest) {
         std::make_shared<TypedClosureG<Empty, Int, Int, Int, Int>>(
             BranchingExample::init);
 
-    auto res = WorkManager::run(branching_fn, make_lazy<Int>(x),
-                                make_lazy<Int>(y), make_lazy<Int>(z));
+    auto res = WorkManager::run(branching_fn, Int{x}, Int{y}, Int{z});
 
     ASSERT_EQ(res->value(), 9);
 }
@@ -181,8 +178,7 @@ TEST_P(FnCorrectnessTest, NegativeBranchingExampleTest) {
         std::make_shared<TypedClosureG<Empty, Int, Int, Int, Int>>(
             BranchingExample::init);
 
-    auto res = WorkManager::run(branching_fn, make_lazy<Int>(x),
-                                make_lazy<Int>(y), make_lazy<Int>(z));
+    auto res = WorkManager::run(branching_fn, Int{x}, Int{y}, Int{z});
 
     ASSERT_EQ(res->value(), 21);
 }
@@ -204,14 +200,12 @@ struct HigherOrderCall : public TypedClosureI<Empty, Int, FnT<Int, Int>, Int> {
 };
 
 TEST_P(FnCorrectnessTest, HigherOrderFnExampleTest) {
-    LazyT<FnT<Int, Int>> decrement =
-        make_lazy<FnT<Int, Int>>(Decrement__BuiltIn_G);
+    FnT<Int, Int> decrement = Decrement__BuiltIn_G;
     Int x = 5;
     FnT<Int, FnT<Int, Int>, Int> higher_order_call_fn =
         std::make_shared<TypedClosureG<Empty, Int, FnT<Int, Int>, Int>>(
             HigherOrderCall::init);
-    auto res =
-        WorkManager::run(higher_order_call_fn, decrement, make_lazy<Int>(x));
+    auto res = WorkManager::run(higher_order_call_fn, decrement, x);
     ASSERT_EQ(res->value(), 4);
 }
 
@@ -244,7 +238,7 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest1) {
     Int x = 5;
     FnT<Int, Int> recursive_double_fn =
         std::make_shared<TypedClosureG<Empty, Int, Int>>(RecursiveDouble::init);
-    auto res = WorkManager::run(recursive_double_fn, make_lazy<Int>(x));
+    auto res = WorkManager::run(recursive_double_fn, x);
     ASSERT_EQ(res->value(), 10);
 }
 
@@ -252,7 +246,7 @@ TEST_P(FnCorrectnessTest, RecursiveDoubleTest2) {
     Int x = -5;
     FnT<Int, Int> recursive_double_fn =
         std::make_shared<TypedClosureG<Empty, Int, Int>>(RecursiveDouble::init);
-    auto res = WorkManager::run(recursive_double_fn, make_lazy<Int>(x));
+    auto res = WorkManager::run(recursive_double_fn, x);
     ASSERT_EQ(res->value(), 0);
 }
 
@@ -282,8 +276,7 @@ TEST_P(FnCorrectnessTest, TupleTest) {
 
     LazyT<FnT<TupleT<Int, TupleT<Bool>>, Int, Bool>> pair_fn;
     pair_fn = make_lazy<remove_lazy_t<decltype(pair_fn)>>(PairIntBool::G);
-    auto res = WorkManager::run(pair_fn->value(), make_lazy<Int>(x),
-                                make_lazy<Bool>(y));
+    auto res = WorkManager::run(pair_fn->value(), x, y);
     ASSERT_EQ(std::get<0>(res)->value(), 5);
     ASSERT_EQ(std::get<0>(std::get<1>(res))->value(), false);
 }
@@ -311,14 +304,14 @@ TEST_P(FnCorrectnessTest, ValueFreeUnionTest) {
     {
         Bull bull{};
         bull.tag = 0ULL;
-        auto res = WorkManager::run(bool_union_fn, make_lazy<Bull>(bull));
+        auto res = WorkManager::run(bool_union_fn, bull);
         ASSERT_TRUE(res->value());
     }
 
     {
         Bull bull{};
         bull.tag = 1ULL;
-        auto res = WorkManager::run(bool_union_fn, make_lazy<Bull>(bull));
+        auto res = WorkManager::run(bool_union_fn, bull);
         ASSERT_FALSE(res->value());
     }
 }
@@ -378,8 +371,7 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
             new (&either.value) Right{make_lazy<Bool>(value)};
         }
 
-        auto res = WorkManager::run(either_int_bool_fn,
-                                    make_lazy<EitherIntBool>(either));
+        auto res = WorkManager::run(either_int_bool_fn, either);
         ASSERT_EQ(res->value(), result);
     }
 }
@@ -431,8 +423,7 @@ TEST_P(FnCorrectnessTest, EdgeCaseTest) {
             new (&either.value) Right{make_lazy<Bool>(value)};
         }
 
-        auto res = WorkManager::run(either_int_bool_fn,
-                                    make_lazy<EitherIntBool>(either));
+        auto res = WorkManager::run(either_int_bool_fn, either);
         ASSERT_EQ(res->value(), result);
     }
 }
@@ -500,7 +491,7 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest1) {
 
     FnT<Int, ListInt> summer =
         std::make_shared<TypedClosureG<Empty, Int, ListInt>>(ListIntSum::init);
-    auto res = WorkManager::run(summer, first);
+    auto res = WorkManager::run(summer, first->value());
     ASSERT_EQ(res->value(), 3);
 }
 
@@ -558,7 +549,7 @@ TEST_P(FnCorrectnessTest, RecursiveTypeTest2) {
     FnT<ListInt, ListInt> summer =
         std::make_shared<TypedClosureG<Empty, ListInt, ListInt>>(
             ListIntDec::init);
-    auto res = WorkManager::run(summer, first);
+    auto res = WorkManager::run(summer, first->value());
     ASSERT_TRUE(res->done());
     ASSERT_EQ(res->value().tag, 0);
     auto body = reinterpret_cast<Cons *>(&res->lvalue().value)->value;
@@ -620,7 +611,7 @@ TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
     FnT<Nat, Nat> pred_fn =
         std::make_shared<TypedClosureG<Empty, Nat, Nat>>(PredFn::init);
 
-    auto res = WorkManager::run(pred_fn, outer)->value();
+    auto res = WorkManager::run(pred_fn, outer->value())->value();
 
     ASSERT_EQ(res.tag, inner->value().tag);
     auto tmp = inner->value().value;
@@ -660,7 +651,6 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
                    remove_shared_ptr_t<remove_lazy_t<decltype(fn)>>>>(
         fn->lvalue())
         ->env = store_env<typename RecursiveFn::EnvT>(env);
-    LazyT<Int> x = make_lazy<Int>(5);
 
     auto move = [](auto &x) {
         auto tmp = x;
@@ -668,7 +658,7 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
         return tmp;
     };
 
-    auto res = WorkManager::run(move(fn)->value(), x);
+    auto res = WorkManager::run(move(fn)->value(), Int{5});
     ASSERT_EQ(fn, nullptr);
     ASSERT_EQ(res->value(), 0);
 }
@@ -758,7 +748,7 @@ TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {
                 ->env = store_env<typename IsOdd::EnvT>(is_odd_env);
         }
 
-        auto odd = WorkManager::run(is_odd_fn->value(), make_lazy<Int>(x));
+        auto odd = WorkManager::run(is_odd_fn->value(), Int{x});
         ASSERT_EQ(odd->value(), x % 2 == 1);
     }
 }

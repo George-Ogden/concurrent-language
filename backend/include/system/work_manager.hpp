@@ -11,7 +11,7 @@
 
 struct WorkManager {
     template <typename Ret, typename... Args>
-    static LazyT<Ret> run(FnT<Ret, Args...> fn, LazyT<Args>... args);
+    static LazyT<Ret> run(FnT<Ret, Args...> fn, Args... args);
     static std::monostate main(std::atomic<WorkT> *ref);
     static void enqueue(WorkT work);
     template <typename... Vs> static void await(Vs &...vs);

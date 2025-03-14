@@ -28,9 +28,12 @@ class Work {
     virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
-    template <typename Ret, typename... Args>
-    static std::pair<std::shared_ptr<Work>, LazyT<Ret>>
-    fn_call(FnT<Ret, Args...> f, LazyT<Args>... args);
+    template <typename Ret, typename... Args, typename... ArgsT>
+    requires(
+        std::is_same_v<Args, remove_lazy_t<std::decay_t<ArgsT>>>
+            &&...) static std::pair<std::shared_ptr<Work>,
+                                    LazyT<Ret>> fn_call(FnT<Ret, Args...> f,
+                                                        ArgsT... args);
     void add_continuation(Continuation c);
     void add_dependencies(
         std::initializer_list<std::shared_ptr<LazyValue>> &&dependencies);

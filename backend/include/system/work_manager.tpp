@@ -15,7 +15,7 @@
 #include <utility>
 
 template <typename Ret, typename... Args>
-LazyT<Ret> WorkManager::run(FnT<Ret, Args...> fn, LazyT<Args>...args) {
+LazyT<Ret> WorkManager::run(FnT<Ret, Args...> fn, Args...args) {
     auto [work, result] = Work::fn_call(fn, args...);
     std::atomic<WorkT> ref{work};
     WorkRunner::num_cpus = ThreadManager::available_concurrency();
