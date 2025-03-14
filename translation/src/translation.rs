@@ -155,6 +155,9 @@ impl Translator {
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
+            Expression::ConstructorCall(constructor_call) => {
+                self.translate_constructor_call(constructor_call)
+            }
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -186,16 +189,19 @@ impl Translator {
             }
         }
     }
-    fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
+    fn translate_constructor_call(&self, constructor_call: ConstructorCall) -> Code {
         let indexing_code = format!(
             "std::integral_constant<std::size_t,{}>()",
             constructor_call.idx
         );
         let value_code = match constructor_call.data {
             None => Code::new(),
-            Some((name, value)) => format!(", {name}{{{}}}", self.translate_value(value)),
+            Some((name, value)) => {
+                format!(", {name}{{ensure_lazy({})}}", self.translate_value(value))
+            }
         };
-        format!("make_lazy<remove_lazy_t<decltype({target})>>({indexing_code}{value_code})")
+        let type_ = constructor_call.type_;
+        format!("{type_}{{{indexing_code}{value_code}}}")
     }
     fn translate_declaration(&self, declaration: Declaration) -> Code {
         let Declaration { type_, memory } = declaration;
@@ -230,9 +236,6 @@ impl Translator {
         let Memory(id) = assignment.target;
         let value_code = match assignment.value {
             Expression::FnCall(fn_call) => return self.translate_fn_call(id.clone(), fn_call),
-            Expression::ConstructorCall(constructor_call) => {
-                self.translate_constructor_call(id.clone(), constructor_call)
-            }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
                 return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::G);"), |env| {
                     let value = self.translate_value(env);
@@ -243,7 +246,7 @@ impl Translator {
             }
             value => self.translate_expression(value),
         };
-        format!("{id} = {value_code};")
+        format!("auto {id} = {value_code};")
     }
     fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
         let condition_code = self.translate_value(if_statement.condition);
@@ -276,7 +279,6 @@ impl Translator {
                     None => Code::new(),
                 };
                 let statements_code = self.translate_statements(branch.statements);
-
                 format!("case {i}ULL : {{ {assignment_code} {statements_code} break; }}",)
             })
             .join("\n");
@@ -854,7 +856,7 @@ mod tests {
             target: Memory(Id::from("x")).into(),
             value: Value::BuiltIn(Integer{value: 5}.into()).into(),
         },
-        "x = make_lazy<Int>(5LL);";
+        "auto x = Int{5LL};";
         "integer assignment"
     )]
     #[test_case(
@@ -867,7 +869,7 @@ mod tests {
                 idx: 0
             }.into(),
         },
-        "x = std::get<0ULL>(tuple);";
+        "auto x = std::get<0ULL>(tuple);";
         "tuple access assignment"
     )]
     #[test_case(
@@ -875,7 +877,7 @@ mod tests {
             target: Memory(Id::from("y")).into(),
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
         },
-        "y = make_lazy<Bool>(true);";
+        "auto y = Bool{true};";
         "boolean assignment"
     )]
     #[test_case(
@@ -942,7 +944,7 @@ mod tests {
             target: Memory(Id::from("e")),
             value: TupleExpression(Vec::new()).into(),
         },
-        "e = std::make_tuple();";
+        "auto e = std::make_tuple();";
         "empty tuple assignment"
     )]
     #[test_case(
@@ -952,7 +954,7 @@ mod tests {
                 Value::BuiltIn(Integer{value: 5}.into())
             ]).into(),
         },
-        "t = std::make_tuple(make_lazy<Int>(5LL));";
+        "auto t = std::make_tuple(Int{5LL});";
         "singleton tuple assignment"
     )]
     #[test_case(
@@ -963,29 +965,31 @@ mod tests {
                 Memory(Id::from("y")).into()
             ]).into(),
         },
-        "t = std::make_tuple(make_lazy<Int>(-4LL),y);";
+        "auto t = std::make_tuple(Int{-4LL},y);";
         "double tuple assignment"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("bull")),
             value: ConstructorCall {
+                type_: Name::from("Bull"),
                 idx: 1,
                 data: None
             }.into(),
         },
-        "bull = make_lazy<remove_lazy_t<decltype(bull)>>(std::integral_constant<std::size_t,1>());";
+        "auto bull = Bull{std::integral_constant<std::size_t,1>()};";
         "empty constructor assignment"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("wrapper")),
             value: ConstructorCall {
+                type_: Name::from("Wrapper"),
                 idx: 0,
                 data: Some((Name::from("Wrapper"), Value::BuiltIn(Integer{value: 4}.into())))
             }.into(),
         },
-        "wrapper = make_lazy<remove_lazy_t<decltype(wrapper)>>(std::integral_constant<std::size_t,0>(), Wrapper{make_lazy<Int>(4LL)});";
+        "auto wrapper = Wrapper{std::integral_constant<std::size_t,0>(), Wrapper{ensure_lazy(Int{4LL})}};";
         "wrapper constructor assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
@@ -1346,6 +1350,7 @@ mod tests {
             Assignment {
                 target: Memory(Id::from("n")).into(),
                 value: ConstructorCall{
+                    type_: Name::from("Nat"),
                     idx: 1,
                     data: None
                 }.into(),
@@ -1357,6 +1362,7 @@ mod tests {
             Assignment {
                 target: Memory(Id::from("s")).into(),
                 value: ConstructorCall{
+                    type_: Name::from("Nat"),
                     idx: 0,
                     data: Some((
                         Name::from("Suc"),
