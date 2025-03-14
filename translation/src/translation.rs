@@ -113,10 +113,10 @@ impl Translator {
         let value_type = self.translate_value_type(&value.clone().into());
         match value {
             BuiltIn::Integer(Integer { value }) => {
-                format!("make_lazy<{value_type}>({value}LL)")
+                format!("{value_type}{{{value}LL}}")
             }
             BuiltIn::Boolean(Boolean { value }) => {
-                format!("make_lazy<{value_type}>({value})")
+                format!("{value_type}{{{value}}}")
             }
             BuiltIn::BuiltInFn(name) => {
                 format!("make_lazy<{value_type}>({name}_G)")
@@ -720,32 +720,32 @@ mod tests {
 
     #[test_case(
         Integer{value: 24}.into(),
-        "make_lazy<Int>(24LL)";
+        "Int{24LL}";
         "integer translation"
     )]
     #[test_case(
         Integer{value: -24}.into(),
-        "make_lazy<Int>(-24LL)";
+        "Int{-24LL}";
         "negative integer translation"
     )]
     #[test_case(
         Integer{value: 0}.into(),
-        "make_lazy<Int>(0LL)";
+        "Int{0LL}";
         "zero translation"
     )]
     #[test_case(
         Integer{value: 10000000000009}.into(),
-        "make_lazy<Int>(10000000000009LL)";
+        "Int{10000000000009LL}";
         "large integer translation"
     )]
     #[test_case(
         Boolean{value: true}.into(),
-        "make_lazy<Bool>(true)";
+        "Bool{true}";
         "true translation"
     )]
     #[test_case(
         Boolean{value: false}.into(),
-        "make_lazy<Bool>(false)";
+        "Bool{false}";
         "false translation"
     )]
     #[test_case(
@@ -819,7 +819,7 @@ mod tests {
     )]
     #[test_case(
         BuiltIn::Integer(Integer{value: -1}).into(),
-        "make_lazy<Int>(-1LL)";
+        "Int{-1LL}";
         "builtin integer translation"
     )]
     fn test_value_translation(value: Value, expected: &str) {
@@ -830,7 +830,7 @@ mod tests {
 
     #[test_case(
         Value::BuiltIn(BuiltIn::Integer(Integer{value: -1}).into()).into(),
-        "make_lazy<Int>(-1LL)";
+        "Int{-1LL}";
         "integer"
     )]
     #[test_case(
