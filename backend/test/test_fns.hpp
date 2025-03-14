@@ -544,26 +544,21 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
 };
 
 TEST_P(FnCorrectnessTest, RecursiveTypeTest2) {
-    LazyT<ListInt> tail;
-    tail = make_lazy<remove_lazy_t<decltype(tail)>>(
-        std::integral_constant<std::size_t, 1>(), Nil{});
-    LazyT<ListInt> third;
-    third = make_lazy<remove_lazy_t<decltype(third)>>(
-        std::integral_constant<std::size_t, 0>(),
-        Cons{std::make_tuple(make_lazy<Int>(8), tail)});
-    LazyT<ListInt> second;
-    second = make_lazy<remove_lazy_t<decltype(second)>>(
-        std::integral_constant<std::size_t, 0>(),
-        Cons{std::make_tuple(make_lazy<Int>(4), third)});
-    LazyT<ListInt> first;
-    first = make_lazy<remove_lazy_t<decltype(first)>>(
-        std::integral_constant<std::size_t, 0>(),
-        Cons{std::make_tuple(make_lazy<Int>(-9), second)});
+    auto tail = ListInt{std::integral_constant<std::size_t, 1>(), Nil{}};
+    auto third =
+        ListInt{std::integral_constant<std::size_t, 0>(),
+                Cons{ensure_lazy(std::make_tuple(make_lazy<Int>(8), tail))}};
+    auto second =
+        ListInt{std::integral_constant<std::size_t, 0>(),
+                Cons{ensure_lazy(std::make_tuple(make_lazy<Int>(4), third))}};
+    auto first =
+        ListInt{std::integral_constant<std::size_t, 0>(),
+                Cons{ensure_lazy(std::make_tuple(make_lazy<Int>(-9), second))}};
 
     FnT<ListInt, ListInt> summer =
         std::make_shared<TypedClosureG<Empty, ListInt, ListInt>>(
             ListIntDec::init);
-    auto res = WorkManager::run(summer, first->value());
+    auto res = WorkManager::run(summer, first);
     ASSERT_TRUE(res->done());
     ASSERT_EQ(res->value().tag, 0);
     auto body = reinterpret_cast<Cons *>(&res->lvalue().value)->value;
@@ -616,21 +611,20 @@ struct PredFn : public TypedClosureI<Empty, Nat, Nat> {
 };
 
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
-    LazyT<Nat> n = make_lazy<Nat>(std::integral_constant<std::size_t, 1>());
-    LazyT<Nat> inner =
-        make_lazy<Nat>(std::integral_constant<std::size_t, 0>(), Suc{n});
-    LazyT<Nat> outer =
-        make_lazy<Nat>(std::integral_constant<std::size_t, 0>(), Suc{inner});
+    auto n = Nat{std::integral_constant<std::size_t, 1>()};
+    auto inner =
+        Nat{std::integral_constant<std::size_t, 0>(), Suc{ensure_lazy(n)}};
+    auto outer =
+        Nat{std::integral_constant<std::size_t, 0>(), Suc{ensure_lazy(inner)}};
 
     FnT<Nat, Nat> pred_fn =
         std::make_shared<TypedClosureG<Empty, Nat, Nat>>(PredFn::init);
 
-    auto res = WorkManager::run(pred_fn, outer->value())->value();
+    auto res = WorkManager::run(pred_fn, outer)->value();
 
-    ASSERT_EQ(res.tag, inner->value().tag);
-    auto tmp = inner->value().value;
+    ASSERT_EQ(res.tag, inner.tag);
     ASSERT_EQ(reinterpret_cast<Suc *>(&res.value)->value,
-              reinterpret_cast<Suc *>(&tmp)->value);
+              reinterpret_cast<Suc *>(&inner.value)->value);
 }
 
 struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
