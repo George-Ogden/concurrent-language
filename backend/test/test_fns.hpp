@@ -266,6 +266,35 @@ TEST_P(FnCorrectnessTest, TupleTest) {
     ASSERT_EQ(std::get<0>(std::get<1>(res))->value(), false);
 }
 
+class MultiplyFn : public TypedClosureI<TupleT<Int>, Int, Int> {
+    using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI;
+    LazyT<Int> body(LazyT<Int> &a) override {
+        auto b = std::get<0>(env);
+        auto c = Multiply__BuiltIn(a, b);
+        return ensure_lazy(c);
+    }
+
+  public:
+    static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args,
+                                                    const EnvT &env) {
+        return std::make_unique<MultiplyFn>(args, env);
+    }
+};
+
+TEST_P(FnCorrectnessTest, MultiplierTest) {
+    LazyT<FnT<Int, Int>> fn;
+    fn = setup_closure<MultiplyFn>();
+    auto env = std::make_tuple(Int{10});
+    std::dynamic_pointer_cast<
+        ClosureFnT<remove_lazy_t<typename MultiplyFn::EnvT>,
+                   remove_shared_ptr_t<remove_lazy_t<decltype(fn)>>>>(
+        fn->lvalue())
+        ->env = store_env<typename MultiplyFn::EnvT>(env);
+
+    auto res = WorkManager::run(fn->value(), Int{5});
+    ASSERT_EQ(res->value(), 50);
+}
+
 struct Twoo;
 struct Faws;
 typedef VariantT<Twoo, Faws> Bull;

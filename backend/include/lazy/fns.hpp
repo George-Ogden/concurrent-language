@@ -2,6 +2,7 @@
 
 #include "fn/fn_inst.tpp"
 #include "fn/types.hpp"
+#include "lazy/fns.hpp"
 #include "lazy/lazy.hpp"
 #include "lazy/types.hpp"
 #include "types/utils.hpp"
@@ -128,7 +129,8 @@ struct StoreEnv<std::shared_ptr<Lazy<WeakFnT<R, A...>>>, U> {
 };
 
 template <typename T, typename U> T store_env(U env) {
-    return StoreEnv<T, U>::store(env);
+    auto lazy_env = ensure_lazy(env);
+    return StoreEnv<T, std::decay_t<decltype(lazy_env)>>::store(lazy_env);
 }
 
 template <typename F> LazyT<std::shared_ptr<typename F::Fn>> setup_closure() {
