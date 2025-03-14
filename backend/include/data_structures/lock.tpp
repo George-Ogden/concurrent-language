@@ -88,6 +88,12 @@ T &Locked<T, LockT>::operator*() {
 }
 
 template <typename T, typename LockT>
+const T &Locked<T, LockT>::operator*() const {
+    return value;
+}
+
+
+template <typename T, typename LockT>
 std::decay_t<T> *Locked<T, LockT>::operator->() {
     return &value;
 }

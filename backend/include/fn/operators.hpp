@@ -10,7 +10,7 @@
 #include <compare>
 #include <memory>
 
-#define Binary_Int_Int_Int_Op__BuiltIn(fn)                                     \
+#define Binary_Int_Int_Int_Op__BuiltIn(fn, size)                               \
     template <typename T, typename U> Int fn(T t, U u) {                       \
         auto [x, y] = WorkManager::await(t, u);                                \
         return fn(x, y);                                                       \
@@ -28,11 +28,18 @@
         init(const ArgsT &args) {                                              \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
+        constexpr std::size_t lower_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr std::size_t upper_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Int, Int, Int> fn##_G =                                                \
         std::make_shared<TypedClosureG<Empty, Int, Int, Int>>(fn##_I::init);
 
-#define Unary_Int_Int_Op__BuiltIn(fn)                                          \
+#define Unary_Int_Int_Op__BuiltIn(fn, size)                                    \
     template <typename T> Int fn(T t) {                                        \
         auto [x] = WorkManager::await(t);                                      \
         return fn(x);                                                          \
@@ -49,11 +56,18 @@
         static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) {   \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
+        constexpr std::size_t lower_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr std::size_t upper_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Int, Int> fn##_G =                                                     \
         std::make_shared<TypedClosureG<Empty, Int, Int>>(fn##_I::init);
 
-#define Unary_Bool_Bool_Op__BuiltIn(fn)                                        \
+#define Unary_Bool_Bool_Op__BuiltIn(fn, size)                                  \
     template <typename T> Bool fn(T t) {                                       \
         auto [x] = WorkManager::await(t);                                      \
         return fn(x);                                                          \
@@ -70,11 +84,18 @@
         static std::unique_ptr<TypedFnI<Bool, Bool>> init(const ArgsT &args) { \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
+        constexpr std::size_t lower_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr std::size_t upper_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Bool, Bool> fn##_G =                                                   \
         std::make_shared<TypedClosureG<Empty, Bool, Bool>>(fn##_I::init);
 
-#define Binary_Int_Int_Bool_Op__BuiltIn(fn)                                    \
+#define Binary_Int_Int_Bool_Op__BuiltIn(fn, size)                              \
     template <typename T, typename U> Bool fn(T t, U u) {                      \
         auto [x, y] = WorkManager::await(t, u);                                \
         return fn(x, y);                                                       \
@@ -92,6 +113,13 @@
         init(const ArgsT &args) {                                              \
             return std::make_unique<fn##_I>(args);                             \
         }                                                                      \
+        constexpr std::size_t lower_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr std::size_t upper_size_bound() const override {              \
+            return size;                                                       \
+        };                                                                     \
+        constexpr bool is_recursive() const override { return false; };        \
     };                                                                         \
     FnT<Bool, Int, Int> fn##_G =                                               \
         std::make_shared<TypedClosureG<Empty, Bool, Int, Int>>(fn##_I::init);
@@ -156,27 +184,27 @@ Bool Comparison_GT__BuiltIn(Int x, Int y) { return x > y; }
 
 Bool Comparison_GE__BuiltIn(Int x, Int y) { return x >= y; }
 
-Binary_Int_Int_Int_Op__BuiltIn(Plus__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Minus__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Multiply__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Divide__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Exponentiate__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Modulo__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Right_Shift__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Left_Shift__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Spaceship__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Bitwise_And__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Bitwise_Or__BuiltIn);
-Binary_Int_Int_Int_Op__BuiltIn(Bitwise_Xor__BuiltIn);
+Binary_Int_Int_Int_Op__BuiltIn(Plus__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Minus__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Multiply__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Divide__BuiltIn, 10);
+Binary_Int_Int_Int_Op__BuiltIn(Exponentiate__BuiltIn, 12);
+Binary_Int_Int_Int_Op__BuiltIn(Modulo__BuiltIn, 10);
+Binary_Int_Int_Int_Op__BuiltIn(Right_Shift__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Left_Shift__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Spaceship__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Bitwise_And__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Bitwise_Or__BuiltIn, 9);
+Binary_Int_Int_Int_Op__BuiltIn(Bitwise_Xor__BuiltIn, 9);
 
-Unary_Int_Int_Op__BuiltIn(Increment__BuiltIn);
-Unary_Int_Int_Op__BuiltIn(Decrement__BuiltIn);
+Unary_Int_Int_Op__BuiltIn(Increment__BuiltIn, 8);
+Unary_Int_Int_Op__BuiltIn(Decrement__BuiltIn, 8);
 
-Unary_Bool_Bool_Op__BuiltIn(Negation__BuiltIn);
+Unary_Bool_Bool_Op__BuiltIn(Negation__BuiltIn, 8);
 
-Binary_Int_Int_Bool_Op__BuiltIn(Comparison_LT__BuiltIn);
-Binary_Int_Int_Bool_Op__BuiltIn(Comparison_LE__BuiltIn);
-Binary_Int_Int_Bool_Op__BuiltIn(Comparison_EQ__BuiltIn);
-Binary_Int_Int_Bool_Op__BuiltIn(Comparison_NE__BuiltIn);
-Binary_Int_Int_Bool_Op__BuiltIn(Comparison_GT__BuiltIn);
-Binary_Int_Int_Bool_Op__BuiltIn(Comparison_GE__BuiltIn);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_LT__BuiltIn, 9);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_LE__BuiltIn, 9);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_EQ__BuiltIn, 9);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_NE__BuiltIn, 9);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_GT__BuiltIn, 9);
+Binary_Int_Int_Bool_Op__BuiltIn(Comparison_GE__BuiltIn, 9);

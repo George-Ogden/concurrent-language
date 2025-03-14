@@ -56,6 +56,8 @@ impl Weakener {
                      ret,
                      env,
                      allocations,
+                     size_bounds,
+                     is_recursive,
                  }| {
                     let (statements, weak_fns) = Self::add_allocations(statements, &closure_cycles);
                     (
@@ -66,6 +68,8 @@ impl Weakener {
                             ret,
                             env,
                             allocations,
+                            size_bounds,
+                            is_recursive,
                         },
                         weak_fns,
                     )
@@ -334,6 +338,8 @@ impl Weakener {
             ret,
             env,
             allocations,
+            size_bounds,
+            is_recursive,
         } = fn_def;
         let env = env
             .into_iter()
@@ -357,6 +363,8 @@ impl Weakener {
             ret,
             env,
             allocations,
+            size_bounds,
+            is_recursive,
         }
     }
 }
@@ -2316,7 +2324,9 @@ mod tests {
                     vec![AtomicTypeEnum::INT.into()],
                     Box::new(AtomicTypeEnum::INT.into()),
                 ).into()
-            ]
+            ],
+            size_bounds: (10, 100),
+            is_recursive: false
         },
         HashSet::from([
             (Name::from("g"), 0),
@@ -2362,7 +2372,9 @@ mod tests {
                     vec![AtomicTypeEnum::INT.into()],
                     Box::new(AtomicTypeEnum::INT.into()),
                 ).into()
-            ]
+            ],
+            size_bounds: (10, 100),
+            is_recursive: false
         },
         HashSet::from([
             (Name::from("f"), 1),
@@ -2529,6 +2541,8 @@ mod tests {
                             }.into()
                         }.into(),
                     ],
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("f0"),
@@ -2541,7 +2555,9 @@ mod tests {
                         ).into(),
                     ],
                     allocations: Vec::new(),
-                    statements: Vec::new()
+                    statements: Vec::new(),
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("f1"),
@@ -2558,7 +2574,9 @@ mod tests {
                         ).into(),
                     ],
                     allocations: Vec::new(),
-                    statements: Vec::new()
+                    statements: Vec::new(),
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("f2"),
@@ -2571,7 +2589,9 @@ mod tests {
                         ).into(),
                     ],
                     allocations: Vec::new(),
-                    statements: Vec::new()
+                    statements: Vec::new(),
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("f3"),
@@ -2584,7 +2604,9 @@ mod tests {
                         ).into(),
                     ],
                     allocations: Vec::new(),
-                    statements: Vec::new()
+                    statements: Vec::new(),
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
             ],
             type_defs: vec![
@@ -2735,6 +2757,8 @@ mod tests {
                         }.into()
                     }.into(),
                 ],
+                size_bounds: (10, 100),
+                is_recursive: false
             },
             FnDef {
                 name: Name::from("f0"),
@@ -2747,7 +2771,9 @@ mod tests {
                     )),
                 ],
                 allocations: Vec::new(),
-                statements: Vec::new()
+                statements: Vec::new(),
+                size_bounds: (10, 100),
+                is_recursive: false
             },
             FnDef {
                 name: Name::from("f1"),
@@ -2764,7 +2790,9 @@ mod tests {
                     )),
                 ],
                 allocations: Vec::new(),
-                statements: Vec::new()
+                statements: Vec::new(),
+                size_bounds: (10, 100),
+                is_recursive: false
             },
             FnDef {
                 name: Name::from("f2"),
@@ -2777,7 +2805,9 @@ mod tests {
                     )),
                 ],
                 allocations: Vec::new(),
-                statements: Vec::new()
+                statements: Vec::new(),
+                size_bounds: (10, 100),
+                is_recursive: false
             },
             FnDef {
                 name: Name::from("f3"),
@@ -2790,7 +2820,9 @@ mod tests {
                     )),
                 ],
                 allocations: Vec::new(),
-                statements: Vec::new()
+                statements: Vec::new(),
+                size_bounds: (10, 100),
+                is_recursive: false
             },
         ];
         "overlapping cycles"
@@ -2864,6 +2896,8 @@ mod tests {
                             }.into()
                         }.into(),
                     ],
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("f0"),
@@ -2876,7 +2910,9 @@ mod tests {
                         ).into(),
                     ],
                     allocations: Vec::new(),
-                    statements: Vec::new()
+                    statements: Vec::new(),
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
                 FnDef {
                     name: Name::from("f1"),
@@ -2889,7 +2925,9 @@ mod tests {
                         ).into(),
                     ],
                     allocations: Vec::new(),
-                    statements: Vec::new()
+                    statements: Vec::new(),
+                    size_bounds: (10, 100),
+                    is_recursive: false
                 },
             ],
             type_defs: vec![
@@ -2968,6 +3006,8 @@ mod tests {
                         }.into()
                     }.into(),
                 ],
+                size_bounds: (10, 100),
+                is_recursive: false
             },
             FnDef {
                 name: Name::from("f0"),
@@ -2980,7 +3020,9 @@ mod tests {
                     ).into(),
                 ],
                 allocations: Vec::new(),
-                statements: Vec::new()
+                statements: Vec::new(),
+                size_bounds: (10, 100),
+                is_recursive: false
             },
             FnDef {
                 name: Name::from("f1"),
@@ -2993,7 +3035,9 @@ mod tests {
                     )),
                 ],
                 allocations: Vec::new(),
-                statements: Vec::new()
+                statements: Vec::new(),
+                size_bounds: (10, 100),
+                is_recursive: false
             },
         ];
         "extra self cycle"

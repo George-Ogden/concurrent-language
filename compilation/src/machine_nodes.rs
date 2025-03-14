@@ -174,7 +174,7 @@ pub struct MatchBranch {
     pub statements: Vec<Statement>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FnDef {
     pub name: Name,
     pub arguments: Vec<(Memory, MachineType)>,
@@ -182,6 +182,20 @@ pub struct FnDef {
     pub ret: (Value, MachineType),
     pub env: Vec<MachineType>,
     pub allocations: Vec<Declaration>,
+    pub is_recursive: bool,
+    pub size_bounds: (usize, usize),
+}
+
+impl PartialEq for FnDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.arguments == other.arguments
+            && self.statements == other.statements
+            && self.ret == other.ret
+            && self.env == other.env
+            && self.allocations == other.allocations
+            && self.is_recursive == other.is_recursive
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
