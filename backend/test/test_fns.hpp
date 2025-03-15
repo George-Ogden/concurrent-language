@@ -779,8 +779,6 @@ TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {
 
         {
             LazyT<FnT<Bool, Int>> is_even_fn;
-            LazyT<TupleT<FnT<Bool, Int>>> is_odd_env;
-            LazyT<TupleT<FnT<Bool, Int>>> is_even_env;
 
             struct Allocator {
                 ClosureFnT<remove_lazy_t<typename IsOdd::EnvT>,
@@ -796,8 +794,8 @@ TEST_P(FnCorrectnessTest, MutuallyRecursiveFnsAllocatorTest) {
             is_odd_fn = setup_closure<IsOdd>(allocator, allocator->_0);
             is_even_fn = setup_closure<IsEven>(allocator, allocator->_1);
 
-            is_odd_env = std::make_tuple(is_even_fn);
-            is_even_env = std::make_tuple(is_odd_fn);
+            auto is_odd_env = std::make_tuple(is_even_fn);
+            auto is_even_env = std::make_tuple(is_odd_fn);
 
             std::dynamic_pointer_cast<ClosureFnT<
                 remove_lazy_t<typename IsEven::EnvT>,

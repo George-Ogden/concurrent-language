@@ -413,20 +413,20 @@ impl Compiler {
             memory: memory.clone().into(),
             type_,
         };
-        if matches!(
-            &value,
+        match &value {
             Expression::FnCall(FnCall {
                 fn_: Value::Memory(_),
                 fn_type: _,
-                args: _
-            })
-        ) {
-            allocations.push(declaration.into());
-            statements.push(assignment.into());
-        } else {
-            statements.push(declaration.into());
-            statements.push(assignment.into());
+                args: _,
+            }) => {
+                allocations.push(declaration.into());
+            }
+            Expression::ClosureInstantiation(_) => {
+                statements.push(declaration.into());
+            }
+            _ => {}
         }
+        statements.push(assignment.into());
         (statements, allocations)
     }
     fn compile_statements(
@@ -478,22 +478,15 @@ impl Compiler {
             .enumerate()
             .flat_map(|(i, (location, type_))| {
                 let memory = self.compile_location(location);
-                vec![
-                    Declaration {
-                        memory: memory.clone(),
-                        type_: type_.clone(),
+                vec![Assignment {
+                    target: memory,
+                    value: ElementAccess {
+                        idx: i,
+                        value: Memory(Id::from("env")).into(),
                     }
                     .into(),
-                    Assignment {
-                        target: memory,
-                        value: ElementAccess {
-                            idx: i,
-                            value: Memory(Id::from("env")).into(),
-                        }
-                        .into(),
-                    }
-                    .into(),
-                ]
+                }
+                .into()]
             })
             .collect_vec()
     }
@@ -546,18 +539,11 @@ impl Compiler {
                 .into_iter()
                 .map(|(value, _)| self.compile_value(value))
                 .collect();
-            let statements = vec![
-                Declaration {
-                    memory: tuple_mem.clone(),
-                    type_: TupleType(env_types).into(),
-                }
-                .into(),
-                Assignment {
-                    target: tuple_mem.clone(),
-                    value: TupleExpression(values).into(),
-                }
-                .into(),
-            ];
+            let statements = vec![Assignment {
+                target: tuple_mem.clone(),
+                value: TupleExpression(values).into(),
+            }
+            .into()];
             (
                 statements,
                 ClosureInstantiation {
@@ -1025,13 +1011,6 @@ mod tests {
             }.into()
         ],
         vec![
-            Declaration {
-                memory: Memory(Id::from("m0")),
-                type_: TupleType(vec![
-                    AtomicTypeEnum::INT.into(),
-                    AtomicTypeEnum::BOOL.into(),
-                ]).into()
-            }.into(),
             Assignment {
                 target: Memory(Id::from("m0")),
                 value: TupleExpression(vec![
@@ -1062,10 +1041,6 @@ mod tests {
             }.into()
         ],
         vec![
-            Declaration {
-                memory: Memory(Id::from("m1")),
-                type_: AtomicTypeEnum::BOOL.into(),
-            }.into(),
             Assignment {
                 target: Memory(Id::from("m1")),
                 value: ElementAccess{
@@ -1095,10 +1070,6 @@ mod tests {
             }.into()
         ],
         vec![
-            Declaration{
-                memory: Memory(Id::from("m0")),
-                type_: AtomicTypeEnum::INT.into()
-            }.into(),
             Assignment {
                 target: Memory(Id::from("m0")),
                 value: FnCall{
@@ -1159,10 +1130,6 @@ mod tests {
                     ],
                 )
             }.into(),
-            Declaration {
-                memory: Memory(Id::from("m2")),
-                type_: AtomicTypeEnum::INT.into()
-            }.into(),
             Assignment {
                 target: Memory(Id::from("m2")),
                 value: Expression::Value(Memory(Id::from("m1")).into()),
@@ -1211,10 +1178,6 @@ mod tests {
                         }.into(),
                     ],
                 )
-            }.into(),
-            Declaration {
-                memory: Memory(Id::from("m1")),
-                type_: AtomicTypeEnum::BOOL.into()
             }.into(),
             Assignment {
                 target: Memory(Id::from("m1")),
@@ -1290,10 +1253,6 @@ mod tests {
                         }.into(),
                     ],
                 )
-            }.into(),
-            Declaration {
-                memory: Memory(Id::from("m3")),
-                type_: AtomicTypeEnum::INT.into()
             }.into(),
             Assignment {
                 target: Memory(Id::from("m3")),
@@ -1411,10 +1370,6 @@ mod tests {
                     }
                 ]
             }.into(),
-            Declaration {
-                memory: Memory(Id::from("m3")),
-                type_: AtomicTypeEnum::INT.into()
-            }.into(),
             Assignment {
                 target: Memory(Id::from("m3")),
                 value: Expression::Value(Memory(Id::from("m1")).into()),
@@ -1502,10 +1457,6 @@ mod tests {
                     MatchBranch {
                         target: Some(Memory(Id::from("m2"))),
                         statements: vec![
-                            Declaration {
-                                type_: AtomicTypeEnum::BOOL.into(),
-                                memory: Memory(Id::from("m3"))
-                            }.into(),
                             Assignment {
                                 target: Memory(Id::from("m3")),
                                 value: FnCall{
@@ -1546,17 +1497,9 @@ mod tests {
                     }
                 ]
             }.into(),
-            Declaration {
-                type_: AtomicTypeEnum::BOOL.into(),
-                memory: Memory(Id::from("m6"))
-            }.into(),
             Assignment {
                 target: Memory(Id::from("m6")),
                 value: Value::from(Memory(Id::from("m1"))).into()
-            }.into(),
-            Declaration {
-                type_: TupleType(vec![AtomicTypeEnum::BOOL.into(),AtomicTypeEnum::INT.into()]).into(),
-                memory: Memory(Id::from("m7"))
             }.into(),
             Assignment {
                 target: Memory(Id::from("m7")),
@@ -1566,10 +1509,6 @@ mod tests {
                         BuiltIn::from(Integer{value: 0}).into()
                     ]
                 ).into(),
-            }.into(),
-            Declaration {
-                type_: TupleType(vec![AtomicTypeEnum::BOOL.into(),AtomicTypeEnum::INT.into()]).into(),
-                memory: Memory(Id::from("m8"))
             }.into(),
             Assignment {
                 target: Memory(Id::from("m8")),
@@ -1642,10 +1581,6 @@ mod tests {
                 ],
                 env: Vec::new(),
                 statements: vec![
-                    Declaration {
-                        memory: Memory(Id::from("m2")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
@@ -1710,13 +1645,6 @@ mod tests {
         },
         (
             vec![
-                Declaration {
-                    memory: Memory(Id::from("m3")),
-                    type_: TupleType(vec![
-                        AtomicTypeEnum::INT.into(),
-                        AtomicTypeEnum::INT.into()
-                    ]).into()
-                }.into(),
                 Assignment {
                     target: Memory(Id::from("m3")),
                     value: TupleExpression(vec![
@@ -1737,10 +1665,6 @@ mod tests {
                     AtomicTypeEnum::INT.into()
                 ].into(),
                 statements: vec![
-                    Declaration {
-                        memory: Memory(Id::from("m0")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
                     Assignment {
                         target: Memory(Id::from("m0")),
                         value: ElementAccess{
@@ -1748,20 +1672,12 @@ mod tests {
                             idx: 0
                         }.into()
                     }.into(),
-                    Declaration {
-                        memory: Memory(Id::from("m1")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
                     Assignment {
                         target: Memory(Id::from("m1")),
                         value: ElementAccess{
                             value: Memory(Id::from("env")).into(),
                             idx: 1
                         }.into()
-                    }.into(),
-                    Declaration {
-                        memory: Memory(Id::from("m2")),
-                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
@@ -1827,12 +1743,6 @@ mod tests {
         },
         (
             vec![
-                Declaration {
-                    memory: Memory(Id::from("m3")),
-                    type_: TupleType(vec![
-                        AtomicTypeEnum::INT.into(),
-                    ]).into()
-                }.into(),
                 Assignment {
                     target: Memory(Id::from("m3")),
                     value: TupleExpression(vec![
@@ -1851,20 +1761,12 @@ mod tests {
                     AtomicTypeEnum::INT.into(),
                 ].into(),
                 statements: vec![
-                    Declaration {
-                        memory: Memory(Id::from("m1")),
-                        type_: AtomicTypeEnum::INT.into()
-                    }.into(),
                     Assignment {
                         target: Memory(Id::from("m1")),
                         value: ElementAccess{
                             value: Memory(Id::from("env")).into(),
                             idx: 0
                         }.into()
-                    }.into(),
-                    Declaration {
-                        memory: Memory(Id::from("m2")),
-                        type_: AtomicTypeEnum::INT.into()
                     }.into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
@@ -1997,14 +1899,6 @@ mod tests {
                     name: Name::from("F1"),
                     arguments: Vec::new(),
                     statements: vec![
-                        Declaration {
-                            type_: FnType(
-                                vec![AtomicTypeEnum::INT.into()],
-                                Box::new(AtomicTypeEnum::INT.into())
-                            )
-                            .into(),
-                            memory: Memory(Id::from("m2")),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m2")),
                             value: ElementAccess {
@@ -2055,17 +1949,6 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("m1")),
                             value: ClosureInstantiation { name: Name::from("F0"), env: None }.into(),
-                        }.into(),
-                        Declaration {
-                            type_: TupleType(
-                                vec![
-                                    FnType(
-                                        vec![AtomicTypeEnum::INT.into()],
-                                        Box::new(AtomicTypeEnum::INT.into())
-                                    ).into()
-                                ]
-                            ).into(),
-                            memory: Memory(Id::from("m4"))
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("m4")),
@@ -2172,10 +2055,6 @@ mod tests {
                     name: Name::from("F0"),
                     arguments: Vec::new(),
                     statements: vec![
-                        Declaration {
-                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
-                            memory: Memory(Id::from("m2")),
-                        }.into(),
                         Assignment{
                             target: Memory(Id::from("m2")),
                             value: ElementAccess{
@@ -2194,25 +2073,13 @@ mod tests {
                     name: Name::from("Main"),
                     arguments: Vec::new(),
                     statements: vec![
-                        Declaration {
-                            type_: TupleType(Vec::new()).into(),
-                            memory: Memory(Id::from("m0")),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m0")),
                             value: TupleExpression(Vec::new()).into(),
                         }.into(),
-                        Declaration {
-                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
-                            memory: Memory(Id::from("m1")),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m1")),
                             value: TupleExpression(vec![Memory(Id::from("m0")).into()]).into(),
-                        }.into(),
-                        Declaration {
-                            type_: TupleType(vec![TupleType(vec![TupleType(Vec::new()).into()]).into()]).into(),
-                            memory: Memory(Id::from("m3")),
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
@@ -2318,10 +2185,6 @@ mod tests {
                 FnDef {
                     name: Name::from("Main"),
                     arguments: Vec::new(), statements: vec![
-                        Declaration {
-                            type_: UnionType(vec![Name::from("T0C0"), Name::from("T0C1")]).into(),
-                            memory: Memory(Id::from("m0"))
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m0")),
                             value: ConstructorCall { idx: 0, data: None, type_: Name::from("T0"), }.into(),
@@ -2354,10 +2217,6 @@ mod tests {
                                     ]
                                 }
                             ]
-                        }.into(),
-                        Declaration {
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory: Memory(Id::from("m3"))
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
@@ -2470,13 +2329,6 @@ mod tests {
                         (Memory(Id::from("m1")), AtomicTypeEnum::INT.into()),
                     ],
                     statements: vec![
-                        Declaration {
-                            memory: Memory(Id::from("m2")),
-                            type_: FnType(
-                                vec![AtomicTypeEnum::INT.into()],
-                                Box::new(AtomicTypeEnum::INT.into())
-                            ).into()
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m2")),
                             value: ElementAccess{
@@ -2519,15 +2371,6 @@ mod tests {
                         (Memory(Id::from("m0")), AtomicTypeEnum::INT.into()),
                     ],
                     statements: vec![
-                        Declaration {
-                            memory: Memory(Id::from("m4")),
-                            type_: TupleType(vec![
-                                FnType(
-                                    vec![AtomicTypeEnum::INT.into()],
-                                    Box::new(AtomicTypeEnum::INT.into())
-                                ).into()
-                            ]).into()
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m4")),
                             value: TupleExpression(vec![
