@@ -472,11 +472,11 @@ impl Compiler {
             .map(|(val, mem)| (val.clone().into(), mem.location.clone()))
             .collect()
     }
-    fn closure_prefix(&mut self, env_types: &Vec<(Location, MachineType)>) -> Vec<Statement> {
-        env_types
+    fn closure_prefix(&mut self, env_locations: &Vec<Location>) -> Vec<Statement> {
+        env_locations
             .iter()
             .enumerate()
-            .flat_map(|(i, (location, type_))| {
+            .flat_map(|(i, location)| {
                 let memory = self.compile_location(location);
                 vec![Assignment {
                     target: memory,
@@ -495,10 +495,14 @@ impl Compiler {
         mut lambda: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
         let is_recursive = self.recursive_fns.get(&lambda).cloned().unwrap_or(false);
-        let env_mapping = self.replace_open_vars(&mut lambda);
-        let env_types = env_mapping
+        let env_values = self.replace_open_vars(&mut lambda);
+        let env_types = env_values
             .iter()
-            .map(|(value, location)| (location.clone(), self.compile_type(&value.type_())))
+            .map(|(value, _)| self.compile_type(&value.type_()))
+            .collect_vec();
+        let env_locations = env_values
+            .iter()
+            .map(|(_, location)| location.clone())
             .collect_vec();
 
         let size = CodeSizeEstimator::estimate_size(&lambda);
@@ -514,14 +518,13 @@ impl Compiler {
             .into_iter()
             .map(|arg| (self.compile_arg(&arg), self.compile_type(&arg.type_())))
             .collect_vec();
-        let mut prefix = self.closure_prefix(&env_types);
+        let mut prefix = self.closure_prefix(&env_locations);
         let (mut statements, allocations) = self.compile_statements(statements);
         prefix.extend(statements);
         statements = prefix;
         let ret_type = self.compile_type(&return_value.type_());
         let ret_val = self.compile_value(return_value);
         let name = self.next_fn_name();
-        let env_types = env_types.into_iter().map(|(_, type_)| type_).collect_vec();
         self.fn_defs.push(FnDef {
             name: name.clone(),
             arguments: args,
@@ -533,9 +536,9 @@ impl Compiler {
             is_recursive,
         });
 
-        if env_mapping.len() > 0 {
+        if env_values.len() > 0 {
             let tuple_mem = self.new_memory_location();
-            let values = env_mapping
+            let values = env_values
                 .into_iter()
                 .map(|(value, _)| self.compile_value(value))
                 .collect();

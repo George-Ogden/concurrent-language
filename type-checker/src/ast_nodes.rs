@@ -22,9 +22,11 @@ pub struct AtomicType {
     pub type_: AtomicTypeEnum,
 }
 
+#[allow(dead_code)]
 pub const ATOMIC_TYPE_INT: AtomicType = AtomicType {
     type_: AtomicTypeEnum::INT,
 };
+#[allow(dead_code)]
 pub const ATOMIC_TYPE_BOOL: AtomicType = AtomicType {
     type_: AtomicTypeEnum::BOOL,
 };
@@ -35,7 +37,7 @@ pub struct GenericType {
     pub type_variables: Vec<TypeInstance>,
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub fn Typename(id: &str) -> GenericType {
     GenericType {
         id: Id::from(id),
@@ -204,7 +206,7 @@ pub struct GenericVariable {
     pub type_instances: Vec<TypeInstance>,
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub fn Var(id: &str) -> GenericVariable {
     GenericVariable {
         id: Id::from(id),
@@ -274,7 +276,7 @@ pub struct GenericConstructor {
     pub type_instances: Vec<TypeInstance>,
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub fn Constructor(id: &str) -> GenericConstructor {
     GenericConstructor {
         id: Id::from(id),
@@ -319,7 +321,7 @@ impl ParametricAssignee {
     }
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub fn VariableAssignee(id: &str) -> ParametricAssignee {
     ParametricAssignee {
         assignee: Assignee::from(Id::from(id)),
@@ -339,7 +341,7 @@ pub struct Block {
     pub expression: Box<Expression>,
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub fn ExpressionBlock(expression: Expression) -> Block {
     return Block {
         assignments: Vec::new(),

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #[macro_export]
 macro_rules! define_named_vector{
     (@count ) => {0usize};
