@@ -413,7 +413,7 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         if (tag == 0) {
             new (&either.value) Left{make_lazy<Int>(value)};
         } else {
-            new (&either.value) Right{make_lazy<Bool>(value)};
+            new (&either.value) Right{make_lazy<Bool>(value > 0)};
         }
 
         auto res = WorkManager::run(either_int_bool_fn, either);
