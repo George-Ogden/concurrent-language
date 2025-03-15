@@ -148,13 +148,13 @@ void WorkRunner::await_restricted(Vs &...vs) {
     if (n == 0) {
         return;
     }
+    if (all_done(vs...)){
+        return;
+    }
     std::atomic<unsigned> *remaining = new std::atomic<unsigned>{n};
     Locked<bool> *valid = new Locked<bool>{true};
     Continuation c{remaining, counter, valid};
     (vs->add_continuation(c), ...);
-    if (all_done(vs...)) {
-        return exit_early(c);
-    }
     current_work->add_dependencies({vs...});
     while (!done_flag.load(std::memory_order_acquire))
     {
@@ -169,15 +169,6 @@ void WorkRunner::await_restricted(Vs &...vs) {
     }
     throw finished{};
 };
-
-void WorkRunner::exit_early(Continuation &c){
-    delete c.valid;
-    if (c.counter.fetch_sub(1, std::memory_order_relaxed) == 1) {
-        return;
-    } else {
-        throw stack_inversion{};
-    }
-}
 
 bool WorkRunner::break_on_work(WorkT &work, Continuation &c){
     const WorkT prev_work = current_work;

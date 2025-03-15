@@ -30,7 +30,6 @@ struct WorkRunner {
     WorkT get_work();
     void enqueue(WorkT work);
     bool break_on_work(WorkT &work, Continuation &c);
-    void exit_early(Continuation &c);
 
     template <typename... Vs> void await_restricted(Vs &...vs);
     template <typename... Vs> bool all_done(Vs &&...vs);
