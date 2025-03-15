@@ -17,11 +17,10 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    ArgsT args = [&argv]<std::size_t... Is>(std::index_sequence<Is...>) {
+    auto args = [&argv]<std::size_t... Is>(std::index_sequence<Is...>) {
         return std::make_tuple(
-            make_lazy<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>(
-                convert_arg<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>(
-                    argv[Is]))...);
+            convert_arg<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>(
+                argv[Is])...);
     }
     (std::make_index_sequence<N>{});
 

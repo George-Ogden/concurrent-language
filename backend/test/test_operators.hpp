@@ -24,8 +24,7 @@ TEST_P(BinaryOperatorsTests, OperatorCorrectness) {
                                   1000000000224LL}) {
         for (Int y : {-8, 4, 3, 17}) {
             FnT<Int, Int, Int> f = op;
-            auto result =
-                WorkManager::run(f, make_lazy<Int>(x), make_lazy<Int>(y));
+            auto result = WorkManager::run(f, x, y);
             Int expected = validate(x, y);
             ASSERT_EQ(result->value(), expected);
         }
@@ -78,7 +77,7 @@ TEST_P(UnaryOperatorsTests, OperatorCorrectness) {
 
     for (Int x : std::vector<Int>{-1000000009LL, -55, 24, 200, 10024,
                                   1000000000224LL}) {
-        auto result = WorkManager::run(op, make_lazy<Int>(x));
+        auto result = WorkManager::run(op, x);
         Int expected = validate(x);
         ASSERT_EQ(result->value(), expected);
     }
@@ -101,8 +100,7 @@ TEST_P(BinaryComparisonsTests, OperatorCorrectness) {
                               200,           10024, 1000000000224LL};
     for (Int x : xs) {
         for (Int y : xs) {
-            auto result =
-                WorkManager::run(op, make_lazy<Int>(x), make_lazy<Int>(y));
+            auto result = WorkManager::run(op, x, y);
             Bool expected = validate(x, y);
             ASSERT_EQ(result->value(), expected);
         }
@@ -122,11 +120,11 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(NegationTests, OperatorCorrectness) {
     auto fn = Negation__BuiltIn_G;
     {
-        auto result = WorkManager::run(fn, make_lazy<Bool>(true));
+        auto result = WorkManager::run(fn, true);
         ASSERT_EQ(result->value(), false);
     }
     {
-        auto result = WorkManager::run(fn, make_lazy<Bool>(false));
+        auto result = WorkManager::run(fn, false);
         ASSERT_EQ(result->value(), true);
     }
 }

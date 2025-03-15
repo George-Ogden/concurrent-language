@@ -2,6 +2,7 @@
 
 #include "fn/fn_inst.tpp"
 #include "fn/types.hpp"
+#include "lazy/fns.hpp"
 #include "lazy/lazy.hpp"
 #include "lazy/types.hpp"
 #include "types/utils.hpp"
@@ -9,6 +10,34 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+
+template <typename T> auto ensure_lazy(T arg) {
+    if constexpr (is_lazy_v<std::decay_t<T>>) {
+        return arg;
+    } else {
+        return make_lazy<T>(arg);
+    }
+}
+
+template <typename... Ts> auto ensure_lazy(std::tuple<Ts...> arg) {
+    return std::apply(
+        [](auto... args) { return std::make_tuple(ensure_lazy(args)...); },
+        arg);
+}
+
+template <typename T> auto extract_lazy(T arg) {
+    if constexpr (is_lazy_v<std::decay_t<T>>) {
+        return arg->value();
+    } else {
+        return arg;
+    }
+}
+
+template <typename... Ts> auto extract_lazy(std::tuple<Ts...> arg) {
+    return std::apply(
+        [](auto... args) { return std::make_tuple(extract_lazy(args)...); },
+        arg);
+}
 
 template <typename F, typename T>
 requires is_shared_ptr_v<T> && std::is_base_of_v<
@@ -100,7 +129,8 @@ struct StoreEnv<std::shared_ptr<Lazy<WeakFnT<R, A...>>>, U> {
 };
 
 template <typename T, typename U> T store_env(U env) {
-    return StoreEnv<T, U>::store(env);
+    auto lazy_env = ensure_lazy(env);
+    return StoreEnv<T, std::decay_t<decltype(lazy_env)>>::store(lazy_env);
 }
 
 template <typename F> LazyT<std::shared_ptr<typename F::Fn>> setup_closure() {

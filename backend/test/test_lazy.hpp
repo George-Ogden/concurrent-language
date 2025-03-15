@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lazy/fns.hpp"
 #include "lazy/lazy.tpp"
 #include "work/work.tpp"
 
@@ -22,6 +23,40 @@ TEST_F(LazyConstantTest, CorrectValue) { ASSERT_EQ(x->value(), 3); }
 TEST(MakeLazyTest, CorrectValue) {
     LazyT<Int> y = make_lazy<Int>(-3);
     ASSERT_EQ(y->value(), -3);
+}
+
+TEST(EnsureLazyTest, NonLazy) {
+    LazyT<Int> y = ensure_lazy(Int{-3});
+    ASSERT_EQ(y->value(), -3);
+}
+
+TEST(EnsureLazyTest, Lazy) {
+    LazyT<Int> y = ensure_lazy(make_lazy<Int>(-3));
+    ASSERT_EQ(y->value(), -3);
+}
+
+TEST(EnsureLazyTest, MixedTuple) {
+    auto y =
+        ensure_lazy(std::make_tuple(3, std::make_tuple(make_lazy<Int>(-3))));
+    ASSERT_EQ(std::get<0>(y)->value(), 3);
+    ASSERT_EQ(std::get<0>(std::get<1>(y))->value(), -3);
+}
+
+TEST(ExtractLazyTest, NonLazy) {
+    Int y = extract_lazy(Int{-3});
+    ASSERT_EQ(y, -3);
+}
+
+TEST(ExtractLazyTest, Lazy) {
+    Int y = extract_lazy(make_lazy<Int>(-3));
+    ASSERT_EQ(y, -3);
+}
+
+TEST(ExtractLazyTest, MixedTuple) {
+    auto y =
+        extract_lazy(std::make_tuple(3, std::make_tuple(make_lazy<Int>(-3))));
+    ASSERT_EQ(std::get<0>(y), 3);
+    ASSERT_EQ(std::get<0>(std::get<1>(y)), -3);
 }
 
 TEST_F(LazyConstantTest, UnfinishedContinuationBehaviour) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lazy/fns.hpp"
 #include "work/runner.hpp"
 #include "system/work_manager.tpp"
 
@@ -97,7 +98,11 @@ WorkT WorkRunner::get_work() {
 
 template <typename T>
 constexpr auto filter_awaitable(T &v) {
-    return std::tuple<std::decay_t<T>>(v);
+    if constexpr (is_lazy_v<T>) {
+        return std::tuple<std::decay_t<T>>(v);
+    } else {
+        return std::tuple<>{};
+    }
 }
 
 template <typename... Ts>
@@ -106,10 +111,11 @@ constexpr auto filter_awaitable(std::tuple<Ts...> &v) {
 }
 
 template <typename... Vs>
-void WorkRunner::await(Vs &...vs) {
+auto WorkRunner::await(Vs &...vs) {
     std::apply([&](auto &&...ts)
                { await_restricted(ts...); },
                std::tuple_cat(filter_awaitable(vs)...));
+    return std::make_tuple(extract_lazy(vs)...);
 }
 
 template <typename T>

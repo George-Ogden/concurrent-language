@@ -23,12 +23,14 @@ bool Work::done() const {
     return status.done();
 }
 
-template <typename Ret, typename... Args>
-std::pair<std::shared_ptr<Work>, LazyT<Ret>> Work::fn_call(FnT<Ret, Args...> f, LazyT<Args>... args) {
+template <typename Ret, typename... Args, typename ... ArgsT>
+requires (std::is_same_v<Args,remove_lazy_t<std::decay_t<ArgsT>>> && ...)
+std::pair<std::shared_ptr<Work>, LazyT<Ret>>
+Work::fn_call(FnT<Ret, Args...> f, ArgsT... args) {
     std::shared_ptr<TypedWork<Ret, Args...>> work = std::make_shared<TypedWork<Ret, Args...>>();
     auto placeholders = make_lazy_placeholders<LazyT<Ret>>(work);
     work->targets = lazy_map([](const auto &t) { return std::weak_ptr(t); }, placeholders);
-    work->fn = f->init(args...);
+    work->fn = f->init(ensure_lazy(args)...);
     work->fn->set_fn(f);
     return std::make_pair(work, placeholders);
 }

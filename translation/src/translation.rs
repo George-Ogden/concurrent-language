@@ -113,10 +113,10 @@ impl Translator {
         let value_type = self.translate_value_type(&value.clone().into());
         match value {
             BuiltIn::Integer(Integer { value }) => {
-                format!("make_lazy<{value_type}>({value}LL)")
+                format!("{value_type}{{{value}LL}}")
             }
             BuiltIn::Boolean(Boolean { value }) => {
-                format!("make_lazy<{value_type}>({value})")
+                format!("{value_type}{{{value}}}")
             }
             BuiltIn::BuiltInFn(name) => {
                 format!("make_lazy<{value_type}>({name}_G)")
@@ -155,6 +155,9 @@ impl Translator {
             Expression::TupleExpression(TupleExpression(values)) => {
                 format!("std::make_tuple({})", self.translate_value_list(values))
             }
+            Expression::ConstructorCall(constructor_call) => {
+                self.translate_constructor_call(constructor_call)
+            }
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -169,12 +172,14 @@ impl Translator {
     fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
         let args_code = self.translate_value_list(fn_call.args);
         match fn_call.fn_ {
+            // ignore target in case of wrapping in lazy
             Value::BuiltIn(built_in) => {
                 let BuiltIn::BuiltInFn(name) = built_in else {
                     panic!("Attempt to call non-fn built-in.")
                 };
-                format!("{target} = {name}({args_code});",)
+                format!("{name}({args_code})",)
             }
+            // return the full assignment
             Value::Memory(memory) => {
                 let id = self.translate_memory(memory);
                 let call_code = if args_code.len() == 0 {
@@ -182,23 +187,31 @@ impl Translator {
                 } else {
                     format!("{}->value(),{}", id, args_code)
                 };
-                format!("if ({target} == decltype({target}){{}}) {{ WorkT work; std::tie(work, {target}) = Work::fn_call({call_code}); WorkManager::enqueue(work); }}")
+                format!("if ({target} == decltype({target}){{}}) {{ WorkT work; std::tie(work, {target}) = Work::fn_call({call_code}); process(work); }}")
             }
         }
     }
-    fn translate_constructor_call(&self, target: Id, constructor_call: ConstructorCall) -> Code {
+    fn translate_constructor_call(&self, constructor_call: ConstructorCall) -> Code {
         let indexing_code = format!(
             "std::integral_constant<std::size_t,{}>()",
             constructor_call.idx
         );
         let value_code = match constructor_call.data {
             None => Code::new(),
-            Some((name, value)) => format!(", {name}{{{}}}", self.translate_value(value)),
+            Some((name, value)) => {
+                format!(", {name}{{ensure_lazy({})}}", self.translate_value(value))
+            }
         };
-        format!("make_lazy<remove_lazy_t<decltype({target})>>({indexing_code}{value_code})")
+        let type_ = constructor_call.type_;
+        format!("{type_}{{{indexing_code}{value_code}}}")
     }
-    fn translate_declaration(&self, declaration: Declaration) -> Code {
+    fn translate_declaration(
+        &self,
+        declaration: Declaration,
+        declared: &mut HashSet<Memory>,
+    ) -> Code {
         let Declaration { type_, memory } = declaration;
+        declared.insert(memory.clone());
         format!(
             "{} {};",
             self.translate_lazy_type(&type_),
@@ -226,12 +239,12 @@ impl Translator {
             allocated_memory,
         )
     }
-    fn translate_assignment(&self, assignment: Assignment) -> Code {
-        let Memory(id) = assignment.target;
+    fn translate_assignment(&self, assignment: Assignment, declared: &HashSet<Memory>) -> Code {
+        let Memory(id) = assignment.target.clone();
         let value_code = match assignment.value {
-            Expression::FnCall(fn_call) => return self.translate_fn_call(id.clone(), fn_call),
-            Expression::ConstructorCall(constructor_call) => {
-                self.translate_constructor_call(id.clone(), constructor_call)
+            Expression::FnCall(fn_call) => match &fn_call.fn_ {
+                Value::BuiltIn(_) => self.translate_fn_call(id.clone(), fn_call),
+                Value::Memory(_) => return self.translate_fn_call(id.clone(), fn_call),
             }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
                 return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::G);"), |env| {
@@ -243,19 +256,27 @@ impl Translator {
             }
             value => self.translate_expression(value),
         };
-        format!("{id} = {value_code};")
+        if declared.contains(&assignment.target) {
+            format!("{id} = ensure_lazy({value_code});")
+        } else {
+            format!("auto {id} = {value_code};")
+        }
     }
-    fn translate_if_statement(&self, if_statement: IfStatement) -> Code {
+    fn translate_if_statement(&self, if_statement: IfStatement, declared: HashSet<Memory>) -> Code {
         let condition_code = self.translate_value(if_statement.condition);
-        let if_branch = self.translate_statements(if_statement.branches.0);
-        let else_branch = self.translate_statements(if_statement.branches.1);
-        format!("if ({condition_code}->value()) {{ {if_branch} }} else {{ {else_branch} }}",)
+        let if_branch = self.translate_statements(if_statement.branches.0, declared.clone());
+        let else_branch = self.translate_statements(if_statement.branches.1, declared.clone());
+        format!("if (extract_lazy({condition_code})) {{ {if_branch} }} else {{ {else_branch} }}",)
     }
-    fn translate_match_statement(&self, match_statement: MatchStatement) -> Code {
+    fn translate_match_statement(
+        &self,
+        match_statement: MatchStatement,
+        declared: HashSet<Memory>,
+    ) -> Code {
         let UnionType(types) = match_statement.expression.1;
         let subject = self.translate_memory(match_statement.auxiliary_memory);
         let extraction = format!(
-            "auto {subject} = {}->value();",
+            "auto {subject} = extract_lazy({});",
             self.translate_value(match_statement.expression.0)
         );
         let branches_code = match_statement
@@ -275,26 +296,34 @@ impl Translator {
                     }
                     None => Code::new(),
                 };
-                let statements_code = self.translate_statements(branch.statements);
-
+                let statements_code =
+                    self.translate_statements(branch.statements.clone(), declared.clone());
                 format!("case {i}ULL : {{ {assignment_code} {statements_code} break; }}",)
             })
             .join("\n");
         format!("{extraction} switch ({subject}.tag) {{ {branches_code} }}")
     }
-    fn translate_statement(&self, statement: Statement) -> Code {
+    fn translate_statement(&self, statement: Statement, declared: &mut HashSet<Memory>) -> Code {
         match statement {
             Statement::Await(await_) => self.translate_await(await_),
-            Statement::Assignment(assignment) => self.translate_assignment(assignment),
-            Statement::IfStatement(if_statement) => self.translate_if_statement(if_statement),
-            Statement::Declaration(declaration) => self.translate_declaration(declaration),
+            Statement::Assignment(assignment) => self.translate_assignment(assignment, &declared),
+            Statement::IfStatement(if_statement) => {
+                self.translate_if_statement(if_statement, declared.clone())
+            }
+            Statement::Declaration(declaration) => {
+                self.translate_declaration(declaration, declared)
+            }
             Statement::Allocation(allocation) => self.translate_allocation(allocation).0,
             Statement::MatchStatement(match_statement) => {
-                self.translate_match_statement(match_statement)
+                self.translate_match_statement(match_statement, declared.clone())
             }
         }
     }
-    fn translate_statements(&self, statements: Vec<Statement>) -> Code {
+    fn translate_statements(
+        &self,
+        statements: Vec<Statement>,
+        mut declared: HashSet<Memory>,
+    ) -> Code {
         let (forwarded, other_statements): (Vec<_>, Vec<_>) =
             statements
                 .into_iter()
@@ -309,7 +338,7 @@ impl Translator {
 
         let declarations_code = declarations
             .into_iter()
-            .map(|declaration| self.translate_declaration(declaration))
+            .map(|declaration| self.translate_declaration(declaration, &mut declared))
             .join("\n");
 
         let (allocation_codes, allocations): (Vec<_>, Vec<_>) = allocations
@@ -348,30 +377,44 @@ impl Translator {
 
         let other_code = other_statements
             .into_iter()
-            .map(|statement| self.translate_statement(statement))
+            .map(|statement| self.translate_statement(statement, &mut declared))
             .join("\n");
 
         format!("{declarations_code}\n{allocations_code}\n{closure_predefinitions}\n{other_code}")
     }
-    fn translate_memory_allocation(&self, memory_allocation: Declaration) -> Code {
+    fn translate_memory_allocation(
+        &self,
+        memory_allocation: Declaration,
+        declared: &mut HashSet<Memory>,
+    ) -> Code {
         let Declaration { memory, type_ } = memory_allocation;
+        declared.insert(memory.clone());
         format!(
             "{} {};",
             self.translate_lazy_type(&type_),
             self.translate_memory(memory)
         )
     }
-    fn translate_memory_allocations(&self, memory_allocations: Vec<Declaration>) -> Code {
+    fn translate_memory_allocations(
+        &self,
+        memory_allocations: Vec<Declaration>,
+        declared: &mut HashSet<Memory>,
+    ) -> Code {
         memory_allocations
             .into_iter()
-            .map(|memory_allocation| self.translate_memory_allocation(memory_allocation))
+            .map(|memory_allocation| self.translate_memory_allocation(memory_allocation, declared))
             .join("\n")
     }
     fn translate_fn_def(&self, fn_def: FnDef) -> Code {
         let name = fn_def.name;
         let return_type = fn_def.ret.1;
-        let statements_code = self.translate_statements(fn_def.statements);
-        let return_code = format!("return {};", self.translate_value(fn_def.ret.0));
+        let mut declared = HashSet::new();
+        let allocations_code = self.translate_memory_allocations(fn_def.allocations, &mut declared);
+        let statements_code = self.translate_statements(fn_def.statements, declared);
+        let return_code = format!(
+            "return ensure_lazy({});",
+            self.translate_value(fn_def.ret.0)
+        );
         let external_types = &std::iter::once(return_type.clone())
             .chain(fn_def.arguments.iter().map(|(_, type_)| type_.clone()))
             .map(|type_| self.translate_type(&type_))
@@ -424,7 +467,6 @@ impl Translator {
         let clone_code = format!(
             "static std::unique_ptr<TypedFnI<{external_types}>> init(const ArgsT &args{env_ptr}) {{ return std::make_unique<{name}>({replication_args}); }}"
         );
-        let allocations_code = self.translate_memory_allocations(fn_def.allocations);
         format!(
             "{declaration_code} {{ {constructor_code} {allocations_code} {header_code} {{ {statements_code} {return_code} }} {size_code} {recursive_code} {clone_code} {instance} }};"
         )
@@ -729,32 +771,32 @@ mod tests {
 
     #[test_case(
         Integer{value: 24}.into(),
-        "make_lazy<Int>(24LL)";
+        "Int{24LL}";
         "integer translation"
     )]
     #[test_case(
         Integer{value: -24}.into(),
-        "make_lazy<Int>(-24LL)";
+        "Int{-24LL}";
         "negative integer translation"
     )]
     #[test_case(
         Integer{value: 0}.into(),
-        "make_lazy<Int>(0LL)";
+        "Int{0LL}";
         "zero translation"
     )]
     #[test_case(
         Integer{value: 10000000000009}.into(),
-        "make_lazy<Int>(10000000000009LL)";
+        "Int{10000000000009LL}";
         "large integer translation"
     )]
     #[test_case(
         Boolean{value: true}.into(),
-        "make_lazy<Bool>(true)";
+        "Bool{true}";
         "true translation"
     )]
     #[test_case(
         Boolean{value: false}.into(),
-        "make_lazy<Bool>(false)";
+        "Bool{false}";
         "false translation"
     )]
     #[test_case(
@@ -828,7 +870,7 @@ mod tests {
     )]
     #[test_case(
         BuiltIn::Integer(Integer{value: -1}).into(),
-        "make_lazy<Int>(-1LL)";
+        "Int{-1LL}";
         "builtin integer translation"
     )]
     fn test_value_translation(value: Value, expected: &str) {
@@ -839,7 +881,7 @@ mod tests {
 
     #[test_case(
         Value::BuiltIn(BuiltIn::Integer(Integer{value: -1}).into()).into(),
-        "make_lazy<Int>(-1LL)";
+        "Int{-1LL}";
         "integer"
     )]
     #[test_case(
@@ -863,7 +905,7 @@ mod tests {
             target: Memory(Id::from("x")).into(),
             value: Value::BuiltIn(Integer{value: 5}.into()).into(),
         },
-        "x = make_lazy<Int>(5LL);";
+        "auto x = Int{5LL};";
         "integer assignment"
     )]
     #[test_case(
@@ -876,7 +918,7 @@ mod tests {
                 idx: 0
             }.into(),
         },
-        "x = std::get<0ULL>(tuple);";
+        "auto x = std::get<0ULL>(tuple);";
         "tuple access assignment"
     )]
     #[test_case(
@@ -884,7 +926,7 @@ mod tests {
             target: Memory(Id::from("y")).into(),
             value: Value::BuiltIn(Boolean{value: true}.into()).into(),
         },
-        "y = make_lazy<Bool>(true);";
+        "auto y = Bool{true};";
         "boolean assignment"
     )]
     #[test_case(
@@ -907,7 +949,7 @@ mod tests {
                 ]
             }.into(),
         },
-        "call = Plus__BuiltIn(arg1, arg2);";
+        "auto call = Plus__BuiltIn(arg1, arg2);";
         "built-in fn call"
     )]
     #[test_case(
@@ -922,7 +964,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (res == decltype(res){}) { WorkT work; std::tie(work, res) = Work::fn_call(call->value()); WorkManager::enqueue(work); }";
+        "if (res == decltype(res){}) { WorkT work; std::tie(work, res) = Work::fn_call(call->value()); process(work); }";
         "custom fn call no args"
     )]
     #[test_case(
@@ -943,7 +985,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (call2 == decltype(call2){}) { WorkT work; std::tie(work, call2) = Work::fn_call(call1->value(), arg1, arg2); WorkManager::enqueue(work); }";
+        "if (call2 == decltype(call2){}) { WorkT work; std::tie(work, call2) = Work::fn_call(call1->value(), arg1, arg2); process(work); }";
         "custom fn call"
     )]
     #[test_case(
@@ -951,7 +993,7 @@ mod tests {
             target: Memory(Id::from("e")),
             value: TupleExpression(Vec::new()).into(),
         },
-        "e = std::make_tuple();";
+        "auto e = std::make_tuple();";
         "empty tuple assignment"
     )]
     #[test_case(
@@ -961,7 +1003,7 @@ mod tests {
                 Value::BuiltIn(Integer{value: 5}.into())
             ]).into(),
         },
-        "t = std::make_tuple(make_lazy<Int>(5LL));";
+        "auto t = std::make_tuple(Int{5LL});";
         "singleton tuple assignment"
     )]
     #[test_case(
@@ -972,223 +1014,131 @@ mod tests {
                 Memory(Id::from("y")).into()
             ]).into(),
         },
-        "t = std::make_tuple(make_lazy<Int>(-4LL),y);";
+        "auto t = std::make_tuple(Int{-4LL},y);";
         "double tuple assignment"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("bull")),
             value: ConstructorCall {
+                type_: Name::from("Bull"),
                 idx: 1,
                 data: None
             }.into(),
         },
-        "bull = make_lazy<remove_lazy_t<decltype(bull)>>(std::integral_constant<std::size_t,1>());";
+        "auto bull = Bull{std::integral_constant<std::size_t,1>()};";
         "empty constructor assignment"
     )]
     #[test_case(
         Assignment {
             target: Memory(Id::from("wrapper")),
             value: ConstructorCall {
+                type_: Name::from("Wrapper"),
                 idx: 0,
                 data: Some((Name::from("Wrapper"), Value::BuiltIn(Integer{value: 4}.into())))
             }.into(),
         },
-        "wrapper = make_lazy<remove_lazy_t<decltype(wrapper)>>(std::integral_constant<std::size_t,0>(), Wrapper{make_lazy<Int>(4LL)});";
+        "auto wrapper = Wrapper{std::integral_constant<std::size_t,0>(), Wrapper{ensure_lazy(Int{4LL})}};";
         "wrapper constructor assignment"
     )]
     fn test_assignment_translation(assignment: Assignment, expected: &str) {
-        let code = TRANSLATOR.translate_assignment(assignment);
+        let code = TRANSLATOR.translate_assignment(assignment, &HashSet::new());
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
 
     #[test_case(
-        MatchStatement{
-            expression: (Memory(Id::from("bull")).into(), UnionType(vec![Name::from("Twoo"), Name::from("Faws")]).into()),
-            auxiliary_memory: Memory(Id::from("tmp")),
-            branches: vec![
-                MatchBranch {
-                    target: None,
-                    statements: vec![
+        vec![Await(vec![Memory(Id::from("z"))]).into()],
+        "WorkManager::await(z);";
+        "await for single memory"
+    )]
+    #[test_case(
+        vec![
+            Await(vec![
+                Memory(Id::from("z")),
+                Memory(Id::from("x"))
+            ]).into()
+        ],
+        "WorkManager::await(z,x);";
+        "await for multiple memory"
+    )]
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("z"))]).into(),
+            Declaration {
+                type_: AtomicTypeEnum::INT.into(),
+                memory: Memory(Id::from("x"))
+            }.into(),
+            IfStatement {
+                condition: Memory(Id::from("z")).into(),
+                branches: (
+                    vec![Assignment {
+                        target: Memory(Id::from("x")),
+                        value: Expression::Value(Value::BuiltIn(Integer{value: 1}.into()).into()),
+                    }.into()],
+                    vec![Assignment {
+                        target: Memory(Id::from("x")).into(),
+                        value: Expression::Value(Value::BuiltIn(Integer{value: -1}.into()).into()),
+                    }.into()],
+                )
+            }.into()
+        ],
+        "LazyT<Int> x; WorkManager::await(z); if (extract_lazy(z)) { x = ensure_lazy(Int{1LL}); } else { x = ensure_lazy(Int{-1LL}); }";
+        "if-else statement"
+    )]
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("z"))]).into(),
+            Declaration {
+                type_: AtomicTypeEnum::INT.into(),
+                memory: Memory(Id::from("x"))
+            }.into(),
+            Declaration {
+                type_: AtomicTypeEnum::BOOL.into(),
+                memory: Memory(Id::from("r"))
+            }.into(),
+            IfStatement {
+                condition: Memory(Id::from("z")).into(),
+                branches: (
+                    vec![
+                        IfStatement {
+                            condition: Memory(Id::from("y")).into(),
+                            branches: (
+                                vec![
+                                    Assignment {
+                                        target: Memory(Id::from("x")).into(),
+                                        value: Expression::Value(Value::BuiltIn(Integer{value: 1}.into()).into()),
+                                    }.into()
+                                ],
+                                vec![
+                                    Assignment {
+                                        target: Memory(Id::from("x")).into(),
+                                        value: Expression::Value(Value::BuiltIn(Integer{value: -1}.into()).into()),
+                                    }.into()
+                                ],
+                            )
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Value(Value::BuiltIn(Boolean{value: true}.into()).into()),
                         }.into(),
                     ],
-                },
-                MatchBranch {
-                    target: None,
-                    statements: vec![
+                    vec![
+                        Assignment {
+                            target: Memory(Id::from("x")).into(),
+                            value: Expression::Value(Value::BuiltIn(Integer{value: 0}.into()).into()),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("r")).into(),
                             value: Expression::Value(Value::BuiltIn(Boolean{value: false}.into()).into()),
                         }.into(),
                     ],
-                }
-            ]
-        },
-        "auto tmp = bull->value(); switch (tmp.tag) { case 0ULL: { r = make_lazy<Bool>(true); break; } case 1ULL: { r = make_lazy<Bool>(false); break; }}";
-        "match statement no values"
-    )]
-    #[test_case(
-        MatchStatement {
-            auxiliary_memory: Memory(Id::from("tmp")),
-            expression: (
-                Memory(Id::from("either")).into(),
-                UnionType(vec![Name::from("Left"), Name::from("Right")]).into()
-            ),
-            branches: vec![
-                MatchBranch {
-                    target: Some(Memory(Name::from("x"))),
-                    statements: vec![
-                        Assignment {
-                            target: Memory(Id::from("call")).into(),
-                            value: FnCall{
-                                fn_: BuiltIn::BuiltInFn(
-                                    Name::from("Comparison_GE__BuiltIn"),
-                                ).into(),
-                                fn_type: FnType(
-                                    vec![
-                                        AtomicType(AtomicTypeEnum::INT).into(),
-                                        AtomicType(AtomicTypeEnum::INT).into()
-                                    ],
-                                    Box::new(AtomicType(AtomicTypeEnum::BOOL).into()),
-                                ),
-                                args: vec![
-                                    Memory(Id::from("x")).into(),
-                                    Memory(Id::from("y")).into(),
-                                ]
-                            }.into(),
-                        }.into()
-                    ],
-                },
-                MatchBranch {
-                    target: Some(Memory(Name::from("x"))),
-                    statements: vec![
-                        Assignment {
-                            target: Memory(Id::from("call")).into(),
-                            value: Value::from(Memory(Id::from("x"))).into(),
-                        }.into(),
-                    ],
-                }
-            ]
-        },
-        "auto tmp = either->value(); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = Comparison_GE__BuiltIn(x,y); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = x; break; }}";
-        "match statement read values"
-    )]
-    #[test_case(
-        MatchStatement {
-            auxiliary_memory: Memory(Id::from("nat_")),
-            expression: (Memory(Id::from("nat")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")])),
-            branches: vec![
-                MatchBranch {
-                    target: Some(Memory(Name::from("s"))),
-                    statements: vec![
-                        Assignment {
-                            target: Memory(Id::from("r")).into(),
-                            value: Expression::Value(Memory(Name::from("s")).into())
-                        }.into(),
-                    ],
-                },
-                MatchBranch {
-                    target: None,
-                    statements: vec![
-                        Assignment {
-                            target: Memory(Id::from("r")).into(),
-                            value: Expression::Value(Memory(Name::from("nil")).into()),
-                        }.into(),
-                    ],
-                }
-            ]
-        },
-        "auto nat_ = nat->value(); switch (nat_.tag) { case 0ULL: { LazyT<Suc::type> s = reinterpret_cast<Suc*>(&nat_.value)->value; r = s; break; } case 1ULL: { r = nil; break; }}";
-        "match statement recursive type"
-    )]
-    fn test_match_statement_translation(match_statement: MatchStatement, expected: &str) {
-        let code = TRANSLATOR.translate_match_statement(match_statement);
-        let expected_code = Code::from(expected);
-        assert_eq_code(code, expected_code);
-    }
-
-    #[test_case(
-        Await(vec![Memory(Id::from("z"))]).into(),
-        "WorkManager::await(z);";
-        "await for single memory"
-    )]
-    #[test_case(
-        Await(vec![
-            Memory(Id::from("z")),
-            Memory(Id::from("x"))
-        ]).into(),
-        "WorkManager::await(z,x);";
-        "await for multiple memory"
-    )]
-    #[test_case(
-        IfStatement {
-            condition: Memory(Id::from("z")).into(),
-            branches: (
-                vec![Assignment {
-                    target: Memory(Id::from("x")),
-                    value: Expression::Value(Value::BuiltIn(Integer{value: 1}.into()).into()),
-                }.into()],
-                vec![Assignment {
-                    target: Memory(Id::from("x")).into(),
-                    value: Expression::Value(Value::BuiltIn(Integer{value: -1}.into()).into()),
-                }.into()],
-            )
-        }.into(),
-        "if (z->value()) { x = make_lazy<Int>(1LL); } else { x = make_lazy<Int>(-1LL); }";
-        "if-else statement"
-    )]
-    #[test_case(
-        IfStatement {
-            condition: Memory(Id::from("z")).into(),
-            branches: (
-                vec![
-                    IfStatement {
-                        condition: Memory(Id::from("y")).into(),
-                        branches: (
-                            vec![
-                                Assignment {
-                                    target: Memory(Id::from("x")).into(),
-                                    value: Expression::Value(Value::BuiltIn(Integer{value: 1}.into()).into()),
-                                }.into()
-                            ],
-                            vec![
-                                Assignment {
-                                    target: Memory(Id::from("x")).into(),
-                                    value: Expression::Value(Value::BuiltIn(Integer{value: -1}.into()).into()),
-                                }.into()
-                            ],
-                        )
-                    }.into(),
-                    Assignment {
-                        target: Memory(Id::from("r")).into(),
-                        value: Expression::Value(Value::BuiltIn(Boolean{value: true}.into()).into()),
-                    }.into(),
-                ],
-                vec![
-                    Assignment {
-                        target: Memory(Id::from("x")).into(),
-                        value: Expression::Value(Value::BuiltIn(Integer{value: 0}.into()).into()),
-                    }.into(),
-                    Assignment {
-                        target: Memory(Id::from("r")).into(),
-                        value: Expression::Value(Value::BuiltIn(Boolean{value: false}.into()).into()),
-                    }.into(),
-                ],
-            )
-        }.into(),
-        "if (z->value()) { if (y->value()) { x = make_lazy<Int>(1LL); } else { x = make_lazy<Int>(-1LL); } r = make_lazy<Bool>(true); } else { x = make_lazy<Int>(0LL); r = make_lazy<Bool>(false); }";
+                )
+            }.into()
+        ],
+        "LazyT<Int> x; LazyT<Bool> r; WorkManager::await(z); if (extract_lazy(z)) { if (extract_lazy(y)) { x = ensure_lazy(Int{1LL}); } else { x = ensure_lazy(Int{-1LL}); } r = ensure_lazy(Bool{true}); } else { x = ensure_lazy(Int{0LL}); r = ensure_lazy(Bool{false}); }";
         "nested if-else statement"
     )]
-    fn test_statement_translation(statement: Statement, expected: &str) {
-        let code = TRANSLATOR.translate_statement(statement);
-        let expected_code = Code::from(expected);
-        assert_eq_code(code, expected_code);
-    }
-
     #[test_case(
         vec![Assignment {
             target: Memory(Id::from("closure")).into(),
@@ -1301,10 +1251,6 @@ mod tests {
             Await(vec![
                 Memory(Id::from("t"))
             ]).into(),
-            Declaration {
-                type_: AtomicType(AtomicTypeEnum::INT).into(),
-                memory: Memory(Id::from("x"))
-            }.into(),
             Assignment {
                 target: Memory(Id::from("x")),
                 value: ElementAccess{
@@ -1313,7 +1259,7 @@ mod tests {
                 }.into(),
             }.into()
         ],
-        "LazyT<Int> x; WorkManager::await(t); x = std::get<1ULL>(tuple);";
+        "WorkManager::await(t); auto x = std::get<1ULL>(tuple);";
         "tuple access"
     )]
     #[test_case(
@@ -1326,15 +1272,11 @@ mod tests {
                 }.into(),
             }.into()
         ],
-        "f = load_env(std::get<1ULL>(env));";
+        "auto f = load_env(std::get<1ULL>(env));";
         "env access"
     )]
     #[test_case(
         vec![
-            Declaration{
-                type_: MachineType::NamedType(Name::from("List")),
-                memory:  Memory(Id::from("tail")),
-            }.into(),
             Assignment {
                 target: Memory(Id::from("tail")),
                 value: ElementAccess{
@@ -1343,29 +1285,23 @@ mod tests {
                 }.into(),
             }.into(),
         ],
-        "LazyT<List> tail; tail = std::get<1ULL>(cons);";
+        "auto tail = std::get<1ULL>(cons);";
         "cons extraction"
     )]
     #[test_case(
         vec![
-            Declaration{
-                type_: UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
-                memory: Memory(Id::from("n"))
-            }.into(),
             Assignment {
                 target: Memory(Id::from("n")).into(),
                 value: ConstructorCall{
+                    type_: Name::from("Nat"),
                     idx: 1,
                     data: None
                 }.into(),
             }.into(),
-            Declaration{
-                type_:UnionType(vec![Name::from("Suc"), Name::from("Nil")]).into(),
-                memory: Memory(Id::from("s"))
-            }.into(),
             Assignment {
                 target: Memory(Id::from("s")).into(),
                 value: ConstructorCall{
+                    type_: Name::from("Nat"),
                     idx: 0,
                     data: Some((
                         Name::from("Suc"),
@@ -1374,11 +1310,132 @@ mod tests {
                 }.into(),
             }.into(),
         ],
-        "LazyT<VariantT<Suc, Nil>> n; LazyT<VariantT<Suc, Nil>> s; n = make_lazy<remove_lazy_t<decltype(n)>>(std::integral_constant<std::size_t,1>()); s = make_lazy<remove_lazy_t<decltype(s)>>(std::integral_constant<std::size_t,0>(), Suc{n});";
+        "auto n = Nat{std::integral_constant<std::size_t,1>()}; auto s = Nat{std::integral_constant<std::size_t,0>(), Suc{ensure_lazy(n)}};";
         "simple recursive type instantiation"
     )]
+    #[test_case(
+        vec![
+            Await(vec![Memory(Id::from("bull"))]).into(),
+            Declaration {
+                type_: AtomicTypeEnum::BOOL.into(),
+                memory: Memory(Id::from("r"))
+            }.into(),
+            MatchStatement{
+                expression: (Memory(Id::from("bull")).into(), UnionType(vec![Name::from("Twoo"), Name::from("Faws")]).into()),
+                auxiliary_memory: Memory(Id::from("tmp")),
+                branches: vec![
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("r")).into(),
+                                value: Expression::Value(Value::BuiltIn(Boolean{value: true}.into()).into()),
+                            }.into(),
+                        ],
+                    },
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("r")).into(),
+                                value: Expression::Value(Value::BuiltIn(Boolean{value: false}.into()).into()),
+                            }.into(),
+                        ],
+                    }
+                ]
+            }.into()
+        ],
+        "LazyT<Bool> r; WorkManager::await(bull); auto tmp = extract_lazy(bull); switch (tmp.tag) { case 0ULL: { r = ensure_lazy(Bool{true}); break; } case 1ULL: { r = ensure_lazy(Bool{false}); break; }}";
+        "match statement no values"
+    )]
+    #[test_case(
+        vec![
+            Declaration {
+                type_: AtomicTypeEnum::INT.into(),
+                memory: Memory(Id::from("call"))
+            }.into(),
+            MatchStatement {
+                auxiliary_memory: Memory(Id::from("tmp")),
+                expression: (
+                    Memory(Id::from("either")).into(),
+                    UnionType(vec![Name::from("Left"), Name::from("Right")]).into()
+                ),
+                branches: vec![
+                    MatchBranch {
+                        target: Some(Memory(Name::from("x"))),
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("call")).into(),
+                                value: FnCall{
+                                    fn_: BuiltIn::BuiltInFn(
+                                        Name::from("Comparison_GE__BuiltIn"),
+                                    ).into(),
+                                    fn_type: FnType(
+                                        vec![
+                                            AtomicType(AtomicTypeEnum::INT).into(),
+                                            AtomicType(AtomicTypeEnum::INT).into()
+                                        ],
+                                        Box::new(AtomicType(AtomicTypeEnum::BOOL).into()),
+                                    ),
+                                    args: vec![
+                                        Memory(Id::from("x")).into(),
+                                        Memory(Id::from("y")).into(),
+                                    ]
+                                }.into(),
+                            }.into()
+                        ],
+                    },
+                    MatchBranch {
+                        target: Some(Memory(Name::from("x"))),
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("call")).into(),
+                                value: Value::from(Memory(Id::from("x"))).into(),
+                            }.into(),
+                        ],
+                    }
+                ]
+            }.into(),
+        ],
+        "LazyT<Int> call; auto tmp = extract_lazy(either); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = ensure_lazy(Comparison_GE__BuiltIn(x,y)); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = ensure_lazy(x); break; }}";
+        "match statement read values"
+    )]
+    #[test_case(
+        vec![
+            Declaration {
+                type_: MachineType::NamedType(Name::from("Nat")),
+                memory: Memory(Id::from("r"))
+            }.into(),
+            MatchStatement {
+                auxiliary_memory: Memory(Id::from("nat_")),
+                expression: (Memory(Id::from("nat")).into(), UnionType(vec![Name::from("Suc"), Name::from("Nil")])),
+                branches: vec![
+                    MatchBranch {
+                        target: Some(Memory(Name::from("s"))),
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("r")).into(),
+                                value: Expression::Value(Memory(Name::from("s")).into())
+                            }.into(),
+                        ],
+                    },
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("r")).into(),
+                                value: Expression::Value(Memory(Name::from("nil")).into()),
+                            }.into(),
+                        ],
+                    }
+                ]
+            }.into(),
+        ],
+        "LazyT<Nat> r; auto nat_ = extract_lazy(nat); switch (nat_.tag) { case 0ULL: { LazyT<Suc::type> s = reinterpret_cast<Suc*>(&nat_.value)->value; r = ensure_lazy(s); break; } case 1ULL: { r = ensure_lazy(nil); break; }}";
+        "match statement recursive type"
+    )]
     fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
-        let code = TRANSLATOR.translate_statements(statements);
+        let code = TRANSLATOR.translate_statements(statements, HashSet::new());
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -1394,7 +1451,7 @@ mod tests {
             size_bounds: (1, 1),
             is_recursive: false
         },
-        "struct IdentityInt : TypedClosureI<Empty, Int, Int> { using TypedClosureI<Empty, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { return x; } constexpr std::size_t lower_size_bound() const override { return 1; }; constexpr std::size_t upper_size_bound() const override { return 1; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) { return std::make_unique<IdentityInt>(args); } static inline FnT<Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int>>(init);};";
+        "struct IdentityInt : TypedClosureI<Empty, Int, Int> { using TypedClosureI<Empty, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { return ensure_lazy(x); } constexpr std::size_t lower_size_bound() const override { return 1; }; constexpr std::size_t upper_size_bound() const override { return 1; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args) { return std::make_unique<IdentityInt>(args); } static inline FnT<Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int>>(init);};";
         "identity int"
     )]
     #[test_case(
@@ -1484,7 +1541,7 @@ mod tests {
             size_bounds: (90, 90),
             is_recursive: false
         },
-        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> res1; LazyT<Int> res2; LazyT<Int> res3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { res1 = Plus__BuiltIn(a, b); res2 = Plus__BuiltIn(c, d); res3 = Plus__BuiltIn(res1, res2); return res3; } constexpr std::size_t lower_size_bound() const override { return 90; }; constexpr std::size_t upper_size_bound() const override { return 90; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
+        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> res1; LazyT<Int> res2; LazyT<Int> res3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { res1 = ensure_lazy(Plus__BuiltIn(a, b)); res2 = ensure_lazy(Plus__BuiltIn(c, d)); res3 = ensure_lazy(Plus__BuiltIn(res1, res2)); return ensure_lazy(res3); } constexpr std::size_t lower_size_bound() const override { return 90; }; constexpr std::size_t upper_size_bound() const override { return 90; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
         "four way plus"
     )]
     #[test_case(
@@ -1493,20 +1550,12 @@ mod tests {
             name: Name::from("Adder"),
             arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: vec![
-                Declaration{
-                    memory: Memory(Id::from("y")),
-                    type_: AtomicType(AtomicTypeEnum::INT).into(),
-                }.into(),
                 Assignment {
                     target: Memory(Id::from("y")),
                     value: ElementAccess{
                         idx: 0,
                         value: Memory(Id::from("env")).into()
                     }.into(),
-                }.into(),
-                Declaration{
-                    memory: Memory(Id::from("inner_res")),
-                    type_: AtomicType(AtomicTypeEnum::INT).into(),
                 }.into(),
                 Assignment {
                     target: Memory(Id::from("inner_res")),
@@ -1533,7 +1582,7 @@ mod tests {
             size_bounds: (50, 80),
             is_recursive: false
         },
-        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { LazyT<Int> y; LazyT<Int> inner_res; y = load_env(std::get<0ULL>(env)); inner_res = Plus__BuiltIn(x, y); return inner_res; } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(x, y); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
         "adder closure"
     )]
     #[test_case(
@@ -1570,7 +1619,7 @@ mod tests {
             size_bounds: (150, 150),
             is_recursive: true
         },
-        "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { LazyT<Int> y; if (y==decltype(y){}){ WorkT work; std::tie(work,y) = Work::fn_call(f->value(),x); WorkManager::enqueue(work);} return y;} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
+        "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { LazyT<Int> y; if (y==decltype(y){}){ WorkT work; std::tie(work,y) = Work::fn_call(f->value(),x); process(work);} return ensure_lazy(y);} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
         "higher order fn"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1665,7 +1714,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call=Plus__BuiltIn(x,y); return call;} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { x=make_lazy<Int>(9LL); y=make_lazy<Int>(5LL); if(main == decltype(main){}) {WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); WorkManager::enqueue(work);} return main; } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
+        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call = ensure_lazy(Plus__BuiltIn(x,y)); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; if(main == decltype(main){}) {WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); process(work);} return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

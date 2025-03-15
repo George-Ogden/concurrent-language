@@ -15,7 +15,7 @@
 #include <utility>
 
 template <typename Ret, typename... Args>
-LazyT<Ret> WorkManager::run(FnT<Ret, Args...> fn, LazyT<Args>...args) {
+LazyT<Ret> WorkManager::run(FnT<Ret, Args...> fn, Args...args) {
     auto [work, result] = Work::fn_call(fn, args...);
     std::atomic<WorkT> ref{work};
     WorkRunner::num_cpus = ThreadManager::available_concurrency();
@@ -42,8 +42,8 @@ std::monostate WorkManager::main(std::atomic<WorkT> *ref) {
 }
 
 template <typename... Vs>
-void WorkManager::await(Vs &...vs) {
-    runners[ThreadManager::get_id()]->await(vs...);
+auto WorkManager::await(Vs &...vs) {
+    return runners[ThreadManager::get_id()]->await(vs...);
 }
 
 template <typename... Vs>

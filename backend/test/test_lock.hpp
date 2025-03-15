@@ -154,6 +154,7 @@ TEST(LockWrapperTest, LockWrapperPointer) {
 }
 
 TEST(LockWrapperTest, LockWrapperLock) {
+    ThreadManager::register_self(0);
     Locked<bool> x;
     x.acquire();
     ASSERT_TRUE(x.lock.held());
