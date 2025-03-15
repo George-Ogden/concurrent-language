@@ -46,42 +46,12 @@ void Work::add_continuation(Continuation c) {
     }
 }
 
-bool Work::prioritize(){
-    if (status.priority()) return false;
-    dependencies.acquire();
-    if (status.prioritize()){
-        for (std::weak_ptr<LazyValue> weak_dependency : *dependencies){
-            std::shared_ptr<LazyValue> dependency = weak_dependency.lock();
-            if (dependency != nullptr){
-                dependency->require();
-            }
-        }
-        dependencies.release();
-        return true;
-    } else {
-        dependencies.release();
-        return false;
-    }
-}
-
 void Work::add_dependencies(std::initializer_list<std::shared_ptr<LazyValue>>&& dependencies){
-    if (status.priority()) {
-        for (std::shared_ptr<LazyValue> dependency: dependencies){
-            dependency->require();
-        }
-    } else {
-        this->dependencies.acquire();
-        if (status.priority()){
-            for (std::shared_ptr<LazyValue> dependency : dependencies){
-                dependency->require();
-            }
-        } else {
-            for (std::shared_ptr<LazyValue> dependency: dependencies){
-                this->dependencies->push_back(dependency);
-            }
-        }
-        this->dependencies.release();
+    this->dependencies.acquire();
+    for (std::shared_ptr<LazyValue> dependency: dependencies){
+        this->dependencies->push_back(dependency);
     }
+    this->dependencies.release();
 }
 
 template <typename T, typename U>

@@ -13,7 +13,7 @@
 
 struct Work;
 struct LazyValue {
-    virtual void require() = 0;
+    virtual void get_work(std::vector<std::shared_ptr<Work>> &work) = 0;
     virtual ~LazyValue();
 };
 
@@ -22,7 +22,7 @@ template <typename T> struct Lazy : LazyValue {
     virtual T value() = 0;
     virtual T &lvalue() = 0;
     virtual void add_continuation(Continuation c) = 0;
-    virtual void require() override;
+    virtual void get_work(std::vector<std::shared_ptr<Work>> &work) override;
     virtual std::shared_ptr<Lazy<T>> as_ref();
 };
 
@@ -40,7 +40,6 @@ template <typename T> class LazyConstant : public Lazy<T> {
 template <typename T> class LazyPlaceholder : public Lazy<T> {
     std::atomic<std::shared_ptr<Lazy<T>>> reference = nullptr;
     std::atomic<std::shared_ptr<Work>> work;
-    bool required = false;
     Locked<std::vector<Continuation>> continuations;
 
   public:
@@ -50,7 +49,7 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     bool done() override;
     T value() override;
     T &lvalue() override;
-    void require() override;
+    virtual void get_work(std::vector<std::shared_ptr<Work>> &work) override;
     std::shared_ptr<Lazy<T>> as_ref() override;
 };
 

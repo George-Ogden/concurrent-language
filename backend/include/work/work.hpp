@@ -37,7 +37,6 @@ class Work {
     void add_continuation(Continuation c);
     void add_dependencies(
         std::initializer_list<std::shared_ptr<LazyValue>> &&dependencies);
-    bool prioritize();
 };
 
 using WorkT = std::shared_ptr<Work>;
