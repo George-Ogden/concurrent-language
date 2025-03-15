@@ -187,7 +187,7 @@ impl Translator {
                 } else {
                     format!("{}->value(),{}", id, args_code)
                 };
-                format!("if ({target} == decltype({target}){{}}) {{ WorkT work; std::tie(work, {target}) = Work::fn_call({call_code}); WorkManager::enqueue(work); }}")
+                format!("if ({target} == decltype({target}){{}}) {{ WorkT work; std::tie(work, {target}) = Work::fn_call({call_code}); process(work); }}")
             }
         }
     }
@@ -964,7 +964,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (res == decltype(res){}) { WorkT work; std::tie(work, res) = Work::fn_call(call->value()); WorkManager::enqueue(work); }";
+        "if (res == decltype(res){}) { WorkT work; std::tie(work, res) = Work::fn_call(call->value()); process(work); }";
         "custom fn call no args"
     )]
     #[test_case(
@@ -985,7 +985,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "if (call2 == decltype(call2){}) { WorkT work; std::tie(work, call2) = Work::fn_call(call1->value(), arg1, arg2); WorkManager::enqueue(work); }";
+        "if (call2 == decltype(call2){}) { WorkT work; std::tie(work, call2) = Work::fn_call(call1->value(), arg1, arg2); process(work); }";
         "custom fn call"
     )]
     #[test_case(
@@ -1619,7 +1619,7 @@ mod tests {
             size_bounds: (150, 150),
             is_recursive: true
         },
-        "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { LazyT<Int> y; if (y==decltype(y){}){ WorkT work; std::tie(work,y) = Work::fn_call(f->value(),x); WorkManager::enqueue(work);} return ensure_lazy(y);} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
+        "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { LazyT<Int> y; if (y==decltype(y){}){ WorkT work; std::tie(work,y) = Work::fn_call(f->value(),x); process(work);} return ensure_lazy(y);} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
         "higher order fn"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1714,7 +1714,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call = ensure_lazy(Plus__BuiltIn(x,y)); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; if(main == decltype(main){}) {WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); WorkManager::enqueue(work);} return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
+        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call = ensure_lazy(Plus__BuiltIn(x,y)); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; if(main == decltype(main){}) {WorkT work; std::tie(work,main) = Work::fn_call(Main->value()); process(work);} return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
