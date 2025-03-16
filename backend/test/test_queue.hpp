@@ -193,6 +193,14 @@ TEST_P(QueueTest, TestQueue) {
     ASSERT_EQ(total, 1000 * 999 / 2 * num_cpus);
 }
 
+TEST(QueueTest, TestQueueReference) {
+    ThreadManager::register_self(0);
+    CyclicQueue<unsigned> queue{1};
+    auto &x = queue.push(0);
+    x++;
+    ASSERT_EQ(queue.pop(), 1);
+}
+
 std::vector<unsigned> queue_test_cpu_counts = {1, 2, 3, 4, 6, 8};
 INSTANTIATE_TEST_SUITE_P(QueueTests, QueueTest,
                          ::testing::ValuesIn(queue_test_cpu_counts));

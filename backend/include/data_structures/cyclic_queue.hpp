@@ -22,7 +22,7 @@ template <typename T> class CyclicQueue {
     size_t max_size() const;
     size_t size() const;
     bool empty() const;
-    void push(const T &value);
-    void push(T &&value);
+    T &push(const T &value);
+    T &push(T &&value);
     std::optional<T> pop();
 };
