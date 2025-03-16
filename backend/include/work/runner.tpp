@@ -3,12 +3,14 @@
 #include "lazy/fns.hpp"
 #include "work/runner.hpp"
 #include "system/work_manager.tpp"
+#include "work/comparator.hpp"
 
 #include <atomic>
 #include <functional>
 #include <chrono>
 #include <memory>
 #include <deque>
+#include <optional>
 
 using namespace std::chrono_literals;
 
@@ -17,82 +19,18 @@ WorkRunner::WorkRunner(const ThreadManager::ThreadId &id):id(id){}
 void WorkRunner::main(std::atomic<WorkT> *ref){
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
     if (work != nullptr) {
-        current_work = work;
         work->run();
         work->await_all();
         done_flag.store(true, std::memory_order_release);
     } else {
         while (!done_flag.load(std::memory_order_acquire)) {
-            work = get_work();
-            if (work == nullptr) {
-                continue;
-            }
-            current_work = work;
             try {
-                work->run();
-            } catch (finished &e) {
+                active_wait();
+            } catch (finished &f){
                 break;
             }
         }
     }
-
-}
-
-void WorkRunner::enqueue(WorkT work) {
-    if (work->status.release()){
-        WorkRunner::shared_work_queue.acquire();
-        WorkRunner::shared_work_queue->push_back(work);
-        WorkRunner::shared_work_queue.release();
-    } else {
-        private_work_stack.acquire();
-        private_work_stack->push_back(work);
-        private_work_stack.release();
-    }
-}
-
-WorkT WorkRunner::get_work() {
-    for (std::size_t offset = 0; offset < (num_cpus << 1); offset ++){
-        std::size_t gray_code = (offset>>1)^offset;
-        ThreadManager::ThreadId idx = offset ^ gray_code;
-        if (idx < num_cpus){
-            Locked<std::deque<WorkT>> &stack = offset == 0 ? private_work_stack : WorkManager::runners[idx]->private_work_stack;
-            if (offset == 0){
-                stack.acquire();
-                if (stack->empty()) {
-                    stack.release();
-                } else {
-                    WorkT work = stack->back();
-                    stack->pop_back();
-                    stack.release();
-                    return work;
-                }
-            } else if (!stack->empty() && stack.try_acquire()){
-                if (stack->empty()) {
-                    stack.release();
-                } else {
-                    WorkT work = stack->back();
-                    stack->pop_back();
-                    stack.release();
-                    return work;
-                }
-            }
-        }
-    }
-
-    Locked<std::deque<WeakWorkT>> &queue = shared_work_queue;
-    if (!queue->empty()){
-        queue.acquire();
-        while (!queue->empty()) {
-            WorkT work = queue->front().lock();
-            queue->pop_front();
-            if (work != nullptr && work->status.acquire()){
-                queue.release();
-                return work;
-            }
-        }
-        queue.release();
-    }
-    return nullptr;
 }
 
 template <typename T>
@@ -154,10 +92,31 @@ void WorkRunner::await_restricted(Vs &...vs) {
     Locked<bool> *valid = new Locked<bool>{true};
     Continuation c{remaining, counter, valid};
     (vs->add_continuation(c), ...);
-    current_work->add_dependencies({vs...});
+    std::vector<WorkT> works;
+    (vs->get_work(works), ...);
+    std::size_t i = 0;
+    bool sorted = false;
     while (!done_flag.load(std::memory_order_acquire))
     {
-        WorkT work = get_work();
+        while (i < works.size() - 1 && any_unfulfilled_requests()){
+            if (!sorted){
+                std::sort(works.begin() + i, works.end(), WorkSizeComparator());
+                sorted = true;
+            }
+            if (works.back()->can_fulfill_request()){
+                auto receiver = get_receiver();
+                if (receiver.has_value()){
+                    (*receiver)->store(works.back(), std::memory_order_relaxed);
+                    works.pop_back();
+                }
+            }
+        }
+        if (i >= works.size()){
+            active_wait();
+            continue;
+        }
+
+        WorkT &work = works[i];
         if (break_on_work(work, c)){
             if (done_flag.load(std::memory_order_acquire)){
                 break;
@@ -165,20 +124,42 @@ void WorkRunner::await_restricted(Vs &...vs) {
             while (!all_done(vs...)) {}
             return;
         }
+        i++;
     }
     throw finished{};
 };
 
+bool WorkRunner::any_unfulfilled_requests() const {
+    return !work_request_queue.empty();
+}
+
+void WorkRunner::active_wait(){
+    WorkT work = request_work();
+    work->run();
+}
+
+WorkT WorkRunner::request_work() const {
+    std::atomic<WorkT> work{nullptr};
+    work_request_queue.push(&work);
+    while (work.load(std::memory_order_relaxed) == nullptr) {
+        if (done_flag.load(std::memory_order_relaxed)){
+            throw finished{};
+        }
+    }
+    return work.load(std::memory_order_relaxed);
+}
+
+std::optional<std::atomic<WorkT>*> WorkRunner::get_receiver() const {
+    return work_request_queue.pop();
+}
+
 bool WorkRunner::break_on_work(WorkT &work, Continuation &c){
-    const WorkT prev_work = current_work;
     try {
         if (c.counter.load(std::memory_order_relaxed) > 0) {
             throw stack_inversion{};
         }
         if (work != nullptr) {
-            current_work = work;
             work->run();
-            current_work = prev_work;
         }
         return false;
     } catch (stack_inversion &e) {
@@ -187,14 +168,13 @@ bool WorkRunner::break_on_work(WorkT &work, Continuation &c){
         **c.valid = false;
         c.valid->release();
         if (work != nullptr && !work->done()){
-            enqueue(work);
+            // process(work);
         }
         if (!was_valid) {
             delete c.valid;
         }
         c.counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
 
-        current_work = prev_work;
         if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0) {
             return true;
         }

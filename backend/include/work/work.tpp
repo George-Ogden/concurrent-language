@@ -46,14 +46,6 @@ void Work::add_continuation(Continuation c) {
     }
 }
 
-void Work::add_dependencies(std::initializer_list<std::shared_ptr<LazyValue>>&& dependencies){
-    this->dependencies.acquire();
-    for (std::shared_ptr<LazyValue> dependency: dependencies){
-        this->dependencies->push_back(dependency);
-    }
-    this->dependencies.release();
-}
-
 template <typename T, typename U>
 void Work::assign(T &targets, U &results) {
     lazy_dual_map([](auto target, auto result) {
@@ -84,4 +76,17 @@ void TypedWork<Ret, Args...>::await_all() {
     auto vs = lazy_map([](auto target) -> LazyT<remove_lazy_t<remove_shared_ptr_t<decltype(target)>>>
                        { return target.lock(); }, targets);
     WorkManager::await_all(vs);
+}
+
+bool operator<(const Work& a, const Work& b) {
+    return a.size() < b.size();
+}
+
+bool Work::can_fulfill_request() const {
+    return size() > 50;
+}
+
+template <typename Ret, typename... Args>
+std::size_t TypedWork<Ret, Args...>::size() const {
+    return fn->lower_size_bound() + fn->upper_size_bound();
 }

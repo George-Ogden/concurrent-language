@@ -51,14 +51,34 @@ TEST_F(WorkTest, CorrectValue) {
 
 class WorkStatusTest : public WorkTest {};
 
-TEST_F(WorkStatusTest, QueuedStatus) {
-    WorkRunner::shared_work_queue->clear();
-    ASSERT_TRUE(work->status.acquire());
-    auto n = work.use_count();
-    WorkManager::enqueue(work);
-    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 1);
-    ASSERT_EQ(work.use_count(), n);
-}
+// TEST_F(WorkStatusTest, QueuedStatus) {
+//     WorkRunner::shared_work_queue->clear();
+//     ASSERT_TRUE(work->status.acquire());
+//     auto n = work.use_count();
+//     WorkManager::enqueue(work);
+//     ASSERT_EQ(WorkRunner::shared_work_queue->size(), 1);
+//     ASSERT_EQ(work.use_count(), n);
+// }
+
+// TEST_F(WorkStatusTest, RequiredAcquiredQueuedStatus) {
+//     WorkRunner::shared_work_queue->clear();
+//     ASSERT_TRUE(work->status.prioritize());
+//     ASSERT_TRUE(work->status.acquire());
+//     auto n = work.use_count();
+//     WorkManager::enqueue(work);
+//     ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
+//     ASSERT_EQ(work.use_count(), n + 1);
+// }
+
+// TEST_F(WorkStatusTest, AcquiredRequiredQueuedStatus) {
+//     WorkRunner::shared_work_queue->clear();
+//     ASSERT_TRUE(work->status.acquire());
+//     ASSERT_TRUE(work->status.prioritize());
+//     auto n = work.use_count();
+//     WorkManager::enqueue(work);
+//     ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
+//     ASSERT_EQ(work.use_count(), n + 1);
+// }
 
 struct LazyWorkTest : WorkTest {};
 
@@ -84,79 +104,135 @@ TEST_F(LazyWorkTest, GetLazyDoneWork) {
 
 struct WorkDependencyTest : WorkTest {};
 
-TEST_F(WorkDependencyTest, Empty) { work->add_dependencies({}); }
+// TEST_F(WorkDependencyTest, Empty) {
+//     work->add_dependencies({});
+// }
 
-struct WorkRunnerPriorityPropagationTest : WorkStatusTest {
-  protected:
-    void SetUp() override {
-        WorkStatusTest::SetUp();
-        WorkRunner::shared_work_queue->clear();
-        WorkRunner::done_flag = false;
-        WorkRunner::num_cpus = ThreadManager::available_concurrency();
-    }
-};
+// TEST_F(WorkDependencyTest, Nullptrs) {
+//     std::shared_ptr<RequiredValue> v1 = std::make_shared<RequiredValue>();
+//     std::shared_ptr<RequiredValue> v3 = std::make_shared<RequiredValue>();
+//     {
+//         std::shared_ptr<RequiredValue> v2 =
+//         std::make_shared<RequiredValue>(); work->add_dependencies({v1, v2});
+//         ASSERT_FALSE(v1->required);
+//         ASSERT_FALSE(v2->required);
+//     }
+//     work->add_dependencies({v3});
+//     ASSERT_TRUE(v1->required);
+//     ASSERT_TRUE(v3->required);
+// }
 
-class PriorityChecker
-    : public TypedClosureI<TupleT<WorkT *, bool, std::function<void()>>, Int> {
-    using TypedClosureI<TupleT<WorkT *, bool, std::function<void()>>,
-                        Int>::TypedClosureI;
-    LazyT<Int> body() override {
-        auto [work, priority, f] = env;
-        f->value()();
-        priority->lvalue() = (*work->value())->status.priority();
-        return make_lazy<Int>(0);
-    }
+// struct WorkRunnerPriorityPropagationTest : WorkStatusTest {
+//   protected:
+//     void SetUp() override {
+//         WorkStatusTest::SetUp();
+//         WorkRunner::shared_work_queue->clear();
 
-  public:
-    static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args,
-                                               const EnvT &env) {
-        return std::make_unique<PriorityChecker>(args, env);
-    }
-    constexpr std::size_t lower_size_bound() const override { return 0; };
-    constexpr std::size_t upper_size_bound() const override { return 0; };
-    constexpr bool is_recursive() const override { return false; };
-};
+//         WorkRunner::done_flag = false;
+//         WorkRunner::num_cpus = ThreadManager::available_concurrency();
+//     }
+// };
 
-struct WorkRunnerCurrentWorkOverrider : WorkRunner {
-    void set_current_work(WorkT work) { current_work = work; }
-};
+// class PriorityChecker
+//     : public TypedClosureI<TupleT<WorkT *, bool, std::function<void()>>, Int>
+//     { using TypedClosureI<TupleT<WorkT *, bool, std::function<void()>>,
+//                         Int>::TypedClosureI;
+//     LazyT<Int> body() override {
+//         auto [work, priority, f] = env;
+//         f->value()();
+//         priority->lvalue() = (*work->value())->status.priority();
+//         return make_lazy<Int>(0);
+//     }
 
-TEST_F(WorkRunnerPriorityPropagationTest, LowPriority) {
-    WorkRunner::shared_work_queue->clear();
-    WorkRunner::done_flag = false;
-    WorkRunner::num_cpus = ThreadManager::available_concurrency();
-    WorkT indirect_work, direct_work;
-    LazyT<Int> v1, v2;
-    typename PriorityChecker::EnvT env = std::make_tuple(
-        make_lazy<WorkT *>(&indirect_work),
-        std::make_shared<LazyConstant<bool>>(
-            false), // bypass value cache when changing value
-        make_lazy<std::function<void()>>(std::function<void()>([]() {})));
+//   public:
+//     static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args,
+//                                                const EnvT &env) {
+//         return std::make_unique<PriorityChecker>(args, env);
+//     }
+//     constexpr std::size_t lower_size_bound() const override { return 0; };
+//     constexpr std::size_t upper_size_bound() const override { return 0; };
+//     constexpr bool is_recursive() const override { return false; };
+// };
 
-    FnT<Int> fn =
-        std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
-            PriorityChecker::init, env);
-    std::tie(indirect_work, v1) = Work::fn_call(fn);
-    WorkManager::enqueue(indirect_work);
+// struct WorkRunnerCurrentWorkOverrider : WorkRunner {
+//     void set_current_work(WorkT work) { current_work = work; }
+// };
 
-    std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
+// TEST_F(WorkRunnerPriorityPropagationTest, LowPriority) {
+//     WorkRunner::shared_work_queue->clear();
+//     WorkRunner::done_flag = false;
+//     WorkRunner::num_cpus = ThreadManager::available_concurrency();
+//     WorkT indirect_work, direct_work;
+//     LazyT<Int> v1, v2;
+//     typename PriorityChecker::EnvT env = std::make_tuple(
+//         make_lazy<WorkT *>(&indirect_work),
+//         std::make_shared<LazyConstant<bool>>(
+//             false), // bypass value cache when changing value
+//         make_lazy<std::function<void()>>(std::function<void()>([]() {})));
 
-    ASSERT_FALSE(indirect_work->status.priority());
-    ASSERT_FALSE(direct_work->status.priority());
-    ASSERT_FALSE(indirect_work->status.done());
-    ASSERT_FALSE(direct_work->status.done());
+//     FnT<Int> fn =
+//         std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
+//             PriorityChecker::init, env);
+//     std::tie(indirect_work, v1) = Work::fn_call(fn);
+//     WorkManager::enqueue(indirect_work);
 
-    static_cast<WorkRunnerCurrentWorkOverrider *>(WorkManager::runners[0].get())
-        ->set_current_work(direct_work);
-    direct_work->run();
+//     std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
 
-    ASSERT_EQ(v2->value(), 1);
-    ASSERT_FALSE(std::get<1>(env)->value());
-    ASSERT_TRUE(direct_work->status.done());
-    ASSERT_TRUE(indirect_work->status.done());
-    ASSERT_FALSE(direct_work->status.priority());
-    ASSERT_FALSE(indirect_work->status.priority());
-}
+//     ASSERT_FALSE(indirect_work->status.priority());
+//     ASSERT_FALSE(direct_work->status.priority());
+//     ASSERT_FALSE(indirect_work->status.done());
+//     ASSERT_FALSE(direct_work->status.done());
+
+//     static_cast<WorkRunnerCurrentWorkOverrider
+//     *>(WorkManager::runners[0].get())
+//         ->set_current_work(direct_work);
+//     direct_work->run();
+
+//     ASSERT_EQ(v2->value(), 1);
+//     ASSERT_FALSE(std::get<1>(env)->value());
+//     ASSERT_TRUE(direct_work->status.done());
+//     ASSERT_TRUE(indirect_work->status.done());
+//     ASSERT_FALSE(direct_work->status.priority());
+//     ASSERT_FALSE(indirect_work->status.priority());
+// }
+
+// TEST_F(WorkRunnerPriorityPropagationTest, HighPriority) {
+//     WorkRunner::shared_work_queue->clear();
+//     WorkT indirect_work, direct_work;
+//     LazyT<Int> v1, v2;
+//     auto env =
+//         std::make_tuple(make_lazy<WorkT *>(&indirect_work),
+//                         std::make_shared<LazyConstant<bool>>(
+//                             false), // bypass value cache when changing value
+//                         make_lazy<std::function<void()>>(
+//                             std::function<void()>([&v2]() { v2->require();
+//                             })));
+
+//     FnT<Int> fn =
+//         std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
+//             PriorityChecker::init, env);
+//     std::tie(indirect_work, v1) = Work::fn_call(fn);
+//     WorkManager::enqueue(indirect_work);
+
+//     std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
+
+//     ASSERT_FALSE(indirect_work->status.priority());
+//     ASSERT_FALSE(direct_work->status.priority());
+//     ASSERT_FALSE(indirect_work->status.done());
+//     ASSERT_FALSE(direct_work->status.done());
+
+//     static_cast<WorkRunnerCurrentWorkOverrider
+//     *>(WorkManager::runners[0].get())
+//         ->set_current_work(direct_work);
+//     direct_work->run();
+
+//     ASSERT_EQ(v2->value(), 1);
+//     ASSERT_TRUE(std::get<1>(env)->value());
+//     ASSERT_TRUE(direct_work->status.done());
+//     ASSERT_TRUE(indirect_work->status.done());
+//     ASSERT_TRUE(direct_work->status.priority());
+//     ASSERT_TRUE(indirect_work->status.priority());
+// }
 
 class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
     using TypedClosureI<Empty, TupleT<Int, Int>, Int, Int>::TypedClosureI;

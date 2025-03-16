@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data_structures/cyclic_queue.hpp"
 #include "data_structures/lock.hpp"
 #include "fn/continuation.tpp"
 #include "system/thread_manager.tpp"
@@ -8,28 +9,26 @@
 #include <atomic>
 #include <deque>
 #include <exception>
+#include <optional>
 
-class StackSeparation;
 struct WorkRunner {
     friend class WorkManager;
-    friend class StackSeparation;
     explicit WorkRunner(const ThreadManager::ThreadId &id);
 
     static inline unsigned num_cpus;
     ThreadManager::ThreadId id;
-    static inline Locked<std::deque<WeakWorkT>> shared_work_queue;
     static inline std::atomic<bool> done_flag;
+    static inline CyclicQueue<std::atomic<WorkT> *> work_request_queue;
 
   protected:
     std::atomic<unsigned> counter;
-    Locked<std::deque<WorkT>> private_work_stack;
-    WorkT current_work;
 
     void main(std::atomic<WorkT> *ref);
-
-    WorkT get_work();
-    void enqueue(WorkT work);
+    void active_wait();
     bool break_on_work(WorkT &work, Continuation &c);
+    bool any_unfulfilled_requests() const;
+    WorkT request_work() const;
+    std::optional<std::atomic<WorkT> *> get_receiver() const;
 
     template <typename... Vs> void await_restricted(Vs &...vs);
     template <typename... Vs> bool all_done(Vs &&...vs);

@@ -10,7 +10,6 @@
 #include "work/status.hpp"
 
 #include <atomic>
-#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -18,7 +17,6 @@
 class Work {
   protected:
     Locked<std::vector<Continuation>> continuations;
-    Locked<std::vector<std::weak_ptr<LazyValue>>> dependencies;
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
@@ -35,8 +33,10 @@ class Work {
                                     LazyT<Ret>> fn_call(FnT<Ret, Args...> f,
                                                         ArgsT... args);
     void add_continuation(Continuation c);
-    void add_dependencies(
-        std::initializer_list<std::shared_ptr<LazyValue>> &&dependencies);
+
+    virtual std::size_t size() const = 0;
+    bool can_fulfill_request() const;
+    friend bool operator<(const Work &a, const Work &b);
 };
 
 using WorkT = std::shared_ptr<Work>;
@@ -50,4 +50,5 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
   public:
     void run() override;
     void await_all() override;
+    std::size_t size() const override;
 };
