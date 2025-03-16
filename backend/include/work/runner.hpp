@@ -2,7 +2,6 @@
 
 #include "data_structures/cyclic_queue.hpp"
 #include "data_structures/lock.hpp"
-#include "fn/continuation.tpp"
 #include "system/thread_manager.tpp"
 #include "work/work.hpp"
 
@@ -26,7 +25,6 @@ struct WorkRunner {
 
     void main(std::atomic<WorkT> *ref);
     void active_wait();
-    bool break_on_work(WorkT &work, Continuation &c);
     bool any_requests() const;
     WorkT request_work() const;
     std::optional<std::atomic<WorkT> *> get_receiver() const;

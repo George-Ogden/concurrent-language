@@ -2,7 +2,6 @@
 
 #include "work/work.hpp"
 #include "work/status.tpp"
-#include "fn/continuation.tpp"
 #include "fn/types.hpp"
 #include "fn/fn_inst.tpp"
 #include "lazy/lazy.tpp"
@@ -35,17 +34,6 @@ Work::fn_call(FnT<Ret, Args...> f, ArgsT... args) {
     return std::make_pair(work, placeholders);
 }
 
-void Work::add_continuation(Continuation c) {
-    continuations.acquire();
-    if (done()) {
-        continuations.release();
-        c.update();
-    } else {
-        continuations->push_back(c);
-        continuations.release();
-    }
-}
-
 template <typename T, typename U>
 void Work::assign(T &targets, U &results) {
     lazy_dual_map([](auto target, auto result) {
@@ -62,13 +50,7 @@ void TypedWork<Ret, Args...>::run() {
     }
     LazyT<Ret> results = fn->run();
     assign(targets, results);
-    this->continuations.acquire();
-    for (Continuation &c : *this->continuations) {
-        c.update();
-    }
-    this->continuations->clear();
     this->status.finish();
-    this->continuations.release();
 }
 
 template <typename Ret, typename... Args>

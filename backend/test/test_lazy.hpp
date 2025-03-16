@@ -59,36 +59,6 @@ TEST(ExtractLazyTest, MixedTuple) {
     ASSERT_EQ(std::get<0>(std::get<1>(y)), -3);
 }
 
-TEST_F(LazyConstantTest, UnfinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    x->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(**valid, true);
-    delete valid;
-    delete remaining;
-}
-
-TEST_F(LazyConstantTest, FinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    x->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
-    ASSERT_EQ(**valid, false);
-    delete valid;
-}
-
-TEST_F(LazyConstantTest, InvalidFinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{false};
-    x->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-}
-
 TEST(LazyCacheTest, BooleanCache) {
     LazyT<Bool> t0 = make_lazy<Bool>(true);
     LazyT<Bool> t1 = make_lazy<Bool>(true);

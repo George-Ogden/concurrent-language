@@ -2,7 +2,6 @@
 
 #include "lazy/lazy.hpp"
 #include "types/utils.hpp"
-#include "fn/continuation.tpp"
 #include "work/work.tpp"
 #include "system/work_manager.tpp"
 
@@ -40,37 +39,13 @@ T& LazyConstant<T>::lvalue() {
 }
 
 template <typename T>
-void LazyConstant<T>::add_continuation(Continuation c) {
-    c.update();
-}
-
-template <typename T>
 LazyPlaceholder<T>::LazyPlaceholder(std::shared_ptr<Work> work)
     : work(work) {}
 
 template <typename T>
-void LazyPlaceholder<T>::add_continuation(Continuation c) {
-    continuations.acquire();
-    auto current_reference = reference.load(std::memory_order_relaxed);
-    if (current_reference == nullptr) {
-        continuations->push_back(c);
-        continuations.release();
-    } else {
-        continuations.release();
-        current_reference->add_continuation(c);
-    }
-}
-
-template <typename T>
 void LazyPlaceholder<T>::assign(std::shared_ptr<Lazy<T>> value) {
-    continuations.acquire();
-    for (Continuation &c : *continuations) {
-        value->add_continuation(c);
-    }
-    continuations->clear();
     reference.store(value, std::memory_order_relaxed);
     work.store(nullptr, std::memory_order_relaxed);
-    continuations.release();
 }
 
 template <typename T>
@@ -109,7 +84,7 @@ void LazyPlaceholder<T>::get_work(std::vector<WorkT> &work) {
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
         WorkT current_work = this->work.load(std::memory_order_relaxed);
-        if (current_work != nullptr && current_work->status.acquire()){
+        if (current_work != nullptr && !current_work->done()){
             work.emplace_back(current_work);
         }
     } else {

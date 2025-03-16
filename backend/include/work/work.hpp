@@ -1,7 +1,6 @@
 #pragma once
 
 #include "data_structures/lock.hpp"
-#include "fn/continuation.hpp"
 #include "fn/fn_inst.hpp"
 #include "fn/types.hpp"
 #include "lazy/types.hpp"
@@ -16,7 +15,6 @@
 
 class Work {
   protected:
-    Locked<std::vector<Continuation>> continuations;
     template <typename T, typename U> static void assign(T &targets, U &result);
 
   public:
@@ -32,7 +30,6 @@ class Work {
             &&...) static std::pair<std::shared_ptr<Work>,
                                     LazyT<Ret>> fn_call(FnT<Ret, Args...> f,
                                                         ArgsT... args);
-    void add_continuation(Continuation c);
 
     virtual std::size_t size() const = 0;
     bool can_respond() const;

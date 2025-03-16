@@ -24,9 +24,9 @@ bool Status::priority() const{
 }
 
 void Status::finish(){
-    value.store<DONE_IDX>(true);
+    value.store<DONE_IDX>(true, std::memory_order_release);
 }
 
 bool Status::done() const{
-    return value.load<DONE_IDX>();
+    return value.load<DONE_IDX>(std::memory_order_acquire);
 }

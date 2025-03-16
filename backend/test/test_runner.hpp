@@ -25,6 +25,7 @@ struct RunnerTest : public ::testing::Test {
         WorkManager::runners.emplace_back(
             std::make_unique<PublicWorkRunner>(1));
         WorkRunner::work_request_queue = CyclicQueue<std::atomic<WorkT> *>{2};
+        WorkRunner::done_flag.store(false);
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };

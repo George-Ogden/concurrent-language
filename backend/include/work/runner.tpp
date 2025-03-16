@@ -85,22 +85,17 @@ void WorkRunner::await_all(Vs &...vs) {
 
 template <typename... Vs>
 void WorkRunner::await_restricted(Vs &...vs) {
-    unsigned n = sizeof...(vs);
-    if (n == 0) {
+    constexpr unsigned n = sizeof...(vs);
+    if constexpr (n == 0) {
         return;
-    }
+    } else {
     if (all_done(vs...)){
         return;
     }
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{n};
-    Locked<bool> *valid = new Locked<bool>{true};
-    Continuation c{remaining, counter, valid};
-    (vs->add_continuation(c), ...);
     std::vector<WorkT> works;
     (vs->get_work(works), ...);
-    std::size_t i = 0;
     bool sorted = false;
-    while (!done_flag.load(std::memory_order_acquire))
+    for (std::size_t i = 0; !done_flag.load(std::memory_order_acquire);)
     {
         while (i < works.size() - 1 && any_requests()){
             if (!sorted){
@@ -113,23 +108,28 @@ void WorkRunner::await_restricted(Vs &...vs) {
                 }
             }
         }
-        if (i >= works.size()){
-            active_wait();
-            continue;
+        if (i < works.size()){
+            WorkT &work = works[i];
+            work->run();
+            i++;
+        } else {
+            works.clear();
+            i = 0;
+            (vs->get_work(works),...);
+            if (works.size() > 0){
+                continue;
+            } else {
+                active_wait();
+            }
         }
 
-        WorkT &work = works[i];
-        if (break_on_work(work, c)){
-            if (done_flag.load(std::memory_order_acquire)){
-                break;
-            }
-            while (!all_done(vs...)) {}
+        if (all_done(vs...)) {
             return;
         }
-        i++;
     }
     throw finished{};
 };
+}
 
 bool WorkRunner::any_requests() const {
     return !work_request_queue.empty();
@@ -163,35 +163,6 @@ bool WorkRunner::respond(WorkT &work) const {
 
 std::optional<std::atomic<WorkT>*> WorkRunner::get_receiver() const {
     return work_request_queue.pop();
-}
-
-bool WorkRunner::break_on_work(WorkT &work, Continuation &c){
-    try {
-        if (c.counter.load(std::memory_order_relaxed) > 0) {
-            throw stack_inversion{};
-        }
-        if (work != nullptr) {
-            work->run();
-        }
-        return false;
-    } catch (stack_inversion &e) {
-        c.valid->acquire();
-        bool was_valid = **c.valid;
-        **c.valid = false;
-        c.valid->release();
-        if (work != nullptr && !work->done()){
-            // process(work);
-        }
-        if (!was_valid) {
-            delete c.valid;
-        }
-        c.counter.fetch_sub(1 - was_valid, std::memory_order_relaxed);
-
-        if (!was_valid && c.counter.load(std::memory_order_relaxed) == 0) {
-            return true;
-        }
-        throw;
-    }
 }
 
 template <typename... Vs>
