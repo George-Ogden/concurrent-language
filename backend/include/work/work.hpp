@@ -44,6 +44,8 @@ using WeakWorkT = std::weak_ptr<Work>;
 
 template <typename Ret, typename... Args> class TypedWork : public Work {
     friend class Work;
+
+  protected:
     WeakLazyPlaceholdersT<Ret> targets;
     std::unique_ptr<TypedFnI<Ret, Args...>> fn;
 

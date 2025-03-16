@@ -3,6 +3,7 @@
 #include "lazy/fns.hpp"
 #include "work/runner.hpp"
 #include "system/work_manager.tpp"
+#include "data_structures/cyclic_queue.tpp"
 #include "work/comparator.hpp"
 
 #include <atomic>
@@ -13,6 +14,9 @@
 #include <optional>
 
 using namespace std::chrono_literals;
+
+std::atomic<bool> WorkRunner::done_flag;
+CyclicQueue<std::atomic<WorkT> *> WorkRunner::work_request_queue;
 
 WorkRunner::WorkRunner(const ThreadManager::ThreadId &id):id(id){}
 

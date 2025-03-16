@@ -17,8 +17,8 @@ struct WorkRunner {
 
     static inline unsigned num_cpus;
     ThreadManager::ThreadId id;
-    static inline std::atomic<bool> done_flag;
-    static inline CyclicQueue<std::atomic<WorkT> *> work_request_queue;
+    static std::atomic<bool> done_flag;
+    static CyclicQueue<std::atomic<WorkT> *> work_request_queue;
 
   protected:
     std::atomic<unsigned> counter;
