@@ -30,10 +30,7 @@ class Work {
             &&...) static std::pair<std::shared_ptr<Work>,
                                     LazyT<Ret>> fn_call(FnT<Ret, Args...> f,
                                                         ArgsT... args);
-
-    virtual std::size_t size() const = 0;
-    bool can_respond() const;
-    friend bool operator<(const Work &a, const Work &b);
+    virtual bool can_respond() const = 0;
 };
 
 using WorkT = std::shared_ptr<Work>;
@@ -49,5 +46,5 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
   public:
     void run() override;
     void await_all() override;
-    std::size_t size() const override;
+    bool can_respond() const override;
 };

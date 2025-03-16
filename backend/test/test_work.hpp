@@ -9,7 +9,6 @@
 #include "system/thread_manager.tpp"
 #include "system/work_manager.tpp"
 #include "types/compound.hpp"
-#include "work/comparator.hpp"
 #include "work/runner.tpp"
 #include "work/work.tpp"
 
@@ -90,26 +89,6 @@ struct ReferenceWork : TypedWork<Int> {
         this->fn = std::move(fn);
     };
 };
-
-TEST(WorkComparisonTest, WorkComparisonTest) {
-    ReferenceWork small_work{std::make_unique<SmallFn>()};
-    ReferenceWork large_work{std::make_unique<LargeFn>()};
-    ASSERT_TRUE(small_work < large_work);
-    ASSERT_FALSE(large_work < small_work);
-    ASSERT_FALSE(small_work < small_work);
-    ASSERT_FALSE(large_work < large_work);
-}
-
-TEST(WorkComparisonTest, WorkSizeComparatorTest) {
-    WorkT small_work =
-        std::make_shared<ReferenceWork>(std::make_unique<SmallFn>());
-    WorkT large_work =
-        std::make_shared<ReferenceWork>(std::make_unique<LargeFn>());
-    ASSERT_TRUE(WorkSizeComparator()(small_work, large_work));
-    ASSERT_FALSE(WorkSizeComparator()(large_work, small_work));
-    ASSERT_FALSE(WorkSizeComparator()(small_work, small_work));
-    ASSERT_FALSE(WorkSizeComparator()(large_work, large_work));
-}
 
 class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
     using TypedClosureI<Empty, TupleT<Int, Int>, Int, Int>::TypedClosureI;

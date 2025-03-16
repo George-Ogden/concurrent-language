@@ -3,7 +3,6 @@
 #include "data_structures/cyclic_queue.tpp"
 #include "lazy/fns.hpp"
 #include "system/work_manager.tpp"
-#include "work/comparator.hpp"
 #include "work/runner.hpp"
 
 #include <atomic>

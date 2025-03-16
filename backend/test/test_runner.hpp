@@ -33,7 +33,7 @@ struct RunnerTest : public ::testing::Test {
 struct DummyWork : Work {
     void run() override {}
     void await_all() override {}
-    std::size_t size() const override { return 0; }
+    bool can_respond() const override { return false; }
 };
 
 TEST_F(RunnerTest, RequestResponseTest) {

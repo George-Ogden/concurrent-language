@@ -60,15 +60,7 @@ void TypedWork<Ret, Args...>::await_all() {
     WorkManager::await_all(vs);
 }
 
-bool operator<(const Work& a, const Work& b) {
-    return a.size() < b.size();
-}
-
-bool Work::can_respond() const {
-    return size() > 50;
-}
-
 template <typename Ret, typename... Args>
-std::size_t TypedWork<Ret, Args...>::size() const {
-    return fn->lower_size_bound() + fn->upper_size_bound();
+bool TypedWork<Ret, Args...>::can_respond() const {
+    return fn->lower_size_bound() > 50 || fn->is_recursive();
 }
