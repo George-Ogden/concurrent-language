@@ -70,5 +70,7 @@ std::optional<T> CyclicQueue<T>::pop() {
     }
     T &data = get((*front)++);
     front.release();
-    return data;
+    T ret = data;
+    data = T{};
+    return ret;
 }

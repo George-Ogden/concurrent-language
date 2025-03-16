@@ -201,6 +201,14 @@ TEST(QueueTest, TestQueueReference) {
     ASSERT_EQ(queue.pop(), 1);
 }
 
+TEST(QueueTest, TestQueueReferenceDestroyed) {
+    ThreadManager::register_self(0);
+    CyclicQueue<unsigned> queue{1};
+    auto &x = queue.push(8);
+    queue.pop();
+    ASSERT_EQ(x, unsigned{});
+}
+
 std::vector<unsigned> queue_test_cpu_counts = {1, 2, 3, 4, 6, 8};
 INSTANTIATE_TEST_SUITE_P(QueueTests, QueueTest,
                          ::testing::ValuesIn(queue_test_cpu_counts));
