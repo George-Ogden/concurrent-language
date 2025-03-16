@@ -82,7 +82,7 @@ bool operator<(const Work& a, const Work& b) {
     return a.size() < b.size();
 }
 
-bool Work::can_fulfill_request() const {
+bool Work::can_respond() const {
     return size() > 50;
 }
 

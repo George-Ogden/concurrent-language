@@ -13,6 +13,7 @@
 
 struct WorkRunner {
     friend class WorkManager;
+    friend class RunnerTest;
     explicit WorkRunner(const ThreadManager::ThreadId &id);
 
     static inline unsigned num_cpus;
@@ -26,9 +27,10 @@ struct WorkRunner {
     void main(std::atomic<WorkT> *ref);
     void active_wait();
     bool break_on_work(WorkT &work, Continuation &c);
-    bool any_unfulfilled_requests() const;
+    bool any_requests() const;
     WorkT request_work() const;
     std::optional<std::atomic<WorkT> *> get_receiver() const;
+    bool respond(WorkT &work) const;
 
     template <typename... Vs> void await_restricted(Vs &...vs);
     template <typename... Vs> bool all_done(Vs &&...vs);

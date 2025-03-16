@@ -35,7 +35,7 @@ class Work {
     void add_continuation(Continuation c);
 
     virtual std::size_t size() const = 0;
-    bool can_fulfill_request() const;
+    bool can_respond() const;
     friend bool operator<(const Work &a, const Work &b);
 };
 

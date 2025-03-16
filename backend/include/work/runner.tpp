@@ -102,15 +102,13 @@ void WorkRunner::await_restricted(Vs &...vs) {
     bool sorted = false;
     while (!done_flag.load(std::memory_order_acquire))
     {
-        while (i < works.size() - 1 && any_unfulfilled_requests()){
+        while (i < works.size() - 1 && any_requests()){
             if (!sorted){
                 std::sort(works.begin() + i, works.end(), WorkSizeComparator());
                 sorted = true;
             }
-            if (works.back()->can_fulfill_request()){
-                auto receiver = get_receiver();
-                if (receiver.has_value()){
-                    (*receiver)->store(works.back(), std::memory_order_relaxed);
+            if (works.back()->can_respond()){
+                if (respond(works.back())) {
                     works.pop_back();
                 }
             }
@@ -133,7 +131,7 @@ void WorkRunner::await_restricted(Vs &...vs) {
     throw finished{};
 };
 
-bool WorkRunner::any_unfulfilled_requests() const {
+bool WorkRunner::any_requests() const {
     return !work_request_queue.empty();
 }
 
@@ -151,6 +149,16 @@ WorkT WorkRunner::request_work() const {
         }
     }
     return work.load(std::memory_order_relaxed);
+}
+
+bool WorkRunner::respond(WorkT &work) const {
+    auto receiver = get_receiver();
+    if (receiver.has_value()){
+        (*receiver)->store(work, std::memory_order_relaxed);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 std::optional<std::atomic<WorkT>*> WorkRunner::get_receiver() const {
