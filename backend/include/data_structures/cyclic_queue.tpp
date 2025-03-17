@@ -42,23 +42,19 @@ bool CyclicQueue<T>::empty() const {
 }
 
 template <typename T>
-T& CyclicQueue<T>::push(const T &value) {
+void CyclicQueue<T>::push(const T &value) {
     back.acquire();
     get(*back) = value;
-    auto &ref = get(*back);
     (*back)++;
     back.release();
-    return ref;
 }
 
 template <typename T>
-T& CyclicQueue<T>::push(T &&value) {
+void CyclicQueue<T>::push(T &&value) {
     back.acquire();
     get(*back) = std::move(value);
-    auto &ref = get(*back);
     (*back)++;
     back.release();
-    return ref;
 }
 
 template <typename T>
