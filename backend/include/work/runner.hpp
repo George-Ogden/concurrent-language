@@ -4,11 +4,13 @@
 #include "data_structures/lock.hpp"
 #include "system/thread_manager.tpp"
 #include "work/work.hpp"
+#include "work/work_request.hpp"
 
 #include <atomic>
-#include <deque>
 #include <exception>
+#include <functional>
 #include <optional>
+#include <vector>
 
 struct WorkRunner {
     friend class WorkManager;
@@ -18,16 +20,16 @@ struct WorkRunner {
     static inline unsigned num_cpus;
     ThreadManager::ThreadId id;
     static std::atomic<bool> done_flag;
-    static CyclicQueue<std::atomic<WorkT> *> work_request_queue;
+    static CyclicQueue<unsigned> work_request_queue;
+    static std::vector<std::unique_ptr<WorkRequest>> work_requests;
+    static void setup(unsigned num_cpus);
 
   protected:
     std::atomic<unsigned> counter;
 
     void main(std::atomic<WorkT> *ref);
-    void active_wait();
+    bool active_wait(std::function<bool()> predicate);
     bool any_requests() const;
-    WorkT request_work() const;
-    std::optional<std::atomic<WorkT> *> get_receiver() const;
     bool respond(WorkT &work) const;
 
     template <typename... Vs> void await_restricted(Vs &...vs);

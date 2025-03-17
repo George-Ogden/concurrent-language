@@ -28,12 +28,13 @@ class Status {
         return value.compare_exchange<WORK_IDX>(AVAILABLE, UNAVAILABLE);
     }
     bool fill() {
-        if (value.compare_exchange<WORK_IDX, WORK_IDX>(AVAILABLE, FULL)) {
-            value.store<QUEUE_IDX>(false);
-            return true;
-        } else {
-            value.store<QUEUE_IDX>(false);
-            return false;
+        while (1) {
+            if (value.compare_exchange<WORK_IDX, WORK_IDX>(AVAILABLE, FULL)) {
+                value.store<QUEUE_IDX>(false);
+                return true;
+            } else if (dequeue()) {
+                return false;
+            }
         }
     }
     bool complete() {

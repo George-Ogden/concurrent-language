@@ -1,7 +1,6 @@
 #pragma once
 
 #include "work/work.hpp"
-#include "work/status.tpp"
 #include "fn/types.hpp"
 #include "fn/fn_inst.tpp"
 #include "lazy/lazy.tpp"
@@ -19,7 +18,11 @@ Work::Work() = default;
 Work::~Work() = default;
 
 bool Work::done() const {
-    return status.done();
+    return done_flag.load(std::memory_order_acquire);
+}
+
+void Work::finish() {
+    done_flag.store(true, std::memory_order_release);
 }
 
 template <typename Ret, typename... Args, typename ... ArgsT>
@@ -45,12 +48,12 @@ void Work::assign(T &targets, U &results) {
 
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run() {
-    if (this->status.done()) {
+    if (done()) {
         return;
     }
     LazyT<Ret> results = fn->run();
     assign(targets, results);
-    this->status.finish();
+    finish();
 }
 
 template <typename Ret, typename... Args>

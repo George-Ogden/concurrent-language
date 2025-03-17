@@ -42,7 +42,6 @@ TEST_F(StatusTransitionTest, FillJob) {
     ASSERT_FALSE(status.unavailable());
     ASSERT_TRUE(status.full());
 
-    ASSERT_FALSE(status.fill());
     ASSERT_TRUE(status.complete());
 
     ASSERT_FALSE(status.queued());

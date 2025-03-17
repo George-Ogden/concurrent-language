@@ -57,7 +57,7 @@ static inline std::shared_ptr<Lazy<Bool>> lazy_false{null_shared_ptr,
 
 template <typename... Args>
 std::shared_ptr<Lazy<Bool>> make_lazy_bool(Args &&...args) {
-    if (Bool{args...}) {
+    if (Bool(args...)) {
         return lazy_true;
     } else {
         return lazy_false;

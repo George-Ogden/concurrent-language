@@ -4,15 +4,16 @@
 #include "lazy/fns.hpp"
 #include "system/work_manager.tpp"
 #include "work/runner.hpp"
+#include "work/work_request.tpp"
 
 #include <atomic>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
 
 std::atomic<bool> WorkRunner::done_flag;
-CyclicQueue<std::atomic<WorkT> *> WorkRunner::work_request_queue;
+CyclicQueue<unsigned> WorkRunner::work_request_queue;
+std::vector<std::unique_ptr<WorkRequest>> WorkRunner::work_requests;
 
 WorkRunner::WorkRunner(const ThreadManager::ThreadId &id) : id(id) {}
 
@@ -25,7 +26,7 @@ void WorkRunner::main(std::atomic<WorkT> *ref) {
     } else {
         while (!done_flag.load(std::memory_order_acquire)) {
             try {
-                active_wait();
+                active_wait(std::function<bool()>([](){return false;}));
             } catch (finished &f) {
                 break;
             }
@@ -100,8 +101,18 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                 large_works.pop_back();
                 work->run();
             } else {
-                (vs->get_work(extra_works), ...);
-                if (extra_works.size() > 0) {
+                auto predicate = [&](){
+                    if (all_done(vs...)){
+                        return true;
+                    }
+                    (vs->get_work(extra_works), ...);
+                    if (extra_works.size() > 0) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                };
+                if (predicate() || active_wait(std::function<bool()>(predicate))) {
                     for (WorkT &work : extra_works) {
                         if (work->can_respond()) {
                             large_works.emplace_back(std::move(work));
@@ -110,8 +121,6 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                         }
                     }
                     extra_works.clear();
-                } else {
-                    active_wait();
                 }
             }
 
@@ -125,36 +134,50 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
 
 bool WorkRunner::any_requests() const { return !work_request_queue.empty(); }
 
-void WorkRunner::active_wait() {
-    WorkT work = request_work();
-    work->run();
-}
-
-WorkT WorkRunner::request_work() const {
-    std::atomic<WorkT> work{nullptr};
-    work_request_queue.push(&work);
-    while (work.load(std::memory_order_relaxed) == nullptr) {
+bool WorkRunner::active_wait(std::function<bool()> predicate) {
+    WorkRequest &work_request = *work_requests[id];
+    if (work_request.enqueue()) {
+        work_request_queue.push(id);
+    } else if (work_request.full()){
+        work_request.fulfill();
+        return false;
+    }
+    while (!predicate()) {
+        if (work_request.full()){
+            work_request.fulfill();
+        }
         if (done_flag.load(std::memory_order_relaxed)) {
             throw finished{};
         }
     }
-    return work.load(std::memory_order_relaxed);
+    if (!work_request.cancel()){
+        assert(work_request.full());
+        work_request.fulfill();
+    }
+    return true;
 }
 
 bool WorkRunner::respond(WorkT &work) const {
-    auto receiver = get_receiver();
-    if (receiver.has_value()) {
-        (*receiver)->store(work, std::memory_order_relaxed);
-        return true;
+    auto idx = work_request_queue.pop();
+    if (idx.has_value()) {
+        WorkRequest &work_request = *work_requests[*idx];
+        return work_request.fill(work);
     } else {
         return false;
     }
 }
 
-std::optional<std::atomic<WorkT> *> WorkRunner::get_receiver() const {
-    return work_request_queue.pop();
-}
-
 template <typename... Vs> bool WorkRunner::all_done(Vs &&...vs) {
     return (... && vs->done());
+}
+
+void WorkRunner::setup(unsigned num_cpus) {
+    WorkRunner::num_cpus = num_cpus;
+    WorkRunner::done_flag = false;
+    WorkRunner::work_request_queue = CyclicQueue<unsigned>{num_cpus};
+    WorkRunner::work_requests.clear();
+    for (unsigned i = 0; i < num_cpus; i++){
+        work_requests.emplace_back(std::move(std::make_unique<WorkRequest>()));
+    }
+    WorkRunner::work_requests.resize(num_cpus);
 }

@@ -18,16 +18,15 @@ template <typename Ret, typename... Args>
 LazyT<Ret> WorkManager::run(FnT<Ret, Args...> fn, Args...args) {
     auto [work, result] = Work::fn_call(fn, args...);
     std::atomic<WorkT> ref{work};
-    WorkRunner::num_cpus = ThreadManager::available_concurrency();
-    ThreadManager::RunConfig config{WorkRunner::num_cpus, false};
-    WorkRunner::work_request_queue = CyclicQueue<std::atomic<WorkT>*>{WorkRunner::num_cpus};
+    auto num_cpus = ThreadManager::available_concurrency();
+    ThreadManager::RunConfig config{num_cpus, false};
+    WorkRunner::setup(num_cpus);
 
     runners = ranges::iota_view(static_cast<unsigned>(0), WorkRunner::num_cpus)
           | ranges::views::transform([](auto thread_id) { return std::make_unique<WorkRunner>(thread_id); })
           | ranges::to<std::vector>();
 
 
-    WorkRunner::done_flag.store(false, std::memory_order_release);
     ThreadManager::run_multithreaded(main, &ref, config);
     return result;
 }

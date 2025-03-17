@@ -16,14 +16,15 @@
 class Work {
   protected:
     template <typename T, typename U> static void assign(T &targets, U &result);
+    std::atomic<bool> done_flag;
 
   public:
-    Status status;
     Work();
     virtual ~Work();
     virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
+    void finish();
     template <typename Ret, typename... Args, typename... ArgsT>
     requires(
         std::is_same_v<Args, remove_lazy_t<std::decay_t<ArgsT>>>
