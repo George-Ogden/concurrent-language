@@ -45,7 +45,10 @@ template <std::size_t... Widths> class AtomicSharedEnum {
     }
     T value() const { return bits.load(std::memory_order_relaxed); }
     template <std::size_t section> T insert(const T &value) {
-        return ((~mask<section>()) & this->value()) |
+        return insert<section>(value, this->value());
+    }
+    template <std::size_t section> T insert(const T &value, const T &default_) {
+        return ((~mask<section>()) & default_) |
                (mask<section>() & (value << prefix_widths[section]));
     }
 
@@ -68,6 +71,35 @@ template <std::size_t... Widths> class AtomicSharedEnum {
     requires(section < sizeof...(Widths)) void store(
         T value, std::memory_order ordering = std::memory_order_relaxed) {
         exchange<section>(value, ordering);
+    }
+    template <std::size_t compare_section_1, std::size_t compare_section_2,
+              std::size_t exchange_section>
+    requires(
+        compare_section_1 < sizeof...(Widths) &&
+        compare_section_2 < sizeof...(Widths) &&
+        exchange_section <
+            sizeof...(
+                Widths)) bool compare_exchange(T expected_1, T expected_2,
+                                               T desired,
+                                               std::memory_order ordering =
+                                                   std::memory_order_relaxed) {
+        while (1) {
+            T current_value = value();
+            T expected_value = insert<compare_section_1>(expected_1);
+            expected_value =
+                insert<compare_section_2>(expected_2, expected_value);
+            T desired_value = insert<exchange_section>(desired);
+            if (bits.compare_exchange_weak(expected_value, desired_value,
+                                           ordering,
+                                           std::memory_order_relaxed)) {
+                return true;
+                // cppcheck-suppress knownConditionTrueFalse
+            } else if (value() != current_value) {
+                continue;
+            } else {
+                return false;
+            }
+        };
     }
     template <std::size_t compare_section,
               std::size_t exchange_section = compare_section>
