@@ -893,7 +893,7 @@ mod tests {
         expected: (Vec<Statement>, Expression),
     ) {
         let mut compiler = Compiler::new();
-        let (statements, expression, _) = compiler.compile_expression(expression);
+        let (statements, expression) = compiler.compile_expression(expression);
         assert_eq!((statements, expression), expected);
     }
 
@@ -972,7 +972,7 @@ mod tests {
         let (constructor, type_) = constructor_type;
         let mut compiler = Compiler::new();
         compiler.compile_type_defs(vec![type_]);
-        let (statements, expression, _) = compiler.compile_expression(constructor.into());
+        let (statements, expression) = compiler.compile_expression(constructor.into());
         assert_eq!((statements, expression), expected);
     }
 
@@ -1208,6 +1208,10 @@ mod tests {
                 branches: (
                     vec![
                         Await(vec![Memory(Id::from("m1"))]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m2")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m2")),
                             value: FnCall{
@@ -1281,7 +1285,7 @@ mod tests {
         expected_statements: Vec<Statement>,
     ) {
         let mut compiler = Compiler::new();
-        let (compiled_statements, _) = compiler.compile_statements(statements);
+        let compiled_statements = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
     #[test_case(
@@ -1510,7 +1514,7 @@ mod tests {
         let (types, statements) = args_types_statements;
         let mut compiler = Compiler::new();
         compiler.compile_type_defs(types);
-        let (compiled_statements, _) = compiler.compile_statements(statements);
+        let compiled_statements = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
 
@@ -1881,6 +1885,10 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m2"))]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m3")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: FnCall {
@@ -1934,6 +1942,10 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m5"))]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m6")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
                             value: FnCall {
@@ -2058,6 +2070,10 @@ mod tests {
                             }.into()
                         }.into(),
                         Await(vec![Memory(Id::from("m4"))]).into(),
+                        Declaration{
+                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
+                            memory:Memory(Id::from("m5")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m5")),
                             value: FnCall{
@@ -2290,6 +2306,10 @@ mod tests {
                             }.into()
                         }.into(),
                         Await(vec![Memory(Id::from("m2")).into()]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m3")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: FnCall{
@@ -2339,6 +2359,10 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m5")).into()]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m6")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
                             value: FnCall{
