@@ -65,5 +65,5 @@ void TypedWork<Ret, Args...>::await_all() {
 
 template <typename Ret, typename... Args>
 bool TypedWork<Ret, Args...>::can_respond() const {
-    return fn->lower_size_bound() > 50 || fn->is_recursive();
+    return fn->lower_size_bound() > 200 || fn->is_recursive();
 }
