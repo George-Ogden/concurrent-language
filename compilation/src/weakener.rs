@@ -55,7 +55,6 @@ impl Weakener {
                      statements,
                      ret,
                      env,
-                     allocations,
                      size_bounds,
                      is_recursive,
                  }| {
@@ -67,7 +66,6 @@ impl Weakener {
                             statements,
                             ret,
                             env,
-                            allocations,
                             size_bounds,
                             is_recursive,
                         },
@@ -337,7 +335,6 @@ impl Weakener {
             statements,
             ret,
             env,
-            allocations,
             size_bounds,
             is_recursive,
         } = fn_def;
@@ -362,7 +359,6 @@ impl Weakener {
             statements,
             ret,
             env,
-            allocations,
             size_bounds,
             is_recursive,
         }
@@ -2312,12 +2308,6 @@ mod tests {
                 (Memory(Id::from("arg")), AtomicTypeEnum::INT.into())
             ],
             ret: (Memory(Id::from("x")).into(), AtomicTypeEnum::INT.into()),
-            allocations: vec![
-                Declaration {
-                    memory: Memory(Id::from("x")),
-                    type_: AtomicTypeEnum::INT.into()
-                }
-            ],
             env: vec![
                 AtomicTypeEnum::BOOL.into(),
                 FnType(
@@ -2353,12 +2343,6 @@ mod tests {
                 (Memory(Id::from("arg")), AtomicTypeEnum::INT.into())
             ],
             ret: (Memory(Id::from("x")).into(), AtomicTypeEnum::INT.into()),
-            allocations: vec![
-                Declaration {
-                    memory: Memory(Id::from("x")),
-                    type_: AtomicTypeEnum::INT.into()
-                }
-            ],
             env: vec![
                 FnType(
                     Vec::new(),
@@ -2406,7 +2390,6 @@ mod tests {
         assert_eq!(fn_def.arguments, weak_fn_def.arguments);
         assert_eq!(fn_def.statements, weak_fn_def.statements);
         assert_eq!(fn_def.ret, weak_fn_def.ret);
-        assert_eq!(fn_def.allocations, weak_fn_def.allocations);
         assert_eq!(expected_env, weak_fn_def.env);
     }
 
@@ -2418,7 +2401,6 @@ mod tests {
                     arguments: Vec::new(),
                     ret: (BuiltIn::from(Integer{value: 0}).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new(),
                     statements: vec![
                         Declaration{
                             memory: Memory(Id::from("closure0")),
@@ -2554,7 +2536,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into()),
                         ).into(),
                     ],
-                    allocations: Vec::new(),
                     statements: Vec::new(),
                     size_bounds: (10, 100),
                     is_recursive: false
@@ -2573,7 +2554,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into()),
                         ).into(),
                     ],
-                    allocations: Vec::new(),
                     statements: Vec::new(),
                     size_bounds: (10, 100),
                     is_recursive: false
@@ -2588,7 +2568,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into()),
                         ).into(),
                     ],
-                    allocations: Vec::new(),
                     statements: Vec::new(),
                     size_bounds: (10, 100),
                     is_recursive: false
@@ -2603,7 +2582,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into()),
                         ).into(),
                     ],
-                    allocations: Vec::new(),
                     statements: Vec::new(),
                     size_bounds: (10, 100),
                     is_recursive: false
@@ -2624,7 +2602,6 @@ mod tests {
                 arguments: Vec::new(),
                 ret: (BuiltIn::from(Integer{value: 0}).into(), AtomicTypeEnum::INT.into()),
                 env: Vec::new(),
-                allocations: Vec::new(),
                 statements: vec![
                     Allocation{
                         fns: vec![
@@ -2770,7 +2747,6 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into()),
                     )),
                 ],
-                allocations: Vec::new(),
                 statements: Vec::new(),
                 size_bounds: (10, 100),
                 is_recursive: false
@@ -2789,7 +2765,6 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into()),
                     )),
                 ],
-                allocations: Vec::new(),
                 statements: Vec::new(),
                 size_bounds: (10, 100),
                 is_recursive: false
@@ -2804,7 +2779,6 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into()),
                     )),
                 ],
-                allocations: Vec::new(),
                 statements: Vec::new(),
                 size_bounds: (10, 100),
                 is_recursive: false
@@ -2819,7 +2793,6 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into()),
                     )),
                 ],
-                allocations: Vec::new(),
                 statements: Vec::new(),
                 size_bounds: (10, 100),
                 is_recursive: false
@@ -2835,7 +2808,6 @@ mod tests {
                     arguments: Vec::new(),
                     ret: (BuiltIn::from(Integer{value: 0}).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new(),
                     statements: vec![
                         Declaration{
                             memory: Memory(Id::from("closure0")),
@@ -2909,7 +2881,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into()),
                         ).into(),
                     ],
-                    allocations: Vec::new(),
                     statements: Vec::new(),
                     size_bounds: (10, 100),
                     is_recursive: false
@@ -2924,7 +2895,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into()),
                         ).into(),
                     ],
-                    allocations: Vec::new(),
                     statements: Vec::new(),
                     size_bounds: (10, 100),
                     is_recursive: false
@@ -2945,7 +2915,6 @@ mod tests {
                 arguments: Vec::new(),
                 ret: (BuiltIn::from(Integer{value: 0}).into(), AtomicTypeEnum::INT.into()),
                 env: Vec::new(),
-                allocations: Vec::new(),
                 statements: vec![
                     Declaration{
                         memory: Memory(Id::from("closure0")),
@@ -3019,7 +2988,6 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into()),
                     ).into(),
                 ],
-                allocations: Vec::new(),
                 statements: Vec::new(),
                 size_bounds: (10, 100),
                 is_recursive: false
@@ -3034,7 +3002,6 @@ mod tests {
                         Box::new(AtomicTypeEnum::INT.into()),
                     )),
                 ],
-                allocations: Vec::new(),
                 statements: Vec::new(),
                 size_bounds: (10, 100),
                 is_recursive: false

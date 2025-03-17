@@ -382,34 +382,10 @@ impl Translator {
 
         format!("{declarations_code}\n{allocations_code}\n{closure_predefinitions}\n{other_code}")
     }
-    fn translate_memory_allocation(
-        &self,
-        memory_allocation: Declaration,
-        declared: &mut HashSet<Memory>,
-    ) -> Code {
-        let Declaration { memory, type_ } = memory_allocation;
-        declared.insert(memory.clone());
-        format!(
-            "{} {};",
-            self.translate_lazy_type(&type_),
-            self.translate_memory(memory)
-        )
-    }
-    fn translate_memory_allocations(
-        &self,
-        memory_allocations: Vec<Declaration>,
-        declared: &mut HashSet<Memory>,
-    ) -> Code {
-        memory_allocations
-            .into_iter()
-            .map(|memory_allocation| self.translate_memory_allocation(memory_allocation, declared))
-            .join("\n")
-    }
     fn translate_fn_def(&self, fn_def: FnDef) -> Code {
         let name = fn_def.name;
         let return_type = fn_def.ret.1;
-        let mut declared = HashSet::new();
-        let allocations_code = self.translate_memory_allocations(fn_def.allocations, &mut declared);
+        let declared = HashSet::new();
         let statements_code = self.translate_statements(fn_def.statements, declared);
         let return_code = format!(
             "return ensure_lazy({});",
@@ -468,7 +444,7 @@ impl Translator {
             "static std::unique_ptr<TypedFnI<{external_types}>> init(const ArgsT &args{env_ptr}) {{ return std::make_unique<{name}>({replication_args}); }}"
         );
         format!(
-            "{declaration_code} {{ {constructor_code} {allocations_code} {header_code} {{ {statements_code} {return_code} }} {size_code} {recursive_code} {clone_code} {instance} }};"
+            "{declaration_code} {{ {constructor_code} {header_code} {{ {statements_code} {return_code} }} {size_code} {recursive_code} {clone_code} {instance} }};"
         )
     }
     fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
@@ -1447,7 +1423,6 @@ mod tests {
             arguments: vec![(Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into())],
             statements: Vec::new(),
             ret: (Memory(Id::from("x")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: Vec::new(),
             size_bounds: (1, 1),
             is_recursive: false
         },
@@ -1524,24 +1499,10 @@ mod tests {
                 }.into(),
             ],
             ret: (Memory(Id::from("res3")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: vec![
-                Declaration {
-                    memory: Memory(Id::from("res1")),
-                    type_: AtomicTypeEnum::INT.into()
-                },
-                Declaration {
-                    memory: Memory(Id::from("res2")),
-                    type_: AtomicTypeEnum::INT.into()
-                },
-                Declaration {
-                    memory: Memory(Id::from("res3")),
-                    type_: AtomicTypeEnum::INT.into()
-                }
-            ],
             size_bounds: (90, 90),
             is_recursive: false
         },
-        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> res1; LazyT<Int> res2; LazyT<Int> res3; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { res1 = ensure_lazy(Plus__BuiltIn(a, b)); res2 = ensure_lazy(Plus__BuiltIn(c, d)); res3 = ensure_lazy(Plus__BuiltIn(res1, res2)); return ensure_lazy(res3); } constexpr std::size_t lower_size_bound() const override { return 90; }; constexpr std::size_t upper_size_bound() const override { return 90; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
+        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { auto res1 = Plus__BuiltIn(a, b); auto res2 = Plus__BuiltIn(c, d); auto res3 = Plus__BuiltIn(res1, res2); return ensure_lazy(res3); } constexpr std::size_t lower_size_bound() const override { return 90; }; constexpr std::size_t upper_size_bound() const override { return 90; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
         "four way plus"
     )]
     #[test_case(
@@ -1578,7 +1539,6 @@ mod tests {
                 }.into(),
             ],
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: Vec::new(),
             size_bounds: (50, 80),
             is_recursive: false
         },
@@ -1615,7 +1575,6 @@ mod tests {
                 }.into(),
             ],
             ret: (Memory(Id::from("y")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-            allocations: Vec::new(),
             size_bounds: (150, 150),
             is_recursive: true
         },
@@ -1666,12 +1625,6 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("call")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                    allocations: vec![
-                        Declaration{
-                            memory: Memory(Id::from("call")),
-                            type_: AtomicType(AtomicTypeEnum::INT).into()
-                        }
-                    ],
                     size_bounds: (50, 50),
                     is_recursive: false
                 },
@@ -1688,6 +1641,10 @@ mod tests {
                             target: Memory(Id::from("y")).into(),
                             value: Expression::Value(Value::BuiltIn(Integer{value: 5}.into())),
                         }.into(),
+                        Declaration {
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory: Memory(Id::from("main"))
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("main")),
                             value: FnCall{
@@ -1703,18 +1660,12 @@ mod tests {
                         }.into(),
                     ],
                     ret: (Memory(Id::from("main")).into(), AtomicType(AtomicTypeEnum::INT).into()),
-                    allocations: vec![
-                        Declaration{
-                            memory: Memory(Id::from("main")),
-                            type_: AtomicType(AtomicTypeEnum::INT).into()
-                        }
-                    ],
                     size_bounds: (40, 60),
                     is_recursive: false
                 }
             ],
         },
-        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> call; LazyT<Int> body() override {call = ensure_lazy(Plus__BuiltIn(x,y)); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> main; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; {WorkT work; std::tie(work,main) = Work::fn_call(extract_lazy(Main)); process(work);} return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
+        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto call = Plus__BuiltIn(x,y); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { LazyT<Int> main; auto x = Int{9LL}; auto y = Int{5LL}; {WorkT work; std::tie(work,main) = Work::fn_call(extract_lazy(Main)); process(work);} return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {
