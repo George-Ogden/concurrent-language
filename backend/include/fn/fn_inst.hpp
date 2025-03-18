@@ -12,6 +12,7 @@
 
 class Work;
 static const inline std::size_t IMMEDIATE_EXECUTION_THRESHOLD = 50;
+using MapVariantT = std::variant<Int, void *>;
 
 template <typename Ret, typename... Args> struct TypedFnG;
 template <typename Ret, typename... Args> class TypedFnI {
@@ -23,8 +24,7 @@ template <typename Ret, typename... Args> class TypedFnI {
     ArgsT args;
     virtual RetT
     body(std::add_lvalue_reference_t<LazyT<std::decay_t<Args>>>...) = 0;
-    std::map<std::vector<std::variant<Int, void *>>, std::shared_ptr<LazyValue>>
-        cache;
+    std::map<std::vector<MapVariantT>, std::shared_ptr<LazyValue>> cache;
 
   public:
     TypedFnI();
@@ -35,7 +35,8 @@ template <typename Ret, typename... Args> class TypedFnI {
     void process(std::shared_ptr<Work> &work) const;
     template <typename R, typename... As, typename... AT>
     requires(std::is_same_v<As, remove_lazy_t<std::decay_t<AT>>> &&...)
-        LazyT<R> fn_call(std::shared_ptr<TypedFnG<R, As...>> f, AT... args);
+        LazyT<R> fn_call(const std::shared_ptr<TypedFnG<R, As...>> &f,
+                         const AT &...args);
     virtual constexpr std::size_t lower_size_bound() const = 0;
     virtual constexpr std::size_t upper_size_bound() const = 0;
     virtual constexpr bool is_recursive() const = 0;

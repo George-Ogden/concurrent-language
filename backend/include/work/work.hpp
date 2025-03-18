@@ -26,11 +26,10 @@ class Work {
     bool done() const;
     void finish();
     template <typename Ret, typename... Args, typename... ArgsT>
-    requires(
-        std::is_same_v<Args, remove_lazy_t<std::decay_t<ArgsT>>>
-            &&...) static std::pair<std::shared_ptr<Work>,
-                                    LazyT<Ret>> fn_call(FnT<Ret, Args...> f,
-                                                        ArgsT... args);
+    requires(std::is_same_v<Args, remove_lazy_t<std::decay_t<ArgsT>>>
+                 &&...) static std::
+        pair<std::shared_ptr<Work>, LazyT<Ret>> fn_call(
+            const FnT<Ret, Args...> &f, const ArgsT &...args);
     virtual bool can_respond() const = 0;
 };
 

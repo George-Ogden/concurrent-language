@@ -41,16 +41,16 @@ template <typename T> auto convert_value(T &&arg) {
         if constexpr (std::is_same_v<remove_lazy_t<U>, Int> ||
                       std::is_same_v<remove_lazy_t<U>, Bool>) {
             if (arg->done()) {
-                return std::make_tuple(Int(arg->value()));
+                return std::make_tuple(MapVariantT{Int{arg->value()}});
             }
         }
-        return std::make_tuple(std::bit_cast<void *>(arg->get()));
+        return std::make_tuple(MapVariantT{std::bit_cast<void *>(arg.get())});
     } else if constexpr (std::is_same_v<U, Int> || std::is_same_v<U, Bool>) {
-        return std::make_tuple(Int(arg));
+        return std::make_tuple(MapVariantT{Int{arg}});
     } else if constexpr (is_shared_ptr_v<U>) {
-        return std::make_tuple(std::bit_cast<void *>(arg.get()));
+        return std::make_tuple(MapVariantT{std::bit_cast<void *>(arg.get())});
     } else {
-        return std::make_tuple(std::bit_cast<void *>(arg));
+        return std::make_tuple(MapVariantT{std::bit_cast<void *>(arg)});
     }
 }
 
@@ -62,7 +62,7 @@ template <typename... Ts> auto convert_value(std::tuple<Ts...> &&arg) {
 auto convert_key(auto &...args) {
     return std::apply(
         [](auto &&...vs) {
-            return std::vector<std::variant<Int, void *>>{vs...};
+            return std::vector<MapVariantT>{vs...};
         },
         convert_value(std::make_tuple(args...)));
 }
@@ -71,7 +71,7 @@ template <typename Ret, typename... Args>
 template <typename R, typename... As, typename... AT>
     requires(std::is_same_v<As, remove_lazy_t<std::decay_t<AT>>> && ...)
 LazyT<R>
-TypedFnI<Ret, Args...>::fn_call(FnT<R, As...> f, AT... args) {
+TypedFnI<Ret, Args...>::fn_call(const FnT<R, As...> &f, const AT&... args) {
     if constexpr (is_tuple_v<R>){
         auto [work, res] = Work::fn_call(f, args...);
         process(work);
