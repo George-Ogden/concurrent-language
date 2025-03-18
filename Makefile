@@ -18,7 +18,8 @@ BACKEND := backend/bin/main
 TARGET := backend/include/main/main.hpp
 
 FRONTEND_FLAGS :=
-FLAGS_HASH := $(shell sha256sum '$(FRONTEND_FLAGS)' 2>/dev/null | cut -d' ' -f1)
+BACKEND_FLAGS :=
+FLAGS_HASH := $(shell echo '$(FRONTEND_FLAGS) / $(BACKEND_FLAGS)' | sha256sum - 2> /dev/null | cut -d' ' -f1)
 
 FILE := samples/main.txt
 LAST_FILE_PREFIX := .last-file-hash-
@@ -67,7 +68,7 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	touch $@
 
 $(BACKEND): $(TARGET)
-	make -C backend build USER_FLAG=$(USER_FLAG)
+	make -C backend build USER_FLAG=$(USER_FLAG) EXTRA_FLAGS=$(BACKEND_FLAGS)
 	touch $@
 
 $(PARSER): $(GRAMMAR)
