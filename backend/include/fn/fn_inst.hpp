@@ -28,6 +28,7 @@ template <typename Ret, typename... Args> class TypedFnI {
     RetT run();
     virtual void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn);
     void process(std::shared_ptr<Work> &work) const;
+    template <typename... Ts> auto fn_call(Ts... args) const;
     virtual constexpr std::size_t lower_size_bound() const = 0;
     virtual constexpr std::size_t upper_size_bound() const = 0;
     virtual constexpr bool is_recursive() const = 0;

@@ -28,6 +28,14 @@ void TypedFnI<Ret, Args...>::process(WorkT &work) const {
 }
 
 template <typename Ret, typename... Args>
+template <typename ...Ts>
+auto TypedFnI<Ret, Args...>::fn_call(Ts... args) const {
+    auto [work, res] = Work::fn_call(args...);
+    process(work);
+    return res;
+}
+
+template <typename Ret, typename... Args>
 constexpr bool TypedFnI<Ret, Args...>::execute_immediately() const {
     return !is_recursive() && upper_size_bound() < IMMEDIATE_EXECUTION_THRESHOLD;
 }

@@ -84,11 +84,7 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
     LazyT<Int> res = nullptr;
     static inline bool finish;
     LazyT<Int> body(LazyT<Int> &x) {
-        if (res == decltype(res){}) {
-            WorkT work;
-            std::tie(work, res) = Work::fn_call(Increment__BuiltIn_G, x);
-            process(work);
-        }
+        res = fn_call(Increment__BuiltIn_G, x);
         if (finish) {
             return res;
         } else {
@@ -109,25 +105,14 @@ struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
     LazyT<Bool> res1;
     LazyT<Int> res2, res3;
     LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y, LazyT<Int> &z) override {
-        WorkT call1, call2, call3;
-        {
-            std::tie(call1, res1) =
-                Work::fn_call(Comparison_GE__BuiltIn_G, x, make_lazy<Int>(0));
-            process(call1);
-        };
+        { res1 = fn_call(Comparison_GE__BuiltIn_G, x, Int(0)); };
         WorkManager::await(res1);
         if (res1->value()) {
-            std::tie(call2, res2) =
-                Work::fn_call(Plus__BuiltIn_G, y, make_lazy<Int>(1));
-            process(call2);
+            res2 = fn_call(Plus__BuiltIn_G, y, Int(1));
         } else {
-            std::tie(call2, res2) =
-                Work::fn_call(Plus__BuiltIn_G, z, make_lazy<Int>(1));
-            process(call2);
+            res2 = fn_call(Plus__BuiltIn_G, z, Int(1));
         }
-        std::tie(call3, res3) =
-            Work::fn_call(Minus__BuiltIn_G, res2, make_lazy<Int>(2));
-        process(call3);
+        res3 = fn_call(Minus__BuiltIn_G, res2, Int(2));
         return res3;
     }
     constexpr std::size_t lower_size_bound() const override { return 100; };
@@ -167,8 +152,7 @@ struct HigherOrderCall : public TypedClosureI<Empty, Int, FnT<Int, Int>, Int> {
     LazyT<Int> body(LazyT<FnT<Int, Int>> &f, LazyT<Int> &x) override {
         WorkManager::await(f);
         WorkT call;
-        std::tie(call, res) = Work::fn_call(f->value(), x);
-        process(call);
+        res = fn_call(f->value(), x);
         return res;
     }
     constexpr std::size_t lower_size_bound() const override { return 60; };
@@ -200,11 +184,8 @@ struct RecursiveDouble : public TypedClosureI<Empty, Int, Int> {
             WorkT call1, call2;
             FnT<Int, Int> fn = std::make_shared<TypedClosureG<Empty, Int, Int>>(
                 RecursiveDouble::init);
-            std::tie(call1, res1) = Work::fn_call(fn, arg);
-            process(call1);
-            std::tie(call2, res2) =
-                Work::fn_call(Plus__BuiltIn_G, res1, make_lazy<Int>(2));
-            process(call2);
+            res1 = fn_call(fn, arg);
+            res2 = fn_call(Plus__BuiltIn_G, res1, make_lazy<Int>(2));
             return res2;
         } else {
             return make_lazy<Int>(0);
@@ -242,7 +223,7 @@ struct PairIntBool
     LazyT<TupleT<Int, TupleT<Bool>>> body(LazyT<Int> &x,
                                           LazyT<Bool> &y) override {
         WorkT work;
-        std::tie(work, z) = Work::fn_call(Negation__BuiltIn_G, y);
+        z = fn_call(Negation__BuiltIn_G, y);
         return std::make_tuple(x, std::make_tuple(z));
     }
     constexpr std::size_t lower_size_bound() const override { return 60; };
@@ -484,12 +465,9 @@ struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
             FnT<Int, ListInt> fn =
                 std::make_shared<TypedClosureG<Empty, Int, ListInt>>(
                     ListIntSum::init);
-            auto [call1, res1] = Work::fn_call(fn, tail);
-            process(call1);
-
-            auto [call2, res2] = Work::fn_call(Plus__BuiltIn_G, res1, head);
-            process(call2);
-            return res2;
+            auto res1 = fn_call(fn, tail);
+            auto res2 = fn_call(Plus__BuiltIn_G, res1, head);
+            return ensure_lazy(res2);
         }
         case 1:
             return make_lazy<Int>(0);
@@ -543,8 +521,7 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
             FnT<ListInt, ListInt> fn =
                 std::make_shared<TypedClosureG<Empty, ListInt, ListInt>>(
                     ListIntDec::init);
-            auto [call, res] = Work::fn_call(fn, tail);
-            process(call);
+            auto res = fn_call(fn, tail);
 
             return make_lazy<ListInt>(std::integral_constant<std::size_t, 0>(),
                                       Cons{ensure_lazy(std::make_tuple(
@@ -661,8 +638,7 @@ struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
             auto arg = Decrement__BuiltIn(x);
             WorkT work;
             LazyT<FnT<Int, Int>> call_fn = load_env(std::get<0>(env));
-            std::tie(work, res) = Work::fn_call(call_fn->value(), arg);
-            process(work);
+            res = fn_call(call_fn->value(), arg);
             return res;
         } else {
             return x;
@@ -706,9 +682,7 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
         WorkManager::await(c);
         if (extract_lazy(c)) {
             auto y = Decrement__BuiltIn(x);
-            auto [call, res] =
-                Work::fn_call(load_env(std::get<0>(env))->value(), y);
-            process(call);
+            auto res = fn_call(load_env(std::get<0>(env))->value(), y);
             return res;
         } else {
             return make_lazy<Bool>(true);
@@ -733,9 +707,7 @@ struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
         WorkManager::await(c);
         if (extract_lazy(c)) {
             auto y = Decrement__BuiltIn(x);
-            auto [call, res] =
-                Work::fn_call(load_env(std::get<0>(env))->value(), y);
-            process(call);
+            auto res = fn_call(load_env(std::get<0>(env))->value(), y);
             return res;
         } else {
             return make_lazy<Bool>(false);
