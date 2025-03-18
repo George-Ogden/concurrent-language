@@ -4,8 +4,11 @@
 #include "types/compound.hpp"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <type_traits>
+#include <variant>
+#include <vector>
 
 class Work;
 static const inline std::size_t IMMEDIATE_EXECUTION_THRESHOLD = 50;
@@ -20,6 +23,8 @@ template <typename Ret, typename... Args> class TypedFnI {
     ArgsT args;
     virtual RetT
     body(std::add_lvalue_reference_t<LazyT<std::decay_t<Args>>>...) = 0;
+    std::map<std::vector<std::variant<Int, void *>>, std::shared_ptr<LazyValue>>
+        cache;
 
   public:
     TypedFnI();
@@ -28,7 +33,9 @@ template <typename Ret, typename... Args> class TypedFnI {
     RetT run();
     virtual void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn);
     void process(std::shared_ptr<Work> &work) const;
-    template <typename... Ts> auto fn_call(Ts... args) const;
+    template <typename R, typename... As, typename... AT>
+    requires(std::is_same_v<As, remove_lazy_t<std::decay_t<AT>>> &&...)
+        LazyT<R> fn_call(std::shared_ptr<TypedFnG<R, As...>> f, AT... args);
     virtual constexpr std::size_t lower_size_bound() const = 0;
     virtual constexpr std::size_t upper_size_bound() const = 0;
     virtual constexpr bool is_recursive() const = 0;

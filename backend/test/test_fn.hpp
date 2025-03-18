@@ -120,3 +120,20 @@ TEST_F(ClosureTest, TestRecursiveClosure) {
     ASSERT_FALSE(
         fib_fn->value()->init(make_lazy<Int>(5))->execute_immediately());
 }
+
+TEST_F(ClosureTest, TestFibFnCaching) {
+    LazyT<FnT<Int, Int>> fib = make_lazy<FnT<Int, Int>>(
+        std::make_shared<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+            FibFn::init));
+    std::dynamic_pointer_cast<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+        fib->lvalue())
+        ->env = store_env<typename FibFn::EnvT>(fib);
+
+    auto fib_fn = fib->value()->init(0);
+    auto f_5a = fib_fn->fn_call(fib->value(), Int{5});
+    auto f_4 = fib_fn->fn_call(fib->value(), Int{4});
+    auto f_5b = fib_fn->fn_call(fib->value(), Int{5});
+
+    ASSERT_EQ(f_5a, f_5b);
+    ASSERT_NE(f_5a, f_4);
+}
