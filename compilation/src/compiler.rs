@@ -394,18 +394,15 @@ impl Compiler {
             target: memory.clone(),
             value: value.clone(),
         };
-        let declaration = Declaration {
-            memory: memory.clone().into(),
-            type_,
-        };
         match &value {
-            Expression::FnCall(FnCall {
-                fn_: Value::Memory(_),
-                fn_type: _,
-                args: _,
-            })
-            | Expression::ClosureInstantiation(_) => {
-                statements.push(declaration.into());
+            Expression::ClosureInstantiation(_) => {
+                statements.push(
+                    Declaration {
+                        memory: memory.clone().into(),
+                        type_,
+                    }
+                    .into(),
+                );
             }
             _ => {}
         }
@@ -1208,10 +1205,6 @@ mod tests {
                 branches: (
                     vec![
                         Await(vec![Memory(Id::from("m1"))]).into(),
-                        Declaration{
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory:Memory(Id::from("m2")).into(),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m2")),
                             value: FnCall{
@@ -1885,10 +1878,6 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m2"))]).into(),
-                        Declaration{
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory:Memory(Id::from("m3")).into(),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: FnCall {
@@ -1942,10 +1931,6 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m5"))]).into(),
-                        Declaration{
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory:Memory(Id::from("m6")).into(),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
                             value: FnCall {
@@ -2070,10 +2055,6 @@ mod tests {
                             }.into()
                         }.into(),
                         Await(vec![Memory(Id::from("m4"))]).into(),
-                        Declaration{
-                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
-                            memory:Memory(Id::from("m5")).into(),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m5")),
                             value: FnCall{
@@ -2306,10 +2287,6 @@ mod tests {
                             }.into()
                         }.into(),
                         Await(vec![Memory(Id::from("m2")).into()]).into(),
-                        Declaration{
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory:Memory(Id::from("m3")).into(),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: FnCall{
@@ -2359,10 +2336,6 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m5")).into()]).into(),
-                        Declaration{
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory:Memory(Id::from("m6")).into(),
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
                             value: FnCall{
