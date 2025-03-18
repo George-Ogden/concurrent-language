@@ -72,21 +72,27 @@ template <typename R, typename... As, typename... AT>
     requires(std::is_same_v<As, remove_lazy_t<std::decay_t<AT>>> && ...)
 LazyT<R>
 TypedFnI<Ret, Args...>::fn_call(const FnT<R, As...> &f, const AT&... args) {
-    if constexpr (is_tuple_v<R>){
+    #if FN_CACHING
+        if constexpr (is_tuple_v<R>){
+            auto [work, res] = Work::fn_call(f, args...);
+            process(work);
+            return res;
+        } else {
+            auto key = convert_key(f, args...);
+            if (cache.contains(key)) {
+                return std::dynamic_pointer_cast<remove_shared_ptr_t<LazyT<R>>>(cache.at(key));
+            } else {
+                auto [work, res] = Work::fn_call(f, args...);
+                cache.insert_or_assign(key, res);
+                process(work);
+                return res;
+            }
+        }
+    #else
         auto [work, res] = Work::fn_call(f, args...);
         process(work);
         return res;
-    } else {
-        auto key = convert_key(f, args...);
-        if (cache.contains(key)) {
-            return std::dynamic_pointer_cast<remove_shared_ptr_t<LazyT<R>>>(cache.at(key));
-        } else {
-            auto [work, res] = Work::fn_call(f, args...);
-            cache.insert_or_assign(key, res);
-            process(work);
-            return res;
-        }
-    }
+    #endif
 }
 
 template <typename Ret, typename... Args>

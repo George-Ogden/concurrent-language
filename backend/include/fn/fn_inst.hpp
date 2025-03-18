@@ -10,6 +10,13 @@
 #include <variant>
 #include <vector>
 
+#ifndef FN_CACHING
+#define FN_CACHING 0
+#else
+#undef FN_CACHING
+#define FN_CACHING 1
+#endif
+
 class Work;
 static const inline std::size_t IMMEDIATE_EXECUTION_THRESHOLD = 50;
 using MapVariantT = std::variant<Int, void *>;
@@ -24,7 +31,9 @@ template <typename Ret, typename... Args> class TypedFnI {
     ArgsT args;
     virtual RetT
     body(std::add_lvalue_reference_t<LazyT<std::decay_t<Args>>>...) = 0;
+#if FN_CACHING
     std::map<std::vector<MapVariantT>, std::shared_ptr<LazyValue>> cache;
+#endif
 
   public:
     TypedFnI();
