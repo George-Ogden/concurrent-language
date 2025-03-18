@@ -103,25 +103,6 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
     }
     constexpr bool is_recursive() const override { return false; };
 };
-TEST_P(FnCorrectnessTest, PersistenceTest) {
-    ThreadManager::register_self(0);
-    WorkRunner::shared_work_queue->clear();
-
-    DelayedIncrement::finish = false;
-    FnT<Int, Int> delayed = std::make_shared<TypedClosureG<Empty, Int, Int>>(
-        DelayedIncrement::init);
-    auto [work, res] = Work::fn_call(delayed, make_lazy<Int>(7));
-    EXPECT_THROW({ work->run(); }, stack_inversion);
-    ASSERT_FALSE(res->done());
-    DelayedIncrement::finish = true;
-    work->run();
-    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 1);
-    auto internal_work = WorkRunner::shared_work_queue->front().lock();
-    ASSERT_NE(internal_work, nullptr);
-    internal_work->run();
-    ASSERT_TRUE(res->done());
-    ASSERT_EQ(res->value(), 8);
-}
 
 struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
     using TypedClosureI<Empty, Int, Int, Int, Int>::TypedClosureI;
@@ -413,7 +394,7 @@ TEST_P(FnCorrectnessTest, ValueIncludedUnionTest) {
         if (tag == 0) {
             new (&either.value) Left{make_lazy<Int>(value)};
         } else {
-            new (&either.value) Right{make_lazy<Bool>(value)};
+            new (&either.value) Right{make_lazy<Bool>(value > 0)};
         }
 
         auto res = WorkManager::run(either_int_bool_fn, either);

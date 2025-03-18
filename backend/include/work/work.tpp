@@ -1,8 +1,6 @@
 #pragma once
 
 #include "work/work.hpp"
-#include "work/status.tpp"
-#include "fn/continuation.tpp"
 #include "fn/types.hpp"
 #include "fn/fn_inst.tpp"
 #include "lazy/lazy.tpp"
@@ -20,7 +18,11 @@ Work::Work() = default;
 Work::~Work() = default;
 
 bool Work::done() const {
-    return status.done();
+    return done_flag.load(std::memory_order_acquire);
+}
+
+void Work::finish() {
+    done_flag.store(true, std::memory_order_release);
 }
 
 template <typename Ret, typename... Args, typename ... ArgsT>
@@ -35,55 +37,6 @@ Work::fn_call(FnT<Ret, Args...> f, ArgsT... args) {
     return std::make_pair(work, placeholders);
 }
 
-void Work::add_continuation(Continuation c) {
-    continuations.acquire();
-    if (done()) {
-        continuations.release();
-        c.update();
-    } else {
-        continuations->push_back(c);
-        continuations.release();
-    }
-}
-
-bool Work::prioritize(){
-    if (status.priority()) return false;
-    dependencies.acquire();
-    if (status.prioritize()){
-        for (std::weak_ptr<LazyValue> weak_dependency : *dependencies){
-            std::shared_ptr<LazyValue> dependency = weak_dependency.lock();
-            if (dependency != nullptr){
-                dependency->require();
-            }
-        }
-        dependencies.release();
-        return true;
-    } else {
-        dependencies.release();
-        return false;
-    }
-}
-
-void Work::add_dependencies(std::initializer_list<std::shared_ptr<LazyValue>>&& dependencies){
-    if (status.priority()) {
-        for (std::shared_ptr<LazyValue> dependency: dependencies){
-            dependency->require();
-        }
-    } else {
-        this->dependencies.acquire();
-        if (status.priority()){
-            for (std::shared_ptr<LazyValue> dependency : dependencies){
-                dependency->require();
-            }
-        } else {
-            for (std::shared_ptr<LazyValue> dependency: dependencies){
-                this->dependencies->push_back(dependency);
-            }
-        }
-        this->dependencies.release();
-    }
-}
-
 template <typename T, typename U>
 void Work::assign(T &targets, U &results) {
     lazy_dual_map([](auto target, auto result) {
@@ -95,18 +48,12 @@ void Work::assign(T &targets, U &results) {
 
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run() {
-    if (this->status.done()) {
+    if (done()) {
         return;
     }
     LazyT<Ret> results = fn->run();
     assign(targets, results);
-    this->continuations.acquire();
-    for (Continuation &c : *this->continuations) {
-        c.update();
-    }
-    this->continuations->clear();
-    this->status.finish();
-    this->continuations.release();
+    finish();
 }
 
 template <typename Ret, typename... Args>
@@ -114,4 +61,9 @@ void TypedWork<Ret, Args...>::await_all() {
     auto vs = lazy_map([](auto target) -> LazyT<remove_lazy_t<remove_shared_ptr_t<decltype(target)>>>
                        { return target.lock(); }, targets);
     WorkManager::await_all(vs);
+}
+
+template <typename Ret, typename... Args>
+bool TypedWork<Ret, Args...>::can_respond() const {
+    return fn->lower_size_bound() > 200 || fn->is_recursive();
 }

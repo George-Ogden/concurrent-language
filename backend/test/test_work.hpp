@@ -1,7 +1,6 @@
 #pragma once
 
 #include "data_structures/lock.tpp"
-#include "fn/continuation.tpp"
 #include "fn/fn_gen.tpp"
 #include "fn/operators.hpp"
 #include "fn/types.hpp"
@@ -49,234 +48,47 @@ TEST_F(WorkTest, CorrectValue) {
     ASSERT_EQ(result->value(), 5);
 }
 
-class WorkStatusTest : public WorkTest {};
+struct LazyWorkTest : WorkTest {};
 
-TEST_F(WorkStatusTest, QueuedStatus) {
-    WorkRunner::shared_work_queue->clear();
-    ASSERT_TRUE(work->status.acquire());
-    auto n = work.use_count();
-    WorkManager::enqueue(work);
-    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 1);
-    ASSERT_EQ(work.use_count(), n);
+TEST_F(LazyWorkTest, GetLazyConstantWork) {
+    std::vector<WorkT> works;
+    auto y = LazyConstant<Int>(10);
+    y.get_work(works);
+    ASSERT_EQ(works, std::vector<WorkT>{});
 }
 
-TEST_F(WorkStatusTest, RequiredAcquiredQueuedStatus) {
-    WorkRunner::shared_work_queue->clear();
-    ASSERT_TRUE(work->status.prioritize());
-    ASSERT_TRUE(work->status.acquire());
-    auto n = work.use_count();
-    WorkManager::enqueue(work);
-    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
-    ASSERT_EQ(work.use_count(), n + 1);
+TEST_F(LazyWorkTest, GetLazyRequiredWork) {
+    std::vector<WorkT> works;
+    result->get_work(works);
+    ASSERT_EQ(works, std::vector<WorkT>{work});
 }
 
-TEST_F(WorkStatusTest, AcquiredRequiredQueuedStatus) {
-    WorkRunner::shared_work_queue->clear();
-    ASSERT_TRUE(work->status.acquire());
-    ASSERT_TRUE(work->status.prioritize());
-    auto n = work.use_count();
-    WorkManager::enqueue(work);
-    ASSERT_EQ(WorkRunner::shared_work_queue->size(), 0);
-    ASSERT_EQ(work.use_count(), n + 1);
+TEST_F(LazyWorkTest, GetLazyDoneWork) {
+    std::vector<WorkT> works;
+    work->run();
+    result->get_work(works);
+    ASSERT_EQ(works, std::vector<WorkT>{});
 }
 
-struct WorkDependencyTest : WorkTest {};
-struct RequiredValue : LazyValue {
-    bool required = false;
-    void require() override { required = true; }
+struct SmallFn : TypedClosureI<Empty, Int> {
+    LazyT<Int> body() { return make_lazy<Int>(0); }
+    constexpr std::size_t lower_size_bound() const { return 10; }
+    constexpr std::size_t upper_size_bound() const { return 20; }
+    constexpr bool is_recursive() const { return false; }
 };
 
-TEST_F(WorkDependencyTest, PreDependencies) {
-    std::shared_ptr<RequiredValue> v1 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v2 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v3 = std::make_shared<RequiredValue>();
-    ASSERT_FALSE(v1->required);
-    ASSERT_FALSE(v2->required);
-    ASSERT_FALSE(v3->required);
-    work->add_dependencies({v1, v2, v3});
-    ASSERT_FALSE(v1->required);
-    ASSERT_FALSE(v2->required);
-    ASSERT_FALSE(v3->required);
-    work->prioritize();
-    ASSERT_TRUE(v1->required);
-    ASSERT_TRUE(v2->required);
-    ASSERT_TRUE(v3->required);
-}
-
-TEST_F(WorkDependencyTest, PostDependencies) {
-    std::shared_ptr<RequiredValue> v1 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v2 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v3 = std::make_shared<RequiredValue>();
-    ASSERT_FALSE(v1->required);
-    ASSERT_FALSE(v2->required);
-    ASSERT_FALSE(v3->required);
-    work->prioritize();
-    work->add_dependencies({v1, v2, v3});
-    ASSERT_TRUE(v1->required);
-    ASSERT_TRUE(v2->required);
-    ASSERT_TRUE(v3->required);
-}
-
-TEST_F(WorkDependencyTest, MixedDependencies) {
-    std::shared_ptr<RequiredValue> v1 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v2 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v3 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v4 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v5 = std::make_shared<RequiredValue>();
-    ASSERT_FALSE(v1->required);
-    ASSERT_FALSE(v2->required);
-    ASSERT_FALSE(v3->required);
-    ASSERT_FALSE(v4->required);
-    ASSERT_FALSE(v5->required);
-    work->add_dependencies({v1, v2, v3});
-    ASSERT_FALSE(v1->required);
-    ASSERT_FALSE(v2->required);
-    ASSERT_FALSE(v3->required);
-    ASSERT_FALSE(v4->required);
-    ASSERT_FALSE(v5->required);
-    work->prioritize();
-    ASSERT_TRUE(v1->required);
-    ASSERT_TRUE(v2->required);
-    ASSERT_TRUE(v3->required);
-    ASSERT_FALSE(v4->required);
-    ASSERT_FALSE(v5->required);
-    work->add_dependencies({v4, v5});
-    ASSERT_TRUE(v1->required);
-    ASSERT_TRUE(v2->required);
-    ASSERT_TRUE(v3->required);
-    ASSERT_TRUE(v4->required);
-    ASSERT_TRUE(v5->required);
-}
-
-TEST_F(WorkDependencyTest, Empty) {
-    work->add_dependencies({});
-    work->prioritize();
-    work->add_dependencies({});
-}
-
-TEST_F(WorkDependencyTest, Nullptrs) {
-    std::shared_ptr<RequiredValue> v1 = std::make_shared<RequiredValue>();
-    std::shared_ptr<RequiredValue> v3 = std::make_shared<RequiredValue>();
-    {
-        std::shared_ptr<RequiredValue> v2 = std::make_shared<RequiredValue>();
-        work->add_dependencies({v1, v2});
-        ASSERT_FALSE(v1->required);
-        ASSERT_FALSE(v2->required);
-    }
-    work->prioritize();
-    ASSERT_TRUE(v1->required);
-    work->add_dependencies({v3});
-    ASSERT_TRUE(v1->required);
-    ASSERT_TRUE(v3->required);
-}
-
-struct WorkRunnerPriorityPropagationTest : WorkStatusTest {
-  protected:
-    void SetUp() override {
-        WorkStatusTest::SetUp();
-        WorkRunner::shared_work_queue->clear();
-        WorkRunner::done_flag = false;
-        WorkRunner::num_cpus = ThreadManager::available_concurrency();
-    }
+struct LargeFn : TypedClosureI<Empty, Int> {
+    LazyT<Int> body() { return make_lazy<Int>(0); }
+    constexpr std::size_t lower_size_bound() const { return 50; }
+    constexpr std::size_t upper_size_bound() const { return 100; }
+    constexpr bool is_recursive() const { return false; }
 };
 
-class PriorityChecker
-    : public TypedClosureI<TupleT<WorkT *, bool, std::function<void()>>, Int> {
-    using TypedClosureI<TupleT<WorkT *, bool, std::function<void()>>,
-                        Int>::TypedClosureI;
-    LazyT<Int> body() override {
-        auto [work, priority, f] = env;
-        f->value()();
-        priority->lvalue() = (*work->value())->status.priority();
-        return make_lazy<Int>(0);
-    }
-
-  public:
-    static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args,
-                                               const EnvT &env) {
-        return std::make_unique<PriorityChecker>(args, env);
-    }
-    constexpr std::size_t lower_size_bound() const override { return 0; };
-    constexpr std::size_t upper_size_bound() const override { return 0; };
-    constexpr bool is_recursive() const override { return false; };
+struct ReferenceWork : TypedWork<Int> {
+    explicit ReferenceWork(std::unique_ptr<TypedFnI<Int>> fn) {
+        this->fn = std::move(fn);
+    };
 };
-
-struct WorkRunnerCurrentWorkOverrider : WorkRunner {
-    void set_current_work(WorkT work) { current_work = work; }
-};
-
-TEST_F(WorkRunnerPriorityPropagationTest, LowPriority) {
-    WorkRunner::shared_work_queue->clear();
-    WorkRunner::done_flag = false;
-    WorkRunner::num_cpus = ThreadManager::available_concurrency();
-    WorkT indirect_work, direct_work;
-    LazyT<Int> v1, v2;
-    typename PriorityChecker::EnvT env = std::make_tuple(
-        make_lazy<WorkT *>(&indirect_work),
-        std::make_shared<LazyConstant<bool>>(
-            false), // bypass value cache when changing value
-        make_lazy<std::function<void()>>(std::function<void()>([]() {})));
-
-    FnT<Int> fn =
-        std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
-            PriorityChecker::init, env);
-    std::tie(indirect_work, v1) = Work::fn_call(fn);
-    WorkManager::enqueue(indirect_work);
-
-    std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
-
-    ASSERT_FALSE(indirect_work->status.priority());
-    ASSERT_FALSE(direct_work->status.priority());
-    ASSERT_FALSE(indirect_work->status.done());
-    ASSERT_FALSE(direct_work->status.done());
-
-    static_cast<WorkRunnerCurrentWorkOverrider *>(WorkManager::runners[0].get())
-        ->set_current_work(direct_work);
-    direct_work->run();
-
-    ASSERT_EQ(v2->value(), 1);
-    ASSERT_FALSE(std::get<1>(env)->value());
-    ASSERT_TRUE(direct_work->status.done());
-    ASSERT_TRUE(indirect_work->status.done());
-    ASSERT_FALSE(direct_work->status.priority());
-    ASSERT_FALSE(indirect_work->status.priority());
-}
-
-TEST_F(WorkRunnerPriorityPropagationTest, HighPriority) {
-    WorkRunner::shared_work_queue->clear();
-    WorkT indirect_work, direct_work;
-    LazyT<Int> v1, v2;
-    auto env =
-        std::make_tuple(make_lazy<WorkT *>(&indirect_work),
-                        std::make_shared<LazyConstant<bool>>(
-                            false), // bypass value cache when changing value
-                        make_lazy<std::function<void()>>(
-                            std::function<void()>([&v2]() { v2->require(); })));
-
-    FnT<Int> fn =
-        std::make_shared<TypedClosureG<typename PriorityChecker::EnvT, Int>>(
-            PriorityChecker::init, env);
-    std::tie(indirect_work, v1) = Work::fn_call(fn);
-    WorkManager::enqueue(indirect_work);
-
-    std::tie(direct_work, v2) = Work::fn_call(Increment__BuiltIn_G, v1);
-
-    ASSERT_FALSE(indirect_work->status.priority());
-    ASSERT_FALSE(direct_work->status.priority());
-    ASSERT_FALSE(indirect_work->status.done());
-    ASSERT_FALSE(direct_work->status.done());
-
-    static_cast<WorkRunnerCurrentWorkOverrider *>(WorkManager::runners[0].get())
-        ->set_current_work(direct_work);
-    direct_work->run();
-
-    ASSERT_EQ(v2->value(), 1);
-    ASSERT_TRUE(std::get<1>(env)->value());
-    ASSERT_TRUE(direct_work->status.done());
-    ASSERT_TRUE(indirect_work->status.done());
-    ASSERT_TRUE(direct_work->status.priority());
-    ASSERT_TRUE(indirect_work->status.priority());
-}
 
 class PairFn : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
     using TypedClosureI<Empty, TupleT<Int, Int>, Int, Int>::TypedClosureI;
@@ -307,104 +119,3 @@ TEST(TupleWorkTest, CorrectValue) {
     ASSERT_EQ(std::get<0>(results)->value(), 4);
     ASSERT_EQ(std::get<1>(results)->value(), -4);
 };
-
-class WorkContinuationTest : public WorkTest {};
-
-TEST_F(WorkContinuationTest, IndirectContinuationAdded) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    result->add_continuation(Continuation{remaining, counter, valid});
-    work->run();
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
-    ASSERT_EQ(**valid, false);
-    delete valid;
-}
-
-TEST_F(WorkContinuationTest, IndirectContinuationApplied) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    work->run();
-    result->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
-    ASSERT_EQ(**valid, false);
-    delete valid;
-}
-
-TEST_F(WorkContinuationTest, DoneUnfinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    work->run();
-    work->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(**valid, true);
-    delete remaining;
-    delete valid;
-}
-
-TEST_F(WorkContinuationTest, NotDoneUnfinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{2};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    work->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 2);
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(**valid, true);
-    work->run();
-    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(**valid, true);
-    delete remaining;
-    delete valid;
-}
-
-TEST_F(WorkContinuationTest, DoneFinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    ASSERT_EQ(**valid, true);
-    work->run();
-    work->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
-    ASSERT_EQ(**valid, false);
-    delete valid;
-}
-
-TEST_F(WorkContinuationTest, NotDoneFinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{true};
-    work->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(**valid, true);
-    work->run();
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 2);
-    ASSERT_EQ(**valid, false);
-    delete valid;
-}
-
-TEST_F(WorkContinuationTest, DoneInvalidFinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{false};
-    ASSERT_EQ(**valid, false);
-    work->run();
-    work->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-}
-
-TEST_F(WorkContinuationTest, NotDoneInvalidFinishedContinuationBehaviour) {
-    std::atomic<unsigned> *remaining = new std::atomic<unsigned>{1};
-    std::atomic<unsigned> counter{1};
-    Locked<bool> *valid = new Locked<bool>{false};
-    work->add_continuation(Continuation{remaining, counter, valid});
-    ASSERT_EQ(remaining->load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-    ASSERT_EQ(**valid, false);
-    work->run();
-    ASSERT_EQ(counter.load(std::memory_order_relaxed), 1);
-}

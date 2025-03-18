@@ -253,6 +253,49 @@ TEST(AtomicSharedEnumTest, CompareExchangeIndirect) {
     ASSERT_EQ(byte_array.load<3>(), 0);
 }
 
+TEST(AtomicSharedEnumTest, CompareExchangeMultiple) {
+    AtomicSharedEnum<2, 1, 2, 1> byte_array;
+    ASSERT_EQ(byte_array.load<0>(), 0);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE((byte_array.compare_exchange<1, 0>(0, 3)));
+    ASSERT_EQ(byte_array.load<0>(), 3);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE((byte_array.compare_exchange<1, 0>(0, 2)));
+    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 0);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE((byte_array.compare_exchange<1, 2>(0, 1)));
+    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+    ASSERT_TRUE((byte_array.compare_exchange<1, 0, 3>(0, 2, 1)));
+    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_FALSE((byte_array.compare_exchange<1, 0, 3>(1, 2, 0)));
+    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_FALSE((byte_array.compare_exchange<1, 0, 3>(0, 3, 0)));
+    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 1);
+    ASSERT_TRUE((byte_array.compare_exchange<1, 0, 3>(0, 2, 0)));
+    ASSERT_EQ(byte_array.load<0>(), 2);
+    ASSERT_EQ(byte_array.load<1>(), 0);
+    ASSERT_EQ(byte_array.load<2>(), 1);
+    ASSERT_EQ(byte_array.load<3>(), 0);
+}
+
 TEST(AtomicSharedEnumTest, TwoByteEnum) {
     AtomicSharedEnum<7, 9> byte_array;
     ASSERT_EQ(byte_array.load<0>(), 0);

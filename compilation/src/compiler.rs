@@ -204,20 +204,20 @@ impl Compiler {
     fn compile_expression(
         &mut self,
         expression: IntermediateExpression,
-    ) -> (Vec<Statement>, Expression, Vec<Declaration>) {
+    ) -> (Vec<Statement>, Expression) {
         match expression {
             IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 values,
             )) => {
                 let values = self.compile_values(values);
-                (Vec::new(), TupleExpression(values).into(), Vec::new())
+                (Vec::new(), TupleExpression(values).into())
             }
             IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
                 value,
                 idx,
             }) => {
                 let value = self.compile_value(value);
-                (Vec::new(), ElementAccess { value, idx }.into(), Vec::new())
+                (Vec::new(), ElementAccess { value, idx }.into())
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
                 let MachineType::FnType(fn_type) = self.compile_type(&fn_.type_()) else {
@@ -237,7 +237,6 @@ impl Compiler {
                         args: args_values,
                     }
                     .into(),
-                    Vec::new(),
                 )
             }
             IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
@@ -262,28 +261,27 @@ impl Compiler {
                         }),
                     }
                     .into(),
-                    Vec::new(),
                 )
             }
             IntermediateExpression::IntermediateValue(value) => {
                 let value = self.compile_value(value);
-                (Vec::new(), value.into(), Vec::new())
+                (Vec::new(), value.into())
             }
             IntermediateExpression::IntermediateLambda(lambda) => {
                 let (statements, closure_inst) = self.compile_lambda(lambda);
-                (statements, closure_inst.into(), Vec::new())
+                (statements, closure_inst.into())
             }
             IntermediateExpression::IntermediateIf(if_) => {
-                let (statements, value, allocations) = self.compile_if(if_);
-                (statements, value.into(), allocations)
+                let (statements, value) = self.compile_if(if_);
+                (statements, value.into())
             }
             IntermediateExpression::IntermediateMatch(match_) => {
-                let (statements, value, allocations) = self.compile_match(match_);
-                (statements, value.into(), allocations)
+                let (statements, value) = self.compile_match(match_);
+                (statements, value.into())
             }
         }
     }
-    fn compile_if(&mut self, if_: IntermediateIf) -> (Vec<Statement>, Value, Vec<Declaration>) {
+    fn compile_if(&mut self, if_: IntermediateIf) -> (Vec<Statement>, Value) {
         let IntermediateIf {
             condition,
             branches: (true_block, false_block),
@@ -303,7 +301,7 @@ impl Compiler {
             }
             .into(),
         );
-        let (mut true_statements, true_value, true_allocations) = self.compile_block(true_block);
+        let (mut true_statements, true_value) = self.compile_block(true_block);
         true_statements.push(
             Assignment {
                 target: memory.clone(),
@@ -311,8 +309,7 @@ impl Compiler {
             }
             .into(),
         );
-        let (mut false_statements, false_value, false_allocations) =
-            self.compile_block(false_block);
+        let (mut false_statements, false_value) = self.compile_block(false_block);
         false_statements.push(
             Assignment {
                 target: memory.clone(),
@@ -327,14 +324,9 @@ impl Compiler {
             }
             .into(),
         );
-        let mut allocations = true_allocations;
-        allocations.extend(false_allocations);
-        (statements, memory.into(), allocations)
+        (statements, memory.into())
     }
-    fn compile_match(
-        &mut self,
-        match_: IntermediateMatch,
-    ) -> (Vec<Statement>, Value, Vec<Declaration>) {
+    fn compile_match(&mut self, match_: IntermediateMatch) -> (Vec<Statement>, Value) {
         let IntermediateMatch { subject, branches } = match_;
         let type_ = subject.type_();
         let MachineType::UnionType(union_type) = self.compile_type(&type_) else {
@@ -355,10 +347,10 @@ impl Compiler {
             }
             .into(),
         );
-        let (branches, allocations): (Vec<_>, Vec<_>) = branches
+        let branches = branches
             .into_iter()
             .map(|IntermediateMatchBranch { target, block }| {
-                let (mut statements, value, allocations) = self.compile_block(block);
+                let (mut statements, value) = self.compile_block(block);
                 statements.push(
                     Assignment {
                         target: memory.clone(),
@@ -366,13 +358,12 @@ impl Compiler {
                     }
                     .into(),
                 );
-                let branch = MatchBranch {
+                MatchBranch {
                     target: target.map(|arg| self.compile_arg(&arg)),
                     statements,
-                };
-                (branch, allocations)
+                }
             })
-            .unzip();
+            .collect();
         statements.push(
             MatchStatement {
                 expression: (subject, union_type),
@@ -382,28 +373,22 @@ impl Compiler {
             .into(),
         );
         let value = self.compile_memory(&result);
-        (statements, value.into(), allocations.concat())
+        (statements, value.into())
     }
-    fn compile_statement(
-        &mut self,
-        statement: IntermediateStatement,
-    ) -> (Vec<Statement>, Vec<Declaration>) {
+    fn compile_statement(&mut self, statement: IntermediateStatement) -> Vec<Statement> {
         match statement {
             IntermediateStatement::IntermediateAssignment(memory) => {
                 self.compile_assignment(memory)
             }
         }
     }
-    fn compile_assignment(
-        &mut self,
-        assignment: IntermediateAssignment,
-    ) -> (Vec<Statement>, Vec<Declaration>) {
+    fn compile_assignment(&mut self, assignment: IntermediateAssignment) -> Vec<Statement> {
         let IntermediateAssignment {
             expression,
             location,
         } = assignment;
         let type_ = self.compile_type(&expression.type_());
-        let (mut statements, value, mut allocations) = self.compile_expression(expression);
+        let (mut statements, value) = self.compile_expression(expression);
         let memory = self.compile_location(&location);
         let assignment = Assignment {
             target: memory.clone(),
@@ -418,38 +403,29 @@ impl Compiler {
                 fn_: Value::Memory(_),
                 fn_type: _,
                 args: _,
-            }) => {
-                allocations.push(declaration.into());
-            }
-            Expression::ClosureInstantiation(_) => {
+            })
+            | Expression::ClosureInstantiation(_) => {
                 statements.push(declaration.into());
             }
             _ => {}
         }
         statements.push(assignment.into());
-        (statements, allocations)
+        statements
     }
-    fn compile_statements(
-        &mut self,
-        statements: Vec<IntermediateStatement>,
-    ) -> (Vec<Statement>, Vec<Declaration>) {
-        let (statements, allocations): (Vec<_>, Vec<_>) = statements
+    fn compile_statements(&mut self, statements: Vec<IntermediateStatement>) -> Vec<Statement> {
+        statements
             .into_iter()
-            .map(|statement| self.compile_statement(statement))
-            .unzip();
-        (statements.concat(), allocations.concat())
+            .flat_map(|statement| self.compile_statement(statement))
+            .collect()
     }
-    fn compile_block(
-        &mut self,
-        block: IntermediateBlock,
-    ) -> (Vec<Statement>, Value, Vec<Declaration>) {
-        let (statements, declarations): (Vec<_>, Vec<_>) = block
+    fn compile_block(&mut self, block: IntermediateBlock) -> (Vec<Statement>, Value) {
+        let statements = block
             .statements
             .into_iter()
-            .map(|statement| self.compile_statement(statement))
-            .unzip();
+            .flat_map(|statement| self.compile_statement(statement))
+            .collect();
         let value = self.compile_value(block.ret);
-        (statements.concat(), value, declarations.concat())
+        (statements, value)
     }
     fn replace_open_vars(
         &mut self,
@@ -519,7 +495,7 @@ impl Compiler {
             .map(|arg| (self.compile_arg(&arg), self.compile_type(&arg.type_())))
             .collect_vec();
         let mut prefix = self.closure_prefix(&env_locations);
-        let (mut statements, allocations) = self.compile_statements(statements);
+        let mut statements = self.compile_statements(statements);
         prefix.extend(statements);
         statements = prefix;
         let ret_type = self.compile_type(&return_value.type_());
@@ -531,7 +507,6 @@ impl Compiler {
             statements,
             ret: (ret_val, ret_type),
             env: env_types.clone(),
-            allocations,
             size_bounds: size,
             is_recursive,
         });
@@ -918,7 +893,7 @@ mod tests {
         expected: (Vec<Statement>, Expression),
     ) {
         let mut compiler = Compiler::new();
-        let (statements, expression, _) = compiler.compile_expression(expression);
+        let (statements, expression) = compiler.compile_expression(expression);
         assert_eq!((statements, expression), expected);
     }
 
@@ -997,7 +972,7 @@ mod tests {
         let (constructor, type_) = constructor_type;
         let mut compiler = Compiler::new();
         compiler.compile_type_defs(vec![type_]);
-        let (statements, expression, _) = compiler.compile_expression(constructor.into());
+        let (statements, expression) = compiler.compile_expression(constructor.into());
         assert_eq!((statements, expression), expected);
     }
 
@@ -1233,6 +1208,10 @@ mod tests {
                 branches: (
                     vec![
                         Await(vec![Memory(Id::from("m1"))]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m2")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m2")),
                             value: FnCall{
@@ -1306,7 +1285,7 @@ mod tests {
         expected_statements: Vec<Statement>,
     ) {
         let mut compiler = Compiler::new();
-        let (compiled_statements, _) = compiler.compile_statements(statements);
+        let compiled_statements = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
     #[test_case(
@@ -1535,7 +1514,7 @@ mod tests {
         let (types, statements) = args_types_statements;
         let mut compiler = Compiler::new();
         compiler.compile_type_defs(types);
-        let (compiled_statements, _) = compiler.compile_statements(statements);
+        let compiled_statements = compiler.compile_statements(statements);
         assert_eq!(compiled_statements, expected_statements);
     }
 
@@ -1608,7 +1587,6 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new(),
                 size_bounds: (0, 0),
                 is_recursive: false
             },
@@ -1706,7 +1684,6 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new(),
                 size_bounds: (0, 0),
                 is_recursive: false
             }
@@ -1795,7 +1772,6 @@ mod tests {
                     Memory(Id::from("m2")).into(),
                     AtomicTypeEnum::INT.into()
                 ),
-                allocations: Vec::new(),
                 size_bounds: (0, 0),
                 is_recursive: false
             }
@@ -1894,7 +1870,6 @@ mod tests {
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new(),
                     size_bounds: (0, 0),
                     is_recursive: false
                 },
@@ -1910,6 +1885,10 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m2"))]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m3")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: FnCall {
@@ -1929,12 +1908,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into())
                         ).into()
                     ].into(),
-                    allocations: vec![
-                        Declaration {
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory: Memory(Id::from("m3"))
-                        }
-                    ],
                     size_bounds: (0, 0),
                     is_recursive: false
                 },
@@ -1969,6 +1942,10 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m5"))]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m6")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
                             value: FnCall {
@@ -1980,12 +1957,6 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m6")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: vec![
-                        Declaration {
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory: Memory(Id::from("m6"))
-                        }
-                    ],
                     size_bounds: (0, 0),
                     is_recursive: false
                 }
@@ -2068,7 +2039,6 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m2")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
                     env: vec![TupleType(vec![TupleType(Vec::new()).into()]).into()].into(),
-                    allocations: Vec::new(),
                     size_bounds: (0, 0),
                     is_recursive: false
                 },
@@ -2100,6 +2070,10 @@ mod tests {
                             }.into()
                         }.into(),
                         Await(vec![Memory(Id::from("m4"))]).into(),
+                        Declaration{
+                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
+                            memory:Memory(Id::from("m5")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m5")),
                             value: FnCall{
@@ -2114,12 +2088,6 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m5")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
                     env: Vec::new(),
-                    allocations: vec![
-                        Declaration {
-                            type_: TupleType(vec![TupleType(Vec::new()).into()]).into(),
-                            memory: Memory(Id::from("m5"))
-                        }
-                    ],
                     size_bounds: (0, 0),
                     is_recursive: false
                 },
@@ -2228,7 +2196,6 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m3")).into(),AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new(),
                     size_bounds: (0, 0),
                     is_recursive: false
                 },
@@ -2263,7 +2230,6 @@ mod tests {
                     statements: Vec::new(),
                     ret: (Memory(Id::from("m1")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: Vec::new(),
                     size_bounds: (0,0),
                     is_recursive: false
                 }
@@ -2340,6 +2306,10 @@ mod tests {
                             }.into()
                         }.into(),
                         Await(vec![Memory(Id::from("m2")).into()]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m3")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: FnCall{
@@ -2359,12 +2329,6 @@ mod tests {
                             Box::new(AtomicTypeEnum::INT.into())
                         ))
                     ].into(),
-                    allocations: vec![
-                        Declaration {
-                            memory: Memory(Id::from("m3")),
-                            type_: AtomicTypeEnum::INT.into()
-                        }
-                    ],
                     size_bounds: (0, 0),
                     is_recursive: true
                 },
@@ -2395,6 +2359,10 @@ mod tests {
                             }.into(),
                         }.into(),
                         Await(vec![Memory(Id::from("m5")).into()]).into(),
+                        Declaration{
+                            type_: AtomicTypeEnum::INT.into(),
+                            memory:Memory(Id::from("m6")).into(),
+                        }.into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
                             value: FnCall{
@@ -2409,12 +2377,6 @@ mod tests {
                     ],
                     ret: (Memory(Id::from("m6")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
-                    allocations: vec![
-                        Declaration {
-                            memory: Memory(Id::from("m6")),
-                            type_: AtomicTypeEnum::INT.into()
-                        }
-                    ],
                     size_bounds: (0, 0),
                     is_recursive: false
                 }

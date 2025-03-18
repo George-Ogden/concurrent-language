@@ -38,7 +38,7 @@ class ClosureTest : public ::testing::Test {
     void SetUp() override {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
-        WorkRunner::shared_work_queue->clear();
+        WorkRunner::setup(1);
         WorkManager::runners.clear();
         WorkManager::runners.emplace_back(std::make_unique<WorkRunner>(0));
     }

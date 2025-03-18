@@ -1,36 +1,36 @@
 #pragma once
 
+#include "data_structures/cyclic_queue.hpp"
 #include "data_structures/lock.hpp"
-#include "fn/continuation.tpp"
 #include "system/thread_manager.tpp"
 #include "work/work.hpp"
+#include "work/work_request.hpp"
 
 #include <atomic>
-#include <deque>
 #include <exception>
+#include <functional>
+#include <optional>
+#include <vector>
 
-class StackSeparation;
 struct WorkRunner {
     friend class WorkManager;
-    friend class StackSeparation;
+    friend class RunnerTest;
     explicit WorkRunner(const ThreadManager::ThreadId &id);
 
     static inline unsigned num_cpus;
     ThreadManager::ThreadId id;
-    static inline Locked<std::deque<WeakWorkT>> shared_work_queue;
-    static inline std::atomic<bool> done_flag;
+    static std::atomic<bool> done_flag;
+    static CyclicQueue<unsigned> work_request_queue;
+    static std::vector<std::unique_ptr<WorkRequest>> work_requests;
+    static void setup(unsigned num_cpus);
 
   protected:
     std::atomic<unsigned> counter;
-    Locked<std::deque<WorkT>> private_work_stack;
-    WorkT current_work;
 
     void main(std::atomic<WorkT> *ref);
-
-    WorkT get_work();
-    void enqueue(WorkT work);
-    bool break_on_work(WorkT &work, Continuation &c);
-    void exit_early(Continuation &c);
+    bool active_wait(std::function<bool()> predicate);
+    bool any_requests() const;
+    bool respond(WorkT &work) const;
 
     template <typename... Vs> void await_restricted(Vs &...vs);
     template <typename... Vs> bool all_done(Vs &&...vs);

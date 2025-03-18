@@ -13,7 +13,6 @@ struct WorkManager {
     template <typename Ret, typename... Args>
     static LazyT<Ret> run(FnT<Ret, Args...> fn, Args... args);
     static std::monostate main(std::atomic<WorkT> *ref);
-    static void enqueue(WorkT work);
     template <typename... Vs> static auto await(Vs &...vs);
     template <typename... Vs> static void await_all(Vs &...vs);
     static inline std::vector<std::unique_ptr<WorkRunner>> runners;

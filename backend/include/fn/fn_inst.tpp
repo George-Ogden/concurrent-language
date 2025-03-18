@@ -24,8 +24,6 @@ template <typename Ret, typename... Args>
 void TypedFnI<Ret, Args...>::process(WorkT &work) const {
     if (execute_immediately()) {
         work->run();
-    } else {
-        WorkManager::enqueue(work);
     }
 }
 
