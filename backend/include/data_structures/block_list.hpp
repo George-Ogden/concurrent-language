@@ -1,28 +1,24 @@
 #pragma once
 
-#include "data_structures/lock.tpp"
-
 #include <algorithm>
-#include <atomic>
-#include <cassert>
 #include <cstddef>
-#include <initializer_list>
-#include <memory>
 #include <optional>
-#include <utility>
 
 template <typename T> class BlockList {
+  private:
     struct Block {
         const size_t length;
         T *data;
         Block *next, *prev;
-        explicit Block(std::size_t length) : Block(new T[length], length){};
-        explicit Block(T *data, std::size_t length)
-            : length(length), data(data), next(nullptr), prev(nullptr){};
-        ~Block() { delete[] data; }
+
+        explicit Block(std::size_t length);
+        explicit Block(T *data, std::size_t length);
+        ~Block();
+
         Block(const Block &other) = delete;
         Block &operator=(const Block &other) = delete;
     };
+
     template <typename U> class Iterator {
         friend BlockList;
         Block *block;
@@ -134,6 +130,7 @@ template <typename T> class BlockList {
             return std::distance(pointer, block->data + block->length);
         }
     };
+
     template <typename U> struct ConstIterator : public Iterator<const U> {
         // cppcheck-suppress noExplicitConstructor
         ConstIterator(const Iterator<U> &it)
@@ -149,17 +146,13 @@ template <typename T> class BlockList {
             return left.block == right.block && left.pointer == right.pointer;
         }
     };
+
     Block *head;
     Iterator<T> _begin, _end;
-    std::atomic<size_t> _size;
-    ExchangeLock front_lock, back_lock;
+    std::size_t _size;
 
   protected:
-    void add_block(Block *block) {
-        _end.block->next = block;
-        block->prev = _end.block;
-        _end.jump_blocks();
-    }
+    void add_block(Block *block);
 
   public:
     using value_type = T;
@@ -168,114 +161,31 @@ template <typename T> class BlockList {
     using iterator = Iterator<T>;
     using const_iterator = ConstIterator<T>;
     using size_type = size_t;
-    static constexpr std::size_t compute_length(std::size_t size) {
-        return std::max(static_cast<size_t>(16), size / sizeof(T));
-    }
-    BlockList()
-        : head(new Block(new T[0], 0)), _begin(head, nullptr),
-          _end(head, nullptr), _size(0) {}
-    explicit BlockList(std::initializer_list<T> init) : BlockList() {
-        append_range(init);
-    }
-    ~BlockList() {
-        Block *next = head;
-        while (next != nullptr) {
-            Block *block = next;
-            next = block->next;
-            delete block;
-        }
-    }
+
+    static constexpr std::size_t compute_length(std::size_t size);
+
+    BlockList();
+    ~BlockList();
     BlockList(const BlockList &other) = delete;
     BlockList &operator=(const BlockList &other) = delete;
-    size_type size() const { return _size.load(std::memory_order_relaxed); }
-    iterator begin() { return _begin; }
-    iterator end() { return _end; }
-    const_iterator begin() const { return _begin; }
-    const_iterator end() const { return _end; }
-    const_iterator cbegin() const { return _begin; }
-    const_iterator cend() const { return _end; }
-    reference front() { return *begin(); }
-    const_reference front() const { return *begin(); }
-    reference back() { return *std::prev(end()); }
-    const_reference back() const { return *std::prev(end()); }
-    void push_back(T &&value) { emplace_back(std::move(value)); }
-    void push_back(const T &value) { emplace_back(value); }
-    template <typename... Args> reference emplace_back(Args &&...args) {
-        back_lock.acquire();
-        if (_end.at_end_of_block()) {
-            add_block(
-                new Block(std::max(_end.block->length, compute_length(1024))));
-        }
-        // cppcheck-suppress constVariable
-        reference &ref =
-            *std::construct_at(_end.pointer, std::forward<Args>(args)...);
-        ++_end;
-        back_lock.release();
-        _size.fetch_add(1, std::memory_order_relaxed);
-        return ref;
-    }
-    std::optional<T> pop_front() {
-        if (empty()) {
-            return std::nullopt;
-        }
-        front_lock.acquire();
-        if (empty()) {
-            front_lock.release();
-            return std::nullopt;
-        }
-        T first = front();
-        ++_begin;
-        if (head->next != _begin.block) {
-            head = head->next;
-            delete head->prev;
-            head->prev = nullptr;
-        }
-        front_lock.release();
-        _size.fetch_sub(1, std::memory_order_relaxed);
-        return first;
-    }
-    std::optional<T> pop_back() {
-        // Only keep one additional block.
-        if (empty()) {
-            return std::nullopt;
-        }
-        back_lock.acquire();
-        if (_end.at_start_of_block() && _end.block->next != nullptr) {
-            delete _end.block->next;
-            _end.block->next = nullptr;
-        }
-        auto end_it = end();
-        if (empty()) {
-            back_lock.release();
-            return std::nullopt;
-        }
-        T last = *std::prev(end_it);
-        --_end;
-        back_lock.release();
-        _size.fetch_sub(1, std::memory_order_relaxed);
-        return last;
-    }
-    bool empty() const { return begin() == end(); }
-    template <typename R> constexpr void append_range(R &&rg) {
-        back_lock.acquire();
-        auto it = rg.begin();
-        {
-            size_t n = std::min(rg.size(),
-                                static_cast<size_t>(_end.distance_remaining()));
-            std::copy_n(it, n, _end.pointer);
-            _size.fetch_add(n, std::memory_order_relaxed);
-        }
-        if (it != rg.end()) {
-            size_t n = static_cast<size_t>(std::distance(it, rg.end()));
-            Block *block = new Block(n);
 
-            std::copy_n(it, n, block->data);
-            add_block(block);
+    size_type size() const;
+    iterator begin();
+    iterator end();
+    const_iterator begin() const;
+    const_iterator end() const;
+    const_iterator cbegin() const;
+    const_iterator cend() const;
+    reference front();
+    const_reference front() const;
+    reference back();
+    const_reference back() const;
+    void push_back(T &&value);
+    void push_back(const T &value);
+    void clear();
 
-            std::advance(it, n);
-            std::advance(_end, n);
-            _size.fetch_add(n, std::memory_order_relaxed);
-        }
-        back_lock.release();
-    }
+    template <typename... Args> reference emplace_back(Args &&...args);
+
+    std::optional<T> pop_back();
+    bool empty() const;
 };
