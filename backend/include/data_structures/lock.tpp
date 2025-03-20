@@ -99,6 +99,11 @@ std::decay_t<T> *Locked<T, LockT>::operator->() {
 }
 
 template <typename T, typename LockT>
+const std::decay_t<T> *Locked<T, LockT>::operator->() const {
+    return &value;
+}
+
+template <typename T, typename LockT>
 bool Locked<T, LockT>::try_acquire() {
     return lock.try_acquire();
 }

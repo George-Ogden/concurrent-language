@@ -62,6 +62,7 @@ template <typename T, typename LockT = ExchangeLock> struct Locked {
     T &operator*();
     const T &operator*() const;
     std::decay_t<T> *operator->();
+    const std::decay_t<T> *operator->() const;
     bool try_acquire();
     bool release();
     void acquire();

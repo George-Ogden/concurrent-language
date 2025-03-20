@@ -5,6 +5,11 @@
 
 WorkRequest::WorkRequest() = default;
 
+void WorkRequest::request() {
+    status.request();
+}
+
+
 bool WorkRequest::enqueue() {
     return status.enqueue();
 }

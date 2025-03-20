@@ -136,6 +136,7 @@ bool WorkRunner::any_requests() const { return !work_request_queue.empty(); }
 
 bool WorkRunner::active_wait(std::function<bool()> predicate) {
     WorkRequest &work_request = *work_requests[id];
+    work_request.request();
     if (work_request.enqueue()) {
         work_request_queue.push(id);
     } else if (work_request.full()){
