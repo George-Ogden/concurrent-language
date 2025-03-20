@@ -158,6 +158,7 @@ impl Translator {
             Expression::ConstructorCall(constructor_call) => {
                 self.translate_constructor_call(constructor_call)
             }
+            Expression::FnCall(fn_call) => self.translate_fn_call(fn_call),
             e => panic!("{:?} does not translate directly as an expression", e),
         }
     }
@@ -169,17 +170,15 @@ impl Translator {
             .join(",");
         format!("WorkManager::await({arguments});")
     }
-    fn translate_fn_call(&self, target: Id, fn_call: FnCall) -> Code {
+    fn translate_fn_call(&self, fn_call: FnCall) -> Code {
         let args_code = self.translate_value_list(fn_call.args);
         match fn_call.fn_ {
-            // ignore target in case of wrapping in lazy
             Value::BuiltIn(built_in) => {
                 let BuiltIn::BuiltInFn(name) = built_in else {
                     panic!("Attempt to call non-fn built-in.")
                 };
                 format!("{name}({args_code})",)
             }
-            // return the full assignment
             Value::Memory(memory) => {
                 let id = self.translate_memory(memory);
                 let call_code = if args_code.len() == 0 {
@@ -187,7 +186,7 @@ impl Translator {
                 } else {
                     format!("extract_lazy({}),{}", id, args_code)
                 };
-                format!("{{ WorkT work; std::tie(work, {target}) = Work::fn_call({call_code}); process(work); }}")
+                format!("fn_call({call_code})")
             }
         }
     }
@@ -242,10 +241,6 @@ impl Translator {
     fn translate_assignment(&self, assignment: Assignment, declared: &HashSet<Memory>) -> Code {
         let Memory(id) = assignment.target.clone();
         let value_code = match assignment.value {
-            Expression::FnCall(fn_call) => match &fn_call.fn_ {
-                Value::BuiltIn(_) => self.translate_fn_call(id.clone(), fn_call),
-                Value::Memory(_) => return self.translate_fn_call(id.clone(), fn_call),
-            }
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
                 return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::G);"), |env| {
                     let value = self.translate_value(env);
@@ -940,7 +935,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "{ WorkT work; std::tie(work, res) = Work::fn_call(extract_lazy(call)); process(work); }";
+        "auto res = fn_call(extract_lazy(call));";
         "custom fn call no args"
     )]
     #[test_case(
@@ -961,7 +956,7 @@ mod tests {
                 ).into()
             }.into(),
         },
-        "{ WorkT work; std::tie(work, call2) = Work::fn_call(extract_lazy(call1), arg1, arg2); process(work); }";
+        "auto call2 = fn_call(extract_lazy(call1), arg1, arg2);";
         "custom fn call"
     )]
     #[test_case(
@@ -1554,10 +1549,6 @@ mod tests {
                 (Memory(Id::from("x")), AtomicType(AtomicTypeEnum::INT).into()),
             ],
             statements: vec![
-                Declaration{
-                    memory: Memory(Id::from("y")),
-                    type_: AtomicType(AtomicTypeEnum::INT).into(),
-                }.into(),
                 Assignment {
                     target: Memory(Id::from("y")),
                     value: FnCall{
@@ -1578,7 +1569,7 @@ mod tests {
             size_bounds: (150, 150),
             is_recursive: true
         },
-        "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { LazyT<Int> y; { WorkT work; std::tie(work,y) = Work::fn_call(extract_lazy(f),x); process(work);} return ensure_lazy(y);} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
+        "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { auto y = fn_call(extract_lazy(f),x); return ensure_lazy(y);} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
         "higher order fn"
     )]
     fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
@@ -1641,10 +1632,6 @@ mod tests {
                             target: Memory(Id::from("y")).into(),
                             value: Expression::Value(Value::BuiltIn(Integer{value: 5}.into())),
                         }.into(),
-                        Declaration {
-                            type_: AtomicTypeEnum::INT.into(),
-                            memory: Memory(Id::from("main"))
-                        }.into(),
                         Assignment {
                             target: Memory(Id::from("main")),
                             value: FnCall{
@@ -1665,7 +1652,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto call = Plus__BuiltIn(x,y); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { LazyT<Int> main; auto x = Int{9LL}; auto y = Int{5LL}; {WorkT work; std::tie(work,main) = Work::fn_call(extract_lazy(Main)); process(work);} return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
+        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto call = Plus__BuiltIn(x,y); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; auto main = fn_call(extract_lazy(Main)); return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
     fn test_program_translation(program: Program, expected: &str) {

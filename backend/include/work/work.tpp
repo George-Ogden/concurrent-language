@@ -28,7 +28,7 @@ void Work::finish() {
 template <typename Ret, typename... Args, typename ... ArgsT>
 requires (std::is_same_v<Args,remove_lazy_t<std::decay_t<ArgsT>>> && ...)
 std::pair<std::shared_ptr<Work>, LazyT<Ret>>
-Work::fn_call(FnT<Ret, Args...> f, ArgsT... args) {
+Work::fn_call(const FnT<Ret, Args...> &f, const ArgsT&... args) {
     std::shared_ptr<TypedWork<Ret, Args...>> work = std::make_shared<TypedWork<Ret, Args...>>();
     auto placeholders = make_lazy_placeholders<LazyT<Ret>>(work);
     work->targets = lazy_map([](const auto &t) { return std::weak_ptr(t); }, placeholders);

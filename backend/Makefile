@@ -31,13 +31,14 @@ ifneq ($(filter $(USER_FLAG),1 -1),)
 endif
 
 USER := $(shell user=$$(who -m | awk '{print $$1}'); [ -z "$$user" ] && whoami || echo $$user)
+EXTRA_FLAGS_HASH := $(shell echo '$(EXTRA_FLAGS)' | sha256sum 2> /dev/null | cut -d ' ' -f1)
 COMPILER_PREFIX := $(BUILD_DIR)/.compiled-with-
-COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)$(USER_FLAG)
+COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)$(USER_FLAG)$(EXTRA_FLAGS_HASH)
 
 TEST_DIR := test
 TEST_LIBS := -lgtest -lgtest_main
 TEST_BUILDDIR := $(BUILD_DIR)/test
-TEST_FLAGS := -g -fsanitize=address $(WRAP)
+TEST_FLAGS := -g -fsanitize=address $(WRAP) -DFN_CACHING
 TEST_INCLUDE := $(wildcard $(TEST_DIR)/*.hpp) $(WRAP_USER_FILE)
 TEST_FILE := $(TEST_BUILDDIR)/test.cpp
 TEST_EXECS := $(patsubst $(TEST_DIR)/test_%.hpp, $(TARGET_DIR)/test_%, $(filter $(TEST_DIR)/test_%.hpp, $(TEST_INCLUDE)))

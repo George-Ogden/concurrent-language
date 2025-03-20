@@ -120,3 +120,91 @@ TEST_F(ClosureTest, TestRecursiveClosure) {
     ASSERT_FALSE(
         fib_fn->value()->init(make_lazy<Int>(5))->execute_immediately());
 }
+
+TEST_F(ClosureTest, TestFibFnCaching) {
+    LazyT<FnT<Int, Int>> fib = make_lazy<FnT<Int, Int>>(
+        std::make_shared<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+            FibFn::init));
+    std::dynamic_pointer_cast<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+        fib->lvalue())
+        ->env = store_env<typename FibFn::EnvT>(fib);
+
+    auto fib_fn = fib->value()->init(0);
+    auto f_5a = fib_fn->fn_call(fib->value(), Int{5});
+    auto f_4 = fib_fn->fn_call(fib->value(), Int{4});
+    auto f_5b = fib_fn->fn_call(fib->value(), Int{5});
+
+    ASSERT_EQ(f_5a, f_5b);
+    ASSERT_NE(f_5a, f_4);
+}
+
+TEST_F(ClosureTest, TestPlusFnCaching) {
+    LazyT<FnT<Int, Int>> fib = make_lazy<FnT<Int, Int>>(
+        std::make_shared<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+            FibFn::init));
+    std::dynamic_pointer_cast<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+        fib->lvalue())
+        ->env = store_env<typename FibFn::EnvT>(fib);
+
+    auto fib_fn = fib->value()->init(0);
+    FnT<Int, Int, Int> plus_fn =
+        std::make_shared<TypedClosureG<Empty, Int, Int, Int>>(PlusFn::init);
+    auto plus_4_8a = fib_fn->fn_call(plus_fn, Int{4}, Int{8});
+    auto plus_5_8 = fib_fn->fn_call(plus_fn, Int{5}, Int{8});
+    auto plus_4_9 = fib_fn->fn_call(plus_fn, Int{4}, Int{9});
+    auto plus_4_8b = fib_fn->fn_call(plus_fn, Int{4}, Int{8});
+
+    ASSERT_EQ(plus_4_8a, plus_4_8b);
+    ASSERT_NE(plus_5_8, plus_4_8a);
+    ASSERT_NE(plus_4_9, plus_4_8a);
+    ASSERT_NE(plus_5_8, plus_4_9);
+}
+
+TEST_F(ClosureTest, TestMixedFnCaching) {
+    LazyT<FnT<Int, Int>> fib = make_lazy<FnT<Int, Int>>(
+        std::make_shared<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+            FibFn::init));
+    std::dynamic_pointer_cast<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+        fib->lvalue())
+        ->env = store_env<typename FibFn::EnvT>(fib);
+
+    auto fib_fn = fib->value()->init(0);
+    FnT<Int, Int> inc_fn = std::make_shared<TypedClosureG<Int, Int, Int>>(
+        AdderFn::init, make_lazy<Int>(1));
+    auto fib_5 = fib_fn->fn_call(fib->value(), Int{5});
+    auto inc_5 = fib_fn->fn_call(inc_fn, Int{5});
+
+    ASSERT_NE(fib_5, inc_5);
+}
+
+struct PairIntInt : public TypedClosureI<Empty, TupleT<Int, Int>, Int, Int> {
+    using TypedClosureI<Empty, TupleT<Int, Int>, Int, Int>::TypedClosureI;
+    LazyT<TupleT<Int, Int>> body(LazyT<Int> &x, LazyT<Int> &y) override {
+        return std::make_tuple(x, y);
+    }
+    constexpr std::size_t lower_size_bound() const override { return 60; };
+    constexpr std::size_t upper_size_bound() const override { return 60; };
+    static std::unique_ptr<TypedFnI<TupleT<Int, Int>, Int, Int>>
+    init(const ArgsT &args) {
+        return std::make_unique<PairIntInt>(args);
+    }
+    constexpr bool is_recursive() const override { return false; };
+};
+
+TEST_F(ClosureTest, TestTupleCaching) {
+    LazyT<FnT<Int, Int>> fib = make_lazy<FnT<Int, Int>>(
+        std::make_shared<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+            FibFn::init));
+    std::dynamic_pointer_cast<TypedClosureG<WeakFnT<Int, Int>, Int, Int>>(
+        fib->lvalue())
+        ->env = store_env<typename FibFn::EnvT>(fib);
+    auto fib_fn = fib->value()->init(0);
+
+    FnT<TupleT<Int, Int>, Int, Int> pair_fn =
+        std::make_shared<TypedClosureG<Empty, TupleT<Int, Int>, Int, Int>>(
+            PairIntInt::init);
+    auto pair_5_6 = fib_fn->fn_call(pair_fn, Int{5}, Int{6});
+    auto pair_5_7 = fib_fn->fn_call(pair_fn, Int{5}, Int{7});
+
+    ASSERT_NE(pair_5_6, pair_5_7);
+}
