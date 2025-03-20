@@ -6,26 +6,10 @@ fib = (n: int) -> int {
             1
         }
     } else {
-        if ((n & 1) == 0) {
-            fib(n/2-1) ** 2 + fib(n/2) * fib(n/2-1) + fib(n/2) * fib(n/2-2)
-        } else {
-            fib(n/2) ** 2 + fib(n/2) * fib(n/2-1) * 2
-        }
+        fib(n-1) + fib(n-2)
     }
 };
 
 main = (n: int) -> int {
     fib(n)
 };
-
-/*
-XXXXXXXX
-XXX[]XXX
-XXXOXXXX
-XX[]XXXX
-
-XXXXXXX
-XXXOXXX
-XXX[]XX
-XX[]XXX
-*/
