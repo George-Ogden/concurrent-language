@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data_structures/cyclic_queue.tpp"
+#include "data_structures/block_list.tpp"
 #include "lazy/fns.hpp"
 #include "system/work_manager.tpp"
 #include "work/runner.hpp"
@@ -84,8 +85,6 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
         if (all_done(vs...)) {
             return;
         }
-        std::vector<WorkT> extra_works;
-        std::vector<WorkT> small_works, large_works;
         do {
             while (large_works.size() > 1 && any_requests()) {
                 if (respond(large_works.back())) {
@@ -120,7 +119,10 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                             small_works.emplace_back(std::move(work));
                         }
                     }
-                    extra_works.clear();
+                    while (!extra_works.empty()){
+                        extra_works.pop_back();
+                    }
+                    // extra_works.clear();
                 }
             }
 
