@@ -1,10 +1,14 @@
 #pragma once
 
+#include "data_structures/lock.tpp"
+
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <utility>
 
 template <typename T> class BlockList {
@@ -55,7 +59,7 @@ template <typename T> class BlockList {
 
       public:
         Iterator() : Iterator(nullptr, nullptr) {}
-        using iterator_category = std::random_access_iterator_tag;
+        using iterator_category = std::bidirectional_iterator_tag;
         using difference_type = std::ptrdiff_t;
         using value_type = U;
         using reference = value_type &;
@@ -147,7 +151,8 @@ template <typename T> class BlockList {
     };
     Block *head;
     Iterator<T> _begin, _end;
-    size_t _size;
+    std::atomic<size_t> _size;
+    ExchangeLock front_lock, back_lock;
 
   protected:
     void add_block(Block *block) {
@@ -182,7 +187,7 @@ template <typename T> class BlockList {
     }
     BlockList(const BlockList &other) = delete;
     BlockList &operator=(const BlockList &other) = delete;
-    size_type size() const { return _size; }
+    size_type size() const { return _size.load(std::memory_order_relaxed); }
     iterator begin() { return _begin; }
     iterator end() { return _end; }
     const_iterator begin() const { return _begin; }
@@ -196,6 +201,7 @@ template <typename T> class BlockList {
     void push_back(T &&value) { emplace_back(std::move(value)); }
     void push_back(const T &value) { emplace_back(value); }
     template <typename... Args> reference emplace_back(Args &&...args) {
+        back_lock.acquire();
         if (_end.at_end_of_block()) {
             add_block(
                 new Block(std::max(_end.block->length, compute_length(1024))));
@@ -204,35 +210,60 @@ template <typename T> class BlockList {
         reference &ref =
             *std::construct_at(_end.pointer, std::forward<Args>(args)...);
         ++_end;
-        _size++;
+        back_lock.release();
+        _size.fetch_add(1, std::memory_order_relaxed);
         return ref;
     }
-    void pop_front() {
+    std::optional<T> pop_front() {
+        if (empty()) {
+            return std::nullopt;
+        }
+        front_lock.acquire();
+        if (empty()) {
+            front_lock.release();
+            return std::nullopt;
+        }
+        T first = front();
         ++_begin;
         if (head->next != _begin.block) {
             head = head->next;
             delete head->prev;
             head->prev = nullptr;
         }
-        _size--;
+        front_lock.release();
+        _size.fetch_sub(1, std::memory_order_relaxed);
+        return first;
     }
-    void pop_back() {
+    std::optional<T> pop_back() {
         // Only keep one additional block.
+        if (empty()) {
+            return std::nullopt;
+        }
+        back_lock.acquire();
         if (_end.at_start_of_block() && _end.block->next != nullptr) {
             delete _end.block->next;
             _end.block->next = nullptr;
         }
+        auto end_it = end();
+        if (empty()) {
+            back_lock.release();
+            return std::nullopt;
+        }
+        T last = *std::prev(end_it);
         --_end;
-        _size--;
+        back_lock.release();
+        _size.fetch_sub(1, std::memory_order_relaxed);
+        return last;
     }
     bool empty() const { return begin() == end(); }
     template <typename R> constexpr void append_range(R &&rg) {
+        back_lock.acquire();
         auto it = rg.begin();
         {
             size_t n = std::min(rg.size(),
                                 static_cast<size_t>(_end.distance_remaining()));
             std::copy_n(it, n, _end.pointer);
-            _size += n;
+            _size.fetch_add(n, std::memory_order_relaxed);
         }
         if (it != rg.end()) {
             size_t n = static_cast<size_t>(std::distance(it, rg.end()));
@@ -243,7 +274,8 @@ template <typename T> class BlockList {
 
             std::advance(it, n);
             std::advance(_end, n);
-            _size += n;
+            _size.fetch_add(n, std::memory_order_relaxed);
         }
+        back_lock.release();
     }
 };

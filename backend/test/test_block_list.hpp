@@ -7,12 +7,24 @@
 #include <range/v3/numeric/iota.hpp>
 #include <range/v3/view/zip.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <iterator>
+#include <mutex>
+#include <optional>
+#include <pthread.h>
 #include <queue>
 #include <ranges>
 #include <stack>
 
-TEST(BlockList, BlockListTypesTest) {
+using namespace std::chrono_literals;
+
+class BlockListTest : public ::testing::Test {
+  protected:
+    void SetUp() override { ThreadManager::register_self(0); }
+};
+
+TEST_F(BlockListTest, BlockListTypesTest) {
     using I = BlockList<int>::iterator;
     static_assert(std::forward_iterator<I>);
     static_assert(std::bidirectional_iterator<I>);
@@ -21,12 +33,12 @@ TEST(BlockList, BlockListTypesTest) {
     std::queue<int, BlockList<int>> queue;
 }
 
-TEST(BlockList, TestEmptySizeIsZero) {
+TEST_F(BlockListTest, TestEmptySizeIsZero) {
     BlockList<int> list;
     ASSERT_EQ(list.size(), 0);
 }
 
-TEST(BlockList, TestSizeIncrementsOnPushBack) {
+TEST_F(BlockListTest, TestSizeIncrementsOnPushBack) {
     BlockList<int> list;
     ASSERT_EQ(list.size(), 0);
     list.push_back(1);
@@ -36,7 +48,7 @@ TEST(BlockList, TestSizeIncrementsOnPushBack) {
     ASSERT_EQ(list.size(), 2);
 }
 
-TEST(BlockList, TestBlockListIterators) {
+TEST_F(BlockListTest, TestBlockListIterators) {
     BlockList<int> list;
     ASSERT_EQ(list.end(), list.begin());
     for (int i = 10000; i > 0; i--) {
@@ -107,7 +119,7 @@ TEST(BlockList, TestBlockListIterators) {
     ASSERT_EQ(j, 10001);
 }
 
-TEST(BlockList, TestPopFront) {
+TEST_F(BlockListTest, TestPopFront) {
     BlockList<int> list; // []
     ASSERT_EQ(list.size(), 0);
 
@@ -135,7 +147,7 @@ TEST(BlockList, TestPopFront) {
     ASSERT_EQ(list.size(), 0);
 }
 
-TEST(BlockList, TestPopBack) {
+TEST_F(BlockListTest, TestPopBack) {
     BlockList<int> list; // []
     ASSERT_EQ(list.size(), 0);
     ASSERT_TRUE(list.empty());
@@ -171,7 +183,7 @@ TEST(BlockList, TestPopBack) {
     ASSERT_TRUE(list.empty());
 }
 
-TEST(BlockList, TestBlockListIteratorWalk) {
+TEST_F(BlockListTest, TestBlockListIteratorWalk) {
     BlockList<int> list;
     BlockList<int>::iterator it = list.begin();
     BlockList<int>::const_iterator const_it = list.begin();
@@ -191,7 +203,7 @@ TEST(BlockList, TestBlockListIteratorWalk) {
     }
 }
 
-TEST(BlockList, TestBlockListAppendRange) {
+TEST_F(BlockListTest, TestBlockListAppendRange) {
     BlockList<int> list;
     std::vector<int> range(10000);
     ranges::iota(range, 0);
@@ -206,7 +218,7 @@ TEST(BlockList, TestBlockListAppendRange) {
     ASSERT_EQ(i, 9999);
 }
 
-TEST(BlockList, TestBlockListIteratorMidway) {
+TEST_F(BlockListTest, TestBlockListIteratorMidway) {
     BlockList<int> list;
     std::vector<int> range(10000);
     ranges::iota(range, 0);
@@ -231,3 +243,180 @@ TEST(BlockList, TestBlockListIteratorMidway) {
         ASSERT_EQ(list.back(), i);
     }
 }
+
+class BlockListMultiThreadTest : public ::testing::TestWithParam<unsigned> {
+  protected:
+    BlockList<unsigned> queue;
+    void SetUp() override {
+        auto num_cpus = GetParam();
+        ThreadManager::override_concurrency(num_cpus);
+        ThreadManager::register_self(0);
+    }
+
+    void TearDown() override { ThreadManager::reset_concurrency_override(); }
+};
+
+TEST_P(BlockListMultiThreadTest, TestQueuePush) {
+    auto num_cpus = ThreadManager::available_concurrency();
+    std::atomic<unsigned> ready{num_cpus + 1};
+    std::mutex m;
+
+    auto work = [&](const typename ThreadManager::ThreadId &cpu_id) {
+        m.lock();
+        ThreadManager::register_self(cpu_id);
+        m.unlock();
+        ready.fetch_sub(1);
+        while (!ready.load() == 0) {
+        }
+        for (unsigned i = 0; i < 1000; i++) {
+            queue.push_back(i);
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < num_cpus; i++) {
+        threads.push_back(std::thread(work, i));
+    }
+    ready.fetch_sub(1);
+    for (auto &thread : threads) {
+        thread.join();
+    }
+
+    std::atomic<unsigned> total{0};
+    ASSERT_TRUE(queue.size() == num_cpus * 1000);
+    std::optional<unsigned> x = 0;
+    do {
+        total.fetch_add(x.value(), std::memory_order_relaxed);
+        x = queue.pop_front();
+    } while (x.has_value());
+    ASSERT_EQ(total, 1000 * 999 / 2 * num_cpus);
+}
+
+TEST_P(BlockListMultiThreadTest, TestQueuePop) {
+    auto num_cpus = ThreadManager::available_concurrency();
+    std::atomic<unsigned> ready{num_cpus + 1};
+    std::atomic<unsigned> total{0};
+    std::mutex m;
+
+    auto work = [&](const typename ThreadManager::ThreadId &cpu_id) {
+        m.lock();
+        ThreadManager::register_self(cpu_id);
+        m.unlock();
+        ready.fetch_sub(1);
+        while (!ready.load() == 0) {
+        }
+        for (unsigned i = 0; i < 1000; i++) {
+            auto x = queue.pop_front();
+            total += x.value();
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < num_cpus; i++) {
+        threads.push_back(std::thread(work, i));
+    }
+    for (unsigned j = 0; j < num_cpus; j++) {
+        for (unsigned i = 0; i < 1000; i++) {
+            queue.push_back(i);
+        }
+    }
+    ready.fetch_sub(1);
+    for (auto &thread : threads) {
+        thread.join();
+    }
+
+    ASSERT_TRUE(queue.empty());
+    ASSERT_EQ(total, 1000 * 999 / 2 * num_cpus);
+}
+
+TEST_P(BlockListMultiThreadTest, TestQueue) {
+    auto num_cpus = ThreadManager::available_concurrency();
+    std::atomic<unsigned> ready{num_cpus + 1};
+    std::atomic<unsigned> total{0};
+    std::mutex m;
+
+    auto work = [&](const typename ThreadManager::ThreadId &cpu_id) {
+        m.lock();
+        ThreadManager::register_self(cpu_id);
+        m.unlock();
+        ready.fetch_sub(1);
+        while (!ready.load() == 0) {
+        }
+        for (unsigned i = 0; i < 1000; i++) {
+            queue.push_back(i);
+            std::this_thread::sleep_for(10us);
+            std::optional<unsigned> x = queue.pop_front();
+            if (x.has_value()) {
+                total.fetch_add(*x, std::memory_order_relaxed);
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < num_cpus; i++) {
+        threads.push_back(std::thread(work, i));
+    }
+    ready.fetch_sub(1);
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    ASSERT_LE(queue.size(), num_cpus);
+
+    std::optional<unsigned> x = 0;
+    do {
+        total.fetch_add(x.value(), std::memory_order_relaxed);
+        x = queue.pop_back();
+    } while (x.has_value());
+
+    ASSERT_TRUE(queue.empty());
+    ASSERT_EQ(queue.size(), 0);
+    ASSERT_EQ(total, 1000 * 999 / 2 * num_cpus);
+}
+
+TEST_P(BlockListMultiThreadTest, TestStack) {
+    auto num_cpus = ThreadManager::available_concurrency();
+    std::atomic<unsigned> ready{num_cpus + 1};
+    std::atomic<unsigned> total{0};
+    std::mutex m;
+
+    auto work = [&](const typename ThreadManager::ThreadId &cpu_id) {
+        m.lock();
+        ThreadManager::register_self(cpu_id);
+        m.unlock();
+        ready.fetch_sub(1);
+        while (!ready.load() == 0) {
+        }
+        for (unsigned i = 0; i < 1000; i++) {
+            queue.push_back(i);
+            std::this_thread::sleep_for(10us);
+            std::optional<unsigned> x = queue.pop_back();
+            if (x.has_value()) {
+                total.fetch_add(*x, std::memory_order_relaxed);
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < num_cpus; i++) {
+        threads.push_back(std::thread(work, i));
+    }
+    ready.fetch_sub(1);
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    ASSERT_LE(queue.size(), num_cpus);
+
+    std::optional<unsigned> x = 0;
+    do {
+        total.fetch_add(x.value(), std::memory_order_relaxed);
+        x = queue.pop_back();
+    } while (x.has_value());
+
+    ASSERT_TRUE(queue.empty());
+    ASSERT_EQ(queue.size(), 0);
+    ASSERT_EQ(total, 1000 * 999 / 2 * num_cpus);
+}
+
+std::vector<unsigned> queue_test_cpu_counts = {1, 2, 3, 4, 6, 8};
+INSTANTIATE_TEST_SUITE_P(BlockListMultiThreadTests, BlockListMultiThreadTest,
+                         ::testing::ValuesIn(queue_test_cpu_counts));
