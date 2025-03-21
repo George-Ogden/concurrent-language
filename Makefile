@@ -35,10 +35,10 @@ $(LAST_FILE):
 	touch $@
 
 run: build
-	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend run --quiet
+	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend EXTRA_FLAGS='$(BACKEND_FLAGS)' run --quiet
 
 build: $(TARGET)
-	make -C backend build
+	make -C backend build EXTRA_FLAGS='$(BACKEND_FLAGS)'
 
 $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
 	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) $(FRONTEND_FLAGS) > $(TARGET)
@@ -68,7 +68,7 @@ $(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
 	touch $@
 
 $(BACKEND): $(TARGET)
-	make -C backend build USER_FLAG=$(USER_FLAG) EXTRA_FLAGS=$(BACKEND_FLAGS)
+	make -C backend build USER_FLAG=$(USER_FLAG) EXTRA_FLAGS='$(BACKEND_FLAGS)'
 	touch $@
 
 $(PARSER): $(GRAMMAR)
