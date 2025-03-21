@@ -105,7 +105,7 @@ $(COMPILER_FILE): | $(BUILD_DIR)
 build: $(TARGET)
 
 run: build
-	./$(TARGET) $(FLAGS)
+	./$(TARGET) $(INPUT)
 
 %: $(TARGET_DIR)/%
 	./$<

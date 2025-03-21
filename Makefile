@@ -35,7 +35,7 @@ $(LAST_FILE):
 	touch $@
 
 run: build
-	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend EXTRA_FLAGS='$(BACKEND_FLAGS)' run --quiet
+	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend EXTRA_FLAGS='$(BACKEND_FLAGS)' run --quiet INPUT='$(INPUT)'
 
 build: $(TARGET)
 	make -C backend build EXTRA_FLAGS='$(BACKEND_FLAGS)'
