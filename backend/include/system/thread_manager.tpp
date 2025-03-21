@@ -15,6 +15,9 @@
 #include <stdexcept>
 #include <thread>
 
+std::mutex ThreadManager::m;
+std::optional<unsigned int> ThreadManager::num_cpus_override;
+
 unsigned ThreadManager::hardware_concurrency() {
     return std::thread::hardware_concurrency();
 }
@@ -33,12 +36,13 @@ void ThreadManager::reset_concurrency_override() {
     set_shared_affinity();
 }
 
+thread_local ThreadManager::ThreadId thread_id;
 void ThreadManager::register_self(ThreadId cpu_id) {
-    id_conversion_table[std::this_thread::get_id()] = cpu_id;
+    thread_id = cpu_id;
 }
 
 ThreadManager::ThreadId ThreadManager::get_id() {
-    return id_conversion_table.at(std::this_thread::get_id());
+    return thread_id;
 }
 
 unsigned ThreadManager::set_affinity(unsigned cpu_id) {
@@ -84,16 +88,13 @@ int ThreadManager::set_priority() {
 void ThreadManager::thread_setup(size_t cpu_id, bool verbose) {
     size_t cpu = set_affinity(cpu_id);
     int priority = set_priority();
-    m.lock();
     if (verbose) {
+        m.lock();
         std::cout << "Running on CPU " << cpu << " with priority " << priority
                   << std::endl;
+        m.unlock();
     }
     register_self(cpu_id);
-    waiting_threads.fetch_sub(1, std::memory_order_relaxed);
-    m.unlock();
-    while (waiting_threads.load(std::memory_order_relaxed) > 0) {
-    }
 }
 
 template <typename F, typename T>
@@ -126,7 +127,6 @@ void ThreadManager::run_multithreaded(F thread_body, T arg,
     override_concurrency(run_config.num_cpus);
     std::vector<ThreadId> cpu_ids(run_config.num_cpus);
     ranges::iota(cpu_ids, 0);
-    waiting_threads.store(run_config.num_cpus, std::memory_order_relaxed);
 
     std::vector<std::thread> threads;
     ranges::transform(

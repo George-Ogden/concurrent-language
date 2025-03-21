@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data_structures/block_list.hpp"
 #include "data_structures/cyclic_queue.hpp"
 #include "data_structures/lock.hpp"
 #include "system/thread_manager.tpp"
@@ -25,7 +26,7 @@ struct WorkRunner {
     static void setup(unsigned num_cpus);
 
   protected:
-    std::atomic<unsigned> counter;
+    BlockList<WorkT> extra_works, small_works, large_works;
 
     void main(std::atomic<WorkT> *ref);
     bool active_wait(std::function<bool()> predicate);

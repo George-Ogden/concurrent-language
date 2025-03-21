@@ -4,6 +4,7 @@
 #include "types/utils.hpp"
 #include "work/work.tpp"
 #include "system/work_manager.tpp"
+#include "data_structures/block_list.tpp"
 
 #include <optional>
 #include <memory>
@@ -17,7 +18,7 @@ std::shared_ptr<Lazy<T>> Lazy<T>::as_ref() {
 }
 
 template <typename T>
-void Lazy<T>::get_work(std::vector<WorkT> &work) {}
+void Lazy<T>::get_work(BlockList<WorkT> &work) {}
 
 template <typename T>
 template <typename ...Args>
@@ -80,7 +81,7 @@ std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
 }
 
 template <typename T>
-void LazyPlaceholder<T>::get_work(std::vector<WorkT> &work) {
+void LazyPlaceholder<T>::get_work(BlockList<WorkT> &work) {
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
         WorkT current_work = this->work.load(std::memory_order_relaxed);
