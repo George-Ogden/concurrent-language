@@ -138,6 +138,24 @@ benchmark: | $(LOG_DIR)
 		done; \
 	done;
 
+python_benchmark: | $(LOG_DIR)
+	echo "python benchmark" > $(LOG_DIR)/title.txt
+
+	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
+	for i in `seq 1 $(REPEATS)`; do \
+		for program in benchmark/**; do \
+			while read input; do \
+				echo $$program $$input; \
+				python scripts/benchmark.py $$program/main.py "$$input" \
+				| xargs printf '%s\t' \
+					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
+					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
+				| xargs -0 echo >> $(LOG_FILE); \
+			done < $$program/input.txt; \
+		done; \
+	done;
+
+
 $(VECTOR_FILE): | $(LOG_DIR)
 	make $(TARGET) FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"
 	head -1 $(TEMPFILE) | sed 's/$$/\ttime/' | sed 's/^/sample\t/' > $@
