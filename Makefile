@@ -124,8 +124,8 @@ benchmark: | $(LOG_DIR)
 	touch $(LOG_DIR)/title.txt
 
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
-	for i in `seq 1 $(REPEATS)`; do \
-		for program in benchmark/**; do \
+	for program in benchmark/**; do \
+		for i in `seq 1 $(REPEATS)`; do \
 			make build FILE=$$program/main.txt USER_FLAG=-1; \
 			while read input; do \
 				echo $$program $$input; \
