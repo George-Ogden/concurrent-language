@@ -146,7 +146,7 @@ python_benchmark: | $(LOG_DIR)
 		for program in benchmark/**; do \
 			while read input; do \
 				echo $$program $$input; \
-				python scripts/benchmark.py $$program/main.py "$$input" \
+				sudo chrt -f $(MAX_PRIORITY) python scripts/benchmark.py $$program/main.py "$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
