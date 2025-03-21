@@ -26,7 +26,7 @@ void BlockList<T>::add_block(Block *block) {
 
 template <typename T>
 constexpr std::size_t BlockList<T>::compute_length(std::size_t size) {
-    return std::max(static_cast<size_t>(2), size / sizeof(T));
+    return std::max(static_cast<size_t>(16), size / sizeof(T));
 }
 
 template <typename T>
@@ -94,7 +94,7 @@ template <typename... Args>
 typename BlockList<T>::reference BlockList<T>::emplace_back(Args &&...args) {
     if (_end.at_end_of_block()) {
         if (_end.block->next == nullptr) {
-            add_block(new Block(std::max(_end.block->length, compute_length(4))));
+            add_block(new Block(std::max(_end.block->length, compute_length(1024))));
         } else {
             _end.jump_blocks();
         }
