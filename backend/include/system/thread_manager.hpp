@@ -41,8 +41,7 @@ class ThreadManager {
                                   const RunConfig &run_config);
 
   private:
-    static inline std::mutex m;
-    static inline std::atomic<int> waiting_threads;
-    static inline std::optional<unsigned int> num_cpus_override;
-    static inline std::map<std::thread::id, ThreadId> id_conversion_table;
+    static std::mutex m;
+    static std::atomic<int> waiting_threads;
+    static std::optional<unsigned> num_cpus_override;
 };
