@@ -33,19 +33,19 @@ size_t CyclicQueue<T>::max_size() const { return max_size_; }
 
 template <typename T>
 size_t CyclicQueue<T>::size() const {
-    return *back - *front;
+    return back->load(std::memory_order_relaxed) - front->load(std::memory_order_relaxed);
 }
 
 template <typename T>
 bool CyclicQueue<T>::empty() const {
-    return *back == *front;
+    return back->load(std::memory_order_relaxed) == front->load(std::memory_order_relaxed);
 }
 
 template <typename T>
 void CyclicQueue<T>::push(const T &value) {
     back.acquire();
     get(*back) = value;
-    (*back)++;
+    back->fetch_add(1, std::memory_order_relaxed);
     back.release();
 }
 
@@ -53,18 +53,18 @@ template <typename T>
 void CyclicQueue<T>::push(T &&value) {
     back.acquire();
     get(*back) = std::move(value);
-    (*back)++;
+    back->fetch_add(1, std::memory_order_relaxed);
     back.release();
 }
 
 template <typename T>
 std::optional<T> CyclicQueue<T>::pop() {
     front.acquire();
-    if (*front == *back){
+    if (front->load(std::memory_order_relaxed) == back->load(std::memory_order_relaxed)){
         front.release();
         return std::nullopt;
     }
-    T &data = get((*front)++);
+    T &data = get(front->fetch_add(1, std::memory_order_relaxed));
     front.release();
     return data;
 }

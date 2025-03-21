@@ -6,7 +6,7 @@
 #include <memory>
 
 class Status {
-    enum WorkStatus { UNAVAILABLE, AVAILABLE, FULL, MAX };
+    enum WorkStatus { UNAVAILABLE, AVAILABLE, ACTIVE, MAX };
     static inline constexpr std::size_t WORK_IDX = 0;
     static inline constexpr std::size_t WORK_WIDTH = 2;
     static_assert(MAX <= (1ULL << WORK_WIDTH));
@@ -19,7 +19,7 @@ class Status {
     bool queued() const { return value.load<QUEUE_IDX>(); }
     bool available() const { return value.load<WORK_IDX>() == AVAILABLE; }
     bool unavailable() const { return value.load<WORK_IDX>() == UNAVAILABLE; }
-    bool full() const { return value.load<WORK_IDX>() == FULL; }
+    bool full() const { return value.load<WORK_IDX>() == ACTIVE; }
 
     bool request() {
         return value.compare_exchange<WORK_IDX>(UNAVAILABLE, AVAILABLE);
@@ -29,7 +29,7 @@ class Status {
     }
     bool fill() {
         while (1) {
-            if (value.compare_exchange<WORK_IDX, WORK_IDX>(AVAILABLE, FULL)) {
+            if (value.compare_exchange<WORK_IDX, WORK_IDX>(AVAILABLE, ACTIVE)) {
                 value.store<QUEUE_IDX>(false);
                 return true;
             } else if (dequeue()) {
@@ -38,7 +38,7 @@ class Status {
         }
     }
     bool complete() {
-        return value.compare_exchange<WORK_IDX>(FULL, UNAVAILABLE);
+        return value.compare_exchange<WORK_IDX>(ACTIVE, UNAVAILABLE);
     }
     bool enqueue() {
         return value.compare_exchange<WORK_IDX, QUEUE_IDX, QUEUE_IDX>(

@@ -5,13 +5,21 @@
 
 WorkRequest::WorkRequest() = default;
 
+void WorkRequest::request() {
+    status.request();
+}
+
+
 bool WorkRequest::enqueue() {
     return status.enqueue();
 }
 
 void WorkRequest::fulfill() {
-    while (work.load(std::memory_order_relaxed) == nullptr) {}
-    work.load(std::memory_order_relaxed)->run();
+    WorkT work;
+    do {
+        work = this->work.load(std::memory_order_relaxed);
+    } while (work == nullptr);
+    work->run();
 }
 
 bool WorkRequest::full() const {
