@@ -119,10 +119,7 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                             small_works.emplace_back(std::move(work));
                         }
                     }
-                    while (!extra_works.empty()){
-                        extra_works.pop_back();
-                    }
-                    // extra_works.clear();
+                    extra_works.clear();
                 }
             }
 
