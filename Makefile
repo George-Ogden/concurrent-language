@@ -124,8 +124,8 @@ benchmark: | $(LOG_DIR)
 	touch $(LOG_DIR)/title.txt
 
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
-	for i in `seq 1 $(REPEATS)`; do \
-		for program in benchmark/**; do \
+	for program in benchmark/**; do \
+		for i in `seq 1 $(REPEATS)`; do \
 			make build FILE=$$program/main.txt USER_FLAG=-1; \
 			while read input; do \
 				echo $$program $$input; \
@@ -146,7 +146,7 @@ python_benchmark: | $(LOG_DIR)
 		for program in benchmark/**; do \
 			while read input; do \
 				echo $$program $$input; \
-				python scripts/benchmark.py $$program/main.py "$$input" \
+				sudo chrt -f $(MAX_PRIORITY) python scripts/benchmark.py $$program/main.py "$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
