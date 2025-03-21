@@ -12,7 +12,7 @@
 #include <memory>
 #include <optional>
 
-std::atomic<bool> WorkRunner::done_flag;
+std::atomic<bool> WorkRunner::done_flag{false};
 CyclicQueue<unsigned> WorkRunner::work_request_queue;
 std::vector<std::unique_ptr<WorkRequest>> WorkRunner::work_requests;
 
@@ -21,11 +21,12 @@ WorkRunner::WorkRunner(const ThreadManager::ThreadId &id) : id(id) {}
 void WorkRunner::main(std::atomic<WorkT> *ref) {
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
     if (work != nullptr) {
+        std::cout << static_cast<int>(ThreadManager::get_id()) << std::endl;
         work->run();
         work->await_all();
-        done_flag.store(true, std::memory_order_release);
+        done_flag.store(true, std::memory_order_relaxed);
     } else {
-        while (!done_flag.load(std::memory_order_acquire)) {
+        while (!done_flag.load(std::memory_order_relaxed)) {
             try {
                 active_wait(std::function<bool()>([](){return false;}));
             } catch (finished &f) {
@@ -126,7 +127,7 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
             if (all_done(vs...)) {
                 return;
             }
-        } while (!done_flag.load(std::memory_order_acquire));
+        } while (!done_flag.load(std::memory_order_relaxed));
         throw finished{};
     };
 }
@@ -135,6 +136,7 @@ bool WorkRunner::any_requests() const { return !work_request_queue.empty(); }
 
 bool WorkRunner::active_wait(std::function<bool()> predicate) {
     WorkRequest &work_request = *work_requests[id];
+    work_request.request();
     if (work_request.enqueue()) {
         work_request_queue.push(id);
     } else if (work_request.full()){
@@ -172,7 +174,7 @@ template <typename... Vs> bool WorkRunner::all_done(Vs &&...vs) {
 
 void WorkRunner::setup(unsigned num_cpus) {
     WorkRunner::num_cpus = num_cpus;
-    WorkRunner::done_flag = false;
+    WorkRunner::done_flag.store(false);
     WorkRunner::work_request_queue = CyclicQueue<unsigned>{num_cpus};
     WorkRunner::work_requests.clear();
     for (unsigned i = 0; i < num_cpus; i++){

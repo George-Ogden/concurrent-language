@@ -10,6 +10,7 @@ struct WorkRequest {
     std::atomic<WorkT> work;
 
     WorkRequest();
+    void request();
     bool enqueue();
     void fulfill();
     bool full() const;

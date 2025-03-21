@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data_structures/atomic_shared_enum.hpp"
 #include "data_structures/lock.hpp"
 #include "fn/fn_inst.hpp"
 #include "fn/types.hpp"
@@ -15,8 +16,11 @@
 
 class Work {
   protected:
+    enum WorkStatus { AVAILABLE, ACTIVE, DONE, MAX };
     template <typename T, typename U> static void assign(T &targets, U &result);
-    std::atomic<bool> done_flag;
+    constexpr static inline unsigned ATOMIC_WIDTH = 2;
+    AtomicSharedEnum<ATOMIC_WIDTH> work_status;
+    static_assert(MAX <= (1ULL << ATOMIC_WIDTH));
 
   public:
     Work();

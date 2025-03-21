@@ -11,7 +11,7 @@
 
 template <typename T> class CyclicQueue {
     std::vector<T> data;
-    Locked<std::size_t> front, back;
+    Locked<std::atomic<std::size_t>> front, back;
     std::size_t max_size_;
     T &get(std::size_t i) { return data[i % max_size_]; }
 

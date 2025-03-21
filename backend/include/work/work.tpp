@@ -18,11 +18,11 @@ Work::Work() = default;
 Work::~Work() = default;
 
 bool Work::done() const {
-    return done_flag.load(std::memory_order_acquire);
+    return static_cast<WorkStatus>(work_status.load<0>(std::memory_order_acquire)) == WorkStatus::DONE;
 }
 
 void Work::finish() {
-    done_flag.store(true, std::memory_order_release);
+    work_status.store<0>(WorkStatus::DONE, std::memory_order_release);
 }
 
 template <typename Ret, typename... Args, typename ... ArgsT>
@@ -48,12 +48,11 @@ void Work::assign(T &targets, U &results) {
 
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run() {
-    if (done()) {
-        return;
+    if (work_status.compare_exchange<0>(WorkStatus::AVAILABLE, WorkStatus::ACTIVE, std::memory_order_acq_rel)){
+        LazyT<Ret> results = fn->run();
+        assign(targets, results);
+        finish();
     }
-    LazyT<Ret> results = fn->run();
-    assign(targets, results);
-    finish();
 }
 
 template <typename Ret, typename... Args>
@@ -65,5 +64,5 @@ void TypedWork<Ret, Args...>::await_all() {
 
 template <typename Ret, typename... Args>
 bool TypedWork<Ret, Args...>::can_respond() const {
-    return fn->lower_size_bound() > 200 || fn->is_recursive();
+    return (fn->lower_size_bound() > 200 || fn->is_recursive()) && work_status.load<0>(std::memory_order_acquire) == WorkStatus::AVAILABLE;
 }
