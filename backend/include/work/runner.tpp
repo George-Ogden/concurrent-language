@@ -21,7 +21,6 @@ WorkRunner::WorkRunner(const ThreadManager::ThreadId &id) : id(id) {}
 void WorkRunner::main(std::atomic<WorkT> *ref) {
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
     if (work != nullptr) {
-        std::cout << static_cast<int>(ThreadManager::get_id()) << std::endl;
         work->run();
         work->await_all();
         done_flag.store(true, std::memory_order_relaxed);
