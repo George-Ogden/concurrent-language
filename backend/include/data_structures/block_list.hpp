@@ -118,7 +118,7 @@ template <typename T> class BlockList {
             return *copy;
         }
         bool operator==(const Iterator &other) const {
-            return ConstIterator(*this) == ConstIterator(other);
+            return ConstIterator<U>(*this) == ConstIterator<U>(other);
         }
 
         difference_type distance_along() const {

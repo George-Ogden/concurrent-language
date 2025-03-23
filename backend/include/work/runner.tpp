@@ -177,7 +177,7 @@ void WorkRunner::setup(unsigned num_cpus) {
     WorkRunner::work_request_queue = CyclicQueue<unsigned>{num_cpus};
     WorkRunner::work_requests.clear();
     for (unsigned i = 0; i < num_cpus; i++){
-        work_requests.emplace_back(std::move(std::make_unique<WorkRequest>()));
+        work_requests.emplace_back(std::make_unique<WorkRequest>());
     }
     WorkRunner::work_requests.resize(num_cpus);
 }

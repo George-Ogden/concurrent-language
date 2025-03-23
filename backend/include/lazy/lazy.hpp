@@ -10,7 +10,7 @@
 #include <optional>
 #include <utility>
 
-struct Work;
+class Work;
 struct LazyValue {
     virtual void get_work(BlockList<std::shared_ptr<Work>> &work) = 0;
     virtual ~LazyValue();

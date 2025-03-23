@@ -83,7 +83,7 @@ struct DelayedIncrement : public TypedClosureI<Empty, Int, Int> {
     using TypedClosureI<Empty, Int, Int>::TypedClosureI;
     LazyT<Int> res = nullptr;
     static inline bool finish;
-    LazyT<Int> body(LazyT<Int> &x) {
+    LazyT<Int> body(LazyT<Int> &x) override {
         res = fn_call(Increment__BuiltIn_G, x);
         if (finish) {
             return res;

@@ -37,7 +37,7 @@ TEST_P(QueueTest, TestQueuePush) {
         ThreadManager::register_self(cpu_id);
         m.unlock();
         ready.fetch_sub(1);
-        while (!ready.load() == 0) {
+        while ((!ready.load()) == 0) {
         }
         for (unsigned i = 0; i < 1000; i++) {
             queue.push(i);
@@ -75,7 +75,7 @@ TEST_P(QueueTest, TestQueuePop) {
         ThreadManager::register_self(cpu_id);
         m.unlock();
         ready.fetch_sub(1);
-        while (!ready.load() == 0) {
+        while ((!ready.load()) == 0) {
         }
         for (unsigned i = 0; i < 1000; i++) {
             auto x = queue.pop();
@@ -113,7 +113,7 @@ TEST_P(QueueTest, TestQueueNoWrap) {
         ThreadManager::register_self(cpu_id);
         m.unlock();
         ready.fetch_sub(1);
-        while (!ready.load() == 0) {
+        while ((!ready.load()) == 0) {
         }
         for (unsigned i = 0; i < 1000; i++) {
             queue.push(i);
@@ -159,7 +159,7 @@ TEST_P(QueueTest, TestQueue) {
         ThreadManager::register_self(cpu_id);
         m.unlock();
         ready.fetch_sub(1);
-        while (!ready.load() == 0) {
+        while ((!ready.load()) == 0) {
         }
         for (unsigned i = 0; i < 1000; i++) {
             queue.push(i);
