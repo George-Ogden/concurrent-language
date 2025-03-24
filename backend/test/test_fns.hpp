@@ -451,13 +451,14 @@ struct Nil {
 
 struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
     using TypedClosureI<Empty, Int, ListInt>::TypedClosureI;
-    LazyT<Int> body(LazyT<ListInt> &lazy_list) override {
-        WorkManager::await(lazy_list);
-        ListInt list = lazy_list->value();
-        switch (list.tag) {
+    LazyT<Int> body(LazyT<ListInt> &list) override {
+        LazyT<Int> result;
+        WorkManager::await(list);
+        ListInt list_value = list->value();
+        switch (list_value.tag) {
         case 0: {
             LazyT<Cons::type> cons =
-                reinterpret_cast<Cons *>(&list.value)->value;
+                reinterpret_cast<Cons *>(&list_value.value)->value;
             WorkManager::await(cons);
             LazyT<Int> head = std::get<0ULL>(cons);
             LazyT<ListInt> tail = std::get<1ULL>(cons);
@@ -465,14 +466,16 @@ struct ListIntSum : public TypedClosureI<Empty, Int, ListInt> {
             FnT<Int, ListInt> fn =
                 std::make_shared<TypedClosureG<Empty, Int, ListInt>>(
                     ListIntSum::init);
-            auto res1 = fn_call(fn, tail);
-            auto res2 = fn_call(Plus__BuiltIn_G, res1, head);
-            return ensure_lazy(res2);
+            auto tail_sum = fn_call(fn, tail);
+            auto sum = fn_call(Plus__BuiltIn_G, tail_sum, head);
+            result = ensure_lazy(sum);
+            break;
         }
         case 1:
-            return make_lazy<Int>(0);
+            result = make_lazy<Int>(0);
+            break;
         }
-        return nullptr;
+        return ensure_lazy(result);
     }
     constexpr std::size_t lower_size_bound() const override { return 20; };
     constexpr std::size_t upper_size_bound() const override { return 200; };
@@ -589,26 +592,30 @@ struct Suc {
 struct PredFn : public TypedClosureI<Empty, Nat, Nat> {
     using TypedClosureI<Empty, Nat, Nat>::TypedClosureI;
     LazyT<Nat> body(LazyT<Nat> &nat) override {
+        LazyT<Nat> result;
         WorkManager::await(nat);
         Nat nat_ = nat->value();
         switch (nat_.tag) {
         case 0: {
-            LazyT<Suc::type> s = reinterpret_cast<Suc *>(&nat_.value)->value;
-            return s;
+            LazyT<typename Suc::type> suc =
+                reinterpret_cast<Suc *>(&nat_.value)->value;
+            result = ensure_lazy(suc);
+            break;
         }
         case 1: {
-            return make_lazy<Nat>(std::integral_constant<std::size_t, 1>(),
-                                  Nil{});
+            result =
+                make_lazy<Nat>(std::integral_constant<std::size_t, 1>(), Nil{});
+            break;
         }
         }
-        return nullptr;
+        return ensure_lazy(result);
     }
     constexpr std::size_t lower_size_bound() const override { return 20; };
     constexpr std::size_t upper_size_bound() const override { return 40; };
     static std::unique_ptr<TypedFnI<Nat, Nat>> init(const ArgsT &args) {
         return std::make_unique<PredFn>(args);
     }
-    constexpr bool is_recursive() const override { return true; };
+    constexpr bool is_recursive() const override { return false; };
 };
 
 TEST_P(FnCorrectnessTest, SimpleRecursiveTypeTest) {
