@@ -157,7 +157,7 @@ template <typename T> class BlockList {
   public:
     using value_type = T;
     using reference = value_type &;
-    using const_reference = const reference;
+    using const_reference = value_type const &;
     using iterator = Iterator<T>;
     using const_iterator = ConstIterator<T>;
     using size_type = size_t;
