@@ -1,6 +1,9 @@
+import gc
 import signal
 import sys
 import time
+
+gc.disable()
 
 program_name = sys.argv[1]
 args = sys.argv[2]
