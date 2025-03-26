@@ -2,7 +2,7 @@ CXX := g++
 EXTRA_FLAGS :=
 CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors $(EXTRA_FLAGS)
 OPTIMIZATION := -Ofast
-LIBS := -lpthread
+LIBS :=
 INCLUDE := -Iinclude
 
 BUILD_DIR := build_
@@ -105,7 +105,7 @@ $(COMPILER_FILE): | $(BUILD_DIR)
 build: $(TARGET)
 
 run: build
-	./$(TARGET) $(FLAGS)
+	./$(TARGET) $(INPUT)
 
 %: $(TARGET_DIR)/%
 	./$<

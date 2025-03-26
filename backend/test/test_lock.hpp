@@ -86,7 +86,7 @@ TYPED_TEST(LockAcquireTest, TestTwoThreadLockTryAcquire) {
 }
 
 TYPED_TEST(EightCoreLockAcquireTest, TestEightThreadLockTryAcquire) {
-    using Lock = TestFixture::LockT;
+    using Lock = typename TestFixture::LockT;
     Lock lock;
     std::mutex m;
 

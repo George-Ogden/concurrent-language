@@ -14,7 +14,7 @@
 #include <vector>
 
 struct WorkRunner {
-    friend class WorkManager;
+    friend struct WorkManager;
     friend class RunnerTest;
     explicit WorkRunner(const ThreadManager::ThreadId &id);
 
