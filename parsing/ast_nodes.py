@@ -12,10 +12,13 @@ class ASTNode:
     SUBSTITUTIONS: ClassVar[dict[str, str]] = {"type": "type_"}
 
     def to_json(self) -> Any:
+        """Serialize for translation into Rust."""
         annotations = inspect.get_annotations(type(self), eval_str=True)
         attrs = (
             (
+                # The attribute `type` is converted to `type_` for Rust compatibility.
                 self.SUBSTITUTIONS.get(attr, attr),
+                # Use the type annotations when converting attributes.
                 self.convert_to_json(getattr(self, attr), type_=annotations[attr]),
             )
             for attr in self.__match_args__
@@ -33,14 +36,17 @@ class ASTNode:
                 and value_type in typing.get_args(type_)
                 and set(typing.get_args(type_)) != {NoneType, type(value)}
             ):
+                # Add an extra layer of wrapping to `Union` types.
                 return {value_type.__name__: cls.convert_to_json(value, value_type)}
             else:
                 return value.to_json()
         elif isinstance(value, list):
             node_type = typing.get_args(type_)
             if len(node_type) == 1:
+                # Use the object's type if known.
                 [type_] = node_type
             else:
+                # Otherwise assume the default types are correct and infer at the next level.
                 type_ = None
             return [cls.convert_to_json(node, type_=type_) for node in value]
         elif isinstance(value, (Id, NoneType, int)):
@@ -52,6 +58,7 @@ class ASTNode:
                 continue
             annotation = inspect.get_annotations(self.__init__)[key]
             value = getattr(self, key)
+            # Do a sanity check for any list items that are not lists.
             if isinstance(annotation, str):
                 if annotation.startswith("list"):
                     assert isinstance(value, list), f"{value} should be a list"

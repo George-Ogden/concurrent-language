@@ -44,6 +44,7 @@ class OperatorManager:
 
     @classmethod
     def check_operator(cls, operator: str) -> bool:
+        """Returns whether `operator` could be a valid operator (grammatically)."""
         return re.match(cls.OPERATOR_REGEX, operator) is not None
 
     @classmethod
