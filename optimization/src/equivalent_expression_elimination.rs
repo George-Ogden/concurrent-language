@@ -28,6 +28,7 @@ impl EquivalentExpressionEliminator {
         }
     }
 
+    /// Normalize equivalent locations in an expression.
     fn normalize_expression(
         &self,
         mut expression: IntermediateExpression,
@@ -52,6 +53,7 @@ impl EquivalentExpressionEliminator {
         Refresher::refresh(&mut lambda);
         lambda
     }
+    /// Store normalized expressions and their locations.
     fn prepare_history(&mut self, block: &mut IntermediateBlock) {
         for statement in &mut block.statements {
             match statement {
@@ -76,6 +78,7 @@ impl EquivalentExpressionEliminator {
                         }
                         _ => {}
                     }
+                    // Check whether the expression has already been defined.
                     let new_location = match self.historical_expressions.get(&expression) {
                         None => {
                             self.historical_expressions
@@ -84,8 +87,10 @@ impl EquivalentExpressionEliminator {
                         }
                         Some(new_location) => new_location.clone(),
                     };
+                    // Store the assignment in the definitions.
                     self.definitions
                         .insert(location.clone(), expression.clone());
+                    // Add a normalized location if there is an equivalent assignment (otherwise this is the same as `location`).
                     self.normalized_locations
                         .insert(location.clone(), new_location);
                 }
@@ -93,6 +98,7 @@ impl EquivalentExpressionEliminator {
         }
         block.ret = block.ret.substitute(&self.normalized_locations);
     }
+    /// Update the history with new definitions.
     fn refresh_history(&mut self, block: &IntermediateBlock) {
         for statement in &block.statements {
             match statement {
@@ -122,6 +128,7 @@ impl EquivalentExpressionEliminator {
             }
         }
     }
+    /// Reorder statements based on weak requirements.
     fn weakly_reorder(
         &self,
         block: IntermediateBlock,
@@ -164,6 +171,7 @@ impl EquivalentExpressionEliminator {
         weakly_required_locations: &HashSet<Location>,
         new_statements: &mut Vec<IntermediateStatement>,
     ) {
+        // Ensure the location has not already been defined and is weakly required.
         if defined.contains(&location) || !weakly_required_locations.contains(&location) {
             return;
         }
@@ -173,6 +181,7 @@ impl EquivalentExpressionEliminator {
             return;
         };
 
+        // Consider any location that might be used and whether it should be used.
         for location in self.very_weak_expression_locations(&expression) {
             self.weakly_process_location(
                 location,
@@ -206,6 +215,7 @@ impl EquivalentExpressionEliminator {
         );
     }
     fn weak_block_locations(&self, block: &IntermediateBlock) -> HashSet<Location> {
+        // Weak block locations are those that are already assigned to or are needed by all future paths in the program.
         let mut locations =
             HashSet::from_iter(
                 block
@@ -216,6 +226,7 @@ impl EquivalentExpressionEliminator {
                             expression,
                             location,
                         }) => {
+                            // Lookup normalized location.
                             let (location, expression) =
                                 if let IntermediateExpression::IntermediateValue(
                                     IntermediateValue::IntermediateMemory(IntermediateMemory {
@@ -229,6 +240,7 @@ impl EquivalentExpressionEliminator {
                                 } else {
                                     (location.clone(), expression.clone())
                                 };
+                            // Determine all weakly used locations.
                             let mut locations = vec![location.clone()];
                             locations
                                 .extend(self.weak_expression_locations(&expression).into_iter());
@@ -249,11 +261,13 @@ impl EquivalentExpressionEliminator {
                 .collect::<HashSet<_>>()
         };
         match &expression {
+            // Only open variables are weakly required in lambdas.
             IntermediateExpression::IntermediateLambda(lambda) => lambda
                 .find_open_vars()
                 .iter()
                 .filter_map(IntermediateValue::filter_memory_location)
                 .collect(),
+            // Weakly required variables must be weakly required in both branches.
             IntermediateExpression::IntermediateIf(if_) => {
                 let mut required = merge(
                     self.weak_block_locations(&if_.branches.0),
@@ -262,8 +276,10 @@ impl EquivalentExpressionEliminator {
                 required.extend(if_.condition.filter_memory_location().into_iter());
                 required
             }
+            // Weakly required variables must be weakly required in all branches.
             IntermediateExpression::IntermediateMatch(match_) => {
                 let mut required = None;
+                // Do not move expressions out of a single match branch.
                 if match_.branches.len() > 1 {
                     for branch in &match_.branches {
                         let extra = self.weak_block_locations(&branch.block);
@@ -284,6 +300,7 @@ impl EquivalentExpressionEliminator {
                 .collect(),
         }
     }
+    /// Determine all locations that may be used in an expression.
     pub fn very_weak_expression_locations(
         &self,
         expression: &IntermediateExpression,
@@ -350,6 +367,7 @@ impl EquivalentExpressionEliminator {
         locations
     }
 
+    /// Reorder statements based on strong requirements.
     fn strongly_reorder(
         &self,
         block: IntermediateBlock,
@@ -363,6 +381,7 @@ impl EquivalentExpressionEliminator {
             for statement in statements {
                 match statement {
                     IntermediateStatement::IntermediateAssignment(assignment) => {
+                        // Ensure location is strongly defined before processing.
                         if strongly_required_locations.contains(&assignment.location) {
                             self.strongly_process_location(
                                 assignment.location,
@@ -401,6 +420,7 @@ impl EquivalentExpressionEliminator {
         }
         defined.insert(location.clone());
 
+        // If location is not included in definitions, ignore it (mostly used for testing with open variables).
         let Some(mut expression) = self.definitions.get(&location).cloned() else {
             return;
         };
@@ -441,6 +461,7 @@ impl EquivalentExpressionEliminator {
         );
     }
     fn strong_block_locations(&self, block: &IntermediateBlock) -> HashSet<Location> {
+        // Strong block locations are those that are needed by all future paths in the program.
         let mut strongly_required_locations =
             HashSet::from_iter(block.ret.filter_memory_location().into_iter());
         for statement in block.statements.iter().rev() {
@@ -449,6 +470,7 @@ impl EquivalentExpressionEliminator {
                     expression,
                     location,
                 }) => {
+                    // Reverse locations and use the transitivity to find other strongly required locations.
                     if strongly_required_locations.contains(location) {
                         strongly_required_locations
                             .extend(self.strong_expression_locations(expression).into_iter());
@@ -478,6 +500,7 @@ impl EquivalentExpressionEliminator {
             }
             IntermediateExpression::IntermediateMatch(match_) => {
                 let mut required = None;
+                // Do not move expressions out of a single match branch.
                 if match_.branches.len() > 1 {
                     for branch in &match_.branches {
                         let extra = self.weak_block_locations(&branch.block);

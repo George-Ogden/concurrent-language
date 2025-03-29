@@ -18,6 +18,7 @@ pub struct Inliner {
     size_limit: usize,
 }
 
+// Define exit limit in case of fns that are repeatedly inlined but do not increase in size.
 const MAX_INLINING_ITERATIONS: usize = 1000;
 
 impl Inliner {
@@ -30,6 +31,7 @@ impl Inliner {
         let mut i = 0;
         while should_continue && i < MAX_INLINING_ITERATIONS {
             (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
+            // Clean up with equivalent expression elimination after each iteration.
             program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
             i += 1;
         }
@@ -42,11 +44,13 @@ impl Inliner {
         }
     }
 
+    /// Inline a function, generating statements and a value.
     fn inline(
         &self,
         mut lambda: IntermediateLambda,
         args: Vec<IntermediateValue>,
     ) -> IntermediateBlock {
+        // Refresh the lambda to maintain SSA.
         Refresher::refresh_for_inlining(&mut lambda);
         let assignments = lambda
             .args
@@ -69,6 +73,7 @@ impl Inliner {
         lambda: IntermediateLambda,
         size_limit: Option<usize>,
     ) -> (IntermediateLambda, bool) {
+        // If the lambda is already too big, do nothing.
         let bounds = CodeSizeEstimator::estimate_size(&lambda);
         if let Some(size) = size_limit {
             if bounds.1 >= size {
@@ -79,11 +84,13 @@ impl Inliner {
             args,
             block: IntermediateBlock { statements, ret },
         } = lambda;
+        // Register statements and set size limit.
         let mut inliner = Inliner::from(&statements);
         if let Some(size) = size_limit {
             inliner.size_limit = size;
         }
         let inliner = inliner;
+        // Inline statements that are below a certain size.
         let (statements, should_continue) = inliner.inline_statements(statements);
         (
             IntermediateLambda {
@@ -154,6 +161,7 @@ impl Inliner {
             IntermediateExpression::IntermediateLambda(lambda)
                 if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
             {
+                // Inline lambda if it is below the size limit.
                 let IntermediateLambda {
                     args,
                     block: IntermediateBlock { statements, ret },
@@ -216,6 +224,7 @@ impl Inliner {
     }
 }
 
+/// Inliner::from(statements)
 impl From<&Vec<IntermediateStatement>> for Inliner {
     fn from(statements: &Vec<IntermediateStatement>) -> Self {
         let mut inliner = Inliner::new();

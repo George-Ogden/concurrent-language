@@ -12,12 +12,14 @@ pub struct Refresher {
     locations: HashMap<Location, IntermediateValue>,
 }
 
+/// Refresh potentially duplicated variable names.
 impl Refresher {
     pub fn new() -> Self {
         Refresher {
             locations: HashMap::new(),
         }
     }
+    /// Refresh arguments as memory so that they can be assigned to.
     pub fn refresh_for_inlining(lambda: &mut IntermediateLambda) {
         let mut refresher = Refresher::new();
         for arg in lambda.args.iter_mut() {
@@ -31,6 +33,7 @@ impl Refresher {
     pub fn refresh(lambda: &mut IntermediateLambda) {
         Refresher::new().refresh_lambda(lambda);
     }
+    /// Store all assignment targets and allocate a new memory address.
     pub fn register_statements(&mut self, statements: &Vec<IntermediateStatement>) {
         let targets = statements.iter().filter_map(|statement| {
             let IntermediateStatement::IntermediateAssignment(assignment) = statement;
@@ -101,16 +104,19 @@ impl Refresher {
                 Some(data) => self.refresh_value(data),
             },
             IntermediateExpression::IntermediateLambda(lambda) => {
+                // Refresh lambda independently.
                 self.clone().refresh_lambda(lambda)
             }
             IntermediateExpression::IntermediateIf(if_) => {
                 self.refresh_value(&mut if_.condition);
+                // Refresh branches independently.
                 self.clone().refresh_block(&mut if_.branches.0);
                 self.clone().refresh_block(&mut if_.branches.1);
             }
             IntermediateExpression::IntermediateMatch(match_) => {
                 self.refresh_value(&mut match_.subject);
                 for branch in &mut match_.branches {
+                    // Refresh branches independently.
                     let mut refresher = self.clone();
                     if let Some(arg) = &mut branch.target {
                         refresher.refresh_arg(arg);

@@ -63,6 +63,7 @@ impl DeadCodeAnalyzer {
         location: Location,
         dependents: Vec<Location>,
     ) {
+        // Sort locations so that the smallest is on the left.
         let key = minmax(arg, location).into();
         if !self.double_constraints.contains_key(&key) {
             self.double_constraints.insert(key.clone(), HashSet::new());
@@ -87,6 +88,7 @@ impl DeadCodeAnalyzer {
                                 ret: _,
                             },
                     }) => {
+                        // Register fn args.
                         let args = args.into_iter().map(|arg| arg.location.clone()).collect();
                         self.fn_args.insert(location.clone(), args);
                     }
@@ -156,6 +158,7 @@ impl DeadCodeAnalyzer {
                             match self.fn_args.get(&fn_.location) {
                                 Some(fn_args) => {
                                     for (loc, arg) in zip_eq(fn_args.clone(), args) {
+                                        // Require that the parameter is used in the fn definition and the return value is used in order for the argument to count as used.
                                         let dependents =
                                             self.used_value(arg).iter().cloned().collect_vec();
                                         self.add_double_constraint(
@@ -195,6 +198,7 @@ impl DeadCodeAnalyzer {
     fn solve_constraints(&self, initial_solution: Vec<Location>) -> HashSet<Location> {
         let mut solution = HashSet::from_iter(initial_solution.clone());
         let mut new_variables = VecDeque::from(initial_solution);
+        // Build index of double constraints so we can check them quickly whenever a new variable is freed.
         let mut double_constraint_index: HashMap<Location, Vec<Location>> = HashMap::from_iter(
             self.double_constraints
                 .keys()
@@ -232,6 +236,7 @@ impl DeadCodeAnalyzer {
         }
         solution
     }
+    /// Filter values based on whether args for the fn in location are used.
     fn filter_args<T>(&self, location: &Location, values: Vec<T>) -> Vec<T> {
         match self.fn_args.get(&location) {
             None => values,
@@ -243,6 +248,7 @@ impl DeadCodeAnalyzer {
                 .collect_vec(),
         }
     }
+    /// Delete unused code and arguments.
     fn remove_redundancy(
         &mut self,
         statements: Vec<IntermediateStatement>,
@@ -262,6 +268,7 @@ impl DeadCodeAnalyzer {
                         {
                             let used_args = self.filter_args(&location, args.clone());
                             if used_args.len() != args.len() {
+                                // Define an unoptimized variant of the function, which takes all the args and passes the relevant ones to the optimized variant.
                                 let fresh_args = args
                                     .iter()
                                     .map(|arg| IntermediateArg::from(arg.type_.clone()))
@@ -338,6 +345,7 @@ impl DeadCodeAnalyzer {
                     location,
                 }) => {
                     if self.variables.contains(&location) {
+                        // Keep only used assignments.
                         Some(
                             IntermediateAssignment {
                                 location: location.clone(),
@@ -361,6 +369,7 @@ impl DeadCodeAnalyzer {
                                     ) if self.fn_updates.contains_key(&memory.location)
                                         && !self.fn_updates.values().contains(&location) =>
                                     {
+                                        // Update fn type if the fn is replaced with an optimized version.
                                         let IntermediateType::IntermediateFnType(
                                             IntermediateFnType(_, ret_type),
                                         ) = memory.type_
