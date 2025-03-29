@@ -9,6 +9,7 @@ pub struct UniqueError<T: Debug> {
     pub duplicate: T,
 }
 
+/// Check whether all items are unique, returning a duplicate if one is found.
 pub fn check_unique<I, T>(items: I) -> Result<(), UniqueError<T>>
 where
     I: Iterator<Item = T> + Clone,

@@ -6,6 +6,7 @@ use crate::{
     Boolean, Id,
 };
 
+/// Prefix of the program containing `&&` and `||` definitions.
 pub fn prefix() -> Vec<Definition> {
     vec![
         Assignment {

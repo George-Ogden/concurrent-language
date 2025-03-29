@@ -1026,6 +1026,7 @@ mod tests {
     #[test]
     fn test() {
         let string = "{\"definitions\": []}\n";
+        // Test deserializing JSON (examples copied from Python code).
         let result = serde_json::from_str::<Program>(&string);
         dbg!(&result);
         assert!(result.is_ok())

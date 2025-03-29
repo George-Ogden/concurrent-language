@@ -70,6 +70,7 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
+    /// Translate AST nodes that represent types into type checking nodes.
     fn convert_ast_type(
         type_instance: TypeInstance,
         type_definitions: &TypeDefinitions,
@@ -151,7 +152,9 @@ impl TypeChecker {
             })
             .collect::<Result<_, _>>()
     }
+    /// Check that type definitions are okay and return a `TypeChecker` on success, which can check the rest of the program or a `TypeCheckError` if this fails.
     fn check_type_definitions(definitions: Vec<Definition>) -> Result<Self, TypeCheckError> {
+        // Check type names are unique (including pre-defined types).
         let type_names = definitions.iter().map(|definition| definition.get_id());
         let all_type_parameters = definitions.iter().map(Definition::get_parameters);
         let predefined_type_names = AtomicTypeEnum::iter()
@@ -172,6 +175,8 @@ impl TypeChecker {
                 });
             }
         }
+
+        // Check type parameters do not overlap with constructors or other parameters.
         for (type_name, type_parameters) in type_names.clone().zip(all_type_parameters.clone()) {
             if type_parameters.contains(&type_name) {
                 return Err(TypeCheckError::TypeAsParameter {
@@ -210,26 +215,10 @@ impl TypeChecker {
                 )
             })
             .collect();
+
+        // Collect constructors for union types.
         let mut constructors = HashMap::new();
-        let transparent_definitions = definitions
-            .iter()
-            .map(|definition| {
-                if let Definition::TransparentTypeDefinition(TransparentTypeDefinition {
-                    variable:
-                        GenericTypeVariable {
-                            id,
-                            generic_variables: _,
-                        },
-                    type_: _,
-                }) = definition
-                {
-                    Some(id.clone())
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-        for definition in definitions {
+        for definition in definitions.clone() {
             let type_name = definition.get_id().clone();
             let type_reference = &type_definitions[&type_name];
             let type_ = match definition {
@@ -351,6 +340,26 @@ impl TypeChecker {
                 panic!("{} not found in type definitions", type_name)
             }
         }
+
+        // Check transparent definitions are not recursive.
+        let transparent_definitions = definitions
+            .into_iter()
+            .map(|definition| {
+                if let Definition::TransparentTypeDefinition(TransparentTypeDefinition {
+                    variable:
+                        GenericTypeVariable {
+                            id,
+                            generic_variables: _,
+                        },
+                    type_: _,
+                }) = definition
+                {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
         transparent_definitions.into_iter().try_for_each(|id| {
             id.map_or(Ok(()), |id| {
                 if TypeChecker::is_self_recursive(&id, &type_definitions).is_err() {
@@ -366,11 +375,13 @@ impl TypeChecker {
             constructors,
         });
     }
+    /// Check whether a defined id is recursive.
     fn is_self_recursive(id: &Id, definitions: &TypeDefinitions) -> Result<(), ()> {
         let start = definitions.get(id).unwrap();
         let mut queue = VecDeque::from([start.clone()]);
         let mut visited: HashMap<*mut ParametricType, bool> =
             HashMap::from_iter(definitions.values().map(|p| (p.as_ptr(), false)));
+        // Perform BFS on definitions.
         fn update_queue(
             type_: &Type,
             start: &Rc<RefCell<ParametricType>>,
@@ -424,6 +435,7 @@ impl TypeChecker {
         }
         Ok(())
     }
+    /// Type check an expression.
     fn check_expression(
         &self,
         expression: Expression,
@@ -460,6 +472,7 @@ impl TypeChecker {
                 .into(),
         })
     }
+    /// Type check a variable.
     fn check_generic_variable(
         &self,
         GenericVariable { id, type_instances }: GenericVariable,
@@ -855,6 +868,7 @@ impl TypeChecker {
             .map(|expression| self.check_expression(expression, context, generic_variables))
             .collect::<Result<_, _>>()
     }
+    /// Determine the type of a function definition.
     fn fn_signature(
         &self,
         fn_def: &FunctionDefinition,
@@ -1022,6 +1036,7 @@ impl TypeChecker {
             });
 
         let type_checker = TypeChecker::check_type_definitions(type_definitions)?;
+        // Add a `return main` statement at the end of the program.
         let program_block = Block {
             assignments,
             expression: Box::new(
@@ -1032,6 +1047,7 @@ impl TypeChecker {
                 .into(),
             ),
         };
+        // Check that `main` is a function with correct argument and return types.
         let typed_block =
             type_checker.check_block(program_block, context.clone(), GenericVariables::new())?;
         let Type::TypeFn(TypeFn(args, ret)) = typed_block.type_() else {
@@ -1058,6 +1074,7 @@ impl TypeChecker {
         };
         let main = main.clone();
         for statement in &typed_block.statements {
+            // Ensure that main is assigned to, making it a fn-def, not a lambda.
             if let TypedStatement::TypedFnDef(TypedFnDef {
                 variable,
                 parameters: _,
@@ -1113,6 +1130,7 @@ impl TypeChecker {
     }
     pub fn type_check(mut program: Program) -> Result<TypedProgram, TypeCheckError> {
         program.definitions = vec![prefix(), program.definitions].concat();
+        // Add the default context (operators) when checking programs.
         DEFAULT_CONTEXT.with(|context| Self::check_program(program, context))
     }
 }
