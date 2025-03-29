@@ -16,6 +16,7 @@ fn main() {
     io::stdin()
         .read_to_string(&mut input)
         .expect("Failed to read from stdin");
+    // Deserialize the JSON from the stdin.
     match serde_json::from_str::<Program>(&input) {
         Ok(program) => match TypeChecker::type_check(program) {
             Ok(type_checked_program) => {
@@ -24,6 +25,7 @@ fn main() {
                     Optimizer::optimize(lowered_program, args.optimization_args);
                 let compiled_program = Compiler::compile(optimized_program, args.compilation_args);
                 let code = Translator::translate(compiled_program);
+                // Write code to the stdout.
                 println!("{}", code)
             }
             Err(e) => {
