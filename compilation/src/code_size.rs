@@ -34,6 +34,7 @@ define_named_vector!(
     match_,
 );
 
+// Use empirically determined constants.
 pub const CODE_SIZE_CONSTANTS: Lazy<CodeVector> = Lazy::new(|| CodeVector {
     builtin_bool: 0,
     builtin_int: 0,
@@ -78,6 +79,7 @@ pub const CODE_SIZE_CONSTANTS: Lazy<CodeVector> = Lazy::new(|| CodeVector {
 
 pub struct CodeSizeEstimator {}
 
+/// Estimate the bounds on the size of code with a linear formula.
 impl CodeSizeEstimator {
     fn builtin_size(built_in: &IntermediateBuiltIn) -> usize {
         match built_in {

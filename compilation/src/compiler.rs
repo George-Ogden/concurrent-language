@@ -12,6 +12,7 @@ use lowering::*;
 use once_cell::sync::Lazy;
 
 const OPERATOR_NAMES: Lazy<HashMap<Id, Id>> = Lazy::new(|| {
+    // Names for all the built-in operators.
     HashMap::from_iter(
         [
             ("+", "Plus__BuiltIn"),
@@ -95,7 +96,9 @@ impl Compiler {
     fn compile_types(&self, types: &Vec<IntermediateType>) -> Vec<MachineType> {
         types.iter().map(|type_| self.compile_type(type_)).collect()
     }
+    // Compile union type definitions into structs in C++.
     fn compile_type_defs(&mut self, types: Vec<Rc<RefCell<IntermediateType>>>) -> Vec<TypeDef> {
+        // Find union types.
         let types = types
             .into_iter()
             .filter_map(|type_| {
@@ -106,10 +109,12 @@ impl Compiler {
                 Some((type_.as_ptr(), union_type))
             })
             .collect_vec();
+        // Assign names in case of references.
         for (i, (ptr, _)) in types.iter().enumerate() {
             self.reference_names
                 .insert(*ptr, MachineType::NamedType(format!("T{i}")));
         }
+        // Generate constructors.
         let machine_types = types
             .iter()
             .enumerate()
@@ -128,6 +133,7 @@ impl Compiler {
                 (format!("T{i}"), intermediate_type)
             })
             .collect_vec();
+        // Turn into `TypeDef`s.
         types
             .into_iter()
             .zip(machine_types.into_iter())
@@ -150,6 +156,7 @@ impl Compiler {
             .collect_vec()
     }
 
+    /// Get the next unique memory address.
     fn next_memory_address(&self) -> Memory {
         Memory(format!("m{}", self.memory_ids.len()))
     }
@@ -167,16 +174,9 @@ impl Compiler {
         self.compile_location(&arg.location)
     }
     fn new_memory_location(&mut self) -> Memory {
-        let mut boxes: Vec<Location> = Vec::new();
-        while match boxes.last() {
-            None => true,
-            Some(x) => self.memory_ids.contains_key(&x),
-        } {
-            boxes.push(Location::new());
-        }
-        let last = boxes.last().unwrap();
+        let location = Location::new();
         let memory = self.next_memory_address();
-        self.memory_ids.insert(last.clone(), memory.clone());
+        self.memory_ids.insert(location.clone(), memory.clone());
         memory
     }
     fn next_fn_name(&self) -> Name {
@@ -201,6 +201,7 @@ impl Compiler {
             .map(|value| self.compile_value(value))
             .collect()
     }
+    /// Expressions may need multiple lines to be defined (e.g. if statement) so return any new statements too.
     fn compile_expression(
         &mut self,
         expression: IntermediateExpression,
@@ -227,6 +228,7 @@ impl Compiler {
                 let args_values = self.compile_values(args);
                 (
                     if let Value::Memory(mem) = &fn_value {
+                        // Ensure fn is calculated before call.
                         vec![Await(vec![mem.clone()]).into()]
                     } else {
                         Vec::new()
@@ -294,6 +296,7 @@ impl Compiler {
         };
         let target = IntermediateMemory::from(true_block.type_());
         let memory = self.compile_memory(&target);
+        // Add declaration for shared result.
         statements.push(
             Declaration {
                 memory: memory.clone(),
@@ -340,6 +343,7 @@ impl Compiler {
         };
         let result = IntermediateMemory::from(branches[0].block.type_());
         let memory = self.compile_memory(&result);
+        // Add declaration for shared result.
         statements.push(
             Declaration {
                 memory: memory.clone(),
@@ -396,6 +400,7 @@ impl Compiler {
         };
         match &value {
             Expression::ClosureInstantiation(_) => {
+                // Closures require declarations so that fns can be mutually recursive.
                 statements.push(
                     Declaration {
                         memory: memory.clone().into(),
@@ -424,6 +429,7 @@ impl Compiler {
         let value = self.compile_value(block.ret);
         (statements, value)
     }
+    /// Substitute open variables in lambdas with new variables.
     fn replace_open_vars(
         &mut self,
         fn_def: &mut IntermediateLambda,
@@ -446,6 +452,7 @@ impl Compiler {
             .collect()
     }
     fn closure_prefix(&mut self, env_locations: &Vec<Location>) -> Vec<Statement> {
+        // Prefix closures by spilling environment tuple.
         env_locations
             .iter()
             .enumerate()
@@ -468,7 +475,9 @@ impl Compiler {
         mut lambda: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
         let is_recursive = self.recursive_fns.get(&lambda).cloned().unwrap_or(false);
+        // Replace open variables to determine environment.
         let env_values = self.replace_open_vars(&mut lambda);
+        // Determine types of open variables.
         let env_types = env_values
             .iter()
             .map(|(value, _)| self.compile_type(&value.type_()))
@@ -509,11 +518,13 @@ impl Compiler {
         });
 
         if env_values.len() > 0 {
+            // Define closure as a tuple.
             let tuple_mem = self.new_memory_location();
             let values = env_values
                 .into_iter()
                 .map(|(value, _)| self.compile_value(value))
                 .collect();
+            // Assign to all closed variables.
             let statements = vec![Assignment {
                 target: tuple_mem.clone(),
                 value: TupleExpression(values).into(),
@@ -535,7 +546,9 @@ impl Compiler {
         let IntermediateProgram { main, types } = program;
         let type_defs = self.compile_type_defs(types);
         let (statements, _) = self.compile_lambda(main);
+        // Check that main has no open variables.
         assert_eq!(statements.len(), 0);
+        // Main is the last compiled program.
         let main = self.fn_defs.last_mut().unwrap();
         main.name = Name::from("Main");
         let program = Program {
@@ -551,6 +564,7 @@ impl Compiler {
         };
         compiler.compile_program(program)
     }
+    /// Export code vectors to a file.
     fn export_vector(program: &IntermediateProgram, filename: String) -> Result<(), String> {
         let vector = CodeVectorCalculator::lambda_vector(&program.main);
         vector?

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #[macro_export]
+/// Macro to define a vector of integers where each field is named, as well as the map `operators`.
 macro_rules! define_named_vector{
     (@count ) => {0usize};
     (@count $head:ident $($tail:ident)*) => {1usize + define_named_vector!(@count $($tail)*)};
@@ -14,18 +15,21 @@ macro_rules! define_named_vector{
         }
         impl $name {
             pub fn new() -> Self {
+                // Instantiate all fields as zero and empty operators.
                 Self {
                     $($fields: 0,)*
                     operators: HashMap::new()
                 }
             }
             pub fn operator(operator: Id) -> Self {
+                // Define vector for a single operator.
                 let mut instance = Self::new();
                 instance.operators.insert(operator, 1);
                 instance
             }
             $(
                 pub fn $fields() -> Self {
+                    // Define vector for a single field.
                     let mut instance = Self::new();
                     instance.$fields = instance.$fields + 1;
                     instance
@@ -39,6 +43,7 @@ macro_rules! define_named_vector{
             }
 
             pub fn to_string(&self) -> String {
+                // Convert to TSV with header and contents.
                 let (operator_names, operator_values): (Vec<_>, Vec<_>) = self.operators.clone().into_iter().sorted().unzip();
                 let fields: [&str; define_named_vector!(@count $($fields)*)] = [$(stringify!($fields),)*];
                 let field_names: Vec<String> = fields.into_iter().map(String::from).collect();

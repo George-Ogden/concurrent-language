@@ -9,6 +9,7 @@ use lowering::{
 
 use crate::code_size::{CodeVector, CODE_SIZE_CONSTANTS};
 
+/// Compute code vectors for a program.
 pub struct CodeVectorCalculator {}
 
 impl CodeVectorCalculator {
@@ -80,7 +81,7 @@ impl CodeVectorCalculator {
         if &branch_vectors.0 == &branch_vectors.1 {
             Ok(branch_vectors.0 + condition_vector + CodeVector::if_())
         } else {
-            Err(String::from("If statement branches are not equal"))
+            Err(String::from("If statement branches are not equal."))
         }
     }
     fn match_vector(match_statement: &IntermediateMatch) -> Result<CodeVector, String> {
@@ -93,7 +94,7 @@ impl CodeVectorCalculator {
         if branch_vectors.iter().all_equal() {
             Ok(branch_vectors[0].clone() + subject_vector + CodeVector::match_())
         } else {
-            Err(String::from("Match statement branches are not equal"))
+            Err(String::from("Match statement branches are not equal."))
         }
     }
     fn match_branch_vector(match_branch: &IntermediateMatchBranch) -> Result<CodeVector, String> {
