@@ -23,6 +23,7 @@ impl Translator {
     fn translate_lazy_type(&self, type_: &MachineType) -> Code {
         format!("LazyT<{}>", self.translate_type(type_))
     }
+    // Topologically sort types to ensure consistency in definitions.
     fn top_sort(&self, type_defs: &Vec<TypeDef>) -> Vec<(Name, Option<MachineType>)> {
         let mut visited = HashSet::<Name>::new();
         let mut result = Vec::new();
@@ -53,6 +54,7 @@ impl Translator {
         visited.insert(type_def.name.clone());
         let used_types = type_def.directly_used_types();
         for type_name in used_types {
+            // Find any used types based on constructors.
             let type_name = type_name
                 .split_once("C")
                 .map_or(type_name.clone(), |(before, _)| String::from(before));
@@ -61,6 +63,7 @@ impl Translator {
         result.extend(type_def.constructors.iter().map(|ctor| ctor.clone()));
     }
     fn translate_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
+        // Predefine any used types (without information).
         let forward_constructor_definitions = type_defs
             .iter()
             .map(|type_def| {
@@ -70,6 +73,7 @@ impl Translator {
                     .map(|constructor| format!("struct {};", constructor.0))
             })
             .flatten();
+        // Define type aliases for structs.
         let type_definitions = type_defs.iter().map(|type_def| {
             let variant_definition = self.translate_type(&MachineType::UnionType(UnionType(
                 type_def
@@ -80,6 +84,7 @@ impl Translator {
             )));
             format!("typedef {variant_definition} {};", type_def.name)
         });
+        // Define constructors.
         let ctors = self.top_sort(&type_defs);
         let constructor_definitions = ctors.iter().map(|(name, type_)| {
             let fields = match type_ {
@@ -123,8 +128,8 @@ impl Translator {
             }
         }
     }
-    fn translate_memory(&self, memory: Memory) -> Code {
-        memory.0
+    fn translate_memory(&self, Memory(id): Memory) -> Code {
+        id
     }
     fn translate_value(&self, value: Value) -> Code {
         match value {
@@ -217,6 +222,7 @@ impl Translator {
             self.translate_memory(memory)
         )
     }
+    /// Define allocator for cyclic closures in fn defs.
     fn translate_allocation(
         &self,
         allocation: Allocation,
@@ -254,6 +260,7 @@ impl Translator {
         if declared.contains(&assignment.target) {
             format!("{id} = ensure_lazy({value_code});")
         } else {
+            // Use C++'s type inference system to determine whether the value is lazy or not.
             format!("auto {id} = {value_code};")
         }
     }
@@ -331,11 +338,13 @@ impl Translator {
         let (declarations, allocations): (Vec<_>, Vec<_>) =
             forwarded.into_iter().partition_map(identity);
 
+        // Add declarations before any other statements.
         let declarations_code = declarations
             .into_iter()
             .map(|declaration| self.translate_declaration(declaration, &mut declared))
             .join("\n");
 
+        // Add allocations after declarations but before any other statements.
         let (allocation_codes, allocations): (Vec<_>, Vec<_>) = allocations
             .into_iter()
             .map(|allocation| self.translate_allocation(allocation))
@@ -344,6 +353,7 @@ impl Translator {
         let allocations: HashMap<Memory, (Code, usize)> =
             HashMap::from_iter(allocations.into_iter().flatten());
 
+        // Setup closures before instantiating them.
         let closure_predefinitions =
             other_statements
                 .iter()
@@ -435,11 +445,11 @@ impl Translator {
             "constexpr bool is_recursive() const override {{ return {}; }};",
             fn_def.is_recursive
         );
-        let clone_code = format!(
+        let initialization_code = format!(
             "static std::unique_ptr<TypedFnI<{external_types}>> init(const ArgsT &args{env_ptr}) {{ return std::make_unique<{name}>({replication_args}); }}"
         );
         format!(
-            "{declaration_code} {{ {constructor_code} {header_code} {{ {statements_code} {return_code} }} {size_code} {recursive_code} {clone_code} {instance} }};"
+            "{declaration_code} {{ {constructor_code} {header_code} {{ {statements_code} {return_code} }} {size_code} {recursive_code} {initialization_code} {instance} }};"
         )
     }
     fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
@@ -451,6 +461,7 @@ impl Translator {
     fn translate_program(&self, program: Program) -> Code {
         let type_def_code = self.translate_type_defs(program.type_defs);
         let fn_def_code = self.translate_fn_defs(program.fn_defs);
+        // Add header with all libraries.
         format!("#include \"main/include.hpp\"\n\n{type_def_code} {fn_def_code}")
     }
     pub fn translate(program: Program) -> Code {
@@ -470,6 +481,7 @@ mod tests {
 
     const TRANSLATOR: Lazy<Translator> = Lazy::new(|| Translator {});
 
+    /// Remove spaces between non-words for easier equality checking.
     fn normalize_code(code: Code) -> Code {
         let regex = Regex::new(r"((^|[^[:space:]])[[:space:]]+([^[:space:][:word:]]|$))|((^|[^[:space:][:word:]])[[:space:]]+([^[:space:]]|$))")
         .unwrap();
