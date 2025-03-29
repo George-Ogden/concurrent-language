@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <vector>
 
+/// Fixed-length cyclic queue with thread-safe operations.
 template <typename T> class CyclicQueue {
     std::vector<T> data;
     Locked<std::atomic<std::size_t>> front, back;

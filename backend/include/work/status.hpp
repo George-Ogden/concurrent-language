@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 
+/// Shared enum for work runner queue status transitions.
 class Status {
     enum WorkStatus { UNAVAILABLE, AVAILABLE, ACTIVE, MAX };
     static inline constexpr std::size_t WORK_IDX = 0;

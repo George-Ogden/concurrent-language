@@ -30,6 +30,7 @@ inline constexpr auto prefix_sum_v = prefix_sum<Widths...>::value;
 
 template <std::size_t... Widths> class AtomicSharedEnum {
   public:
+    /// Determine size based on smallest width integer to support the width.
     using T =
         std::conditional_t<((Widths + ...) <= 8), std::uint8_t,
                            std::conditional_t<((Widths + ...) <= 16),
@@ -40,16 +41,19 @@ template <std::size_t... Widths> class AtomicSharedEnum {
     static constexpr inline auto widths =
         std::array<std::size_t, sizeof...(Widths)>{Widths...};
     static constexpr inline auto prefix_widths = prefix_sum_v<Widths...>;
+    /// Generate a bitmask that covers the bits for the given section.
     template <std::size_t section> constexpr T mask() const {
         return ((1ULL << widths[section]) - 1) << prefix_widths[section];
     }
     T value() const { return bits.load(std::memory_order_relaxed); }
-    template <std::size_t section> T insert(const T &value) {
-        return insert<section>(value, this->value());
-    }
+    /// Insert the given value into the correct position in the enum.
     template <std::size_t section> T insert(const T &value, const T &default_) {
         return ((~mask<section>()) & default_) |
                (mask<section>() & (value << prefix_widths[section]));
+    }
+    /// Use the default value as the current value.
+    template <std::size_t section> T insert(const T &value) {
+        return insert<section>(value, this->value());
     }
 
   public:
@@ -61,17 +65,20 @@ template <std::size_t... Widths> class AtomicSharedEnum {
         return (bits.load(ordering) >> prefix_widths[section]) &
                ((1ULL << widths[section]) - 1);
     }
+    /// Flip a section of a single bit width.
     template <std::size_t section>
     requires(section < sizeof...(Widths) && widths[section] == 1) bool flip(
         std::memory_order ordering = std::memory_order_relaxed) {
         return bits.fetch_xor(1 << prefix_widths[section], ordering) >>
                prefix_widths[section];
     }
+    /// Store a value into the given section.
     template <std::size_t section>
     requires(section < sizeof...(Widths)) void store(
         T value, std::memory_order ordering = std::memory_order_relaxed) {
         exchange<section>(value, ordering);
     }
+    /// Compare two sections before inserting a desired value.
     template <std::size_t compare_section_1, std::size_t compare_section_2,
               std::size_t exchange_section>
     requires(
@@ -92,15 +99,20 @@ template <std::size_t... Widths> class AtomicSharedEnum {
             if (bits.compare_exchange_weak(expected_value, desired_value,
                                            ordering,
                                            std::memory_order_relaxed)) {
+                // If this succeeds, return.
                 return true;
                 // cppcheck-suppress knownConditionTrueFalse
             } else if (value() != current_value) {
+                // If the value has changed try again.
                 continue;
             } else {
+                // Otherwise, fail.
                 return false;
             }
         };
     }
+    /// Compare a single section before inserting a desired value (default to
+    /// the same section).
     template <std::size_t compare_section,
               std::size_t exchange_section = compare_section>
     requires(
@@ -117,15 +129,19 @@ template <std::size_t... Widths> class AtomicSharedEnum {
             if (bits.compare_exchange_weak(expected_value, desired_value,
                                            ordering,
                                            std::memory_order_relaxed)) {
+                // If this succeeds, return.
                 return true;
                 // cppcheck-suppress knownConditionTrueFalse
             } else if (value() != current_value) {
+                // If the value has changed try again.
                 continue;
             } else {
+                // Otherwise, fail.
                 return false;
             }
         };
     }
+    /// Place a new value into a given section, returning the old value.
     template <std::size_t section>
     requires(section < sizeof...(Widths)) T
         exchange(T value,

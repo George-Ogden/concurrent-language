@@ -19,11 +19,13 @@ WorkRunner::WorkRunner(const ThreadManager::ThreadId &id) : id(id) {}
 
 void WorkRunner::main(std::atomic<WorkT> *ref) {
     WorkT work = ref->exchange(nullptr, std::memory_order_relaxed);
+    // First thread sets the work and waits.
     if (work != nullptr) {
         work->run();
         work->await_all();
         done_flag.store(true, std::memory_order_relaxed);
     } else {
+        // All other threads busy wait.
         while (!done_flag.load(std::memory_order_relaxed)) {
             try {
                 active_wait(std::function<bool()>([](){return false;}));
@@ -34,6 +36,7 @@ void WorkRunner::main(std::atomic<WorkT> *ref) {
     }
 }
 
+/// Determine which values need waiting for.
 template <typename T> constexpr auto filter_awaitable(T &v) {
     if constexpr (is_lazy_v<T>) {
         return std::tuple<std::decay_t<T>>(v);
@@ -64,6 +67,7 @@ void WorkRunner::await_variants(std::shared_ptr<Lazy<VariantT<Ts...>>> &l) {
         waiters[sizeof...(Ts)] = {[this](auto &storage) {
             await_all(std::launder(reinterpret_cast<Ts *>(&storage))->value);
         }...};
+    // Call the waiting function determined by the tag.
     waiters[idx](v.value);
 }
 
@@ -86,15 +90,18 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
         }
         do {
             while (large_works.size() > 1 && any_requests()) {
+                // Give large work to another thread.
                 if (respond(large_works.back())) {
                     large_works.pop_back();
                 }
             }
             if (!small_works.empty()) {
+                // Run small work first.
                 WorkT work = small_works.back();
                 small_works.pop_back();
                 work->run();
             } else if (!large_works.empty()) {
+                // Then run large work.
                 WorkT work = large_works.back();
                 large_works.pop_back();
                 work->run();
@@ -110,8 +117,10 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                         return false;
                     }
                 };
+                // If there is still no work, perform an active wait.
                 if (predicate() || active_wait(std::function<bool()>(predicate))) {
                     for (WorkT &work : extra_works) {
+                        // When extra work is found, start processing it.
                         if (work->can_respond()) {
                             large_works.emplace_back(std::move(work));
                         } else {

@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+/// Work class for executing a function and assigning its values.
 class Work {
   protected:
     enum WorkStatus { AVAILABLE, ACTIVE, DONE, MAX };
@@ -25,15 +26,19 @@ class Work {
   public:
     Work();
     virtual ~Work();
+    /// Try to execute the work.
     virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
+    /// Transition to done state.
     void finish();
+    /// Call a fn - execute eagerly if it is small.
     template <typename Ret, typename... Args, typename... ArgsT>
     requires(std::is_same_v<Args, remove_lazy_t<std::decay_t<ArgsT>>>
                  &&...) static std::
         pair<std::shared_ptr<Work>, LazyT<Ret>> fn_call(
             const FnT<Ret, Args...> &f, const ArgsT &...args);
+    /// Determines if a work item is large enough to be shared across threads.
     virtual bool can_respond() const = 0;
 };
 

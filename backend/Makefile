@@ -18,6 +18,7 @@ HEADERS := $(wildcard include/*.hpp include/**/*.hpp include/**/*.tpp) $(USER_FI
 
 WRAP_USER_FILE := wrap/user.hpp
 WRAP_BENCHMARK_FILE := wrap/benchmark.hpp
+# Use different wrappers for user file and benchmarking.
 ifeq ($(USER_FLAG), 1)
 	WRAP_FILE := $(WRAP_USER_FILE)
 else ifeq ($(USER_FLAG), -1)
@@ -30,9 +31,11 @@ ifneq ($(filter $(USER_FLAG),1 -1),)
 	INCLUDE += -I.
 endif
 
+# Determine current user.
 USER := $(shell user=$$(who -m | awk '{print $$1}'); [ -z "$$user" ] && whoami || echo $$user)
 EXTRA_FLAGS_HASH := $(shell echo '$(EXTRA_FLAGS)' | sha256sum 2> /dev/null | cut -d ' ' -f1)
 COMPILER_PREFIX := $(BUILD_DIR)/.compiled-with-
+# Generate a filename based on the flags that forces rebuild when changed.
 COMPILER_FILE := $(COMPILER_PREFIX)$(CXX)$(USER_FLAG)$(EXTRA_FLAGS_HASH)
 
 TEST_DIR := test
@@ -44,6 +47,7 @@ TEST_FILE := $(TEST_BUILDDIR)/test.cpp
 TEST_EXECS := $(patsubst $(TEST_DIR)/test_%.hpp, $(TARGET_DIR)/test_%, $(filter $(TEST_DIR)/test_%.hpp, $(TEST_INCLUDE)))
 TEST_EXEC := $(TARGET_DIR)/test
 
+# Include Makefile in dependencies.
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
 
 default: $(TARGET)
@@ -51,6 +55,7 @@ default: $(TARGET)
 all: $(TARGETS) $(TEST_EXEC) $(TEST_EXECS)
 
 $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
+	# Create directories then change permissions if run with sudo.
 	if [ `whoami` = "$(USER)" ]; \
 	then \
 		mkdir -p $@; \
@@ -63,6 +68,7 @@ $(TEST_BUILDDIR) $(BUILD_DIR) $(TARGET_DIR):
 	fi
 
 $(USER_FILE): $(WRAP_FILE) $(COMPILER_FILE)
+	# Include the wrap user file if `USER_FLAG` is set.
 	$(if $(filter $(USER_FLAG),1 -1), echo "#include \"$(WRAP_FILE)\"" > $@, echo "" > $@)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(HEADERS) $(COMPILER_FILE) | $(BUILD_DIR)
@@ -75,12 +81,14 @@ $(TEST_BUILDDIR)/: $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
 	echo $(TEST_DIR)/%.hpp > $@
 
 $(TEST_FILE): $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
+	# Include all test files.
 	echo "" > $@; \
 	for file in $(TEST_INCLUDE); do \
 		echo "#include \"$$file\"" >> $@; \
 	done
 
 $(TEST_BUILDDIR)/test_%.cpp: $(TEST_INCLUDE) $(HEADERS) | $(TEST_BUILDDIR)
+	# Only include selected test file when testing a single file.
 	echo "" > $@; \
 	for file in $(TEST_DIR)/test_$*.hpp $(WRAP_USER_FILE); do \
 		echo "#include \"$$file\"" >> $@; \
@@ -111,5 +119,3 @@ run: build
 	./$<
 
 .PHONY: all build clean default run
-
-.PRECIOUS: $(TEST_BUILDDIR)/test_%.cpp $(BUILD_DIR)/%.o

@@ -54,6 +54,7 @@ class MutexLock : public Lock {
     ThreadManager::ThreadId holder;
 };
 
+/// Wrapper for an element with easily-accessible lock methods.
 template <typename T, typename LockT = ExchangeLock> struct Locked {
     static_assert(std::is_base_of_v<Lock, LockT>);
     LockT lock;

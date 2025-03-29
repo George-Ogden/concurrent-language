@@ -1,3 +1,4 @@
+# Include Makefile in dependencies.
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
 
 PARSER := parsing
@@ -24,6 +25,7 @@ FLAGS_HASH := $(shell echo '$(FRONTEND_FLAGS) / $(BACKEND_FLAGS)' | sha256sum - 
 FILE := samples/main.txt
 LAST_FILE_PREFIX := .last-file-hash-
 LAST_FILE_HASH = $(shell sha256sum '$(FILE)' 2>/dev/null | cut -d' ' -f1)
+# Create file containing flags and rebuild if it changes.
 LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)$(FLAGS_HASH)
 
 all: $(PIPELINE) $(BACKEND)
