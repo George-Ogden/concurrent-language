@@ -14,6 +14,7 @@ pub struct RecursiveFnFinder {
 }
 
 impl RecursiveFnFinder {
+    /// Find whether all functions in a program are recursive or not.
     pub fn recursive_fns(program: &IntermediateProgram) -> RecursiveFns {
         let lambda = &program.main;
         let mut finder = RecursiveFnFinder {
@@ -28,15 +29,19 @@ impl RecursiveFnFinder {
         }
         recursive_fns
     }
+    /// Find out whether a lambda is recursive.
     fn find(&self, lambda: &IntermediateLambda, recursive_fns: &mut RecursiveFns) -> bool {
         if recursive_fns.contains_key(lambda) {
             return recursive_fns[lambda];
         }
+        // Assume that it is recursive, in case it is found.
         recursive_fns.insert(lambda.clone(), true);
         let is_recursive = self.check(&lambda.block.statements, recursive_fns);
+        // Update based on result.
         recursive_fns.insert(lambda.clone(), is_recursive);
         is_recursive
     }
+    /// Check for calls to recursive functions within the body.
     fn check(
         &self,
         statements: &Vec<IntermediateStatement>,

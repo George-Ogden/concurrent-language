@@ -1,6 +1,9 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{
+        hash_map::{Entry, HashMap},
+        BTreeMap, HashSet,
+    },
     rc::Rc,
 };
 
@@ -35,6 +38,7 @@ impl Lowerer {
             statements: Vec::new(),
             memory: MemoryMap::new(),
         };
+        // Add default context to scope.
         let scope = DEFAULT_CONTEXT.with(|context| {
             Scope::from_iter(context.iter().map(|(id, var)| {
                 let IntermediateType::IntermediateFnType(type_) =
@@ -52,13 +56,16 @@ impl Lowerer {
     fn update_memory(&mut self, location: Location, expression: IntermediateExpression) {
         self.memory.insert(location, expression);
     }
+    /// Get a value that is equal to an expression.
     fn get_cached_value(
         &mut self,
         intermediate_expression: IntermediateExpression,
     ) -> IntermediateValue {
         if let Some(cached) = self.history.get(&intermediate_expression) {
+            // If such a value exists, return it.
             return cached.clone();
         }
+        // If not, create a value and add a statement with the assignment.
         let assignment: IntermediateAssignment = intermediate_expression.clone().into();
         self.update_memory(assignment.location.clone(), assignment.expression.clone());
         self.statements.push(assignment.clone().into());
@@ -315,6 +322,7 @@ impl Lowerer {
         }
     }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
+        // Remove names from the type to override union equality (different from type checking).
         let type_ = self.clear_names(type_);
         let lower_type = self.lower_type_internal(&type_, HashSet::new());
         lower_type
@@ -346,16 +354,18 @@ impl Lowerer {
                         .into()
                     };
                 match self.type_defs.entry(type_.clone()) {
-                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                    Entry::Occupied(occupied_entry) => {
                         visited_references.insert(occupied_entry.get().as_ptr());
                         lower_type(self, visited_references)
                     }
-                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                    Entry::Vacant(vacant_entry) => {
+                        // Generate new, empty reference.
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
                         visited_references.insert(reference.as_ptr());
                         let lower_type = lower_type(self, visited_references);
+                        // Update the reference with the lowered type.
                         *reference.clone().borrow_mut() = lower_type.clone();
                         lower_type
                     }
@@ -365,9 +375,10 @@ impl Lowerer {
                 reference: type_,
                 instances: params,
             }) => {
+                // Monomorphize types by instantiating.
                 let instantiation = self.clear_names(&type_.borrow().instantiate(params));
                 match self.type_defs.entry(instantiation.clone()) {
-                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                    Entry::Occupied(occupied_entry) => {
                         if visited_references.contains(&occupied_entry.get().as_ptr()) {
                             IntermediateType::Reference(occupied_entry.get().clone())
                         } else {
@@ -375,7 +386,7 @@ impl Lowerer {
                             occupied_entry.get().borrow().clone()
                         }
                     }
-                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                    Entry::Vacant(vacant_entry) => {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
@@ -415,6 +426,7 @@ impl Lowerer {
     ) -> Option<(IntermediateMemory, TypedExpression)> {
         let variable = statement.variable();
         if parameters.is_none() && variable.type_.parameters.len() > 0 {
+            // Record uninstantiated expressions, but do not generate yet.
             self.uninstantiated.insert(variable.variable, statement);
             return None;
         }
@@ -436,6 +448,7 @@ impl Lowerer {
                 expression.instantiate(&parameters)
             }
         };
+        // Assign to a dummy memory location.
         let placeholder = IntermediateMemory::from(self.lower_type(&expression.type_()));
         self.scope.insert(
             (variable.variable.clone(), parameters.clone()),
@@ -448,6 +461,8 @@ impl Lowerer {
         self.update_memory(placeholder.location, value.into());
     }
     fn lower_statements(&mut self, statements: Vec<TypedStatement>) {
+        // Add placeholders for assignments, then insert the actual expression.
+        // Necessary for recursive fn definitions.
         let expressions = statements
             .into_iter()
             .filter_map(|statement| self.add_placeholder_assignment(statement, None))
@@ -477,6 +492,8 @@ impl Lowerer {
 
 #[cfg(test)]
 mod tests {
+
+    use crate::expression_equality_checker::ExpressionEqualityChecker;
 
     use super::*;
 

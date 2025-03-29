@@ -4,19 +4,24 @@ use crate::intermediate_nodes::*;
 
 pub type MemoryMap = HashMap<Location, IntermediateExpression>;
 
+/// Remove unnecessary assignments and inline built-ins.
 pub struct AllocationOptimizer {
     memory: MemoryMap,
 }
+
 impl AllocationOptimizer {
+    /// Instantiate from existing memory map.
     pub fn from_memory_map(memory_map: MemoryMap) -> Self {
         Self { memory: memory_map }
     }
+    /// Instantiate from statements.
     pub fn from_statements(statements: &Vec<IntermediateStatement>) -> Self {
         let mut allocation_optimizer = Self::from_memory_map(MemoryMap::new());
         allocation_optimizer.register_memory(statements);
         allocation_optimizer
     }
 
+    /// Record all assignments.
     fn register_memory(&mut self, statements: &Vec<IntermediateStatement>) {
         for statement in statements {
             match statement {
@@ -136,9 +141,11 @@ impl AllocationOptimizer {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
             IntermediateValue::IntermediateArg(arg) => arg.into(),
             IntermediateValue::IntermediateMemory(memory) => {
+                // Inline assignment if possible.
                 if let Some(expression) = self.memory.get(&memory.location) {
                     match expression {
                         IntermediateExpression::IntermediateValue(value) => {
+                            // Inline value recursively.
                             self.remove_wasted_allocations_from_value(value.clone())
                         }
                         _ => memory.into(),
@@ -168,6 +175,7 @@ impl AllocationOptimizer {
                     expression,
                     location,
                 } = assignment;
+                // Remove assignments to a value.
                 if matches!(&expression, IntermediateExpression::IntermediateValue(_)) {
                     return None;
                 }

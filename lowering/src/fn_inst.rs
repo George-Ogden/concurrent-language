@@ -8,6 +8,7 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, Clone)]
+/// FnInst stores all ways of identifying a function.
 pub enum FnInst {
     Lambda(IntermediateLambda),
     BuiltIn(BuiltInFn),
@@ -31,6 +32,8 @@ impl From<Location> for FnInst {
         FnInst::Ref(value)
     }
 }
+
+pub type FnDefs = HashMap<Location, FnInst>;
 
 impl FnInst {
     fn collect_fn_defs_from_statement(statement: &IntermediateStatement, fn_defs: &mut FnDefs) {
@@ -83,6 +86,7 @@ impl FnInst {
         }
     }
 
+    /// Translate a location into a lambda or built-in function, if it can be traced.
     pub fn get_root_fn(
         fn_defs: &FnDefs,
         location: &Location,
@@ -96,8 +100,6 @@ impl FnInst {
         }
     }
 }
-
-pub type FnDefs = HashMap<Location, FnInst>;
 
 #[cfg(test)]
 mod tests {
