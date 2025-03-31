@@ -8,12 +8,12 @@ import pandas as pd
 
 def load_data(directory: str) -> pd.DataFrame:
     filename = os.path.join(directory, "vector.tsv")
-
     df = pd.read_csv(filename, sep="\t", index_col=False)
     return df.dropna(how="any", axis=0, ignore_index=True)
 
 
 def remove_outliers_iteration(df: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    """Remove timings more than `threshold` times the standard deviation outside the mean for a sample program."""
     mean = df.groupby("sample").time.transform("mean")
     std = df.groupby("sample").time.transform(functools.partial(np.nanstd, ddof=0))
     z = np.abs(df.time - mean) / std
@@ -21,6 +21,7 @@ def remove_outliers_iteration(df: pd.DataFrame, threshold: float) -> pd.DataFram
 
 
 def remove_outliers(df: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    """Remove outliers iteratively until there are no updates."""
     length = None
     while length is None or length != len(df):
         length = len(df)
@@ -31,7 +32,6 @@ def remove_outliers(df: pd.DataFrame, threshold: float) -> pd.DataFrame:
 
 def save_data(df: pd.DataFrame, directory: str) -> None:
     filename = os.path.join(directory, "clean_vector.tsv")
-
     df.to_csv(filename, index=False, sep="\t")
 
 
