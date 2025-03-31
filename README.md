@@ -1,5 +1,6 @@
-# Concurrent Language
-## Setup/Install
+Concurrent Language
+===================
+# Setup/Install
 This project requires installing Python, GCC, Java and Rust.
 This project was developed with
 - `Python=3.12`
@@ -8,16 +9,16 @@ This project was developed with
 - `Rust=1.87`
 
 Rust dependencies are managed automatically by Cargo.
-### Python Dependencies
+## Python Dependencies
 ```bash
 pip install -r requirements.txt
 ```
-### C++ Dependencies
+## C++ Dependencies
 ```bash
 sudo apt-get install -y build-essential libgtest-dev librange-v3-dev
 ```
-## Build and Run
-### Compile
+# Build and Run
+## Compile
 To compile a program,
 ```bash
 make build FILE=$filename
@@ -28,15 +29,15 @@ Then
 sudo ./backend/bin/main [ARGS]...
 ```
 `sudo` is required to set the priorities and avoid interruption (you can still interrupt on a non real-time kernel).
-### Run
+## Run
 Alternatively, compile and run in one step.
 ```bash
 make run FILE=$filename INPUT="$input"
 ```
-### Running without `sudo`
+## Running without `sudo`
 It is possible to build/run without `sudo`.
 To do this, set `USER_FLAG=1` as a Makefile argument.
-## Test
+# Test
 To run Python tests, install the development dependencies.
 ```bash
 pip install -r requirements-dev.txt`
@@ -58,7 +59,7 @@ To run Rust tests for a specific directory:
 ```bash
 cargo test --manifest-path $directory/Cargo.toml
 ```
-## Benchmarking
+# Benchmarking
 Benchmarking requires access to `sudo`.
 You will be prompted to enter the password when the first program is run.
 To benchmark programs:
@@ -82,10 +83,10 @@ Both benchmarks will create directories with the following structure:
 
 _The benchmarking scripts were modified for the multi-core benchmarking to ensure the correct CPUs were used.
 The Python script was also slightly modified to include the extra time to setup multiple cores._
-## Scripts
+# Scripts
 The main script is `./scripts/benchmark_visualization.py`.
 All other scripts are used for generating the code size coefficients.
-### Benchmark Visualization
+## Benchmark Visualization
 `./scripts/benchmark_visualization.py` allows comparing the outputs of multiple runs.
 It takes in a list of directories and options for the output.
 The `-w` flag opens the resulting plot in the browser.
@@ -94,7 +95,7 @@ For example, the following command compares the Python benchmark to the language
 ```bash
 python benchmark_visualization.py logs/$python_benchmark logs/$language_benchmark -w -o plot.pdf
 ```
-### Estimating Timing Coefficients
+## Estimating Timing Coefficients
 The timing programs are stored in `./timings`.
 To generate runtimes and vectors, run `make timings` (it is __strongly__ recommended to disable optimization in `./backend/Makefile` when doing this).
 This will produce a directory with the following structure:
@@ -138,8 +139,8 @@ Some of the coefficients should be zero but are assigned a positive value and th
 For example, `element_access` (tuple access) is usually free as the compiler inlines it.
 However, this coefficient will often be positive and may manually need setting to zero.
 
-## Repository Overview
-### Frontend
+# Repository Overview
+## Frontend
 The frontend converts text into C++ code to interact with the backend.
 An overview of sections is:
 - `Grammar.g4`
@@ -152,26 +153,26 @@ An overview of sections is:
 
 Throughout the process, I use a pattern where enum fields have the same name as the type.
 The `./from_variants` crate defines the directive `FromVariants` so that the types can be converted into the enum with `.into()`.
-#### Pipeline
+### Pipeline
 `./pipeline` contains the orchestration code for the full compiler.
 It performs argument parsing then runs all the stages, displaying any errors that occur during type-checking.
-#### Grammar
+### Grammar
 - `Grammar.g4` specifies an ANTLR grammar with specifications for tokens and a parse tree.
 It also contains comments with potential language extensions.
-#### Parsing
+### Parsing
 - `./parsing/grammar` is generated from the ANTLR grammar (via the Makefile), and contains Python code to lex and parse the text.
 - `./parsing/operators.py` contains operators with specified precedences and associativity, as well as utilities for handling this.
 - `./parsing/ast_nodes.py` contains the nodes for the AST and code to serialize them into JSON.
 - `./parsing/parser.py` visits the parse tree and converts it into an AST.
 - `./parsing/__main__.py` orchestrates the process by generating the parse tree with the ANTLR library, using the visitor to generate an AST, then serializing the result into JSON.
-#### Type Checking
+### Type Checking
 The type-checker receives AST nodes in the form of JSON from the parsing stage.
 - `./type-checker/src/ast_nodes.rs` contains equivalent nodes to `./parsing/ast_nodes.py` for deserializing.
 - `./type-checker/src/prefix.rs` contains the program prefix with definitions of `&&` and `||` (done natively by the language).
 - `./type-checker/src/utils.rs` contains a utility for detecting duplicates in parametric lists.
 - `./type-checker/src/type_check_nodes.rs` contains definitions of annotated AST nodes that will be generated after the type-checking process.
 - `./type-checker/src/type_checker.rs` contains the `TypeChecker` to type check a program and generate a `TypedProgram` or `TypeCheckError`.
-#### Lowering
+### Lowering
 Lowering converts the annotated AST into an intermediate representation.
 - `./lowering/src/intermediate_nodes.rs` contains definitions for the intermediate representation.
 - `./lowering/src/allocations.rs` defines an `AllocationOptimizer` to remove variables that only alias another value.
@@ -182,13 +183,13 @@ The intermediate representation gives each variable a unique id so this ensures 
 This is useful when handling type-aliases or recursive types.
 - `./lowering/src/fn_inst.rs` contains utilities for identifying the lambda associated with a function call.
 - `./lowering/src/recursive_fn_finder.rs` defines a `RecursiveFnFinder`, which identifies functions that might contain recursive calls.
-#### Optimization
+### Optimization
 - `./optimization/src/refresher.rs` define a `Refresher` to update functions that have duplicated variables or need variables from a new set for an optimization.
 - `./optimization/src/dead_code_analysis.rs` contains a `DeadCodeAnalyzer` to remove dead code, including unused variables, arguments and functions.
 - `./optimization/src/equivalent_expression_elimination.rs` contains an `EquivalentExpressionOptimizer` to remove duplicated expressions.
 - `./optimization/src/inlining.rs` contains an `Inliner` to inline function calls.
 - `./optimization/src/optimizer.rs` runs the optimizations based on the command-line arguments.
-#### Compilation
+### Compilation
 The compilation stage bridges between the intermediate representation and C++ code.
 The outputs from this stage contain all the information to translate directly into C++ in the form of machine nodes.
 - `./compilation/src/machine_nodes.rs` defines machine nodes that mirror the C++ code.
@@ -197,7 +198,7 @@ The outputs from this stage contain all the information to translate directly in
 - `./compilation/src/code_size.rs` defines a `CodeSizeEstimator` to generate approximate bounds on the size of a function definition.
 - `./compilation/src/weakener.rs` defines a `Weakener` to introduce weak pointers and allocators to manage recursive cycles in functions.
 - `./compilation/src/compiler.rs` defines the `Compiler` to convert from the intermediate representation into the machine nodes.
-#### Translation
+### Translation
 The translation stage generates C++ code that can be compiled, linked and run.
 - `./translation/src/type_formatter.rs` contains a `TypeFormatter` and a `TypesFormatter` to convert machine node types into C++ types.
 - `./translation/src/translation.rs` contains the `Translator` to convert machine nodes into C++ code.
