@@ -234,3 +234,18 @@ The heavy use of template-metaprogramming means that files are split into header
 - `./backend/src/main.cpp` handles the main program by reading command line arguments, then timing the execution, and displaying the output.
 - `./backend/src/sleep.cpp` is a utility program to sleep for 10 seconds.
 - `./backend/wrap/` overrides setting the affinity and priority so that different variants can be run at different priorities.
+
+## Other Files
+### Programs
+- `./samples` contains sample programs.
+- `./benchmark` contains programs for benchmarking and their inputs.
+- `./timing/` contains code for estimating the coefficients of code vectors.
+### Scripts
+- The scripts are descripted in [__Scripts__](#Scripts).
+- `./scripts/plots/` contains files for generating the plots in the dissertation.
+### CICD
+- `.pre-commit-config.yaml` has pre-commit hooks for automatic linting and formatting on commit.
+- `.github/workflows` contains scripts for building and testing on the remote server.
+### Building
+- `Makefile` and `backend/Makefile` define build operations and other utility functions.
+- `requirements*.txt` and `**/Cargo.toml` contain dependencies for Python and Rust builds.
