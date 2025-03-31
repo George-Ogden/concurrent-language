@@ -205,34 +205,41 @@ The translation stage generates C++ code that can be compiled, linked and run.
 
 ## Backend
 The backend is written as a header-only library with template definitions.
-The heavy use of template-metaprogramming means that files are split into header declarations `*.hpp` and template implementations `*.tpp`.
-- `./backend/include/system/thread_manager.hpp` contains utilities for managing OS threads at setup and tear-down.
-- `./backend/include/system/work_manager.hpp` provides interfaces that are not specific to thread-runners.
-- `./backend/include/work/runner.hpp` defines a `WorkRunner` to process work items.
+The heavy use of template-metaprogramming means that files are split into header declarations (`.hpp`) and template implementations (`.tpp`). In the list below, I only include the `.hpp` files but the `.tpp` files are also included.
+### Lazy Values
 - `./backend/include/lazy/lazy.hpp` defines type-specific `Lazy<T>` for calculating values.
 - `./backend/include/lazy/types.hpp` contains utilities for handling and manipulating types with lazy instances.
-- `./backend/include/lazy/fns.hpp` contains utilities for manipulating lazy values.
-- `./backend/include/main/user.hpp` is a placeholder for overriding operations that require sudo.
-- `./backend/include/main/include.hpp` contains a list of headers that can be included by the main file.
-- `./backend/include/main/main.hpp` is where the frontend writes the C++ for compilation.
-- `./backend/include/time/utils.hpp` contains utils for timing the program.
-- `./backend/include/data_structures/lock.hpp` defines a lock and related utility functions.
-- `./backend/include/data_structures/cyclic_queue.hpp` defines `CyclicQueue` with thread-safe operations.
-- `./backend/include/data_structures/atomic_shared_enum.hpp` defines `AtomicSharedEnum` for synchronizing multiple enums in a single atomic.
-- `./backend/include/fn/types.hpp` contains type aliases for function types.
+### Functions
 - `./backend/include/fn/fn_inst.hpp` defines `FnInst` (function instance) and implementations for closures.
 - `./backend/include/fn/fn_gen.hpp` defines `FnGen` (function generator) and implementations for closures.
 - `./backend/include/fn/operators.hpp` defines built-in operators.
+- `./backend/include/fn/types.hpp` contains type aliases for function types.
+### Work
 - `./backend/include/work/work.hpp` defines a work item and its specialization with a typed function.
+- `./backend/include/work/runner.hpp` defines a `WorkRunner` to process work items.
 - `./backend/include/work/status.hpp` defines the status transitions for a work runner.
 - `./backend/include/work/work_request.hpp` defines a `WorkRequest` for communicating work between work runners.
-- `./backend/include/types/utils.hpp` defines type utilities.
+### Types
 - `./backend/include/types/compound.hpp` defines compound types for product and union types.
 - `./backend/include/types/display.hpp` defines utilities for displaying the resulting value when the program is complete.
 - `./backend/include/types/builtin.hpp` defines builtin types (`Int` and `Bool`).
-- `./backend/test/` defines tests for the backend.
+### Utilities
+- `./backend/include/data_structures/lock.hpp` defines a lock and related utility functions.
+- `./backend/include/data_structures/atomic_shared_enum.hpp` defines `AtomicSharedEnum` for synchronizing multiple enums in a single atomic.
+- `./backend/include/data_structures/cyclic_queue.hpp` defines `CyclicQueue` with thread-safe operations.
+- `./backend/include/time/utils.hpp` contains utils for timing the program.
+- `./backend/include/types/utils.hpp` defines type utilities.
+- `./backend/include/lazy/fns.hpp` contains utilities for manipulating lazy values.
+### Main Execution
+- `./backend/include/system/work_manager.hpp` provides interfaces that are not specific to thread-runners.
+- `./backend/include/system/thread_manager.hpp` contains utilities for managing OS threads at setup and tear-down.
+- `./backend/include/main/include.hpp` contains a list of headers that can be included by the main file.
 - `./backend/src/main.cpp` handles the main program by reading command line arguments, then timing the execution, and displaying the output.
+- `./backend/include/main/main.hpp` is where the frontend writes the C++ for compilation.
+### Development
 - `./backend/src/sleep.cpp` is a utility program to sleep for 10 seconds.
+- `./backend/test/` defines tests for the backend.
+- `./backend/include/main/user.hpp` is a placeholder for overriding operations that require sudo.
 - `./backend/wrap/` overrides setting the affinity and priority so that different variants can be run at different priorities.
 
 ## Other Files
