@@ -5,12 +5,12 @@ PARSER := parsing
 GRAMMAR := parsing/grammar
 TYPE_CHECKER := type-checker/target/release/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
-TRANSLATOR := translation/target/release/libtranslation.d
-TRANSLATOR_MANIFEST := translation/Cargo.toml
+EMITTER := emission/target/release/libemission.d
+EMITTER_MANIFEST := emission/Cargo.toml
 LOWERER := lowering/target/release/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
-COMPILER := compilation/target/release/libcompilation.d
-COMPILER_MANIFEST := compilation/Cargo.toml
+TRANSLATOR := translation/target/release/libtranslation.d
+TRANSLATOR_MANIFEST := translation/Cargo.toml
 OPTIMIZER := optimization/target/release/optimization
 OPTIMIZER_MANIFEST := optimization/Cargo.toml
 PIPELINE := pipeline/target/release/pipeline
@@ -56,19 +56,19 @@ $(LOWERER): $(wildcard lowering/src/*) $(TYPE_CHECKER)
 	cargo build --manifest-path $(LOWERER_MANIFEST) --release
 	touch $@
 
-$(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
-	cargo build --manifest-path $(COMPILER_MANIFEST) --release
+$(TRANSLATOR): $(wildcard translation/src/*) $(LOWERER)
+	cargo build --manifest-path $(TRANSLATOR_MANIFEST) --release
 	touch $@
 
-$(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
-	cargo build --manifest-path $(TRANSLATOR_MANIFEST) --release
+$(EMITTER): $(wildcard emission/src/*) $(TRANSLATOR)
+	cargo build --manifest-path $(EMITTER_MANIFEST) --release
 	touch $@
 
 $(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
 	cargo build --manifest-path $(OPTIMIZER_MANIFEST) --release
 	touch $@
 
-$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
+$(PIPELINE): $(wildcard pipeline/src/*) $(EMITTER) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST) --release
 	touch $@
 
@@ -89,8 +89,8 @@ test: build
 	pytest parsing -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
-	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
+	cargo test --manifest-path $(EMITTER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(OPTIMIZER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test

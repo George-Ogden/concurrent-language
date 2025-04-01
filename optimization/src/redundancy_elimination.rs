@@ -13,13 +13,13 @@ type Definitions = HashMap<Location, IntermediateExpression>;
 type NormalizedLocations = HashMap<Location, Location>;
 
 #[derive(Clone)]
-pub struct EquivalentExpressionEliminator {
+pub struct RedundancyEliminator {
     historical_expressions: HistoricalExpressions,
     definitions: Definitions,
     normalized_locations: NormalizedLocations,
 }
 
-impl EquivalentExpressionEliminator {
+impl RedundancyEliminator {
     pub fn new() -> Self {
         Self {
             historical_expressions: HistoricalExpressions::new(),
@@ -518,9 +518,9 @@ impl EquivalentExpressionEliminator {
         }
     }
 
-    pub fn eliminate_equivalent_expressions(program: IntermediateProgram) -> IntermediateProgram {
+    pub fn eliminate_redundancy(program: IntermediateProgram) -> IntermediateProgram {
         let IntermediateProgram { main, types } = program;
-        let mut optimizer = EquivalentExpressionEliminator::new();
+        let mut optimizer = RedundancyEliminator::new();
         let lambda = optimizer.eliminate_from_lambda(main);
         let allocation_optimizer = AllocationOptimizer::from_statements(&lambda.block.statements);
         let IntermediateExpression::IntermediateLambda(main) =
@@ -1569,15 +1569,14 @@ mod tests {
                 ret: expected_location.clone().into(),
             },
         };
-        let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
-        let optimized_fn =
-            equivalent_expression_eliminator.eliminate_from_lambda(IntermediateLambda {
-                args: Vec::new(),
-                block: IntermediateBlock {
-                    statements: original_statements,
-                    ret: original_location.clone().into(),
-                },
-            });
+        let mut redundancy_eliminator = RedundancyEliminator::new();
+        let optimized_fn = redundancy_eliminator.eliminate_from_lambda(IntermediateLambda {
+            args: Vec::new(),
+            block: IntermediateBlock {
+                statements: original_statements,
+                ret: original_location.clone().into(),
+            },
+        });
         let allocation_optimizer =
             AllocationOptimizer::from_statements(&optimized_fn.block.statements);
         dbg!(&optimized_fn.block.statements);
@@ -1730,15 +1729,14 @@ mod tests {
             }
             .into(),
         ];
-        let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
-        let optimized_lambda =
-            equivalent_expression_eliminator.eliminate_from_lambda(IntermediateLambda {
-                args: Vec::new(),
-                block: IntermediateBlock {
-                    statements,
-                    ret: target.clone().into(),
-                },
-            });
+        let mut redundancy_eliminator = RedundancyEliminator::new();
+        let optimized_lambda = redundancy_eliminator.eliminate_from_lambda(IntermediateLambda {
+            args: Vec::new(),
+            block: IntermediateBlock {
+                statements,
+                ret: target.clone().into(),
+            },
+        });
         let allocation_optimizer =
             AllocationOptimizer::from_statements(&optimized_lambda.block.statements);
         let optimized_block =
@@ -1849,8 +1847,7 @@ mod tests {
         program_expected: (IntermediateProgram, IntermediateProgram),
     ) {
         let (program, expected_program) = program_expected;
-        let optimized_program =
-            EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+        let optimized_program = RedundancyEliminator::eliminate_redundancy(program);
         dbg!(&optimized_program);
         dbg!(&expected_program);
         assert_eq!(optimized_program.types, expected_program.types);

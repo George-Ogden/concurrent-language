@@ -7,9 +7,7 @@ use lowering::{
 };
 use std::convert::identity;
 
-use crate::{
-    equivalent_expression_elimination::EquivalentExpressionEliminator, refresher::Refresher,
-};
+use crate::{redundancy_elimination::RedundancyEliminator, refresher::Refresher};
 use itertools::Either::{Left, Right};
 use translation::CodeSizeEstimator;
 
@@ -32,7 +30,7 @@ impl Inliner {
         while should_continue && i < MAX_INLINING_ITERATIONS {
             (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
             // Clean up with equivalent expression elimination after each iteration.
-            program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+            program = RedundancyEliminator::eliminate_redundancy(program);
             i += 1;
         }
         program
