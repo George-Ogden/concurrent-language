@@ -2,9 +2,9 @@ use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
     code_vector::CodeVectorCalculator, weakener::Weakener, Assignment, Await, BuiltIn,
-    ClosureInstantiation, CodeSizeEstimator, CompilationArgs, ConstructorCall, Declaration,
-    ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch,
-    MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
+    ClosureInstantiation, CodeSizeEstimator, ConstructorCall, Declaration, ElementAccess,
+    Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement,
+    Memory, Name, Program, Statement, TranslationArgs, TupleExpression, TupleType, TypeDef,
     UnionType, Value,
 };
 use itertools::Itertools;
@@ -47,7 +47,7 @@ type MemoryIds = HashMap<Location, Memory>;
 type TypeLookup = HashMap<IntermediateUnionType, (Name, UnionType)>;
 type FnDefs = Vec<FnDef>;
 
-pub struct Compiler {
+pub struct Translator {
     reference_names: ReferenceNames,
     memory_ids: MemoryIds,
     type_lookup: TypeLookup,
@@ -55,9 +55,9 @@ pub struct Compiler {
     recursive_fns: RecursiveFns,
 }
 
-impl Compiler {
+impl Translator {
     pub fn new() -> Self {
-        Compiler {
+        Translator {
             reference_names: ReferenceNames::new(),
             memory_ids: MemoryIds::new(),
             type_lookup: TypeLookup::new(),
@@ -66,19 +66,19 @@ impl Compiler {
         }
     }
 
-    fn compile_type(&self, type_: &IntermediateType) -> MachineType {
+    fn translate_type(&self, type_: &IntermediateType) -> MachineType {
         match type_ {
             IntermediateType::AtomicType(atomic_type) => {
                 let atomic_type_enum = atomic_type.0;
                 atomic_type_enum.clone().into()
             }
             IntermediateType::IntermediateTupleType(IntermediateTupleType(types)) => {
-                TupleType(self.compile_types(types)).into()
+                TupleType(self.translate_types(types)).into()
             }
             IntermediateType::IntermediateFnType(IntermediateFnType(arg_types, ret_type)) => {
                 FnType(
-                    self.compile_types(arg_types),
-                    Box::new(self.compile_type(&*ret_type)),
+                    self.translate_types(arg_types),
+                    Box::new(self.translate_type(&*ret_type)),
                 )
                 .into()
             }
@@ -88,16 +88,19 @@ impl Compiler {
             IntermediateType::Reference(reference) => {
                 match self.reference_names.get(&reference.as_ptr()) {
                     Some(type_) => type_.clone(),
-                    None => self.compile_type(&reference.borrow().clone()),
+                    None => self.translate_type(&reference.borrow().clone()),
                 }
             }
         }
     }
-    fn compile_types(&self, types: &Vec<IntermediateType>) -> Vec<MachineType> {
-        types.iter().map(|type_| self.compile_type(type_)).collect()
+    fn translate_types(&self, types: &Vec<IntermediateType>) -> Vec<MachineType> {
+        types
+            .iter()
+            .map(|type_| self.translate_type(type_))
+            .collect()
     }
-    // Compile union type definitions into structs in C++.
-    fn compile_type_defs(&mut self, types: Vec<Rc<RefCell<IntermediateType>>>) -> Vec<TypeDef> {
+    // Translate union type definitions into structs in C++.
+    fn translate_type_defs(&mut self, types: Vec<Rc<RefCell<IntermediateType>>>) -> Vec<TypeDef> {
         // Find union types.
         let types = types
             .into_iter()
@@ -144,7 +147,7 @@ impl Compiler {
                         .into_iter()
                         .zip(ctor_names.into_iter())
                         .map(|(type_, name)| {
-                            (name, type_.as_ref().map(|type_| self.compile_type(type_)))
+                            (name, type_.as_ref().map(|type_| self.translate_type(type_)))
                         })
                         .collect_vec();
                     TypeDef {
@@ -160,18 +163,18 @@ impl Compiler {
     fn next_memory_address(&self) -> Memory {
         Memory(format!("m{}", self.memory_ids.len()))
     }
-    fn compile_location(&mut self, location: &Location) -> Memory {
+    fn translate_location(&mut self, location: &Location) -> Memory {
         if !self.memory_ids.contains_key(location) {
             self.memory_ids
                 .insert(location.clone(), self.next_memory_address());
         }
         self.memory_ids[location].clone().into()
     }
-    fn compile_memory(&mut self, memory: &IntermediateMemory) -> Memory {
-        self.compile_location(&memory.location)
+    fn translate_memory(&mut self, memory: &IntermediateMemory) -> Memory {
+        self.translate_location(&memory.location)
     }
-    fn compile_arg(&mut self, arg: &IntermediateArg) -> Memory {
-        self.compile_location(&arg.location)
+    fn translate_arg(&mut self, arg: &IntermediateArg) -> Memory {
+        self.translate_location(&arg.location)
     }
     fn new_memory_location(&mut self) -> Memory {
         let location = Location::new();
@@ -182,10 +185,10 @@ impl Compiler {
     fn next_fn_name(&self) -> Name {
         format!("F{}", self.fn_defs.len())
     }
-    fn compile_value(&mut self, value: IntermediateValue) -> Value {
+    fn translate_value(&mut self, value: IntermediateValue) -> Value {
         match &value {
-            IntermediateValue::IntermediateArg(arg) => self.compile_arg(arg).into(),
-            IntermediateValue::IntermediateMemory(memory) => self.compile_memory(memory).into(),
+            IntermediateValue::IntermediateArg(arg) => self.translate_arg(arg).into(),
+            IntermediateValue::IntermediateMemory(memory) => self.translate_memory(memory).into(),
             IntermediateValue::IntermediateBuiltIn(built_in) => Value::from(match built_in {
                 IntermediateBuiltIn::Boolean(boolean) => BuiltIn::from(boolean.clone()),
                 IntermediateBuiltIn::Integer(integer) => BuiltIn::from(integer.clone()),
@@ -195,14 +198,14 @@ impl Compiler {
             }),
         }
     }
-    fn compile_values(&mut self, values: Vec<IntermediateValue>) -> Vec<Value> {
+    fn translate_values(&mut self, values: Vec<IntermediateValue>) -> Vec<Value> {
         values
             .into_iter()
-            .map(|value| self.compile_value(value))
+            .map(|value| self.translate_value(value))
             .collect()
     }
     /// Expressions may need multiple lines to be defined (e.g. if statement) so return any new statements too.
-    fn compile_expression(
+    fn translate_expression(
         &mut self,
         expression: IntermediateExpression,
     ) -> (Vec<Statement>, Expression) {
@@ -210,22 +213,22 @@ impl Compiler {
             IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 values,
             )) => {
-                let values = self.compile_values(values);
+                let values = self.translate_values(values);
                 (Vec::new(), TupleExpression(values).into())
             }
             IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
                 value,
                 idx,
             }) => {
-                let value = self.compile_value(value);
+                let value = self.translate_value(value);
                 (Vec::new(), ElementAccess { value, idx }.into())
             }
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
-                let MachineType::FnType(fn_type) = self.compile_type(&fn_.type_()) else {
+                let MachineType::FnType(fn_type) = self.translate_type(&fn_.type_()) else {
                     panic!("Function has non-function type.")
                 };
-                let fn_value = self.compile_value(fn_);
-                let args_values = self.compile_values(args);
+                let fn_value = self.translate_value(fn_);
+                let args_values = self.translate_values(args);
                 (
                     if let Value::Memory(mem) = &fn_value {
                         // Ensure fn is calculated before call.
@@ -246,7 +249,7 @@ impl Compiler {
                 data,
                 type_,
             }) => {
-                let value = data.map(|data| self.compile_value(data));
+                let value = data.map(|data| self.translate_value(data));
                 let (name, _) = &self.type_lookup[&type_];
                 (
                     Vec::new(),
@@ -255,9 +258,9 @@ impl Compiler {
                         idx,
                         data: value.map(|value| {
                             let MachineType::UnionType(UnionType(variants)) =
-                                self.compile_type(&type_.into())
+                                self.translate_type(&type_.into())
                             else {
-                                panic!("Did not compile union type into union type.")
+                                panic!("Did not translate union type into union type.")
                             };
                             (variants[idx].clone(), value)
                         }),
@@ -266,45 +269,45 @@ impl Compiler {
                 )
             }
             IntermediateExpression::IntermediateValue(value) => {
-                let value = self.compile_value(value);
+                let value = self.translate_value(value);
                 (Vec::new(), value.into())
             }
             IntermediateExpression::IntermediateLambda(lambda) => {
-                let (statements, closure_inst) = self.compile_lambda(lambda);
+                let (statements, closure_inst) = self.translate_lambda(lambda);
                 (statements, closure_inst.into())
             }
             IntermediateExpression::IntermediateIf(if_) => {
-                let (statements, value) = self.compile_if(if_);
+                let (statements, value) = self.translate_if(if_);
                 (statements, value.into())
             }
             IntermediateExpression::IntermediateMatch(match_) => {
-                let (statements, value) = self.compile_match(match_);
+                let (statements, value) = self.translate_match(match_);
                 (statements, value.into())
             }
         }
     }
-    fn compile_if(&mut self, if_: IntermediateIf) -> (Vec<Statement>, Value) {
+    fn translate_if(&mut self, if_: IntermediateIf) -> (Vec<Statement>, Value) {
         let IntermediateIf {
             condition,
             branches: (true_block, false_block),
         } = if_;
-        let condition = self.compile_value(condition);
+        let condition = self.translate_value(condition);
         let mut statements = if let Value::Memory(mem) = &condition {
             vec![Await(vec![mem.clone()]).into()]
         } else {
             Vec::new()
         };
         let target = IntermediateMemory::from(true_block.type_());
-        let memory = self.compile_memory(&target);
+        let memory = self.translate_memory(&target);
         // Add declaration for shared result.
         statements.push(
             Declaration {
                 memory: memory.clone(),
-                type_: self.compile_type(&target.type_()),
+                type_: self.translate_type(&target.type_()),
             }
             .into(),
         );
-        let (mut true_statements, true_value) = self.compile_block(true_block);
+        let (mut true_statements, true_value) = self.translate_block(true_block);
         true_statements.push(
             Assignment {
                 target: memory.clone(),
@@ -312,7 +315,7 @@ impl Compiler {
             }
             .into(),
         );
-        let (mut false_statements, false_value) = self.compile_block(false_block);
+        let (mut false_statements, false_value) = self.translate_block(false_block);
         false_statements.push(
             Assignment {
                 target: memory.clone(),
@@ -329,32 +332,32 @@ impl Compiler {
         );
         (statements, memory.into())
     }
-    fn compile_match(&mut self, match_: IntermediateMatch) -> (Vec<Statement>, Value) {
+    fn translate_match(&mut self, match_: IntermediateMatch) -> (Vec<Statement>, Value) {
         let IntermediateMatch { subject, branches } = match_;
         let type_ = subject.type_();
-        let MachineType::UnionType(union_type) = self.compile_type(&type_) else {
+        let MachineType::UnionType(union_type) = self.translate_type(&type_) else {
             panic!("Match expression subject has non-union type.")
         };
-        let subject = self.compile_value(subject);
+        let subject = self.translate_value(subject);
         let mut statements = if let Value::Memory(mem) = &subject {
             vec![Await(vec![mem.clone()]).into()]
         } else {
             Vec::new()
         };
         let result = IntermediateMemory::from(branches[0].block.type_());
-        let memory = self.compile_memory(&result);
+        let memory = self.translate_memory(&result);
         // Add declaration for shared result.
         statements.push(
             Declaration {
                 memory: memory.clone(),
-                type_: self.compile_type(&result.type_()),
+                type_: self.translate_type(&result.type_()),
             }
             .into(),
         );
         let branches = branches
             .into_iter()
             .map(|IntermediateMatchBranch { target, block }| {
-                let (mut statements, value) = self.compile_block(block);
+                let (mut statements, value) = self.translate_block(block);
                 statements.push(
                     Assignment {
                         target: memory.clone(),
@@ -363,7 +366,7 @@ impl Compiler {
                     .into(),
                 );
                 MatchBranch {
-                    target: target.map(|arg| self.compile_arg(&arg)),
+                    target: target.map(|arg| self.translate_arg(&arg)),
                     statements,
                 }
             })
@@ -376,24 +379,24 @@ impl Compiler {
             }
             .into(),
         );
-        let value = self.compile_memory(&result);
+        let value = self.translate_memory(&result);
         (statements, value.into())
     }
-    fn compile_statement(&mut self, statement: IntermediateStatement) -> Vec<Statement> {
+    fn translate_statement(&mut self, statement: IntermediateStatement) -> Vec<Statement> {
         match statement {
             IntermediateStatement::IntermediateAssignment(memory) => {
-                self.compile_assignment(memory)
+                self.translate_assignment(memory)
             }
         }
     }
-    fn compile_assignment(&mut self, assignment: IntermediateAssignment) -> Vec<Statement> {
+    fn translate_assignment(&mut self, assignment: IntermediateAssignment) -> Vec<Statement> {
         let IntermediateAssignment {
             expression,
             location,
         } = assignment;
-        let type_ = self.compile_type(&expression.type_());
-        let (mut statements, value) = self.compile_expression(expression);
-        let memory = self.compile_location(&location);
+        let type_ = self.translate_type(&expression.type_());
+        let (mut statements, value) = self.translate_expression(expression);
+        let memory = self.translate_location(&location);
         let assignment = Assignment {
             target: memory.clone(),
             value: value.clone(),
@@ -414,19 +417,19 @@ impl Compiler {
         statements.push(assignment.into());
         statements
     }
-    fn compile_statements(&mut self, statements: Vec<IntermediateStatement>) -> Vec<Statement> {
+    fn translate_statements(&mut self, statements: Vec<IntermediateStatement>) -> Vec<Statement> {
         statements
             .into_iter()
-            .flat_map(|statement| self.compile_statement(statement))
+            .flat_map(|statement| self.translate_statement(statement))
             .collect()
     }
-    fn compile_block(&mut self, block: IntermediateBlock) -> (Vec<Statement>, Value) {
+    fn translate_block(&mut self, block: IntermediateBlock) -> (Vec<Statement>, Value) {
         let statements = block
             .statements
             .into_iter()
-            .flat_map(|statement| self.compile_statement(statement))
+            .flat_map(|statement| self.translate_statement(statement))
             .collect();
-        let value = self.compile_value(block.ret);
+        let value = self.translate_value(block.ret);
         (statements, value)
     }
     /// Substitute open variables in lambdas with new variables.
@@ -457,7 +460,7 @@ impl Compiler {
             .iter()
             .enumerate()
             .flat_map(|(i, location)| {
-                let memory = self.compile_location(location);
+                let memory = self.translate_location(location);
                 vec![Assignment {
                     target: memory,
                     value: ElementAccess {
@@ -470,7 +473,7 @@ impl Compiler {
             })
             .collect_vec()
     }
-    fn compile_lambda(
+    fn translate_lambda(
         &mut self,
         mut lambda: IntermediateLambda,
     ) -> (Vec<Statement>, ClosureInstantiation) {
@@ -480,7 +483,7 @@ impl Compiler {
         // Determine types of open variables.
         let env_types = env_values
             .iter()
-            .map(|(value, _)| self.compile_type(&value.type_()))
+            .map(|(value, _)| self.translate_type(&value.type_()))
             .collect_vec();
         let env_locations = env_values
             .iter()
@@ -498,14 +501,14 @@ impl Compiler {
         } = lambda;
         let args = args
             .into_iter()
-            .map(|arg| (self.compile_arg(&arg), self.compile_type(&arg.type_())))
+            .map(|arg| (self.translate_arg(&arg), self.translate_type(&arg.type_())))
             .collect_vec();
         let mut prefix = self.closure_prefix(&env_locations);
-        let mut statements = self.compile_statements(statements);
+        let mut statements = self.translate_statements(statements);
         prefix.extend(statements);
         statements = prefix;
-        let ret_type = self.compile_type(&return_value.type_());
-        let ret_val = self.compile_value(return_value);
+        let ret_type = self.translate_type(&return_value.type_());
+        let ret_val = self.translate_value(return_value);
         let name = self.next_fn_name();
         self.fn_defs.push(FnDef {
             name: name.clone(),
@@ -522,7 +525,7 @@ impl Compiler {
             let tuple_mem = self.new_memory_location();
             let values = env_values
                 .into_iter()
-                .map(|(value, _)| self.compile_value(value))
+                .map(|(value, _)| self.translate_value(value))
                 .collect();
             // Assign to all closed variables.
             let statements = vec![Assignment {
@@ -541,14 +544,14 @@ impl Compiler {
             (Vec::new(), ClosureInstantiation { name, env: None })
         }
     }
-    fn compile_program(&mut self, program: IntermediateProgram) -> Program {
+    fn translate_program(&mut self, program: IntermediateProgram) -> Program {
         self.recursive_fns = RecursiveFnFinder::recursive_fns(&program);
         let IntermediateProgram { main, types } = program;
-        let type_defs = self.compile_type_defs(types);
-        let (statements, _) = self.compile_lambda(main);
+        let type_defs = self.translate_type_defs(types);
+        let (statements, _) = self.translate_lambda(main);
         // Check that main has no open variables.
         assert_eq!(statements.len(), 0);
-        // Main is the last compiled program.
+        // Main is the last translated program.
         let main = self.fn_defs.last_mut().unwrap();
         main.name = Name::from("Main");
         let program = Program {
@@ -557,12 +560,12 @@ impl Compiler {
         };
         Weakener::weaken(program)
     }
-    pub fn compile(program: IntermediateProgram, args: CompilationArgs) -> Program {
-        let mut compiler = Compiler::new();
+    pub fn translate(program: IntermediateProgram, args: TranslationArgs) -> Program {
+        let mut translator = Translator::new();
         if let Some(filename) = args.export_vector_file {
             Self::export_vector(&program, filename).expect("Failed to save program")
         };
-        compiler.compile_program(program)
+        translator.translate_program(program)
     }
     /// Export code vectors to a file.
     fn export_vector(program: &IntermediateProgram, filename: String) -> Result<(), String> {
@@ -689,12 +692,15 @@ mod tests {
         ];
         "mixed types"
     )]
-    fn test_compile_type_defs(
+    fn test_translate_type_defs(
         type_defs: Vec<Rc<RefCell<IntermediateType>>>,
         expected_type_defs: Vec<TypeDef>,
     ) {
-        let mut compiler = Compiler::new();
-        assert_eq!(compiler.compile_type_defs(type_defs), expected_type_defs)
+        let mut translator = Translator::new();
+        assert_eq!(
+            translator.translate_type_defs(type_defs),
+            expected_type_defs
+        )
     }
 
     #[test_case(
@@ -738,49 +744,58 @@ mod tests {
         ).into();
         "argument"
     )]
-    fn test_compile_values(value: IntermediateValue, expected_value: Value) {
-        let mut compiler = Compiler::new();
-        let compiled_value = compiler.compile_value(value);
-        assert_eq!(compiled_value, expected_value);
+    fn test_translate_values(value: IntermediateValue, expected_value: Value) {
+        let mut translator = Translator::new();
+        let translated_value = translator.translate_value(value);
+        assert_eq!(translated_value, expected_value);
     }
     #[test]
-    fn test_compile_multiple_memory_locations() {
+    fn test_translate_multiple_memory_locations() {
         let locations = vec![Location::new(), Location::new(), Location::new()];
-        let mut compiler = Compiler::new();
-        let value_0 = compiler.compile_location(&locations[0].clone());
-        let value_1 = compiler.compile_location(&locations[1].clone());
-        let value_2 = compiler.compile_location(&locations[2].clone());
+        let mut translator = Translator::new();
+        let value_0 = translator.translate_location(&locations[0].clone());
+        let value_1 = translator.translate_location(&locations[1].clone());
+        let value_2 = translator.translate_location(&locations[2].clone());
         assert_ne!(value_0, value_1);
         assert_ne!(value_2, value_1);
         assert_ne!(value_2, value_0);
 
-        assert_eq!(value_0, compiler.compile_location(&locations[0].clone()));
-        assert_eq!(value_1, compiler.compile_location(&locations[1].clone()));
-        assert_eq!(value_2, compiler.compile_location(&locations[2].clone()));
+        assert_eq!(
+            value_0,
+            translator.translate_location(&locations[0].clone())
+        );
+        assert_eq!(
+            value_1,
+            translator.translate_location(&locations[1].clone())
+        );
+        assert_eq!(
+            value_2,
+            translator.translate_location(&locations[2].clone())
+        );
     }
     #[test]
-    fn test_compile_arguments() {
+    fn test_translate_arguments() {
         let types: Vec<IntermediateType> = vec![
             AtomicTypeEnum::INT.into(),
             AtomicTypeEnum::BOOL.into(),
             AtomicTypeEnum::INT.into(),
         ];
-        let mut compiler = Compiler::new();
+        let mut translator = Translator::new();
 
         let args = types
             .into_iter()
             .map(|type_| IntermediateArg::from(type_))
             .collect_vec();
-        let value_0 = compiler.compile_value(args[0].clone().into());
-        let value_1 = compiler.compile_value(args[1].clone().into());
-        let value_2 = compiler.compile_value(args[2].clone().into());
+        let value_0 = translator.translate_value(args[0].clone().into());
+        let value_1 = translator.translate_value(args[1].clone().into());
+        let value_2 = translator.translate_value(args[2].clone().into());
         assert_ne!(value_0, value_1);
         assert_ne!(value_2, value_1);
         assert_ne!(value_2, value_0);
 
-        assert_eq!(value_0, compiler.compile_value(args[0].clone().into()));
-        assert_eq!(value_1, compiler.compile_value(args[1].clone().into()));
-        assert_eq!(value_2, compiler.compile_value(args[2].clone().into()));
+        assert_eq!(value_0, translator.translate_value(args[0].clone().into()));
+        assert_eq!(value_1, translator.translate_value(args[1].clone().into()));
+        assert_eq!(value_2, translator.translate_value(args[2].clone().into()));
     }
 
     #[test_case(
@@ -899,12 +914,12 @@ mod tests {
         );
         "fn call higher-order call from args"
     )]
-    fn test_compile_expressions(
+    fn test_translate_expressions(
         expression: IntermediateExpression,
         expected: (Vec<Statement>, Expression),
     ) {
-        let mut compiler = Compiler::new();
-        let (statements, expression) = compiler.compile_expression(expression);
+        let mut translator = Translator::new();
+        let (statements, expression) = translator.translate_expression(expression);
         assert_eq!((statements, expression), expected);
     }
 
@@ -976,14 +991,14 @@ mod tests {
         );
         "recursive constructor call"
     )]
-    fn test_compile_constructors(
+    fn test_translate_constructors(
         constructor_type: (IntermediateCtorCall, Rc<RefCell<IntermediateType>>),
         expected: (Vec<Statement>, Expression),
     ) {
         let (constructor, type_) = constructor_type;
-        let mut compiler = Compiler::new();
-        compiler.compile_type_defs(vec![type_]);
-        let (statements, expression) = compiler.compile_expression(constructor.into());
+        let mut translator = Translator::new();
+        translator.translate_type_defs(vec![type_]);
+        let (statements, expression) = translator.translate_expression(constructor.into());
         assert_eq!((statements, expression), expected);
     }
 
@@ -1287,13 +1302,13 @@ mod tests {
         ];
         "identity function"
     )]
-    fn test_compile_statements(
+    fn test_translate_statements(
         statements: Vec<IntermediateStatement>,
         expected_statements: Vec<Statement>,
     ) {
-        let mut compiler = Compiler::new();
-        let compiled_statements = compiler.compile_statements(statements);
-        assert_eq!(compiled_statements, expected_statements);
+        let mut translator = Translator::new();
+        let translated_statements = translator.translate_statements(statements);
+        assert_eq!(translated_statements, expected_statements);
     }
     #[test_case(
         {
@@ -1511,7 +1526,7 @@ mod tests {
         ];
         "match statement with targets and use"
     )]
-    fn test_compile_match_statements(
+    fn test_translate_match_statements(
         args_types_statements: (
             Vec<Rc<RefCell<IntermediateType>>>,
             Vec<IntermediateStatement>,
@@ -1519,10 +1534,10 @@ mod tests {
         expected_statements: Vec<Statement>,
     ) {
         let (types, statements) = args_types_statements;
-        let mut compiler = Compiler::new();
-        compiler.compile_type_defs(types);
-        let compiled_statements = compiler.compile_statements(statements);
-        assert_eq!(compiled_statements, expected_statements);
+        let mut translator = Translator::new();
+        translator.translate_type_defs(types);
+        let translated_statements = translator.translate_statements(statements);
+        assert_eq!(translated_statements, expected_statements);
     }
 
     #[test_case(
@@ -1785,19 +1800,19 @@ mod tests {
         );
         "env and argument"
     )]
-    fn test_compile_fn_defs(
+    fn test_translate_fn_defs(
         fn_def: IntermediateLambda,
         expected: (Vec<Statement>, ClosureInstantiation, FnDef),
     ) {
         let (expected_statements, expected_value, expected_fn_def) = expected;
 
-        let mut compiler = Compiler::new();
+        let mut translator = Translator::new();
         let size = CodeSizeEstimator::estimate_size(&fn_def);
-        let compiled = compiler.compile_lambda(fn_def);
-        assert_eq!(compiled, (expected_statements, expected_value));
-        let compiled_fn_def = &compiler.fn_defs[0];
-        assert_eq!(compiled_fn_def, &expected_fn_def);
-        assert_eq!(compiled_fn_def.size_bounds, size);
+        let translated = translator.translate_lambda(fn_def);
+        assert_eq!(translated, (expected_statements, expected_value));
+        let translated_fn_def = &translator.fn_defs[0];
+        assert_eq!(translated_fn_def, &expected_fn_def);
+        assert_eq!(translated_fn_def.size_bounds, size);
     }
 
     #[test_case(
@@ -2371,12 +2386,12 @@ mod tests {
         };
         "recursive closure program"
     )]
-    fn test_compile_program(program: IntermediateProgram, expected_program: Program) {
-        let mut compiler = Compiler::new();
+    fn test_translate_program(program: IntermediateProgram, expected_program: Program) {
+        let mut translator = Translator::new();
         let main_size = CodeSizeEstimator::estimate_size(&program.main);
-        let compiled_program = compiler.compile_program(program);
-        assert_eq!(compiled_program, expected_program);
-        let main = compiled_program.fn_defs.last().unwrap();
+        let translated_program = translator.translate_program(program);
+        assert_eq!(translated_program, expected_program);
+        let main = translated_program.fn_defs.last().unwrap();
         assert_eq!(main.size_bounds, main_size);
     }
 
@@ -2388,7 +2403,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_compile_program_with_args(temporary_filename: PathBuf) {
+    fn test_translate_program_with_args(temporary_filename: PathBuf) {
         let identity = IntermediateMemory::from(IntermediateType::from(IntermediateFnType(
             vec![AtomicTypeEnum::INT.into()],
             Box::new(AtomicTypeEnum::INT.into()),
@@ -2428,9 +2443,9 @@ mod tests {
             types: Vec::new(),
         };
         let identity_vector = CodeVectorCalculator::lambda_vector(&program.main).expect("");
-        Compiler::compile(
+        Translator::translate(
             program,
-            CompilationArgs {
+            TranslationArgs {
                 export_vector_file: Some(temporary_filename.to_str().unwrap().into()),
             },
         );

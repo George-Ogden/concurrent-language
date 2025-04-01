@@ -10,8 +10,8 @@ use std::convert::identity;
 use crate::{
     equivalent_expression_elimination::EquivalentExpressionEliminator, refresher::Refresher,
 };
-use compilation::CodeSizeEstimator;
 use itertools::Either::{Left, Right};
+use translation::CodeSizeEstimator;
 
 pub struct Inliner {
     fn_defs: FnDefs,

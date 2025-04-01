@@ -1,6 +1,6 @@
 use std::fmt::{self, Formatter};
 
-use compilation::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, UnionType};
+use translation::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, UnionType};
 
 /// Convert type to C++ code.
 pub struct TypeFormatter<'a>(pub &'a MachineType);

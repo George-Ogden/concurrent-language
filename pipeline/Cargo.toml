@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
-compilation = { version = "0.1.0", path = "../compilation" }
+translation = { version = "0.1.0", path = "../translation" }
 lowering = { version = "0.1.0", path = "../lowering" }
 optimization = { version = "0.1.0", path = "../optimization" }
 serde_json = "1.0.137"

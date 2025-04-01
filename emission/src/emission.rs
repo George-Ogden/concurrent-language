@@ -3,7 +3,7 @@ use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use std::convert::identity;
 
-use compilation::{
+use translation::{
     Allocation, Assignment, Await, Boolean, BuiltIn, ClosureInstantiation, ConstructorCall,
     Declaration, ElementAccess, Expression, FnCall, FnDef, Id, IfStatement, Integer, MachineType,
     MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
@@ -455,10 +455,10 @@ impl Emitter {
 mod tests {
     use super::*;
 
-    use compilation::{Allocation, AtomicType, AtomicTypeEnum, FnType, Id, MatchBranch, Name};
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
+    use translation::{Allocation, AtomicType, AtomicTypeEnum, FnType, Id, MatchBranch, Name};
 
     const EMITTER: Lazy<Emitter> = Lazy::new(|| Emitter {});
 
