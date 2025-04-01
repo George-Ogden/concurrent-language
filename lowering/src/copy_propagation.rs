@@ -5,20 +5,20 @@ use crate::intermediate_nodes::*;
 pub type MemoryMap = HashMap<Register, IntermediateExpression>;
 
 /// Remove unnecessary assignments and inline built-ins.
-pub struct AllocationOptimizer {
+pub struct CopyPropagator {
     memory: MemoryMap,
 }
 
-impl AllocationOptimizer {
+impl CopyPropagator {
     /// Instantiate from existing memory map.
     pub fn from_memory_map(memory_map: MemoryMap) -> Self {
         Self { memory: memory_map }
     }
     /// Instantiate from statements.
     pub fn from_statements(statements: &Vec<IntermediateStatement>) -> Self {
-        let mut allocation_optimizer = Self::from_memory_map(MemoryMap::new());
-        allocation_optimizer.register_memory(statements);
-        allocation_optimizer
+        let mut copy_propagator = Self::from_memory_map(MemoryMap::new());
+        copy_propagator.register_memory(statements);
+        copy_propagator
     }
 
     /// Record all assignments.
@@ -59,32 +59,31 @@ impl AllocationOptimizer {
         }
     }
 
-    pub fn remove_wasted_allocations_from_expression(
+    pub fn propagate_copies_in_expression(
         &self,
         expression: IntermediateExpression,
     ) -> IntermediateExpression {
         match expression {
             IntermediateExpression::IntermediateValue(value) => match value.clone() {
-                _ => IntermediateExpression::IntermediateValue(
-                    self.remove_wasted_allocations_from_value(value),
-                ),
+                _ => {
+                    IntermediateExpression::IntermediateValue(self.propagate_copies_in_value(value))
+                }
             },
             IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
                 value,
                 idx,
             }) => IntermediateElementAccess {
-                value: self.remove_wasted_allocations_from_value(value),
+                value: self.propagate_copies_in_value(value),
                 idx,
             }
             .into(),
             IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
                 values,
-            )) => IntermediateTupleExpression(self.remove_wasted_allocations_from_values(values))
-                .into(),
+            )) => IntermediateTupleExpression(self.propagate_copies_in_values(values)).into(),
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args }) => {
                 IntermediateFnCall {
-                    fn_: self.remove_wasted_allocations_from_value(fn_),
-                    args: self.remove_wasted_allocations_from_values(args),
+                    fn_: self.propagate_copies_in_value(fn_),
+                    args: self.propagate_copies_in_values(args),
                 }
                 .into()
             }
@@ -94,14 +93,14 @@ impl AllocationOptimizer {
                 type_,
             }) => IntermediateCtorCall {
                 idx,
-                data: data.map(|data| self.remove_wasted_allocations_from_value(data)),
+                data: data.map(|data| self.propagate_copies_in_value(data)),
                 type_,
             }
             .into(),
             IntermediateExpression::IntermediateLambda(IntermediateLambda { args, block }) => {
                 IntermediateLambda {
                     args,
-                    block: self.remove_wasted_allocations_from_block(block),
+                    block: self.propagate_copies_in_block(block),
                 }
                 .into()
             }
@@ -109,22 +108,22 @@ impl AllocationOptimizer {
                 condition,
                 branches,
             }) => IntermediateIf {
-                condition: self.remove_wasted_allocations_from_value(condition),
+                condition: self.propagate_copies_in_value(condition),
                 branches: (
-                    self.remove_wasted_allocations_from_block(branches.0),
-                    self.remove_wasted_allocations_from_block(branches.1),
+                    self.propagate_copies_in_block(branches.0),
+                    self.propagate_copies_in_block(branches.1),
                 ),
             }
             .into(),
             IntermediateExpression::IntermediateMatch(IntermediateMatch { subject, branches }) => {
                 IntermediateMatch {
-                    subject: self.remove_wasted_allocations_from_value(subject),
+                    subject: self.propagate_copies_in_value(subject),
                     branches: branches
                         .into_iter()
                         .map(
                             |IntermediateMatchBranch { target, block }| IntermediateMatchBranch {
                                 target,
-                                block: self.remove_wasted_allocations_from_block(block),
+                                block: self.propagate_copies_in_block(block),
                             },
                         )
                         .collect(),
@@ -133,10 +132,7 @@ impl AllocationOptimizer {
             }
         }
     }
-    pub fn remove_wasted_allocations_from_value(
-        &self,
-        value: IntermediateValue,
-    ) -> IntermediateValue {
+    pub fn propagate_copies_in_value(&self, value: IntermediateValue) -> IntermediateValue {
         match value.clone() {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.into(),
             IntermediateValue::IntermediateArg(arg) => arg.into(),
@@ -146,7 +142,7 @@ impl AllocationOptimizer {
                     match expression {
                         IntermediateExpression::IntermediateValue(value) => {
                             // Inline value recursively.
-                            self.remove_wasted_allocations_from_value(value.clone())
+                            self.propagate_copies_in_value(value.clone())
                         }
                         _ => memory.into(),
                     }
@@ -156,16 +152,16 @@ impl AllocationOptimizer {
             }
         }
     }
-    pub fn remove_wasted_allocations_from_values(
+    pub fn propagate_copies_in_values(
         &self,
         values: Vec<IntermediateValue>,
     ) -> Vec<IntermediateValue> {
         values
             .into_iter()
-            .map(|value| self.remove_wasted_allocations_from_value(value))
+            .map(|value| self.propagate_copies_in_value(value))
             .collect()
     }
-    pub fn remove_wasted_allocations_from_statement(
+    pub fn propagate_copies_in_statement(
         &self,
         statement: IntermediateStatement,
     ) -> Option<IntermediateStatement> {
@@ -179,8 +175,7 @@ impl AllocationOptimizer {
                 if matches!(&expression, IntermediateExpression::IntermediateValue(_)) {
                     return None;
                 }
-                let condensed_expression =
-                    self.remove_wasted_allocations_from_expression(expression.clone());
+                let condensed_expression = self.propagate_copies_in_expression(expression.clone());
                 let expression = condensed_expression;
                 Some(IntermediateStatement::IntermediateAssignment(
                     IntermediateAssignment {
@@ -192,22 +187,22 @@ impl AllocationOptimizer {
             }
         }
     }
-    pub fn remove_wasted_allocations_from_statements(
+    pub fn propagate_copies_in_statements(
         &self,
         statements: Vec<IntermediateStatement>,
     ) -> Vec<IntermediateStatement> {
         statements
             .into_iter()
-            .filter_map(|statement| self.remove_wasted_allocations_from_statement(statement))
+            .filter_map(|statement| self.propagate_copies_in_statement(statement))
             .collect()
     }
-    pub fn remove_wasted_allocations_from_block(
+    pub fn propagate_copies_in_block(
         &self,
         IntermediateBlock { statements, ret }: IntermediateBlock,
     ) -> IntermediateBlock {
         IntermediateBlock {
-            statements: self.remove_wasted_allocations_from_statements(statements),
-            ret: self.remove_wasted_allocations_from_value(ret),
+            statements: self.propagate_copies_in_statements(statements),
+            ret: self.propagate_copies_in_value(ret),
         }
     }
 }

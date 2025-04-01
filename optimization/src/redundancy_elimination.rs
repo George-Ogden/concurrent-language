@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use lowering::{
-    AllocationOptimizer, IntermediateAssignment, IntermediateBlock, IntermediateExpression,
+    CopyPropagator, IntermediateAssignment, IntermediateBlock, IntermediateExpression,
     IntermediateLambda, IntermediateMemory, IntermediateProgram, IntermediateStatement,
     IntermediateValue, Register,
 };
@@ -522,9 +522,9 @@ impl RedundancyEliminator {
         let IntermediateProgram { main, types } = program;
         let mut optimizer = RedundancyEliminator::new();
         let lambda = optimizer.eliminate_from_lambda(main);
-        let allocation_optimizer = AllocationOptimizer::from_statements(&lambda.block.statements);
+        let copy_propagator = CopyPropagator::from_statements(&lambda.block.statements);
         let IntermediateExpression::IntermediateLambda(main) =
-            allocation_optimizer.remove_wasted_allocations_from_expression(lambda.into())
+            copy_propagator.propagate_copies_in_expression(lambda.into())
         else {
             panic!("Main function changed form.")
         };
@@ -539,11 +539,11 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AllocationOptimizer, AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id,
-        Integer, IntermediateArg, IntermediateAssignment, IntermediateBuiltIn,
-        IntermediateElementAccess, IntermediateFnCall, IntermediateFnType, IntermediateIf,
-        IntermediateLambda, IntermediateMatch, IntermediateMatchBranch, IntermediateMemory,
-        IntermediateProgram, IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        AtomicTypeEnum, Boolean, BuiltInFn, CopyPropagator, ExpressionEqualityChecker, Id, Integer,
+        IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess,
+        IntermediateFnCall, IntermediateFnType, IntermediateIf, IntermediateLambda,
+        IntermediateMatch, IntermediateMatchBranch, IntermediateMemory, IntermediateProgram,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
         IntermediateUnionType, IntermediateValue, Register,
     };
     use test_case::test_case;
@@ -1577,11 +1577,9 @@ mod tests {
                 ret: original_register.clone().into(),
             },
         });
-        let allocation_optimizer =
-            AllocationOptimizer::from_statements(&optimized_fn.block.statements);
+        let copy_propagator = CopyPropagator::from_statements(&optimized_fn.block.statements);
         dbg!(&optimized_fn.block.statements);
-        let optimized_fn =
-            allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
+        let optimized_fn = copy_propagator.propagate_copies_in_expression(optimized_fn.into());
         dbg!(&expected_fn);
         dbg!(&optimized_fn);
         ExpressionEqualityChecker::assert_equal(&optimized_fn, &expected_fn.into());
@@ -1737,10 +1735,8 @@ mod tests {
                 ret: target.clone().into(),
             },
         });
-        let allocation_optimizer =
-            AllocationOptimizer::from_statements(&optimized_lambda.block.statements);
-        let optimized_block =
-            allocation_optimizer.remove_wasted_allocations_from_block(optimized_lambda.block);
+        let copy_propagator = CopyPropagator::from_statements(&optimized_lambda.block.statements);
+        let optimized_block = copy_propagator.propagate_copies_in_block(optimized_lambda.block);
         let optimized_statements = optimized_block.statements;
         assert_eq!(optimized_statements.len(), 1);
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {

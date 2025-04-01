@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    allocations::{AllocationOptimizer, MemoryMap},
+    copy_propagation::{CopyPropagator, MemoryMap},
     intermediate_nodes::*,
 };
 use itertools::{zip_eq, Itertools};
@@ -473,9 +473,9 @@ impl Lowerer {
     }
     fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
         let main = self.lower_lambda_def(program.main);
-        let allocation_optimizer = AllocationOptimizer::from_memory_map(self.memory.clone());
+        let copy_propagator = CopyPropagator::from_memory_map(self.memory.clone());
         let IntermediateExpression::IntermediateLambda(main) =
-            allocation_optimizer.remove_wasted_allocations_from_expression(main.into())
+            copy_propagator.propagate_copies_in_expression(main.into())
         else {
             panic!("Main fn changed form in allocation removal.")
         };
@@ -1413,10 +1413,10 @@ mod tests {
         .into();
         let mut lowerer = Lowerer::new();
         let value = lowerer.lower_expression(expression);
-        let allocation_optimizer = AllocationOptimizer::from_memory_map(lowerer.memory.clone());
-        let efficient_value = allocation_optimizer.remove_wasted_allocations_from_value(value);
-        let efficient_statements = allocation_optimizer
-            .remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        let copy_propagator = CopyPropagator::from_memory_map(lowerer.memory.clone());
+        let efficient_value = copy_propagator.propagate_copies_in_value(value);
+        let efficient_statements =
+            copy_propagator.propagate_copies_in_statements(lowerer.statements.clone());
         let efficient_fn = IntermediateLambda {
             args: Vec::new(),
             block: IntermediateBlock {
@@ -2474,9 +2474,9 @@ mod tests {
         let (statements, expected_scope) = statements_scope;
         let mut lowerer = Lowerer::new();
         lowerer.lower_statements(statements);
-        let allocation_optimizer = AllocationOptimizer::from_memory_map(lowerer.memory.clone());
-        lowerer.statements = allocation_optimizer
-            .remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        let copy_propagator = CopyPropagator::from_memory_map(lowerer.memory.clone());
+        lowerer.statements =
+            copy_propagator.propagate_copies_in_statements(lowerer.statements.clone());
         let flat_scope: HashMap<(Variable, Vec<Type>), IntermediateValue> = lowerer
             .scope
             .clone()
@@ -2485,13 +2485,11 @@ mod tests {
             .collect::<HashMap<_, _>>();
         let mut tuples = (Vec::new(), Vec::new());
         for (k, e) in expected_scope {
-            let value = allocation_optimizer
-                .remove_wasted_allocations_from_value(flat_scope[&(k, Vec::new())].clone());
+            let value =
+                copy_propagator.propagate_copies_in_value(flat_scope[&(k, Vec::new())].clone());
             let expression = match value {
-                IntermediateValue::IntermediateMemory(memory) => allocation_optimizer
-                    .remove_wasted_allocations_from_expression(
-                        lowerer.memory[&memory.register].clone(),
-                    ),
+                IntermediateValue::IntermediateMemory(memory) => copy_propagator
+                    .propagate_copies_in_expression(lowerer.memory[&memory.register].clone()),
                 v => v.into(),
             };
             dbg!(&expression, &e);
