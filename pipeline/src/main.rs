@@ -5,9 +5,9 @@ mod args;
 use args::Cli;
 use clap::Parser;
 use compilation::Compiler;
+use emission::Emitter;
 use lowering::Lowerer;
 use optimization::Optimizer;
-use translation::Translator;
 use type_checker::{Program, TypeChecker};
 
 fn main() {
@@ -24,7 +24,7 @@ fn main() {
                 let optimized_program =
                     Optimizer::optimize(lowered_program, args.optimization_args);
                 let compiled_program = Compiler::compile(optimized_program, args.compilation_args);
-                let code = Translator::translate(compiled_program);
+                let code = Emitter::emit(compiled_program);
                 // Write code to the stdout.
                 println!("{}", code)
             }

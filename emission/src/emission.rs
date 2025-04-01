@@ -14,14 +14,14 @@ use crate::type_formatter::TypeFormatter;
 
 type Code = String;
 
-pub struct Translator {}
+pub struct Emitter {}
 
-impl Translator {
-    fn translate_type(&self, type_: &MachineType) -> Code {
+impl Emitter {
+    fn emit_type(&self, type_: &MachineType) -> Code {
         format!("{}", TypeFormatter(type_))
     }
-    fn translate_lazy_type(&self, type_: &MachineType) -> Code {
-        format!("LazyT<{}>", self.translate_type(type_))
+    fn emit_lazy_type(&self, type_: &MachineType) -> Code {
+        format!("LazyT<{}>", self.emit_type(type_))
     }
     // Topologically sort types to ensure consistency in definitions.
     fn top_sort(&self, type_defs: &Vec<TypeDef>) -> Vec<(Name, Option<MachineType>)> {
@@ -62,7 +62,7 @@ impl Translator {
         }
         result.extend(type_def.constructors.iter().map(|ctor| ctor.clone()));
     }
-    fn translate_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
+    fn emit_type_defs(&self, type_defs: Vec<TypeDef>) -> Code {
         // Predefine any used types (without information).
         let forward_constructor_definitions = type_defs
             .iter()
@@ -75,7 +75,7 @@ impl Translator {
             .flatten();
         // Define type aliases for structs.
         let type_definitions = type_defs.iter().map(|type_def| {
-            let variant_definition = self.translate_type(&MachineType::UnionType(UnionType(
+            let variant_definition = self.emit_type(&MachineType::UnionType(UnionType(
                 type_def
                     .constructors
                     .iter()
@@ -91,8 +91,8 @@ impl Translator {
                 Some(type_) => {
                     format!(
                         "using type = {}; {} value;",
-                        self.translate_type(type_),
-                        self.translate_lazy_type(&MachineType::NamedType(Name::from("type")))
+                        self.emit_type(type_),
+                        self.emit_lazy_type(&MachineType::NamedType(Name::from("type")))
                     )
                 }
                 None => Code::from("Empty value;"),
@@ -106,7 +106,7 @@ impl Translator {
             itertools::join(constructor_definitions, "\n"),
         )
     }
-    fn translate_value_type(&self, value: &Value) -> Code {
+    fn emit_value_type(&self, value: &Value) -> Code {
         match value {
             Value::BuiltIn(BuiltIn::Boolean(_)) => Code::from("Bool"),
             Value::BuiltIn(BuiltIn::Integer(_)) => Code::from("Int"),
@@ -114,8 +114,8 @@ impl Translator {
             Value::Memory(Memory(id)) => format!("decltype({id})"),
         }
     }
-    fn translate_builtin(&self, value: BuiltIn) -> Code {
-        let value_type = self.translate_value_type(&value.clone().into());
+    fn emit_builtin(&self, value: BuiltIn) -> Code {
+        let value_type = self.emit_value_type(&value.clone().into());
         match value {
             BuiltIn::Integer(Integer { value }) => {
                 format!("{value_type}{{{value}LL}}")
@@ -128,55 +128,52 @@ impl Translator {
             }
         }
     }
-    fn translate_memory(&self, Memory(id): Memory) -> Code {
+    fn emit_memory(&self, Memory(id): Memory) -> Code {
         id
     }
-    fn translate_value(&self, value: Value) -> Code {
+    fn emit_value(&self, value: Value) -> Code {
         match value {
-            Value::BuiltIn(value) => self.translate_builtin(value),
-            Value::Memory(memory) => self.translate_memory(memory),
+            Value::BuiltIn(value) => self.emit_builtin(value),
+            Value::Memory(memory) => self.emit_memory(memory),
         }
     }
-    fn translate_value_list(&self, values: Vec<Value>) -> Code {
+    fn emit_value_list(&self, values: Vec<Value>) -> Code {
         values
             .into_iter()
-            .map(|value| self.translate_value(value))
+            .map(|value| self.emit_value(value))
             .join(", ")
     }
-    fn translate_expression(&self, expression: Expression) -> Code {
+    fn emit_expression(&self, expression: Expression) -> Code {
         match expression {
             Expression::ElementAccess(ElementAccess { value, idx }) => {
-                let code = format!(
-                    "std::get<{idx}ULL>({})",
-                    self.translate_value(value.clone())
-                );
+                let code = format!("std::get<{idx}ULL>({})", self.emit_value(value.clone()));
                 if Value::Memory(Memory(Id::from("env"))) == value {
                     format!("load_env({code})")
                 } else {
                     code
                 }
             }
-            Expression::Value(value) => self.translate_value(value),
+            Expression::Value(value) => self.emit_value(value),
             Expression::TupleExpression(TupleExpression(values)) => {
-                format!("std::make_tuple({})", self.translate_value_list(values))
+                format!("std::make_tuple({})", self.emit_value_list(values))
             }
             Expression::ConstructorCall(constructor_call) => {
-                self.translate_constructor_call(constructor_call)
+                self.emit_constructor_call(constructor_call)
             }
-            Expression::FnCall(fn_call) => self.translate_fn_call(fn_call),
-            e => panic!("{:?} does not translate directly as an expression", e),
+            Expression::FnCall(fn_call) => self.emit_fn_call(fn_call),
+            e => panic!("{:?} does not emit directly as an expression", e),
         }
     }
-    fn translate_await(&self, await_: Await) -> Code {
+    fn emit_await(&self, await_: Await) -> Code {
         let arguments = await_
             .0
             .into_iter()
-            .map(|memory| self.translate_memory(memory))
+            .map(|memory| self.emit_memory(memory))
             .join(",");
         format!("WorkManager::await({arguments});")
     }
-    fn translate_fn_call(&self, fn_call: FnCall) -> Code {
-        let args_code = self.translate_value_list(fn_call.args);
+    fn emit_fn_call(&self, fn_call: FnCall) -> Code {
+        let args_code = self.emit_value_list(fn_call.args);
         match fn_call.fn_ {
             Value::BuiltIn(built_in) => {
                 let BuiltIn::BuiltInFn(name) = built_in else {
@@ -185,7 +182,7 @@ impl Translator {
                 format!("{name}({args_code})",)
             }
             Value::Memory(memory) => {
-                let id = self.translate_memory(memory);
+                let id = self.emit_memory(memory);
                 let call_code = if args_code.len() == 0 {
                     format!("extract_lazy({})", id)
                 } else {
@@ -195,7 +192,7 @@ impl Translator {
             }
         }
     }
-    fn translate_constructor_call(&self, constructor_call: ConstructorCall) -> Code {
+    fn emit_constructor_call(&self, constructor_call: ConstructorCall) -> Code {
         let indexing_code = format!(
             "std::integral_constant<std::size_t,{}>()",
             constructor_call.idx
@@ -203,59 +200,52 @@ impl Translator {
         let value_code = match constructor_call.data {
             None => Code::new(),
             Some((name, value)) => {
-                format!(", {name}{{ensure_lazy({})}}", self.translate_value(value))
+                format!(", {name}{{ensure_lazy({})}}", self.emit_value(value))
             }
         };
         let type_ = constructor_call.type_;
         format!("{type_}{{{indexing_code}{value_code}}}")
     }
-    fn translate_declaration(
-        &self,
-        declaration: Declaration,
-        declared: &mut HashSet<Memory>,
-    ) -> Code {
+    fn emit_declaration(&self, declaration: Declaration, declared: &mut HashSet<Memory>) -> Code {
         let Declaration { type_, memory } = declaration;
         declared.insert(memory.clone());
         format!(
             "{} {};",
-            self.translate_lazy_type(&type_),
-            self.translate_memory(memory)
+            self.emit_lazy_type(&type_),
+            self.emit_memory(memory)
         )
     }
     /// Define allocator for cyclic closures in fn defs.
-    fn translate_allocation(
-        &self,
-        allocation: Allocation,
-    ) -> (Code, HashMap<Memory, (Code, usize)>) {
+    fn emit_allocation(&self, allocation: Allocation) -> (Code, HashMap<Memory, (Code, usize)>) {
         let Allocation { name, fns, target } = allocation;
         let mut allocated_memory = HashMap::new();
         let mut struct_fields = fns.into_iter().enumerate().map(|(i, (memory, name))| {
-            let target = self.translate_memory(target.clone());
+            let target = self.emit_memory(target.clone());
             allocated_memory.insert(memory.clone(), (target.clone(), i));
             format!("ClosureFnT<remove_lazy_t<typename {name}::EnvT>, typename {name}::Fn> _{i};")
         });
         let struct_definition = format!("struct {name} {{ {} }};", struct_fields.join("\n"));
         let instantiation = format!(
             "std::shared_ptr<{name}> {} = std::make_shared<{name}>();",
-            self.translate_memory(target)
+            self.emit_memory(target)
         );
         (
             format!("{struct_definition} {instantiation}"),
             allocated_memory,
         )
     }
-    fn translate_assignment(&self, assignment: Assignment, declared: &HashSet<Memory>) -> Code {
+    fn emit_assignment(&self, assignment: Assignment, declared: &HashSet<Memory>) -> Code {
         let Memory(id) = assignment.target.clone();
         let value_code = match assignment.value {
             Expression::ClosureInstantiation(ClosureInstantiation { name, env }) => {
                 return env.map_or_else(|| format!("{id} = make_lazy<remove_lazy_t<decltype({id})>>({name}::G);"), |env| {
-                    let value = self.translate_value(env);
+                    let value = self.emit_value(env);
                     format!(
                         "std::dynamic_pointer_cast<ClosureFnT<remove_lazy_t<typename {name}::EnvT>,remove_shared_ptr_t<remove_lazy_t<decltype({id})>>>>({id}->lvalue())->env = store_env<typename {name}::EnvT>({value});",
                     )
                 })
             }
-            value => self.translate_expression(value),
+            value => self.emit_expression(value),
         };
         if declared.contains(&assignment.target) {
             format!("{id} = ensure_lazy({value_code});")
@@ -264,22 +254,22 @@ impl Translator {
             format!("auto {id} = {value_code};")
         }
     }
-    fn translate_if_statement(&self, if_statement: IfStatement, declared: HashSet<Memory>) -> Code {
-        let condition_code = self.translate_value(if_statement.condition);
-        let if_branch = self.translate_statements(if_statement.branches.0, declared.clone());
-        let else_branch = self.translate_statements(if_statement.branches.1, declared.clone());
+    fn emit_if_statement(&self, if_statement: IfStatement, declared: HashSet<Memory>) -> Code {
+        let condition_code = self.emit_value(if_statement.condition);
+        let if_branch = self.emit_statements(if_statement.branches.0, declared.clone());
+        let else_branch = self.emit_statements(if_statement.branches.1, declared.clone());
         format!("if (extract_lazy({condition_code})) {{ {if_branch} }} else {{ {else_branch} }}",)
     }
-    fn translate_match_statement(
+    fn emit_match_statement(
         &self,
         match_statement: MatchStatement,
         declared: HashSet<Memory>,
     ) -> Code {
         let UnionType(types) = match_statement.expression.1;
-        let subject = self.translate_memory(match_statement.auxiliary_memory);
+        let subject = self.emit_memory(match_statement.auxiliary_memory);
         let extraction = format!(
             "auto {subject} = extract_lazy({});",
-            self.translate_value(match_statement.expression.0)
+            self.emit_value(match_statement.expression.0)
         );
         let branches_code = match_statement
             .branches
@@ -291,7 +281,7 @@ impl Translator {
                         let type_name = &types[i];
                         format!(
                             "{} {id} = reinterpret_cast<{type_name}*>(&{subject}.value)->value;",
-                            self.translate_lazy_type(&MachineType::NamedType(format!(
+                            self.emit_lazy_type(&MachineType::NamedType(format!(
                                 "{type_name}::type"
                             )))
                         )
@@ -299,33 +289,27 @@ impl Translator {
                     None => Code::new(),
                 };
                 let statements_code =
-                    self.translate_statements(branch.statements.clone(), declared.clone());
+                    self.emit_statements(branch.statements.clone(), declared.clone());
                 format!("case {i}ULL : {{ {assignment_code} {statements_code} break; }}",)
             })
             .join("\n");
         format!("{extraction} switch ({subject}.tag) {{ {branches_code} }}")
     }
-    fn translate_statement(&self, statement: Statement, declared: &mut HashSet<Memory>) -> Code {
+    fn emit_statement(&self, statement: Statement, declared: &mut HashSet<Memory>) -> Code {
         match statement {
-            Statement::Await(await_) => self.translate_await(await_),
-            Statement::Assignment(assignment) => self.translate_assignment(assignment, &declared),
+            Statement::Await(await_) => self.emit_await(await_),
+            Statement::Assignment(assignment) => self.emit_assignment(assignment, &declared),
             Statement::IfStatement(if_statement) => {
-                self.translate_if_statement(if_statement, declared.clone())
+                self.emit_if_statement(if_statement, declared.clone())
             }
-            Statement::Declaration(declaration) => {
-                self.translate_declaration(declaration, declared)
-            }
-            Statement::Allocation(allocation) => self.translate_allocation(allocation).0,
+            Statement::Declaration(declaration) => self.emit_declaration(declaration, declared),
+            Statement::Allocation(allocation) => self.emit_allocation(allocation).0,
             Statement::MatchStatement(match_statement) => {
-                self.translate_match_statement(match_statement, declared.clone())
+                self.emit_match_statement(match_statement, declared.clone())
             }
         }
     }
-    fn translate_statements(
-        &self,
-        statements: Vec<Statement>,
-        mut declared: HashSet<Memory>,
-    ) -> Code {
+    fn emit_statements(&self, statements: Vec<Statement>, mut declared: HashSet<Memory>) -> Code {
         let (forwarded, other_statements): (Vec<_>, Vec<_>) =
             statements
                 .into_iter()
@@ -341,13 +325,13 @@ impl Translator {
         // Add declarations before any other statements.
         let declarations_code = declarations
             .into_iter()
-            .map(|declaration| self.translate_declaration(declaration, &mut declared))
+            .map(|declaration| self.emit_declaration(declaration, &mut declared))
             .join("\n");
 
         // Add allocations after declarations but before any other statements.
         let (allocation_codes, allocations): (Vec<_>, Vec<_>) = allocations
             .into_iter()
-            .map(|allocation| self.translate_allocation(allocation))
+            .map(|allocation| self.emit_allocation(allocation))
             .unzip();
         let allocations_code = allocation_codes.join("\n");
         let allocations: HashMap<Memory, (Code, usize)> =
@@ -367,7 +351,7 @@ impl Translator {
                             }),
                     }) = statement
                     {
-                        let id = self.translate_memory(target.clone());
+                        let id = self.emit_memory(target.clone());
                         Some(match allocations.get(target) {
                             Some((allocator, idx)) => format!(
                                 "{id} = setup_closure<{name}>({allocator}, {allocator}->_{idx});"
@@ -382,23 +366,20 @@ impl Translator {
 
         let other_code = other_statements
             .into_iter()
-            .map(|statement| self.translate_statement(statement, &mut declared))
+            .map(|statement| self.emit_statement(statement, &mut declared))
             .join("\n");
 
         format!("{declarations_code}\n{allocations_code}\n{closure_predefinitions}\n{other_code}")
     }
-    fn translate_fn_def(&self, fn_def: FnDef) -> Code {
+    fn emit_fn_def(&self, fn_def: FnDef) -> Code {
         let name = fn_def.name;
         let return_type = fn_def.ret.1;
         let declared = HashSet::new();
-        let statements_code = self.translate_statements(fn_def.statements, declared);
-        let return_code = format!(
-            "return ensure_lazy({});",
-            self.translate_value(fn_def.ret.0)
-        );
+        let statements_code = self.emit_statements(fn_def.statements, declared);
+        let return_code = format!("return ensure_lazy({});", self.emit_value(fn_def.ret.0));
         let external_types = &std::iter::once(return_type.clone())
             .chain(fn_def.arguments.iter().map(|(_, type_)| type_.clone()))
-            .map(|type_| self.translate_type(&type_))
+            .map(|type_| self.emit_type(&type_))
             .join(",");
         let base_name = "TypedClosureI";
         let (env_ptr, replication_args, base, instance) = if fn_def.env.len() == 0 {
@@ -414,7 +395,7 @@ impl Translator {
                 String::from("args, env"),
                 format!(
                     "{base_name}<{},{external_types}>",
-                    self.translate_type(&TupleType(fn_def.env).into()),
+                    self.emit_type(&TupleType(fn_def.env).into()),
                 ),
                 String::new(),
             )
@@ -425,14 +406,14 @@ impl Translator {
 
         let header_code = format!(
             "{} body({}) override",
-            self.translate_lazy_type(&return_type),
+            self.emit_lazy_type(&return_type),
             fn_def
                 .arguments
                 .into_iter()
                 .map(|(memory, type_)| format!(
                     "{} &{}",
-                    self.translate_lazy_type(&type_),
-                    self.translate_memory(memory)
+                    self.emit_lazy_type(&type_),
+                    self.emit_memory(memory)
                 ))
                 .join(",")
         );
@@ -452,21 +433,21 @@ impl Translator {
             "{declaration_code} {{ {constructor_code} {header_code} {{ {statements_code} {return_code} }} {size_code} {recursive_code} {initialization_code} {instance} }};"
         )
     }
-    fn translate_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
+    fn emit_fn_defs(&self, fn_defs: Vec<FnDef>) -> Code {
         fn_defs
             .into_iter()
-            .map(|fn_def| self.translate_fn_def(fn_def))
+            .map(|fn_def| self.emit_fn_def(fn_def))
             .join("\n")
     }
-    fn translate_program(&self, program: Program) -> Code {
-        let type_def_code = self.translate_type_defs(program.type_defs);
-        let fn_def_code = self.translate_fn_defs(program.fn_defs);
+    fn emit_program(&self, program: Program) -> Code {
+        let type_def_code = self.emit_type_defs(program.type_defs);
+        let fn_def_code = self.emit_fn_defs(program.fn_defs);
         // Add header with all libraries.
         format!("#include \"main/include.hpp\"\n\n{type_def_code} {fn_def_code}")
     }
-    pub fn translate(program: Program) -> Code {
-        let translator = Translator {};
-        translator.translate_program(program)
+    pub fn emit(program: Program) -> Code {
+        let emitter = Emitter {};
+        emitter.emit_program(program)
     }
 }
 
@@ -479,7 +460,7 @@ mod tests {
     use regex::Regex;
     use test_case::test_case;
 
-    const TRANSLATOR: Lazy<Translator> = Lazy::new(|| Translator {});
+    const EMITTER: Lazy<Emitter> = Lazy::new(|| Emitter {});
 
     /// Remove spaces between non-words for easier equality checking.
     fn normalize_code(code: Code) -> Code {
@@ -648,8 +629,8 @@ mod tests {
         "VariantT<Cons_Int,Nil_Int>";
         "list int type"
     )]
-    fn test_type_translation(type_: MachineType, expected: &str) {
-        let code = TRANSLATOR.translate_type(&type_);
+    fn test_type_emission(type_: MachineType, expected: &str) {
+        let code = EMITTER.emit_type(&type_);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -703,8 +684,8 @@ mod tests {
         "struct Cons_Int; struct Nil_Int; typedef VariantT<Cons_Int, Nil_Int> ListInt; struct Cons_Int{ using type = TupleT<Int,ListInt>; LazyT<type> value;}; struct Nil_Int{ Empty value; };";
         "list int"
     )]
-    fn test_typedef_translations(type_def: TypeDef, expected: &str) {
-        let code = TRANSLATOR.translate_type_defs(vec![type_def]);
+    fn test_typedef_emissions(type_def: TypeDef, expected: &str) {
+        let code = EMITTER.emit_type_defs(vec![type_def]);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -746,8 +727,8 @@ mod tests {
         "struct Basic; struct Complex; struct None; struct Some; typedef VariantT<Basic,Complex> Expression; typedef VariantT<None,Some> Value; struct None{Empty value;}; struct Some { using type = Expression; LazyT<type> value; }; struct Basic { using type = Int; LazyT<type> value; }; struct Complex { using type = TupleT<Value, Value>; LazyT<type> value; };";
         "mutually recursive types"
     )]
-    fn test_typedefs_translations(type_defs: Vec<TypeDef>, expected: &str) {
-        let code = TRANSLATOR.translate_type_defs(type_defs);
+    fn test_typedefs_emissions(type_defs: Vec<TypeDef>, expected: &str) {
+        let code = EMITTER.emit_type_defs(type_defs);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -755,49 +736,49 @@ mod tests {
     #[test_case(
         Integer{value: 24}.into(),
         "Int{24LL}";
-        "integer translation"
+        "integer emission"
     )]
     #[test_case(
         Integer{value: -24}.into(),
         "Int{-24LL}";
-        "negative integer translation"
+        "negative integer emission"
     )]
     #[test_case(
         Integer{value: 0}.into(),
         "Int{0LL}";
-        "zero translation"
+        "zero emission"
     )]
     #[test_case(
         Integer{value: 10000000000009}.into(),
         "Int{10000000000009LL}";
-        "large integer translation"
+        "large integer emission"
     )]
     #[test_case(
         Boolean{value: true}.into(),
         "Bool{true}";
-        "true translation"
+        "true emission"
     )]
     #[test_case(
         Boolean{value: false}.into(),
         "Bool{false}";
-        "false translation"
+        "false emission"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Plus__BuiltIn"),
         ),
         "make_lazy<decltype(Plus__BuiltIn_G)>(Plus__BuiltIn_G)";
-        "builtin plus translation"
+        "builtin plus emission"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_GE__BuiltIn"),
         ),
         "make_lazy<decltype(Comparison_GE__BuiltIn_G)>(Comparison_GE__BuiltIn_G)";
-        "builtin greater than or equal to translation"
+        "builtin greater than or equal to emission"
     )]
-    fn test_builtin_translation(value: BuiltIn, expected: &str) {
-        let code = TRANSLATOR.translate_builtin(value);
+    fn test_builtin_emission(value: BuiltIn, expected: &str) {
+        let code = EMITTER.emit_builtin(value);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -805,8 +786,8 @@ mod tests {
     #[test_case(Memory(Id::from("x")), "x")]
     #[test_case(Memory(Id::from("bar")), "bar")]
     #[test_case(Memory(Id::from("baz")), "baz")]
-    fn test_memory_translation(memory: Memory, expected: &str) {
-        let code = TRANSLATOR.translate_memory(memory);
+    fn test_memory_emission(memory: Memory, expected: &str) {
+        let code = EMITTER.emit_memory(memory);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -834,7 +815,7 @@ mod tests {
         "builtin boolean type"
     )]
     fn test_value_type(value: Value, expected: &str) {
-        let code = TRANSLATOR.translate_value_type(&value);
+        let code = EMITTER.emit_value_type(&value);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -842,22 +823,22 @@ mod tests {
     #[test_case(
         Memory(Id::from("baz")).into(),
         "baz";
-        "value memory translation"
+        "value memory emission"
     )]
     #[test_case(
         BuiltIn::BuiltInFn(
             Name::from("Comparison_LT__BuiltIn"),
         ).into(),
         "make_lazy<decltype(Comparison_LT__BuiltIn_G)>(Comparison_LT__BuiltIn_G)";
-        "builtin function translation"
+        "builtin function emission"
     )]
     #[test_case(
         BuiltIn::Integer(Integer{value: -1}).into(),
         "Int{-1LL}";
-        "builtin integer translation"
+        "builtin integer emission"
     )]
-    fn test_value_translation(value: Value, expected: &str) {
-        let code = TRANSLATOR.translate_value(value);
+    fn test_value_emission(value: Value, expected: &str) {
+        let code = EMITTER.emit_value(value);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -877,8 +858,8 @@ mod tests {
         "std::get<1ULL>(tuple)";
         "tuple index access"
     )]
-    fn test_expression_translation(expression: Expression, expected: &str) {
-        let code = TRANSLATOR.translate_expression(expression);
+    fn test_expression_emission(expression: Expression, expected: &str) {
+        let code = EMITTER.emit_expression(expression);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -1024,8 +1005,8 @@ mod tests {
         "auto wrapper = Wrapper{std::integral_constant<std::size_t,0>(), Wrapper{ensure_lazy(Int{4LL})}};";
         "wrapper constructor assignment"
     )]
-    fn test_assignment_translation(assignment: Assignment, expected: &str) {
-        let code = TRANSLATOR.translate_assignment(assignment, &HashSet::new());
+    fn test_assignment_emission(assignment: Assignment, expected: &str) {
+        let code = EMITTER.emit_assignment(assignment, &HashSet::new());
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -1417,8 +1398,8 @@ mod tests {
         "LazyT<Nat> r; auto nat_ = extract_lazy(nat); switch (nat_.tag) { case 0ULL: { LazyT<Suc::type> s = reinterpret_cast<Suc*>(&nat_.value)->value; r = ensure_lazy(s); break; } case 1ULL: { r = ensure_lazy(nil); break; }}";
         "match statement recursive type"
     )]
-    fn test_statements_translation(statements: Vec<Statement>, expected: &str) {
-        let code = TRANSLATOR.translate_statements(statements, HashSet::new());
+    fn test_statements_emission(statements: Vec<Statement>, expected: &str) {
+        let code = EMITTER.emit_statements(statements, HashSet::new());
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -1584,8 +1565,8 @@ mod tests {
         "struct Apply : TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>{ using TypedClosureI<TupleT<Int>,Int,FnT<Int,Int>,Int>::TypedClosureI; LazyT<Int> body(LazyT<FnT<Int,Int>> &f, LazyT<Int> &x) override { auto y = fn_call(extract_lazy(f),x); return ensure_lazy(y);} constexpr std::size_t lower_size_bound() const override {return 150;}; constexpr std::size_t upper_size_bound() const override {return 150;}; constexpr bool is_recursive() const override {return true;}; static std::unique_ptr<TypedFnI<Int,FnT<Int,Int>,Int>> init(const ArgsT&args,const EnvT&env) {return std::make_unique<Apply>(args,env);}};";
         "higher order fn"
     )]
-    fn test_fn_def_translation(fn_def: FnDef, expected: &str) {
-        let code = TRANSLATOR.translate_fn_def(fn_def);
+    fn test_fn_def_emission(fn_def: FnDef, expected: &str) {
+        let code = EMITTER.emit_fn_def(fn_def);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
@@ -1667,8 +1648,8 @@ mod tests {
         "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto call = Plus__BuiltIn(x,y); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; auto main = fn_call(extract_lazy(Main)); return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
-    fn test_program_translation(program: Program, expected: &str) {
-        let code = Translator::translate(program);
+    fn test_program_emission(program: Program, expected: &str) {
+        let code = Emitter::emit(program);
         let expected_code = Code::from(expected);
         assert_eq_code(code, expected_code);
     }
