@@ -148,8 +148,8 @@ An overview of sections is:
 - `/type-checker`
 - `/lowering`
 - `/optimization`
-- `/compilation`
 - `/translation`
+- `/emission`
 
 Throughout the process, I use a pattern where enum fields have the same name as the type.
 The `./from_variants` crate defines the directive `FromVariants` so that the types can be converted into the enum with `.into()`.
@@ -175,7 +175,7 @@ The type-checker receives AST nodes in the form of JSON from the parsing stage.
 ### Lowering
 Lowering converts the annotated AST into an intermediate representation.
 - `./lowering/src/intermediate_nodes.rs` contains definitions for the intermediate representation.
-- `./lowering/src/allocations.rs` defines an `AllocationOptimizer` to remove variables that only alias another value.
+- `./lowering/src/copy_propagation.rs` defines an `CopyPropagator` to remove registers that only alias another value.
 - `./lowering/src/lower.rs` defines the `Lowerer` to convert the program from an annotated AST into the intermediate representation.
 - `./lowering/src/expression_equality_checker.rs` defines an `ExpressionEqualityChecker` to determine if two expressions are equivalent when testing.
 The intermediate representation gives each variable a unique id so this ensures that two expressions using different sets of unique ids are the same.
@@ -189,19 +189,19 @@ This is useful when handling type-aliases or recursive types.
 - `./optimization/src/equivalent_expression_elimination.rs` contains an `EquivalentExpressionOptimizer` to remove duplicated expressions.
 - `./optimization/src/inlining.rs` contains an `Inliner` to inline function calls.
 - `./optimization/src/optimizer.rs` runs the optimizations based on the command-line arguments.
-### Compilation
-The compilation stage bridges between the intermediate representation and C++ code.
-The outputs from this stage contain all the information to translate directly into C++ in the form of machine nodes.
-- `./compilation/src/machine_nodes.rs` defines machine nodes that mirror the C++ code.
-- `./compilation/src/named_vector.rs` defines a `define_named_vector` macro to generate vectors with named fields that can be added.
-- `./compilation/src/code_vector.rs` uses this macro to define a `CodeVector` and then calculate code vectors for a program.
-- `./compilation/src/code_size.rs` defines a `CodeSizeEstimator` to generate approximate bounds on the size of a function definition.
-- `./compilation/src/weakener.rs` defines a `Weakener` to introduce weak pointers and allocators to manage recursive cycles in functions.
-- `./compilation/src/compiler.rs` defines the `Compiler` to convert from the intermediate representation into the machine nodes.
 ### Translation
-The translation stage generates C++ code that can be compiled, linked and run.
-- `./translation/src/type_formatter.rs` contains a `TypeFormatter` and a `TypesFormatter` to convert machine node types into C++ types.
-- `./translation/src/translation.rs` contains the `Translator` to convert machine nodes into C++ code.
+The translation stage bridges between the intermediate representation and C++ code.
+The outputs from this stage are machine nodes, which contain all the information to quickly generate C++ code.
+- `./translation/src/machine_nodes.rs` defines machine nodes that mirror the C++ code.
+- `./translation/src/named_vector.rs` defines a `define_named_vector` macro to generate vectors with named fields that can be added.
+- `./translation/src/code_vector.rs` uses this macro to define a `CodeVector` and then calculate code vectors for a program.
+- `./translation/src/code_size.rs` defines a `CodeSizeEstimator` to generate approximate bounds on the size of a function definition.
+- `./translation/src/weakener.rs` defines a `Weakener` to introduce weak pointers and allocators to manage recursive cycles in functions.
+- `./translation/src/translator.rs` defines the `Translator` to convert from the intermediate representation into the machine nodes.
+### Emission
+The emission stage generates C++ code that can be compiled, linked and run.
+- `./emission/src/type_formatter.rs` contains a `TypeFormatter` and a `TypesFormatter` to convert machine node types into C++ types.
+- `./emission/src/emission.rs` contains the `Emitter` to convert machine nodes into C++ code.
 
 ## Backend
 The backend is written as a header-only library with template definitions.
@@ -235,7 +235,7 @@ The heavy use of template-metaprogramming means that files are split into header
 - `./backend/include/system/thread_manager.hpp` contains utilities for managing OS threads at setup and tear-down.
 - `./backend/include/main/include.hpp` contains a list of headers that can be included by the main file.
 - `./backend/src/main.cpp` handles the main program by reading command line arguments, then timing the execution, and displaying the output.
-- `./backend/include/main/main.hpp` is where the frontend writes the C++ for compilation.
+- `./backend/include/main/main.hpp` is where the frontend writes the C++ for translation.
 ### Development
 - `./backend/src/sleep.cpp` is a utility program to sleep for 10 seconds.
 - `./backend/test/` defines tests for the backend.
