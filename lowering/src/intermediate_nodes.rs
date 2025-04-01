@@ -71,17 +71,17 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
-static LOCATION_ID: AtomicUsize = AtomicUsize::new(0);
+static REGISTER_ID: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Ord, Hash, Eq, PartialEq, PartialOrd)]
-pub struct Location(usize);
+pub struct Register(usize);
 
-impl Location {
+impl Register {
     pub fn new() -> Self {
-        Self(LOCATION_ID.fetch_add(1, Ordering::Relaxed))
+        Self(REGISTER_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
-impl fmt::Debug for Location {
+impl fmt::Debug for Register {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -93,16 +93,16 @@ impl IntermediateValue {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.clone().into(),
             IntermediateValue::IntermediateMemory(memory) => IntermediateMemory {
                 type_: memory.type_.clone(),
-                location: substitution
-                    .get(&memory.location)
-                    .unwrap_or(&memory.location)
+                register: substitution
+                    .get(&memory.register)
+                    .unwrap_or(&memory.register)
                     .clone(),
             }
             .into(),
-            IntermediateValue::IntermediateArg(arg) => match substitution.get(&arg.location) {
+            IntermediateValue::IntermediateArg(arg) => match substitution.get(&arg.register) {
                 None => arg.clone().into(),
-                Some(location) => IntermediateMemory {
-                    location: location.clone(),
+                Some(register) => IntermediateMemory {
+                    register: register.clone(),
                     type_: arg.type_.clone(),
                 }
                 .into(),
@@ -121,21 +121,21 @@ impl IntermediateValue {
             IntermediateValue::IntermediateArg(arg) => arg.type_(),
         }
     }
-    pub fn location(&self) -> Option<Location> {
+    pub fn register(&self) -> Option<Register> {
         match self {
             IntermediateValue::IntermediateBuiltIn(_) => None,
-            IntermediateValue::IntermediateMemory(memory) => Some(memory.location.clone()),
-            IntermediateValue::IntermediateArg(arg) => Some(arg.location.clone()),
+            IntermediateValue::IntermediateMemory(memory) => Some(memory.register.clone()),
+            IntermediateValue::IntermediateArg(arg) => Some(arg.register.clone()),
         }
     }
     fn types(values: &Vec<Self>) -> Vec<IntermediateType> {
         values.iter().map(Self::type_).collect()
     }
-    pub fn filter_memory_location(&self) -> Option<Location> {
-        if let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }) =
+    pub fn filter_memory_register(&self) -> Option<Register> {
+        if let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, register }) =
             self
         {
-            Some(location.clone())
+            Some(register.clone())
         } else {
             None
         }
@@ -163,7 +163,7 @@ impl From<BuiltInFn> for IntermediateValue {
 impl From<IntermediateAssignment> for IntermediateValue {
     fn from(value: IntermediateAssignment) -> IntermediateValue {
         IntermediateMemory {
-            location: value.location,
+            register: value.register,
             type_: value.expression.type_(),
         }
         .into()
@@ -203,14 +203,14 @@ pub struct BuiltInFn(pub Id, pub IntermediateFnType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateAssignment {
     pub expression: IntermediateExpression,
-    pub location: Location,
+    pub register: Register,
 }
 
 impl From<IntermediateExpression> for IntermediateAssignment {
     fn from(value: IntermediateExpression) -> Self {
         IntermediateAssignment {
             expression: value,
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
@@ -219,7 +219,7 @@ impl From<IntermediateValue> for IntermediateAssignment {
     fn from(value: IntermediateValue) -> Self {
         IntermediateAssignment {
             expression: value.into(),
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
@@ -252,7 +252,7 @@ impl fmt::Debug for IntermediateExpression {
 }
 
 impl IntermediateExpression {
-    pub fn targets(&self) -> Vec<Location> {
+    pub fn targets(&self) -> Vec<Register> {
         match self {
             IntermediateExpression::IntermediateLambda(IntermediateLambda { block, args: _ }) => {
                 block.targets()
@@ -404,12 +404,12 @@ pub enum IntermediateValue {
 #[derive(Clone, Eq)]
 pub struct IntermediateMemory {
     pub type_: IntermediateType,
-    pub location: Location,
+    pub register: Register,
 }
 
 impl fmt::Debug for IntermediateMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Memory").field(&self.location).finish()
+        f.debug_tuple("Memory").field(&self.register).finish()
     }
 }
 
@@ -421,13 +421,13 @@ impl IntermediateMemory {
 
 impl PartialEq for IntermediateMemory {
     fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
+        self.register == other.register
     }
 }
 
 impl Hash for IntermediateMemory {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.location.hash(state);
+        self.register.hash(state);
     }
 }
 
@@ -435,7 +435,7 @@ impl From<IntermediateType> for IntermediateMemory {
     fn from(value: IntermediateType) -> Self {
         IntermediateMemory {
             type_: value,
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
@@ -443,12 +443,12 @@ impl From<IntermediateType> for IntermediateMemory {
 #[derive(Clone, Eq)]
 pub struct IntermediateArg {
     pub type_: IntermediateType,
-    pub location: Location,
+    pub register: Register,
 }
 
 impl fmt::Debug for IntermediateArg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Arg").field(&self.location).finish()
+        f.debug_tuple("Arg").field(&self.register).finish()
     }
 }
 
@@ -460,7 +460,7 @@ impl IntermediateArg {
 
 impl PartialEq for IntermediateArg {
     fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
+        self.register == other.register
     }
 }
 
@@ -468,14 +468,14 @@ impl From<IntermediateType> for IntermediateArg {
     fn from(value: IntermediateType) -> Self {
         IntermediateArg {
             type_: value,
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
 
 impl Hash for IntermediateArg {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.location.hash(state);
+        self.register.hash(state);
     }
 }
 
@@ -541,7 +541,7 @@ pub struct IntermediateBlock {
 }
 
 impl IntermediateBlock {
-    fn targets(&self) -> Vec<Location> {
+    fn targets(&self) -> Vec<Register> {
         IntermediateStatement::all_targets(&self.statements)
     }
 
@@ -583,8 +583,8 @@ pub struct IntermediateLambda {
     pub block: IntermediateBlock,
 }
 
-/// Typealias for a location substitution.
-type Substitution = HashMap<Location, Location>;
+/// Typealias for a register substitution.
+type Substitution = HashMap<Register, Register>;
 
 impl IntermediateLambda {
     pub fn type_(&self) -> IntermediateFnType {
@@ -602,8 +602,8 @@ impl IntermediateLambda {
     }
 
     pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
-        let mut targets: HashSet<Location> = HashSet::from_iter(self.block.targets());
-        targets.extend(self.args.iter().map(|arg| arg.location.clone()));
+        let mut targets: HashSet<Register> = HashSet::from_iter(self.block.targets());
+        targets.extend(self.args.iter().map(|arg| arg.register.clone()));
         let values = self.block.values();
         values
             .into_iter()
@@ -611,14 +611,14 @@ impl IntermediateLambda {
             .filter_map(|value| match value {
                 IntermediateValue::IntermediateBuiltIn(_) => None,
                 IntermediateValue::IntermediateMemory(memory) => {
-                    if !targets.contains(&memory.location) {
+                    if !targets.contains(&memory.register) {
                         Some(memory.into())
                     } else {
                         None
                     }
                 }
                 IntermediateValue::IntermediateArg(arg) => {
-                    if !targets.contains(&arg.location) {
+                    if !targets.contains(&arg.register) {
                         Some(arg.into())
                     } else {
                         None
@@ -651,7 +651,7 @@ impl IntermediateStatement {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location: _,
+                register: _,
             }) => expression.values(),
         }
     }
@@ -663,20 +663,20 @@ impl IntermediateStatement {
             .collect()
     }
     /// Find all targets assigned to in a statement.
-    fn targets(&self) -> Vec<Location> {
+    fn targets(&self) -> Vec<Register> {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location,
+                register,
             }) => {
                 let mut targets = expression.targets();
-                targets.push(location.clone());
+                targets.push(register.clone());
                 targets
             }
         }
     }
     /// Find all targets assigned to in multiple statements.
-    pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
+    pub fn all_targets(statements: &Vec<Self>) -> Vec<Register> {
         statements
             .iter()
             .flat_map(|statement| statement.targets())
@@ -687,10 +687,10 @@ impl IntermediateStatement {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location,
+                register,
             }) => {
-                if let Some(new_location) = substitution.get(location) {
-                    *location = new_location.clone();
+                if let Some(new_register) = substitution.get(register) {
+                    *register = new_register.clone();
                 }
                 expression.substitute(substitution);
             }

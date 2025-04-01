@@ -6,17 +6,17 @@ use crate::{
     IntermediateArg, IntermediateAssignment, IntermediateBlock, IntermediateCtorCall,
     IntermediateElementAccess, IntermediateExpression, IntermediateFnCall, IntermediateIf,
     IntermediateLambda, IntermediateMatch, IntermediateMatchBranch, IntermediateMemory,
-    IntermediateStatement, IntermediateTupleExpression, IntermediateValue, Location,
+    IntermediateStatement, IntermediateTupleExpression, IntermediateValue, Register,
 };
 
 /// Check whether two expressions are equal, storing verified and unverified references.
 pub struct ExpressionEqualityChecker {
     // The true histories store bidirectional maps of equal assignment targets.
-    left_true_history: HashMap<Location, Location>,
-    right_true_history: HashMap<Location, Location>,
-    // The histories store bidirectional maps of equal locations (potentially excluding assignment targets).
-    left_history: HashMap<Location, Location>,
-    right_history: HashMap<Location, Location>,
+    left_true_history: HashMap<Register, Register>,
+    right_true_history: HashMap<Register, Register>,
+    // The histories store bidirectional maps of equal registers (potentially excluding assignment targets).
+    left_history: HashMap<Register, Register>,
+    right_history: HashMap<Register, Register>,
 }
 
 impl ExpressionEqualityChecker {
@@ -34,25 +34,25 @@ impl ExpressionEqualityChecker {
     }
     fn assert_equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) {
         let IntermediateMemory {
-            location: l1,
+            register: r1,
             type_: _,
         } = m1;
         let IntermediateMemory {
-            location: l2,
+            register: r2,
             type_: _,
         } = m2;
-        self.assert_equal_locations(l1, l2)
+        self.assert_equal_registers(r1, r2)
     }
     fn assert_equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) {
         let IntermediateArg {
-            location: l1,
+            register: r1,
             type_: _,
         } = a1;
         let IntermediateArg {
-            location: l2,
+            register: r2,
             type_: _,
         } = a2;
-        self.assert_equal_locations(l1, l2)
+        self.assert_equal_registers(r1, r2)
     }
     fn assert_equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) {
         assert_eq!(a1.len(), a2.len());
@@ -60,17 +60,17 @@ impl ExpressionEqualityChecker {
             self.assert_equal_arg(a1, a2)
         }
     }
-    fn assert_equal_locations(&mut self, l1: &Location, l2: &Location) {
-        if self.left_history.get(&l1) == Some(&l2) {
-            // Locations have already been deemed equal.
+    fn assert_equal_registers(&mut self, r1: &Register, r2: &Register) {
+        if self.left_history.get(&r1) == Some(&r2) {
+            // Registers have already been deemed equal.
             return;
         }
-        // Check that the locations have not been found unequal.
-        assert!(!matches!(self.left_history.get(&l1), Some(_)));
-        assert!(!matches!(self.right_history.get(&l2), Some(_)));
-        // Assume locations are equal.
-        self.left_history.insert(l1.clone(), l2.clone());
-        self.right_history.insert(l2.clone(), l1.clone());
+        // Check that the registers have not been found unequal.
+        assert!(!matches!(self.left_history.get(&r1), Some(_)));
+        assert!(!matches!(self.right_history.get(&r2), Some(_)));
+        // Assume registers are equal.
+        self.left_history.insert(r1.clone(), r2.clone());
+        self.right_history.insert(r2.clone(), r1.clone());
     }
     fn assert_equal_assignment(
         &mut self,
@@ -79,31 +79,31 @@ impl ExpressionEqualityChecker {
     ) {
         let IntermediateAssignment {
             expression: e1,
-            location: l1,
+            register: r1,
         } = m1;
         let IntermediateAssignment {
             expression: e2,
-            location: l2,
+            register: r2,
         } = m2;
-        if self.left_true_history.get(&l1) == Some(&l2) {
+        if self.left_true_history.get(&r1) == Some(&r2) {
             return;
         }
-        if self.left_history.get(&l1) == Some(&l2) {
-            // If two locations have been assumed as equal, keep this assumption.
-            self.left_true_history.insert(l1.clone(), l2.clone());
-            self.right_true_history.insert(l2.clone(), l1.clone());
+        if self.left_history.get(&r1) == Some(&r2) {
+            // If two registers have been assumed as equal, keep this assumption.
+            self.left_true_history.insert(r1.clone(), r2.clone());
+            self.right_true_history.insert(r2.clone(), r1.clone());
             self.assert_equal_expression(&e1, &e2)
         } else {
             // Ensure there are no existing assumptions about equality.
-            assert!(!matches!(self.left_true_history.get(&l1), Some(_)));
-            assert!(!matches!(self.right_true_history.get(&l2), Some(_)));
-            assert!(!matches!(self.left_history.get(&l1), Some(_)));
-            assert!(!matches!(self.right_history.get(&l2), Some(_)));
-            // Assume that the locations are equal from here onwards.
-            self.left_history.insert(l1.clone(), l2.clone());
-            self.right_history.insert(l2.clone(), l1.clone());
-            self.left_true_history.insert(l1.clone(), l2.clone());
-            self.right_true_history.insert(l2.clone(), l1.clone());
+            assert!(!matches!(self.left_true_history.get(&r1), Some(_)));
+            assert!(!matches!(self.right_true_history.get(&r2), Some(_)));
+            assert!(!matches!(self.left_history.get(&r1), Some(_)));
+            assert!(!matches!(self.right_history.get(&r2), Some(_)));
+            // Assume that the registers are equal from here onwards.
+            self.left_history.insert(r1.clone(), r2.clone());
+            self.right_history.insert(r2.clone(), r1.clone());
+            self.left_true_history.insert(r1.clone(), r2.clone());
+            self.right_true_history.insert(r2.clone(), r1.clone());
             self.assert_equal_expression(&e1, &e2)
         }
     }

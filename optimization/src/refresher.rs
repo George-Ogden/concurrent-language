@@ -4,29 +4,29 @@ use lowering::{
     IntermediateArg, IntermediateAssignment, IntermediateBlock, IntermediateCtorCall,
     IntermediateElementAccess, IntermediateExpression, IntermediateFnCall, IntermediateLambda,
     IntermediateMemory, IntermediateStatement, IntermediateTupleExpression, IntermediateValue,
-    Location,
+    Register,
 };
 
 #[derive(Clone)]
 pub struct Refresher {
-    locations: HashMap<Location, IntermediateValue>,
+    registers: HashMap<Register, IntermediateValue>,
 }
 
 /// Refresh potentially duplicated variable names.
 impl Refresher {
     pub fn new() -> Self {
         Refresher {
-            locations: HashMap::new(),
+            registers: HashMap::new(),
         }
     }
     /// Refresh arguments as memory so that they can be assigned to.
     pub fn refresh_for_inlining(lambda: &mut IntermediateLambda) {
         let mut refresher = Refresher::new();
         for arg in lambda.args.iter_mut() {
-            let IntermediateArg { type_, location } = arg.clone();
+            let IntermediateArg { type_, register } = arg.clone();
             let memory = IntermediateMemory::from(type_);
-            refresher.locations.insert(location, memory.clone().into());
-            arg.location = memory.location;
+            refresher.registers.insert(register, memory.clone().into());
+            arg.register = memory.register;
         }
         refresher.refresh_block(&mut lambda.block);
     }
@@ -38,11 +38,11 @@ impl Refresher {
         let targets = statements.iter().filter_map(|statement| {
             let IntermediateStatement::IntermediateAssignment(assignment) = statement;
             Some((
-                assignment.location.clone(),
+                assignment.register.clone(),
                 IntermediateMemory::from(assignment.expression.type_()).into(),
             ))
         });
-        self.locations.extend(targets.clone());
+        self.registers.extend(targets.clone());
     }
     fn refresh_lambda(mut self, lambda: &mut IntermediateLambda) {
         for arg in &mut lambda.args {
@@ -64,13 +64,13 @@ impl Refresher {
         match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location,
+                register,
             }) => {
                 self.refresh_expression(expression);
                 if let Some(IntermediateValue::IntermediateMemory(memory)) =
-                    self.refresh_location(location)
+                    self.refresh_register(register)
                 {
-                    *location = memory.location.clone();
+                    *register = memory.register.clone();
                 }
             }
         }
@@ -134,28 +134,28 @@ impl Refresher {
     fn refresh_value(&mut self, value: &mut IntermediateValue) {
         match value {
             IntermediateValue::IntermediateBuiltIn(_) => {}
-            IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location })
-            | IntermediateValue::IntermediateArg(IntermediateArg { type_: _, location }) => {
-                if let Some(updated_value) = self.refresh_location(location) {
+            IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, register })
+            | IntermediateValue::IntermediateArg(IntermediateArg { type_: _, register }) => {
+                if let Some(updated_value) = self.refresh_register(register) {
                     *value = updated_value;
                 }
             }
         }
     }
-    fn refresh_location(&mut self, location: &Location) -> Option<IntermediateValue> {
-        self.locations.get(location).cloned()
+    fn refresh_register(&mut self, register: &Register) -> Option<IntermediateValue> {
+        self.registers.get(register).cloned()
     }
     fn refresh_arg(&mut self, arg: &mut IntermediateArg) {
-        let location = Location::new();
-        self.locations.insert(
-            arg.location.clone(),
+        let register = Register::new();
+        self.registers.insert(
+            arg.register.clone(),
             IntermediateArg {
                 type_: arg.type_.clone(),
-                location: location.clone(),
+                register: register.clone(),
             }
             .into(),
         );
-        arg.location = location;
+        arg.register = register;
     }
 }
 
@@ -175,16 +175,16 @@ mod tests {
             let args = vec![
                 IntermediateArg{
                     type_: AtomicTypeEnum::INT.into(),
-                    location: Location::new(),
+                    register: Register::new(),
                 },
                 IntermediateArg{
                     type_: AtomicTypeEnum::INT.into(),
-                    location: Location::new(),
+                    register: Register::new(),
                 },
             ];
             let ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             IntermediateLambda {
                 args: args.clone(),
@@ -201,7 +201,7 @@ mod tests {
                                 )).into(),
                                 args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
                             }.into(),
-                            location: ret.location.clone()
+                            register: ret.register.clone()
                         }.into()
                     ],
                     ret: ret.clone().into()
@@ -240,7 +240,7 @@ mod tests {
                                 block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
-                                            location: bar_call.location.clone(),
+                                            register: bar_call.register.clone(),
                                             expression: IntermediateFnCall{
                                                 fn_: bar.clone().into(),
                                                 args: vec![x.clone().into()]
@@ -250,7 +250,7 @@ mod tests {
                                     ret: bar_call.clone().into()
                                 },
                             }.into(),
-                            location: foo.location.clone()
+                            register: foo.register.clone()
                         }.into(),
                         IntermediateAssignment{
                             expression: IntermediateLambda{
@@ -258,7 +258,7 @@ mod tests {
                                 block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
-                                            location: foo_call.location.clone(),
+                                            register: foo_call.register.clone(),
                                             expression: IntermediateFnCall{
                                                 fn_: foo.clone().into(),
                                                 args: vec![y.clone().into()]
@@ -268,10 +268,10 @@ mod tests {
                                     ret: foo_call.clone().into()
                                 },
                             }.into(),
-                            location: bar.location.clone()
+                            register: bar.register.clone()
                         }.into(),
                         IntermediateAssignment{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             expression: IntermediateFnCall{
                                 fn_: foo.clone().into(),
                                 args: vec![z.clone().into()]

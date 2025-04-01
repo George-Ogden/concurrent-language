@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::intermediate_nodes::*;
 
-pub type MemoryMap = HashMap<Location, IntermediateExpression>;
+pub type MemoryMap = HashMap<Register, IntermediateExpression>;
 
 /// Remove unnecessary assignments and inline built-ins.
 pub struct AllocationOptimizer {
@@ -27,7 +27,7 @@ impl AllocationOptimizer {
             match statement {
                 IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                     expression,
-                    location,
+                    register,
                 }) => {
                     match &expression {
                         IntermediateExpression::IntermediateLambda(IntermediateLambda {
@@ -53,7 +53,7 @@ impl AllocationOptimizer {
                         }
                         _ => {}
                     }
-                    self.memory.insert(location.clone(), expression.clone());
+                    self.memory.insert(register.clone(), expression.clone());
                 }
             }
         }
@@ -142,7 +142,7 @@ impl AllocationOptimizer {
             IntermediateValue::IntermediateArg(arg) => arg.into(),
             IntermediateValue::IntermediateMemory(memory) => {
                 // Inline assignment if possible.
-                if let Some(expression) = self.memory.get(&memory.location) {
+                if let Some(expression) = self.memory.get(&memory.register) {
                     match expression {
                         IntermediateExpression::IntermediateValue(value) => {
                             // Inline value recursively.
@@ -173,7 +173,7 @@ impl AllocationOptimizer {
             IntermediateStatement::IntermediateAssignment(assignment) => {
                 let IntermediateAssignment {
                     expression,
-                    location,
+                    register,
                 } = assignment;
                 // Remove assignments to a value.
                 if matches!(&expression, IntermediateExpression::IntermediateValue(_)) {
@@ -184,7 +184,7 @@ impl AllocationOptimizer {
                 let expression = condensed_expression;
                 Some(IntermediateStatement::IntermediateAssignment(
                     IntermediateAssignment {
-                        location,
+                        register,
                         expression,
                     }
                     .into(),

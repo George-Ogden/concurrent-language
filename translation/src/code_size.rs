@@ -190,7 +190,7 @@ mod tests {
         AtomicTypeEnum, Boolean, BuiltInFn, Id, Integer, IntermediateArg, IntermediateAssignment,
         IntermediateCtorCall, IntermediateElementAccess, IntermediateFnCall, IntermediateFnType,
         IntermediateLambda, IntermediateMatchBranch, IntermediateMemory, IntermediateStatement,
-        IntermediateTupleExpression, IntermediateTupleType, IntermediateUnionType, Location,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateUnionType, Register,
         DEFAULT_CONTEXT,
     };
     use test_case::test_case;
@@ -242,7 +242,7 @@ mod tests {
     #[test_case(
         IntermediateValue::from(IntermediateArg{
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new()
+            register: Register::new()
         }),
         *MAS;
         "argument"
@@ -250,7 +250,7 @@ mod tests {
     #[test_case(
         IntermediateValue::from(IntermediateMemory{
             type_: AtomicTypeEnum::BOOL.into(),
-            location: Location::new()
+            register: Register::new()
         }),
         *MAS;
         "memory"
@@ -267,7 +267,7 @@ mod tests {
     )]
     #[test_case(
         IntermediateTupleExpression(vec![
-            IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+            IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), register: Register::new()}.into(),
             Integer{value: 43}.into()
         ]).into(),
         *TES + *BIS + *MAS;
@@ -277,7 +277,7 @@ mod tests {
         IntermediateElementAccess{
             idx: 1,
             value: IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateTupleType(vec![
                     AtomicTypeEnum::BOOL.into(),
                     AtomicTypeEnum::INT.into(),
@@ -299,7 +299,7 @@ mod tests {
                     Vec::new(),
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into(),
-                location: Location::new()
+                register: Register::new()
             }.into(),
             args: Vec::new(),
         }.into(),
@@ -313,10 +313,10 @@ mod tests {
                     vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into(),
-                location: Location::new()
+                register: Register::new()
             }.into(),
             args: vec![
-                IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+                IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), register: Register::new()}.into(),
                 Integer{value: 43}.into()
             ]
         }.into(),
@@ -333,7 +333,7 @@ mod tests {
                 )
             ))),
             args: vec![
-                IntermediateArg{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+                IntermediateArg{type_: AtomicTypeEnum::BOOL.into(), register: Register::new()}.into(),
             ]
         }.into(),
         CSC.operators[&Id::from("!")] + *MAS;
@@ -349,7 +349,7 @@ mod tests {
                 )
             ))),
             args: vec![
-                IntermediateMemory{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
+                IntermediateMemory{type_: AtomicTypeEnum::INT.into(), register: Register::new()}.into(),
                 Integer{ value: -5}.into(),
             ]
         }.into(),
@@ -367,7 +367,7 @@ mod tests {
             ))),
             args: vec![
                 Integer{ value: 21}.into(),
-                IntermediateArg{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
+                IntermediateArg{type_: AtomicTypeEnum::INT.into(), register: Register::new()}.into(),
             ]
         }.into(),
         CSC.operators[&Id::from("**")] + *BIS + *MAS;
@@ -430,7 +430,7 @@ mod tests {
             (
                 IntermediateAssignment{
                     expression: expression,
-                    location: Location::new()
+                    register: Register::new()
                 }.into(),
                 statement_size
             )
@@ -441,11 +441,11 @@ mod tests {
         {
             let args = vec![
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
             ];
@@ -461,10 +461,10 @@ mod tests {
                     ).into(),
                     args: args.into_iter().map(IntermediateValue::from).collect_vec()
                 }.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let condition = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::BOOL.into()
             };
             let small_statement_size = CodeSizeEstimator::value_size(&small_value.clone().into()).lower();
@@ -473,7 +473,7 @@ mod tests {
             let (lower_bound, upper_bound) = (small_statement_size + condition_size + *IS, large_statements_size + condition_size + *IS);
             (
                 IntermediateAssignment {
-                    location: Location::new(),
+                    register: Register::new(),
                     expression: IntermediateIf{
                         condition: condition.into(),
                         branches: (
@@ -495,11 +495,11 @@ mod tests {
     #[test_case(
         {
             let medium_arg = IntermediateArg{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::INT.into()
             };
             let large_arg = IntermediateArg{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::INT.into()
             };
             let small_expression = IntermediateValue::from(Integer{value: 4});
@@ -518,7 +518,7 @@ mod tests {
                 ]
             }).into();
             let subject = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateUnionType(
                     vec![Some(AtomicTypeEnum::INT.into()), None, Some(AtomicTypeEnum::INT.into())]
                 ).into()
@@ -530,7 +530,7 @@ mod tests {
             let (lower_bound, upper_bound) = (min(small_expression_size, medium_expression_size) + subject_size + *MS, large_expression_size + subject_size + *MS);
             (
                 IntermediateAssignment {
-                    location: Location::new(),
+                    register: Register::new(),
                     expression: IntermediateMatch {
                         subject: subject.into(),
                         branches: vec![
@@ -568,7 +568,7 @@ mod tests {
             {
                 let arg = IntermediateArg{
                     type_: AtomicTypeEnum::INT.into(),
-                    location: Location::new()
+                    register: Register::new()
                 };
                 IntermediateLambda {
                     args: vec![arg.clone()],
@@ -586,20 +586,20 @@ mod tests {
         {
             let arg = IntermediateArg{
                 type_: AtomicTypeEnum::BOOL.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let target = IntermediateMemory{
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let statement = IntermediateAssignment {
-                location: target.location.clone(),
+                register: target.register.clone(),
                 expression: IntermediateIf{
                     condition: arg.clone().into(),
                     branches:(
                         IntermediateValue::from(Integer{ value: 1 }).into(),
                         IntermediateValue::from(IntermediateMemory{
-                            location: Location::new(),
+                            register: Register::new(),
                             type_: AtomicTypeEnum::INT.into()
                         }).into(),
                     )
