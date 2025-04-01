@@ -56,10 +56,28 @@ def plot(df: pd.DataFrame) -> go.Figure:
     )
     titles = df.groupby("iteration").title.first()
     fig.update_xaxes(
-        tickmode="array", tickvals=list(range(len(titles))), ticktext=titles, tickangle=45
+        tickmode="array",
+        tickvals=list(range(len(titles))),
+        ticktext=titles,
+        tickangle=45,
     )
+    fig.update_traces(marker=dict(symbol="cross"))
 
     fig = neaten(fig)
+    fig.update_layout(
+        legend=dict(
+            font=dict(size=32),
+        )
+    )
+    for update in [fig.update_xaxes, fig.update_yaxes]:
+        update(
+            tickfont=dict(size=32),
+            title_font=dict(size=40),
+        )
+
+    for trace in fig.data:
+        trace.marker.size = 20
+        trace.line.width = 8
 
     return fig
 
