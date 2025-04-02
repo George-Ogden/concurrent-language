@@ -1,6 +1,5 @@
 #pragma once
 
-#include "data_structures/block_list.tpp"
 #include "data_structures/lock.tpp"
 #include "fn/fn_gen.tpp"
 #include "fn/operators.hpp"
@@ -19,6 +18,7 @@
 #include <functional>
 #include <memory>
 #include <tuple>
+#include <vector>
 
 class WorkTest : public ::testing::Test {
   protected:
@@ -51,21 +51,21 @@ TEST_F(WorkTest, CorrectValue) {
 struct LazyWorkTest : WorkTest {};
 
 TEST_F(LazyWorkTest, GetLazyConstantWork) {
-    BlockList<WorkT> works;
+    std::vector<WorkT> works;
     auto y = LazyConstant<Int>(10);
     y.get_work(works);
     ASSERT_EQ(works.size(), 0);
 }
 
 TEST_F(LazyWorkTest, GetLazyRequiredWork) {
-    BlockList<WorkT> works;
+    std::vector<WorkT> works;
     result->get_work(works);
     ASSERT_EQ(works.size(), 1);
     ASSERT_EQ(works.front(), work);
 }
 
 TEST_F(LazyWorkTest, GetLazyDoneWork) {
-    BlockList<WorkT> works;
+    std::vector<WorkT> works;
     work->run();
     result->get_work(works);
     ASSERT_EQ(works.size(), 0);
