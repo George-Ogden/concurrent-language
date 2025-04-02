@@ -146,13 +146,13 @@ An overview of sections is:
 - `Grammar.g4`
 - `/parsing`
 - `/type-checker`
-- `/lowering`
 - `/optimization`
+- `/lowering`
 - `/translation`
 - `/emission`
 
 Throughout the process, I use a pattern where enum fields have the same name as the type.
-The `./from_variants` crate defines the directive `FromVariants` so that the types can be converted into the enum with `.into()`.
+The `./from_variants` crate defines the derivable trait `FromVariants` so that the types can be converted into the enum with `.into()`.
 ### Pipeline
 `./pipeline` contains the orchestration code for the full compiler.
 It performs argument parsing, then runs all the stages, displaying any errors that occur during type-checking.
@@ -172,6 +172,12 @@ The type-checker receives AST nodes in the form of JSON from the parsing stage.
 - `./type-checker/src/utils.rs` contains a utility for detecting duplicates in parametric lists.
 - `./type-checker/src/type_check_nodes.rs` contains definitions of annotated AST nodes that will be generated after the type-checking process.
 - `./type-checker/src/type_checker.rs` contains the `TypeChecker` to type check a program and generate a `TypedProgram` or `TypeCheckError`.
+### Optimization
+- `./optimization/src/refresher.rs` define a `Refresher` to update functions that have duplicated variables or need variables from a new set for an optimization.
+- `./optimization/src/dead_code_analysis.rs` contains a `DeadCodeAnalyzer` to remove dead code, including unused variables, arguments and functions.
+- `./optimization/src/equivalent_expression_elimination.rs` contains an `EquivalentExpressionOptimizer` to remove duplicated expressions.
+- `./optimization/src/inlining.rs` contains an `Inliner` to inline function calls.
+- `./optimization/src/optimizer.rs` runs the optimizations based on the command-line arguments.
 ### Lowering
 Lowering converts the annotated AST into an intermediate representation.
 - `./lowering/src/intermediate_nodes.rs` contains definitions for the intermediate representation.
@@ -183,12 +189,6 @@ The intermediate representation gives each variable a unique id so this ensures 
 This is useful when handling type-aliases or recursive types.
 - `./lowering/src/fn_inst.rs` contains utilities for identifying the lambda associated with a function call.
 - `./lowering/src/recursive_fn_finder.rs` defines a `RecursiveFnFinder`, which identifies functions that might contain recursive calls.
-### Optimization
-- `./optimization/src/refresher.rs` define a `Refresher` to update functions that have duplicated variables or need variables from a new set for an optimization.
-- `./optimization/src/dead_code_analysis.rs` contains a `DeadCodeAnalyzer` to remove dead code, including unused variables, arguments and functions.
-- `./optimization/src/equivalent_expression_elimination.rs` contains an `EquivalentExpressionOptimizer` to remove duplicated expressions.
-- `./optimization/src/inlining.rs` contains an `Inliner` to inline function calls.
-- `./optimization/src/optimizer.rs` runs the optimizations based on the command-line arguments.
 ### Translation
 The translation stage bridges between the intermediate representation and C++ code.
 The outputs from this stage are machine nodes, which contain all the information to quickly generate C++ code.
@@ -205,7 +205,7 @@ The emission stage generates C++ code that can be compiled, linked and run.
 
 ## Backend
 The backend is written as a header-only library with template definitions.
-The heavy use of template-metaprogramming means that files are split into header declarations (`.hpp`) and template implementations (`.tpp`). In the list below, I only include the `.hpp` files, but the `.tpp` files are also included.
+The heavy use of template-metaprogramming means that files are split into header declarations (`.hpp`) and template implementations (`.tpp`). In the list below, I only include the `.hpp` files, but the `.tpp` files contain definitions in most cases.
 ### Lazy Values
 - `./backend/include/lazy/lazy.hpp` defines type-specific `Lazy<T>` for calculating values.
 - `./backend/include/lazy/types.hpp` contains utilities for handling and manipulating types with lazy instances.
