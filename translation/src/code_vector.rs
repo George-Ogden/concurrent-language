@@ -9,6 +9,7 @@ use lowering::{
 
 use crate::code_size::{CodeVector, CODE_SIZE_CONSTANTS};
 
+/// Compute code vectors for a program.
 pub struct CodeVectorCalculator {}
 
 impl CodeVectorCalculator {
@@ -80,7 +81,7 @@ impl CodeVectorCalculator {
         if &branch_vectors.0 == &branch_vectors.1 {
             Ok(branch_vectors.0 + condition_vector + CodeVector::if_())
         } else {
-            Err(String::from("If statement branches are not equal"))
+            Err(String::from("If statement branches are not equal."))
         }
     }
     fn match_vector(match_statement: &IntermediateMatch) -> Result<CodeVector, String> {
@@ -93,7 +94,7 @@ impl CodeVectorCalculator {
         if branch_vectors.iter().all_equal() {
             Ok(branch_vectors[0].clone() + subject_vector + CodeVector::match_())
         } else {
-            Err(String::from("Match statement branches are not equal"))
+            Err(String::from("Match statement branches are not equal."))
         }
     }
     fn match_branch_vector(match_branch: &IntermediateMatchBranch) -> Result<CodeVector, String> {
@@ -124,7 +125,7 @@ mod tests {
         IntermediateCtorCall, IntermediateElementAccess, IntermediateFnCall, IntermediateFnType,
         IntermediateLambda, IntermediateMatchBranch, IntermediateMemory, IntermediateStatement,
         IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
-        IntermediateUnionType, Location, DEFAULT_CONTEXT,
+        IntermediateUnionType, Register, DEFAULT_CONTEXT,
     };
     use once_cell::sync::Lazy;
     use test_case::test_case;
@@ -167,7 +168,7 @@ mod tests {
     #[test_case(
         IntermediateValue::from(IntermediateArg{
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new()
+            register: Register::new()
         }),
         MAV.clone();
         "argument"
@@ -175,7 +176,7 @@ mod tests {
     #[test_case(
         IntermediateValue::from(IntermediateMemory{
             type_: AtomicTypeEnum::BOOL.into(),
-            location: Location::new()
+            register: Register::new()
         }),
         MAV.clone();
         "memory"
@@ -192,7 +193,7 @@ mod tests {
     )]
     #[test_case(
         IntermediateTupleExpression(vec![
-            IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+            IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), register: Register::new()}.into(),
             Integer{value: 43}.into()
         ]).into(),
         TEV.clone() + BIV.clone() + MAV.clone();
@@ -202,7 +203,7 @@ mod tests {
         IntermediateElementAccess{
             idx: 1,
             value: IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateTupleType(vec![
                     AtomicTypeEnum::BOOL.into(),
                     AtomicTypeEnum::INT.into(),
@@ -224,7 +225,7 @@ mod tests {
                     Vec::new(),
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into(),
-                location: Location::new()
+                register: Register::new()
             }.into(),
             args: Vec::new(),
         }.into(),
@@ -238,10 +239,10 @@ mod tests {
                     vec![AtomicTypeEnum::INT.into(), AtomicTypeEnum::INT.into()],
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into(),
-                location: Location::new()
+                register: Register::new()
             }.into(),
             args: vec![
-                IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+                IntermediateMemory{type_: AtomicTypeEnum::BOOL.into(), register: Register::new()}.into(),
                 Integer{value: 43}.into()
             ]
         }.into(),
@@ -258,7 +259,7 @@ mod tests {
                 )
             ))),
             args: vec![
-                IntermediateArg{type_: AtomicTypeEnum::BOOL.into(), location: Location::new()}.into(),
+                IntermediateArg{type_: AtomicTypeEnum::BOOL.into(), register: Register::new()}.into(),
             ]
         }.into(),
         CodeVector::operator(Id::from("!")) + MAV.clone();
@@ -274,7 +275,7 @@ mod tests {
                 )
             ))),
             args: vec![
-                IntermediateMemory{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
+                IntermediateMemory{type_: AtomicTypeEnum::INT.into(), register: Register::new()}.into(),
                 Integer{ value: -5}.into(),
             ]
         }.into(),
@@ -292,7 +293,7 @@ mod tests {
             ))),
             args: vec![
                 Integer{ value: 21}.into(),
-                IntermediateArg{type_: AtomicTypeEnum::INT.into(), location: Location::new()}.into(),
+                IntermediateArg{type_: AtomicTypeEnum::INT.into(), register: Register::new()}.into(),
             ]
         }.into(),
         CodeVector::operator(Id::from("**")) + BIV.clone() + MAV.clone();
@@ -355,7 +356,7 @@ mod tests {
             (
                 IntermediateAssignment{
                     expression: expression,
-                    location: Location::new()
+                    register: Register::new()
                 }.into(),
                 Ok(statement_vector)
             )
@@ -366,21 +367,21 @@ mod tests {
         {
             let args = vec![
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
             ];
-            let target = Location::new();
+            let target = Register::new();
             let values = (
                 IntermediateValue::from(args[0].clone()),
                 IntermediateValue::from(args[1].clone())
             );
             let condition = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::BOOL.into()
             };
             let condition_vector = CodeVectorCalculator::value_vector(&condition.clone().into());
@@ -394,7 +395,7 @@ mod tests {
                             values.1.clone().into(),
                         )
                     }.into(),
-                    location: target
+                    register: target
                 }.into(),
                 Ok(condition_vector + value_vector + AV.clone() + IV.clone())
             )
@@ -405,11 +406,11 @@ mod tests {
         {
             let args = vec![
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
             ];
@@ -425,15 +426,15 @@ mod tests {
                     ).into(),
                     args: args.into_iter().map(IntermediateValue::from).collect_vec()
                 }.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let condition = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::BOOL.into()
             };
             (
                 IntermediateAssignment{
-                    location: Location::new(),
+                    register: Register::new(),
                     expression: IntermediateIf{
                         condition: condition.into(),
                         branches: (
@@ -456,19 +457,19 @@ mod tests {
         {
             let args = vec![
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 },
                 IntermediateArg{
-                    location: Location::new(),
+                    register: Register::new(),
                     type_: AtomicTypeEnum::INT.into()
                 }
             ];
-            let target = Location::new();
+            let target = Register::new();
             let value_0 = IntermediateValue::from(args[0].clone());
             let value_1 = IntermediateValue::from(args[1].clone());
             let subject = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateUnionType(
                     vec![Some(AtomicTypeEnum::INT.into()), Some(AtomicTypeEnum::INT.into())]
                 ).into()
@@ -477,7 +478,7 @@ mod tests {
             let subject_vector = CodeVectorCalculator::value_vector(&subject.clone().into());
             (
                 IntermediateAssignment {
-                    location: target,
+                    register: target,
                     expression: IntermediateMatch {
                         subject: subject.into(),
                         branches: vec![
@@ -500,14 +501,14 @@ mod tests {
     #[test_case(
         {
             let medium_arg = IntermediateArg{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::INT.into()
             };
             let large_arg = IntermediateArg{
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::INT.into()
             };
-            let target = Location::new();
+            let target = Register::new();
             let small_value = IntermediateValue::from(Integer{value: -9});
             let medium_value = IntermediateValue::from(medium_arg.clone());
             let large_assignment = IntermediateAssignment{
@@ -524,17 +525,17 @@ mod tests {
                         large_arg.clone().into()
                     ]
                 }.into(),
-                location: target
+                register: target
             };
             let subject = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateUnionType(
                     vec![Some(AtomicTypeEnum::INT.into()), None, Some(AtomicTypeEnum::INT.into())]
                 ).into()
             };
             (
                 IntermediateAssignment {
-                    location: Location::new(),
+                    register: Register::new(),
                     expression: IntermediateMatch {
                         subject: subject.into(),
                         branches: vec![
@@ -581,7 +582,7 @@ mod tests {
             {
                 let arg = IntermediateArg{
                     type_: AtomicTypeEnum::INT.into(),
-                    location: Location::new()
+                    register: Register::new()
                 };
                 IntermediateLambda {
                     args: vec![arg.clone()],
@@ -599,14 +600,14 @@ mod tests {
         {
             let arg = IntermediateArg{
                 type_: AtomicTypeEnum::BOOL.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let target = IntermediateMemory{
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let assignment = IntermediateAssignment{
-                location: target.location.clone(),
+                register: target.register.clone(),
                 expression: IntermediateIf {
                     condition: arg.clone().into(),
                     branches: (
@@ -635,14 +636,14 @@ mod tests {
         {
             let arg = IntermediateArg{
                 type_: AtomicTypeEnum::BOOL.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let target = IntermediateMemory{
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let assignment = IntermediateAssignment{
-                location: target.location.clone(),
+                register: target.register.clone(),
                 expression: IntermediateIf {
                     condition: arg.clone().into(),
                     branches: (

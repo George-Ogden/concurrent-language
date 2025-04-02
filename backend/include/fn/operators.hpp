@@ -10,6 +10,7 @@
 #include <compare>
 #include <memory>
 
+// Macros to turn functions into function generators.
 #define Binary_Int_Int_Int_Op__BuiltIn(fn, size)                               \
     template <typename T, typename U> Int fn(T t, U u) {                       \
         auto [x, y] = WorkManager::await(t, u);                                \
@@ -124,6 +125,7 @@
     FnT<Bool, Int, Int> fn##_G =                                               \
         std::make_shared<TypedClosureG<Empty, Bool, Int, Int>>(fn##_I::init);
 
+// Operator definitions.
 Int Plus__BuiltIn(Int x, Int y) { return x + y; }
 
 Int Minus__BuiltIn(Int x, Int y) { return x - y; }

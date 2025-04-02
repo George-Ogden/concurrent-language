@@ -4,8 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.31", features = ["derive"] }
+from_variants = { version = "0.1.0", path = "../from_variants" }
+gcollections = "1.5.0"
+intervallum = "1.4.1"
 itertools = "0.14.0"
+lowering = { version = "0.1.0", path = "../lowering" }
 once_cell = "1.20.2"
-regex = "1.11.1"
 test-case = "3.3.1"
-compilation = { version = "0.1.0", path = "../compilation" }
+
+[dev-dependencies]
+rstest = "0.24.0"
+tempfile = "3.17.1"

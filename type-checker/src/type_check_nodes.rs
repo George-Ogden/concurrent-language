@@ -133,6 +133,7 @@ macro_rules! strict_partial_eq {
 }
 
 #[derive(Clone, Eq, Hash, FromVariants)]
+// Types are prefixed with "Type" to differentiate them from types in other modules.
 pub enum Type {
     TypeAtomic(TypeAtomic),
     TypeUnion(TypeUnion),

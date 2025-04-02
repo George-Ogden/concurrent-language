@@ -38,6 +38,7 @@ pub struct TypeDef {
 }
 
 impl TypeDef {
+    /// Find the names of all types that are used in all definitions.
     pub fn directly_used_types(&self) -> Vec<Name> {
         self.constructors
             .iter()
@@ -47,6 +48,7 @@ impl TypeDef {
             })
             .collect_vec()
     }
+    /// Find the names types that are used in a specific type.
     fn used_types(&self, type_: &MachineType) -> Vec<Name> {
         match type_ {
             MachineType::AtomicType(_) => Vec::new(),
@@ -187,6 +189,7 @@ pub struct FnDef {
 
 impl PartialEq for FnDef {
     fn eq(&self, other: &Self) -> bool {
+        // Don't require that code sizes are equal (for easier testing).
         self.name == other.name
             && self.arguments == other.arguments
             && self.statements == other.statements

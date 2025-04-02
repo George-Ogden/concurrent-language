@@ -11,19 +11,24 @@
 #include <vector>
 
 class Work;
+// Unspecialized value.
 struct LazyValue {
     virtual void get_work(std::vector<std::shared_ptr<Work>> &work) = 0;
     virtual ~LazyValue();
 };
 
+// Lazy base class specifying a type.
 template <typename T> struct Lazy : LazyValue {
     virtual bool done() = 0;
     virtual T value() = 0;
     virtual T &lvalue() = 0;
+    // Store any necessary work in the vector `work`.
     virtual void get_work(std::vector<std::shared_ptr<Work>> &work) override;
+    // Return a reference to an equivalent value.
     virtual std::shared_ptr<Lazy<T>> as_ref();
 };
 
+// Lazy value with a defined value.
 template <typename T> class LazyConstant : public Lazy<T> {
     T _value;
 
@@ -34,6 +39,8 @@ template <typename T> class LazyConstant : public Lazy<T> {
     T &lvalue() override;
 };
 
+// Lazy placeholder with work and reference to another value that still needs
+// computing.
 template <typename T> class LazyPlaceholder : public Lazy<T> {
     std::atomic<std::shared_ptr<Lazy<T>>> reference = nullptr;
     std::atomic<std::shared_ptr<Work>> work;
@@ -48,6 +55,7 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     std::shared_ptr<Lazy<T>> as_ref() override;
 };
 
+// Shared allocator for boolean types.
 static inline std::shared_ptr<void> null_shared_ptr{nullptr};
 static inline std::array<LazyConstant<Bool>, 2> bools = {
     LazyConstant<Bool>{true}, LazyConstant<Bool>{false}};
@@ -64,6 +72,7 @@ std::shared_ptr<Lazy<Bool>> make_lazy_bool(Args &&...args) {
     }
 }
 
+// Shared allocator for integer types.
 constexpr static inline std::size_t N = 128;
 static inline std::array<LazyConstant<Int>, N * 2> integers =
     // cppcheck-suppress syntaxError

@@ -8,6 +8,7 @@
 #include <memory>
 #include <type_traits>
 
+/// Function generator base class.
 template <typename Ret, typename... Args> struct TypedFnG {
     using RetT = LazyT<std::decay_t<Ret>>;
     using ArgsT = LazyT<TupleT<std::decay_t<Args>...>>;
@@ -18,6 +19,7 @@ template <typename Ret, typename... Args> struct TypedFnG {
     virtual U init(LazyT<std::decay_t<Args>>... args) const = 0;
 };
 
+/// Function generator containing an environment.
 template <typename E, typename Ret, typename... Args>
 struct TypedClosureG : public TypedFnG<Ret, Args...> {
     using typename TypedFnG<Ret, Args...>::ArgsT;
@@ -35,6 +37,7 @@ struct TypedClosureG : public TypedFnG<Ret, Args...> {
     U init(LazyT<std::decay_t<Args>>... args) const override;
 };
 
+/// Specialization of the function generator containing an empty environment.
 template <typename Ret, typename... Args>
 struct TypedClosureG<Empty, Ret, Args...> : public TypedFnG<Ret, Args...> {
     using typename TypedFnG<Ret, Args...>::ArgsT;

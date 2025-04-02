@@ -1,38 +1,39 @@
 use std::collections::{HashMap, HashSet};
 
 use lowering::{
-    AllocationOptimizer, IntermediateAssignment, IntermediateBlock, IntermediateExpression,
+    CopyPropagator, IntermediateAssignment, IntermediateBlock, IntermediateExpression,
     IntermediateLambda, IntermediateMemory, IntermediateProgram, IntermediateStatement,
-    IntermediateValue, Location,
+    IntermediateValue, Register,
 };
 
 use crate::refresher::Refresher;
 
-type HistoricalExpressions = HashMap<IntermediateExpression, Location>;
-type Definitions = HashMap<Location, IntermediateExpression>;
-type NormalizedLocations = HashMap<Location, Location>;
+type HistoricalExpressions = HashMap<IntermediateExpression, Register>;
+type Definitions = HashMap<Register, IntermediateExpression>;
+type NormalizedRegisters = HashMap<Register, Register>;
 
 #[derive(Clone)]
-pub struct EquivalentExpressionEliminator {
+pub struct RedundancyEliminator {
     historical_expressions: HistoricalExpressions,
     definitions: Definitions,
-    normalized_locations: NormalizedLocations,
+    normalized_registers: NormalizedRegisters,
 }
 
-impl EquivalentExpressionEliminator {
+impl RedundancyEliminator {
     pub fn new() -> Self {
         Self {
             historical_expressions: HistoricalExpressions::new(),
-            normalized_locations: NormalizedLocations::new(),
+            normalized_registers: NormalizedRegisters::new(),
             definitions: Definitions::new(),
         }
     }
 
+    /// Normalize equivalent registers in an expression.
     fn normalize_expression(
         &self,
         mut expression: IntermediateExpression,
     ) -> IntermediateExpression {
-        expression.substitute(&self.normalized_locations);
+        expression.substitute(&self.normalized_registers);
         expression
     }
 
@@ -52,12 +53,13 @@ impl EquivalentExpressionEliminator {
         Refresher::refresh(&mut lambda);
         lambda
     }
+    /// Store normalized expressions and their registers.
     fn prepare_history(&mut self, block: &mut IntermediateBlock) {
         for statement in &mut block.statements {
             match statement {
                 IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                     expression,
-                    location,
+                    register,
                 }) => {
                     *expression = self.normalize_expression(expression.clone());
                     match expression {
@@ -76,29 +78,33 @@ impl EquivalentExpressionEliminator {
                         }
                         _ => {}
                     }
-                    let new_location = match self.historical_expressions.get(&expression) {
+                    // Check whether the expression has already been defined.
+                    let new_register = match self.historical_expressions.get(&expression) {
                         None => {
                             self.historical_expressions
-                                .insert(expression.clone(), location.clone());
-                            location.clone()
+                                .insert(expression.clone(), register.clone());
+                            register.clone()
                         }
-                        Some(new_location) => new_location.clone(),
+                        Some(new_register) => new_register.clone(),
                     };
+                    // Store the assignment in the definitions.
                     self.definitions
-                        .insert(location.clone(), expression.clone());
-                    self.normalized_locations
-                        .insert(location.clone(), new_location);
+                        .insert(register.clone(), expression.clone());
+                    // Add a normalized register if there is an equivalent assignment (otherwise this is the same as `register`).
+                    self.normalized_registers
+                        .insert(register.clone(), new_register);
                 }
             }
         }
-        block.ret = block.ret.substitute(&self.normalized_locations);
+        block.ret = block.ret.substitute(&self.normalized_registers);
     }
+    /// Update the history with new definitions.
     fn refresh_history(&mut self, block: &IntermediateBlock) {
         for statement in &block.statements {
             match statement {
                 IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                     expression,
-                    location,
+                    register,
                 }) => {
                     match &expression {
                         IntermediateExpression::IntermediateLambda(ref lambda) => {
@@ -117,38 +123,39 @@ impl EquivalentExpressionEliminator {
                         _ => {}
                     }
                     self.definitions
-                        .insert(location.clone(), expression.clone());
+                        .insert(register.clone(), expression.clone());
                 }
             }
         }
     }
+    /// Reorder statements based on weak requirements.
     fn weakly_reorder(
         &self,
         block: IntermediateBlock,
-        defined: &mut HashSet<Location>,
+        defined: &mut HashSet<Register>,
     ) -> IntermediateBlock {
         let mut new_statements = Vec::new();
-        let weakly_required_locations = self.weak_block_locations(&block);
+        let weakly_required_registers = self.weak_block_registers(&block);
 
         let IntermediateBlock { statements, ret } = block;
 
         for statement in statements {
             match statement {
                 IntermediateStatement::IntermediateAssignment(assignment) => {
-                    self.weakly_process_location(
-                        assignment.location,
+                    self.weakly_process_register(
+                        assignment.register,
                         defined,
-                        &weakly_required_locations,
+                        &weakly_required_registers,
                         &mut new_statements,
                     );
                 }
             }
         }
-        if let Some(location) = ret.filter_memory_location() {
-            self.weakly_process_location(
-                location,
+        if let Some(register) = ret.filter_memory_register() {
+            self.weakly_process_register(
+                register,
                 defined,
-                &weakly_required_locations,
+                &weakly_required_registers,
                 &mut new_statements,
             );
         }
@@ -157,27 +164,29 @@ impl EquivalentExpressionEliminator {
             ret,
         }
     }
-    fn weakly_process_location(
+    fn weakly_process_register(
         &self,
-        location: Location,
-        defined: &mut HashSet<Location>,
-        weakly_required_locations: &HashSet<Location>,
+        register: Register,
+        defined: &mut HashSet<Register>,
+        weakly_required_registers: &HashSet<Register>,
         new_statements: &mut Vec<IntermediateStatement>,
     ) {
-        if defined.contains(&location) || !weakly_required_locations.contains(&location) {
+        // Ensure the register has not already been defined and is weakly required.
+        if defined.contains(&register) || !weakly_required_registers.contains(&register) {
             return;
         }
-        defined.insert(location.clone());
+        defined.insert(register.clone());
 
-        let Some(mut expression) = self.definitions.get(&location).cloned() else {
+        let Some(mut expression) = self.definitions.get(&register).cloned() else {
             return;
         };
 
-        for location in self.very_weak_expression_locations(&expression) {
-            self.weakly_process_location(
-                location,
+        // Consider any register that might be used and whether it should be used.
+        for register in self.very_weak_expression_registers(&expression) {
+            self.weakly_process_register(
+                register,
                 defined,
-                weakly_required_locations,
+                weakly_required_registers,
                 new_statements,
             );
         }
@@ -199,14 +208,15 @@ impl EquivalentExpressionEliminator {
 
         new_statements.push(
             IntermediateAssignment {
-                location,
+                register,
                 expression,
             }
             .into(),
         );
     }
-    fn weak_block_locations(&self, block: &IntermediateBlock) -> HashSet<Location> {
-        let mut locations =
+    fn weak_block_registers(&self, block: &IntermediateBlock) -> HashSet<Register> {
+        // Weak block registers are those that are already assigned to or are needed by all future paths in the program.
+        let mut registers =
             HashSet::from_iter(
                 block
                     .statements
@@ -214,59 +224,65 @@ impl EquivalentExpressionEliminator {
                     .flat_map(|statement| match statement {
                         IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                             expression,
-                            location,
+                            register,
                         }) => {
-                            let (location, expression) =
+                            // Lookup normalized register.
+                            let (register, expression) =
                                 if let IntermediateExpression::IntermediateValue(
                                     IntermediateValue::IntermediateMemory(IntermediateMemory {
                                         type_: _,
-                                        location: normalized_location,
+                                        register: normalized_register,
                                     }),
                                 ) = expression
                                 {
-                                    let expression = self.definitions[&normalized_location].clone();
-                                    (normalized_location.clone(), expression)
+                                    let expression = self.definitions[&normalized_register].clone();
+                                    (normalized_register.clone(), expression)
                                 } else {
-                                    (location.clone(), expression.clone())
+                                    (register.clone(), expression.clone())
                                 };
-                            let mut locations = vec![location.clone()];
-                            locations
-                                .extend(self.weak_expression_locations(&expression).into_iter());
-                            locations
+                            // Determine all weakly used registers.
+                            let mut registers = vec![register.clone()];
+                            registers
+                                .extend(self.weak_expression_registers(&expression).into_iter());
+                            registers
                         }
                     }),
             );
-        locations.extend(block.ret.filter_memory_location().into_iter());
-        locations
+        registers.extend(block.ret.filter_memory_register().into_iter());
+        registers
     }
-    pub fn weak_expression_locations(
+    pub fn weak_expression_registers(
         &self,
         expression: &IntermediateExpression,
-    ) -> HashSet<Location> {
+    ) -> HashSet<Register> {
         let merge = |a, b| {
             HashSet::intersection(&a, &b)
                 .cloned()
                 .collect::<HashSet<_>>()
         };
         match &expression {
+            // Only open variables are weakly required in lambdas.
             IntermediateExpression::IntermediateLambda(lambda) => lambda
                 .find_open_vars()
                 .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
+                .filter_map(IntermediateValue::filter_memory_register)
                 .collect(),
+            // Weakly required variables must be weakly required in both branches.
             IntermediateExpression::IntermediateIf(if_) => {
                 let mut required = merge(
-                    self.weak_block_locations(&if_.branches.0),
-                    self.weak_block_locations(&if_.branches.1),
+                    self.weak_block_registers(&if_.branches.0),
+                    self.weak_block_registers(&if_.branches.1),
                 );
-                required.extend(if_.condition.filter_memory_location().into_iter());
+                required.extend(if_.condition.filter_memory_register().into_iter());
                 required
             }
+            // Weakly required variables must be weakly required in all branches.
             IntermediateExpression::IntermediateMatch(match_) => {
                 let mut required = None;
+                // Do not move expressions out of a single match branch.
                 if match_.branches.len() > 1 {
                     for branch in &match_.branches {
-                        let extra = self.weak_block_locations(&branch.block);
+                        let extra = self.weak_block_registers(&branch.block);
                         required = match required {
                             Some(current) => Some(merge(extra, current)),
                             None => Some(extra),
@@ -274,48 +290,49 @@ impl EquivalentExpressionEliminator {
                     }
                 }
                 let mut required = required.unwrap_or_default();
-                required.extend(match_.subject.filter_memory_location().into_iter());
+                required.extend(match_.subject.filter_memory_register().into_iter());
                 required
             }
             expression => expression
                 .values()
                 .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
+                .filter_map(IntermediateValue::filter_memory_register)
                 .collect(),
         }
     }
-    pub fn very_weak_expression_locations(
+    /// Determine all registers that may be used in an expression.
+    pub fn very_weak_expression_registers(
         &self,
         expression: &IntermediateExpression,
-    ) -> HashSet<Location> {
+    ) -> HashSet<Register> {
         match &expression {
             IntermediateExpression::IntermediateLambda(lambda) => {
-                self.very_weak_block_locations(&lambda.block)
+                self.very_weak_block_registers(&lambda.block)
             }
             IntermediateExpression::IntermediateIf(if_) => {
-                let mut required = self.very_weak_block_locations(&if_.branches.0);
-                required.extend(self.very_weak_block_locations(&if_.branches.1));
-                required.extend(if_.condition.filter_memory_location().into_iter());
+                let mut required = self.very_weak_block_registers(&if_.branches.0);
+                required.extend(self.very_weak_block_registers(&if_.branches.1));
+                required.extend(if_.condition.filter_memory_register().into_iter());
                 required
             }
             IntermediateExpression::IntermediateMatch(match_) => {
                 let mut required = match_
                     .branches
                     .iter()
-                    .flat_map(|branch| self.very_weak_block_locations(&branch.block))
+                    .flat_map(|branch| self.very_weak_block_registers(&branch.block))
                     .collect::<HashSet<_>>();
-                required.extend(match_.subject.filter_memory_location().into_iter());
+                required.extend(match_.subject.filter_memory_register().into_iter());
                 required
             }
             expression => expression
                 .values()
                 .iter()
-                .filter_map(IntermediateValue::filter_memory_location)
+                .filter_map(IntermediateValue::filter_memory_register)
                 .collect(),
         }
     }
-    fn very_weak_block_locations(&self, block: &IntermediateBlock) -> HashSet<Location> {
-        let mut locations =
+    fn very_weak_block_registers(&self, block: &IntermediateBlock) -> HashSet<Register> {
+        let mut registers =
             HashSet::from_iter(
                 block
                     .statements
@@ -323,61 +340,63 @@ impl EquivalentExpressionEliminator {
                     .flat_map(|statement| match statement {
                         IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                             expression,
-                            location,
+                            register,
                         }) => {
-                            let (location, expression) =
+                            let (register, expression) =
                                 if let IntermediateExpression::IntermediateValue(
                                     IntermediateValue::IntermediateMemory(IntermediateMemory {
                                         type_: _,
-                                        location: normalized_location,
+                                        register: normalized_register,
                                     }),
                                 ) = expression
                                 {
-                                    let expression = self.definitions[&normalized_location].clone();
-                                    (normalized_location.clone(), expression)
+                                    let expression = self.definitions[&normalized_register].clone();
+                                    (normalized_register.clone(), expression)
                                 } else {
-                                    (location.clone(), expression.clone())
+                                    (register.clone(), expression.clone())
                                 };
-                            let mut locations = vec![location.clone()];
-                            locations.extend(
-                                self.very_weak_expression_locations(&expression).into_iter(),
+                            let mut registers = vec![register.clone()];
+                            registers.extend(
+                                self.very_weak_expression_registers(&expression).into_iter(),
                             );
-                            locations
+                            registers
                         }
                     }),
             );
-        locations.extend(block.ret.filter_memory_location().into_iter());
-        locations
+        registers.extend(block.ret.filter_memory_register().into_iter());
+        registers
     }
 
+    /// Reorder statements based on strong requirements.
     fn strongly_reorder(
         &self,
         block: IntermediateBlock,
-        defined: &mut HashSet<Location>,
+        defined: &mut HashSet<Register>,
     ) -> IntermediateBlock {
         let mut new_statements = Vec::new();
         let ret = if let IntermediateValue::IntermediateMemory(memory) = &block.ret {
-            let strongly_required_locations = self.strong_block_locations(&block);
+            let strongly_required_registers = self.strong_block_registers(&block);
             let IntermediateBlock { statements, ret: _ } = block;
 
             for statement in statements {
                 match statement {
                     IntermediateStatement::IntermediateAssignment(assignment) => {
-                        if strongly_required_locations.contains(&assignment.location) {
-                            self.strongly_process_location(
-                                assignment.location,
+                        // Ensure register is strongly defined before processing.
+                        if strongly_required_registers.contains(&assignment.register) {
+                            self.strongly_process_register(
+                                assignment.register,
                                 defined,
-                                &strongly_required_locations,
+                                &strongly_required_registers,
                                 &mut new_statements,
                             );
                         }
                     }
                 }
             }
-            self.strongly_process_location(
-                memory.location.clone(),
+            self.strongly_process_register(
+                memory.register.clone(),
                 defined,
-                &strongly_required_locations,
+                &strongly_required_registers,
                 &mut new_statements,
             );
             memory.clone().into()
@@ -389,27 +408,28 @@ impl EquivalentExpressionEliminator {
             ret,
         }
     }
-    fn strongly_process_location(
+    fn strongly_process_register(
         &self,
-        location: Location,
-        defined: &mut HashSet<Location>,
-        strongly_required_locations: &HashSet<Location>,
+        register: Register,
+        defined: &mut HashSet<Register>,
+        strongly_required_registers: &HashSet<Register>,
         new_statements: &mut Vec<IntermediateStatement>,
     ) {
-        if defined.contains(&location) {
+        if defined.contains(&register) {
             return;
         }
-        defined.insert(location.clone());
+        defined.insert(register.clone());
 
-        let Some(mut expression) = self.definitions.get(&location).cloned() else {
+        // If register is not included in definitions, ignore it (mostly used for testing with open variables).
+        let Some(mut expression) = self.definitions.get(&register).cloned() else {
             return;
         };
 
-        for location in self.strong_expression_locations(&expression) {
-            self.strongly_process_location(
-                location,
+        for register in self.strong_expression_registers(&expression) {
+            self.strongly_process_register(
+                register,
                 defined,
-                strongly_required_locations,
+                strongly_required_registers,
                 new_statements,
             );
         }
@@ -434,34 +454,36 @@ impl EquivalentExpressionEliminator {
 
         new_statements.push(
             IntermediateAssignment {
-                location,
+                register,
                 expression,
             }
             .into(),
         );
     }
-    fn strong_block_locations(&self, block: &IntermediateBlock) -> HashSet<Location> {
-        let mut strongly_required_locations =
-            HashSet::from_iter(block.ret.filter_memory_location().into_iter());
+    fn strong_block_registers(&self, block: &IntermediateBlock) -> HashSet<Register> {
+        // Strong block registers are those that are needed by all future paths in the program.
+        let mut strongly_required_registers =
+            HashSet::from_iter(block.ret.filter_memory_register().into_iter());
         for statement in block.statements.iter().rev() {
             match statement {
                 IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                     expression,
-                    location,
+                    register,
                 }) => {
-                    if strongly_required_locations.contains(location) {
-                        strongly_required_locations
-                            .extend(self.strong_expression_locations(expression).into_iter());
+                    // Reverse registers and use the transitivity to find other strongly required registers.
+                    if strongly_required_registers.contains(register) {
+                        strongly_required_registers
+                            .extend(self.strong_expression_registers(expression).into_iter());
                     }
                 }
             }
         }
-        strongly_required_locations
+        strongly_required_registers
     }
-    pub fn strong_expression_locations(
+    pub fn strong_expression_registers(
         &self,
         expression: &IntermediateExpression,
-    ) -> HashSet<Location> {
+    ) -> HashSet<Register> {
         let merge = |a, b| {
             HashSet::intersection(&a, &b)
                 .cloned()
@@ -470,17 +492,18 @@ impl EquivalentExpressionEliminator {
         match &expression {
             IntermediateExpression::IntermediateIf(if_) => {
                 let mut required = merge(
-                    self.weak_block_locations(&if_.branches.0),
-                    self.weak_block_locations(&if_.branches.1),
+                    self.weak_block_registers(&if_.branches.0),
+                    self.weak_block_registers(&if_.branches.1),
                 );
-                required.extend(if_.condition.filter_memory_location().into_iter());
+                required.extend(if_.condition.filter_memory_register().into_iter());
                 required
             }
             IntermediateExpression::IntermediateMatch(match_) => {
                 let mut required = None;
+                // Do not move expressions out of a single match branch.
                 if match_.branches.len() > 1 {
                     for branch in &match_.branches {
-                        let extra = self.weak_block_locations(&branch.block);
+                        let extra = self.weak_block_registers(&branch.block);
                         required = match required {
                             Some(current) => Some(merge(extra, current)),
                             None => Some(extra),
@@ -488,20 +511,20 @@ impl EquivalentExpressionEliminator {
                     }
                 }
                 let mut required = required.unwrap_or_default();
-                required.extend(match_.subject.filter_memory_location().into_iter());
+                required.extend(match_.subject.filter_memory_register().into_iter());
                 required
             }
-            expression => self.weak_expression_locations(&expression),
+            expression => self.weak_expression_registers(&expression),
         }
     }
 
-    pub fn eliminate_equivalent_expressions(program: IntermediateProgram) -> IntermediateProgram {
+    pub fn eliminate_redundancy(program: IntermediateProgram) -> IntermediateProgram {
         let IntermediateProgram { main, types } = program;
-        let mut optimizer = EquivalentExpressionEliminator::new();
+        let mut optimizer = RedundancyEliminator::new();
         let lambda = optimizer.eliminate_from_lambda(main);
-        let allocation_optimizer = AllocationOptimizer::from_statements(&lambda.block.statements);
+        let copy_propagator = CopyPropagator::from_statements(&lambda.block.statements);
         let IntermediateExpression::IntermediateLambda(main) =
-            allocation_optimizer.remove_wasted_allocations_from_expression(lambda.into())
+            copy_propagator.propagate_copies_in_expression(lambda.into())
         else {
             panic!("Main function changed form.")
         };
@@ -516,12 +539,12 @@ mod tests {
     use super::*;
 
     use lowering::{
-        AllocationOptimizer, AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id,
-        Integer, IntermediateArg, IntermediateAssignment, IntermediateBuiltIn,
-        IntermediateElementAccess, IntermediateFnCall, IntermediateFnType, IntermediateIf,
-        IntermediateLambda, IntermediateMatch, IntermediateMatchBranch, IntermediateMemory,
-        IntermediateProgram, IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
-        IntermediateUnionType, IntermediateValue, Location,
+        AtomicTypeEnum, Boolean, BuiltInFn, CopyPropagator, ExpressionEqualityChecker, Id, Integer,
+        IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateElementAccess,
+        IntermediateFnCall, IntermediateFnType, IntermediateIf, IntermediateLambda,
+        IntermediateMatch, IntermediateMatchBranch, IntermediateMemory, IntermediateProgram,
+        IntermediateTupleExpression, IntermediateTupleType, IntermediateType,
+        IntermediateUnionType, IntermediateValue, Register,
     };
     use test_case::test_case;
 
@@ -530,21 +553,21 @@ mod tests {
             let expression = IntermediateTupleExpression(Vec::new());
             let assignment = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             (
                 vec![
                     assignment.clone().into(),
                     IntermediateAssignment{
                         expression: expression.clone().into(),
-                        location: Location::new()
+                        register: Register::new()
                     }.into()
                 ],
                 vec![
                     assignment.clone().into(),
                 ],
                 vec![
-                    assignment.location.clone()
+                    assignment.register.clone()
                 ]
             )
         };
@@ -552,23 +575,23 @@ mod tests {
     )]
     #[test_case(
         {
-            let empty_location_0 = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
-            let empty_location_1 = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
+            let empty_register_0 = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
+            let empty_register_1 = IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
             let empty_assignment_0 = IntermediateAssignment{
                 expression: IntermediateTupleExpression(Vec::new()).into(),
-                location: empty_location_0.location.clone()
+                register: empty_register_0.register.clone()
             };
             let empty_assignment_1 = IntermediateAssignment{
                 expression: IntermediateTupleExpression(Vec::new()).into(),
-                location: empty_location_1.location.clone()
+                register: empty_register_1.register.clone()
             };
             let nested_assignment_0 = IntermediateAssignment{
-                expression: IntermediateTupleExpression(vec![empty_location_0.clone().into()]).into(),
-                location: Location::new()
+                expression: IntermediateTupleExpression(vec![empty_register_0.clone().into()]).into(),
+                register: Register::new()
             };
             let nested_assignment_1 = IntermediateAssignment{
-                expression: IntermediateTupleExpression(vec![empty_location_1.clone().into()]).into(),
-                location: Location::new()
+                expression: IntermediateTupleExpression(vec![empty_register_1.clone().into()]).into(),
+                register: Register::new()
             };
             (
                 vec![
@@ -582,8 +605,8 @@ mod tests {
                     nested_assignment_0.clone().into(),
                 ],
                 vec![
-                    nested_assignment_0.location.clone(),
-                    nested_assignment_0.location.clone()
+                    nested_assignment_0.register.clone(),
+                    nested_assignment_0.register.clone()
                 ]
             )
         };
@@ -601,14 +624,14 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        location: target.location.clone(),
+                        register: target.register.clone(),
                         expression: IntermediateIf{
                             condition: cond.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: c.location.clone(),
+                                            register: c.register.clone(),
                                             expression: zero.clone().into()
                                         }.into()
                                     ],
@@ -617,11 +640,11 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: a.location.clone(),
+                                            register: a.register.clone(),
                                             expression: one.clone().into()
                                         }.into(),
                                         IntermediateAssignment{
-                                            location: b.location.clone(),
+                                            register: b.register.clone(),
                                             expression: one.clone().into()
                                         }.into(),
                                     ],
@@ -633,14 +656,14 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: target.location.clone(),
+                        register: target.register.clone(),
                         expression: IntermediateIf{
                             condition: cond.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: c.location.clone(),
+                                            register: c.register.clone(),
                                             expression: zero.clone().into()
                                         }.into()
                                     ],
@@ -649,7 +672,7 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: b.location.clone(),
+                                            register: b.register.clone(),
                                             expression: one.clone().into()
                                         }.into(),
                                     ],
@@ -660,7 +683,7 @@ mod tests {
                     }.into()
                 ],
                 vec![
-                    target.location.clone()
+                    target.register.clone()
                 ]
             )
         };
@@ -678,18 +701,18 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        location: target.location.clone(),
+                        register: target.register.clone(),
                         expression: IntermediateIf{
                             condition: c.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: x.location.clone(),
+                                            register: x.register.clone(),
                                             expression: eight.clone().into()
                                         }.into(),
                                         IntermediateAssignment{
-                                            location: y.location.clone(),
+                                            register: y.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 x.clone().into(),
                                                 Integer{value: 0}.into(),
@@ -701,11 +724,11 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: z.location.clone(),
+                                            register: z.register.clone(),
                                             expression: eight.clone().into()
                                         }.into(),
                                         IntermediateAssignment{
-                                            location: w.location.clone(),
+                                            register: w.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 z.clone().into(),
                                                 Integer{value: 1}.into(),
@@ -720,18 +743,18 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: z.location.clone(),
+                        register: z.register.clone(),
                         expression: eight.clone().into()
                     }.into(),
                     IntermediateAssignment{
-                        location: target.location.clone(),
+                        register: target.register.clone(),
                         expression: IntermediateIf{
                             condition: c.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: y.location.clone(),
+                                            register: y.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 z.clone().into(),
                                                 Integer{value: 0}.into(),
@@ -743,7 +766,7 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: w.location.clone(),
+                                            register: w.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 z.clone().into(),
                                                 Integer{value: 1}.into(),
@@ -757,7 +780,7 @@ mod tests {
                     }.into()
                 ],
                 vec![
-                    target.location.clone()
+                    target.register.clone()
                 ]
             )
         };
@@ -775,7 +798,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
@@ -784,7 +807,7 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: a.location.clone(),
+                                                register: a.register.clone(),
                                                 expression: IntermediateTupleExpression(vec![
                                                     Integer{value: 0}.into(),
                                                 ]).into()
@@ -798,7 +821,7 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: b.location.clone(),
+                                                register: b.register.clone(),
                                                 expression: IntermediateTupleExpression(vec![
                                                     Integer{value: 1}.into(),
                                                 ]).into()
@@ -812,7 +835,7 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: c.location.clone(),
+                                                register: c.register.clone(),
                                                 expression: IntermediateTupleExpression(vec![
                                                     arg.clone().into(),
                                                 ]).into()
@@ -825,7 +848,7 @@ mod tests {
                         }.into()
                     }.into(),
                     IntermediateAssignment{
-                        location: y.location.clone(),
+                        register: y.register.clone(),
                         expression: IntermediateTupleExpression(vec![
                             Integer{value: 0}.into(),
                         ]).into()
@@ -833,13 +856,13 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: y.location.clone(),
+                        register: y.register.clone(),
                         expression: IntermediateTupleExpression(vec![
                             Integer{value: 0}.into(),
                         ]).into()
                     }.into(),
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
@@ -852,7 +875,7 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: b.location.clone(),
+                                                register: b.register.clone(),
                                                 expression: IntermediateTupleExpression(vec![
                                                     Integer{value: 1}.into(),
                                                 ]).into()
@@ -866,7 +889,7 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: c.location.clone(),
+                                                register: c.register.clone(),
                                                 expression: IntermediateTupleExpression(vec![
                                                     arg.clone().into(),
                                                 ]).into()
@@ -880,8 +903,8 @@ mod tests {
                     }.into(),
                 ],
                 vec![
-                    x.location.clone(),
-                    y.location.clone(),
+                    x.register.clone(),
+                    y.register.clone(),
                 ]
             )
         };
@@ -897,7 +920,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
@@ -906,7 +929,7 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: y.location.clone(),
+                                                register: y.register.clone(),
                                                 expression: IntermediateValue::from(
                                                     arg.clone()
                                                 ).into()
@@ -919,7 +942,7 @@ mod tests {
                         }.into(),
                     }.into(),
                     IntermediateAssignment{
-                        location: z.location.clone(),
+                        register: z.register.clone(),
                         expression: IntermediateTupleExpression(vec![
                             x.clone().into(),
                         ]).into()
@@ -927,7 +950,7 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
@@ -939,14 +962,14 @@ mod tests {
                         }.into(),
                     }.into(),
                     IntermediateAssignment{
-                        location: z.location.clone(),
+                        register: z.register.clone(),
                         expression: IntermediateTupleExpression(vec![
                             x.clone().into(),
                         ]).into()
                     }.into()
                 ],
                 vec![
-                    z.location.clone(),
+                    z.register.clone(),
                 ]
             )
         };
@@ -961,13 +984,13 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        location: y.location.clone(),
+                        register: y.register.clone(),
                         expression: IntermediateTupleExpression(vec![
                             Integer{value: 0}.into(),
                         ]).into()
                     }.into(),
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateIf{
                             condition: c.clone().into(),
                             branches: (
@@ -975,7 +998,7 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: z.location.clone(),
+                                            register: z.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 Integer{value: 1}.into(),
                                             ]).into()
@@ -989,14 +1012,14 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateIf{
                             condition: c.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: y.location.clone(),
+                                            register: y.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 Integer{value: 0}.into(),
                                             ]).into()
@@ -1007,7 +1030,7 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment{
-                                            location: z.location.clone(),
+                                            register: z.register.clone(),
                                             expression: IntermediateTupleExpression(vec![
                                                 Integer{value: 1}.into(),
                                             ]).into()
@@ -1020,7 +1043,7 @@ mod tests {
                     }.into(),
                 ],
                 vec![
-                    x.location.clone()
+                    x.register.clone()
                 ]
             )
         };
@@ -1035,20 +1058,20 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment{
-                        location: x.location.clone(),
+                        register: x.register.clone(),
                         expression: IntermediateTupleExpression(vec![
                             Integer{value: 0}.into(),
                         ]).into()
                     }.into(),
                     IntermediateAssignment{
-                        location: z.location.clone(),
+                        register: z.register.clone(),
                         expression: IntermediateElementAccess{
                             value: x.clone().into(),
                             idx: 0
                         }.into()
                     }.into(),
                     IntermediateAssignment{
-                        location: y.location.clone(),
+                        register: y.register.clone(),
                         expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
@@ -1070,7 +1093,7 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: y.location.clone(),
+                        register: y.register.clone(),
                         expression: IntermediateMatch{
                             subject: s.clone().into(),
                             branches: vec![
@@ -1079,13 +1102,13 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment{
-                                                location: x.location.clone(),
+                                                register: x.register.clone(),
                                                 expression: IntermediateTupleExpression(vec![
                                                     Integer{value: 0}.into(),
                                                 ]).into()
                                             }.into(),
                                             IntermediateAssignment{
-                                                location: z.location.clone(),
+                                                register: z.register.clone(),
                                                 expression: IntermediateElementAccess{
                                                     value: x.clone().into(),
                                                     idx: 0
@@ -1108,7 +1131,7 @@ mod tests {
                     }.into(),
                 ],
                 vec![
-                    y.location.clone()
+                    y.register.clone()
                 ]
             )
         };
@@ -1119,13 +1142,13 @@ mod tests {
             let expression = IntermediateTupleExpression(Vec::new());
             let assignment = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             let ret = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
-            let lambda = Location::new();
+            let lambda = Register::new();
             (
                 vec![
                     assignment.clone().into(),
@@ -1139,7 +1162,7 @@ mod tests {
                                 ret: ret.clone().into()
                             },
                         }.into(),
-                        location: lambda.clone()
+                        register: lambda.clone()
                     }.into()
                 ],
                 vec![
@@ -1152,11 +1175,11 @@ mod tests {
                                 ret: assignment.clone().into()
                             },
                         }.into(),
-                        location: lambda.clone()
+                        register: lambda.clone()
                     }.into()
                 ],
                 vec![
-                    assignment.location.clone(),
+                    assignment.register.clone(),
                     lambda.clone()
                 ]
             )
@@ -1168,13 +1191,13 @@ mod tests {
             let expression = IntermediateTupleExpression(Vec::new());
             let assignment = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             let ret = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
-            let lambda = Location::new();
+            let lambda = Register::new();
             (
                 vec![
                     IntermediateAssignment{
@@ -1188,7 +1211,7 @@ mod tests {
                                 ret: ret.clone().into()
                             },
                         }.into(),
-                        location: lambda.clone()
+                        register: lambda.clone()
                     }.into()
                 ],
                 vec![
@@ -1202,7 +1225,7 @@ mod tests {
                                 ret: assignment.clone().into()
                             },
                         }.into(),
-                        location: lambda.clone()
+                        register: lambda.clone()
                     }.into()
                 ],
                 vec![
@@ -1224,7 +1247,7 @@ mod tests {
                 AtomicTypeEnum::INT
             ));
             let call = IntermediateAssignment{
-                location: Location::new(),
+                register: Register::new(),
                 expression: IntermediateFnCall{
                     fn_: lambda.clone().into(),
                     args: vec![arg.clone().into()]
@@ -1242,7 +1265,7 @@ mod tests {
                                 ret: call.clone().into()
                             },
                         }.into(),
-                        location: lambda.location.clone()
+                        register: lambda.register.clone()
                     }.into()
                 ],
                 vec![
@@ -1256,11 +1279,11 @@ mod tests {
                                 ret: call.clone().into()
                             },
                         }.into(),
-                        location: lambda.location.clone()
+                        register: lambda.register.clone()
                     }.into()
                 ],
                 vec![
-                    lambda.location.clone()
+                    lambda.register.clone()
                 ]
             )
         };
@@ -1292,7 +1315,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: bar_call.location.clone(),
+                                        register: bar_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: bar.clone().into(),
                                             args: vec![x.clone().into()]
@@ -1302,7 +1325,7 @@ mod tests {
                                 ret: bar_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
@@ -1310,7 +1333,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: foo_call.location.clone(),
+                                        register: foo_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: foo.clone().into(),
                                             args: vec![y.clone().into()]
@@ -1320,7 +1343,7 @@ mod tests {
                                 ret: foo_call.clone().into()
                             },
                         }.into(),
-                        location: bar.location.clone()
+                        register: bar.register.clone()
                     }.into(),
                 ],
                 vec![
@@ -1330,7 +1353,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: bar_call.location.clone(),
+                                        register: bar_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: bar.clone().into(),
                                             args: vec![x.clone().into()]
@@ -1340,7 +1363,7 @@ mod tests {
                                 ret: bar_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
@@ -1348,7 +1371,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: foo_call.location.clone(),
+                                        register: foo_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: foo.clone().into(),
                                             args: vec![y.clone().into()]
@@ -1358,12 +1381,12 @@ mod tests {
                                 ret: foo_call.clone().into()
                             },
                         }.into(),
-                        location: bar.location.clone()
+                        register: bar.register.clone()
                     }.into(),
                 ],
                 vec![
-                    foo.location.clone(),
-                    bar.location.clone(),
+                    foo.register.clone(),
+                    bar.register.clone(),
                 ]
             )
         };
@@ -1396,7 +1419,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: bar_call.location.clone(),
+                                        register: bar_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: bar.clone().into(),
                                             args: vec![x.clone().into()]
@@ -1406,7 +1429,7 @@ mod tests {
                                 ret: bar_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
@@ -1414,14 +1437,14 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: branch.location.clone(),
+                                        register: branch.register.clone(),
                                         expression: IntermediateIf{
                                             condition: Boolean{value: true}.into(),
                                             branches: (
                                                 (
                                                     vec![
                                                         IntermediateAssignment{
-                                                            location: foo_call.location.clone(),
+                                                            register: foo_call.register.clone(),
                                                             expression: IntermediateFnCall{
                                                                 fn_: foo.clone().into(),
                                                                 args: vec![y.clone().into()]
@@ -1438,7 +1461,7 @@ mod tests {
                                 ret: branch.clone().into()
                             },
                         }.into(),
-                        location: bar.location.clone()
+                        register: bar.register.clone()
                     }.into(),
                 ],
                 vec![
@@ -1448,7 +1471,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: bar_call.location.clone(),
+                                        register: bar_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: bar.clone().into(),
                                             args: vec![x.clone().into()]
@@ -1458,7 +1481,7 @@ mod tests {
                                 ret: bar_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
@@ -1466,14 +1489,14 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: branch.location.clone(),
+                                        register: branch.register.clone(),
                                         expression: IntermediateIf{
                                             condition: Boolean{value: true}.into(),
                                             branches: (
                                                 (
                                                     vec![
                                                         IntermediateAssignment{
-                                                            location: foo_call.location.clone(),
+                                                            register: foo_call.register.clone(),
                                                             expression: IntermediateFnCall{
                                                                 fn_: foo.clone().into(),
                                                                 args: vec![y.clone().into()]
@@ -1490,12 +1513,12 @@ mod tests {
                                 ret: branch.clone().into()
                             },
                         }.into(),
-                        location: bar.location.clone()
+                        register: bar.register.clone()
                     }.into(),
                 ],
                 vec![
-                    foo.location.clone(),
-                    bar.location.clone(),
+                    foo.register.clone(),
+                    bar.register.clone(),
                 ]
             )
         };
@@ -1505,21 +1528,21 @@ mod tests {
         statements: (
             Vec<IntermediateStatement>,
             Vec<IntermediateStatement>,
-            Vec<Location>,
+            Vec<Register>,
         ),
     ) {
         let (mut original_statements, mut expected_statements, required) = statements;
-        let original_location =
+        let original_register =
             IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
-        let expected_location =
+        let expected_register =
             IntermediateMemory::from(IntermediateType::from(IntermediateTupleType(Vec::new())));
         let return_expression = IntermediateTupleExpression(
             required
                 .into_iter()
-                .map(|location| {
+                .map(|register| {
                     IntermediateMemory {
                         type_: IntermediateTupleType(Vec::new()).into(),
-                        location,
+                        register,
                     }
                     .into()
                 })
@@ -1527,14 +1550,14 @@ mod tests {
         );
         original_statements.push(
             IntermediateAssignment {
-                location: original_location.location.clone(),
+                register: original_register.register.clone(),
                 expression: return_expression.clone().into(),
             }
             .into(),
         );
         expected_statements.push(
             IntermediateAssignment {
-                location: expected_location.location.clone(),
+                register: expected_register.register.clone(),
                 expression: return_expression.clone().into(),
             }
             .into(),
@@ -1543,23 +1566,20 @@ mod tests {
             args: Vec::new(),
             block: IntermediateBlock {
                 statements: expected_statements,
-                ret: expected_location.clone().into(),
+                ret: expected_register.clone().into(),
             },
         };
-        let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
-        let optimized_fn =
-            equivalent_expression_eliminator.eliminate_from_lambda(IntermediateLambda {
-                args: Vec::new(),
-                block: IntermediateBlock {
-                    statements: original_statements,
-                    ret: original_location.clone().into(),
-                },
-            });
-        let allocation_optimizer =
-            AllocationOptimizer::from_statements(&optimized_fn.block.statements);
+        let mut redundancy_eliminator = RedundancyEliminator::new();
+        let optimized_fn = redundancy_eliminator.eliminate_from_lambda(IntermediateLambda {
+            args: Vec::new(),
+            block: IntermediateBlock {
+                statements: original_statements,
+                ret: original_register.clone().into(),
+            },
+        });
+        let copy_propagator = CopyPropagator::from_statements(&optimized_fn.block.statements);
         dbg!(&optimized_fn.block.statements);
-        let optimized_fn =
-            allocation_optimizer.remove_wasted_allocations_from_expression(optimized_fn.into());
+        let optimized_fn = copy_propagator.propagate_copies_in_expression(optimized_fn.into());
         dbg!(&expected_fn);
         dbg!(&optimized_fn);
         ExpressionEqualityChecker::assert_equal(&optimized_fn, &expected_fn.into());
@@ -1569,7 +1589,7 @@ mod tests {
     fn test_refresh_lambdas() {
         let arg = IntermediateArg {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let id = IntermediateLambda {
             args: vec![arg.clone()],
@@ -1578,25 +1598,25 @@ mod tests {
                 ret: arg.clone().into(),
             },
         };
-        let id_loc = IntermediateMemory {
+        let id_reg = IntermediateMemory {
             type_: IntermediateFnType(
                 vec![AtomicTypeEnum::INT.into()],
                 Box::new(AtomicTypeEnum::INT.into()),
             )
             .into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let target = IntermediateMemory {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let target_0 = IntermediateMemory {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let target_1 = IntermediateMemory {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let a = IntermediateAssignment {
             expression: IntermediateFnCall {
@@ -1612,15 +1632,15 @@ mod tests {
                 args: vec![Integer { value: 1 }.into()],
             }
             .into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let b = IntermediateAssignment {
             expression: IntermediateFnCall {
-                fn_: id_loc.clone().into(),
+                fn_: id_reg.clone().into(),
                 args: vec![Integer { value: 2 }.into()],
             }
             .into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let c = IntermediateAssignment {
             expression: IntermediateFnCall {
@@ -1636,37 +1656,37 @@ mod tests {
                 args: vec![Integer { value: 3 }.into()],
             }
             .into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let d = IntermediateAssignment {
             expression: IntermediateFnCall {
-                fn_: id_loc.clone().into(),
+                fn_: id_reg.clone().into(),
                 args: vec![Integer { value: 4 }.into()],
             }
             .into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let statements = vec![
             IntermediateAssignment {
-                location: id_loc.location.clone(),
+                register: id_reg.register.clone(),
                 expression: id.clone().into(),
             }
             .into(),
             IntermediateAssignment {
-                location: target.location.clone(),
+                register: target.register.clone(),
                 expression: IntermediateIf {
                     condition: IntermediateArg {
-                        location: Location::new(),
+                        register: Register::new(),
                         type_: AtomicTypeEnum::BOOL.into(),
                     }
                     .into(),
                     branches: (
                         (
                             vec![IntermediateAssignment {
-                                location: target_0.location.clone(),
+                                register: target_0.register.clone(),
                                 expression: IntermediateIf {
                                     condition: IntermediateArg {
-                                        location: Location::new(),
+                                        register: Register::new(),
                                         type_: AtomicTypeEnum::BOOL.into(),
                                     }
                                     .into(),
@@ -1683,10 +1703,10 @@ mod tests {
                             .into(),
                         (
                             vec![IntermediateAssignment {
-                                location: target_1.location.clone(),
+                                register: target_1.register.clone(),
                                 expression: IntermediateIf {
                                     condition: IntermediateArg {
-                                        location: Location::new(),
+                                        register: Register::new(),
                                         type_: AtomicTypeEnum::BOOL.into(),
                                     }
                                     .into(),
@@ -1707,19 +1727,16 @@ mod tests {
             }
             .into(),
         ];
-        let mut equivalent_expression_eliminator = EquivalentExpressionEliminator::new();
-        let optimized_lambda =
-            equivalent_expression_eliminator.eliminate_from_lambda(IntermediateLambda {
-                args: Vec::new(),
-                block: IntermediateBlock {
-                    statements,
-                    ret: target.clone().into(),
-                },
-            });
-        let allocation_optimizer =
-            AllocationOptimizer::from_statements(&optimized_lambda.block.statements);
-        let optimized_block =
-            allocation_optimizer.remove_wasted_allocations_from_block(optimized_lambda.block);
+        let mut redundancy_eliminator = RedundancyEliminator::new();
+        let optimized_lambda = redundancy_eliminator.eliminate_from_lambda(IntermediateLambda {
+            args: Vec::new(),
+            block: IntermediateBlock {
+                statements,
+                ret: target.clone().into(),
+            },
+        });
+        let copy_propagator = CopyPropagator::from_statements(&optimized_lambda.block.statements);
+        let optimized_block = copy_propagator.propagate_copies_in_block(optimized_lambda.block);
         let optimized_statements = optimized_block.statements;
         assert_eq!(optimized_statements.len(), 1);
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
@@ -1728,7 +1745,7 @@ mod tests {
                     condition: _,
                     branches,
                 }),
-            location: _,
+            register: _,
         }) = optimized_statements[0].clone()
         else {
             panic!()
@@ -1741,7 +1758,7 @@ mod tests {
                     condition: _,
                     branches: true_branches,
                 }),
-            location: _,
+            register: _,
         }) = branches.0.statements[0].clone()
         else {
             panic!()
@@ -1752,7 +1769,7 @@ mod tests {
                     condition: _,
                     branches: false_branches,
                 }),
-            location: _,
+            register: _,
         }) = branches.1.statements[0].clone()
         else {
             dbg!(branches.1.statements);
@@ -1760,7 +1777,7 @@ mod tests {
         };
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             expression: IntermediateExpression::IntermediateLambda(lambda_0),
-            location: location_0,
+            register: register_0,
         }) = true_branches.1.statements[0].clone()
         else {
             dbg!(true_branches.1.statements);
@@ -1768,13 +1785,13 @@ mod tests {
         };
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             expression: IntermediateExpression::IntermediateLambda(lambda_1),
-            location: location_1,
+            register: register_1,
         }) = false_branches.1.statements[0].clone()
         else {
             dbg!(false_branches.1.statements);
             panic!()
         };
-        assert_ne!(location_0, location_1);
+        assert_ne!(register_0, register_1);
         assert_ne!(lambda_0.args, lambda_1.args);
     }
 
@@ -1783,11 +1800,11 @@ mod tests {
             let expression = IntermediateTupleExpression(Vec::new());
             let assignment = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             let ret = IntermediateAssignment{
                 expression: expression.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             let types = vec![
                 Rc::new(RefCell::new(IntermediateUnionType(vec![None, None]).into()))
@@ -1826,8 +1843,7 @@ mod tests {
         program_expected: (IntermediateProgram, IntermediateProgram),
     ) {
         let (program, expected_program) = program_expected;
-        let optimized_program =
-            EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+        let optimized_program = RedundancyEliminator::eliminate_redundancy(program);
         dbg!(&optimized_program);
         dbg!(&expected_program);
         assert_eq!(optimized_program.types, expected_program.types);

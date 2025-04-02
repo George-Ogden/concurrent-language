@@ -8,6 +8,7 @@
 int main(int argc, char *argv[]) {
     auto start = time_utils::now();
     using ArgsT = typename Main::ArgsT;
+    // Ignore first argument.
     argc--;
     argv++;
     constexpr auto N = std::tuple_size_v<ArgsT>;
@@ -17,6 +18,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    // Parse args.
     auto args = [&argv]<std::size_t... Is>(std::index_sequence<Is...>) {
         return std::make_tuple(
             convert_arg<remove_lazy_t<std::tuple_element_t<Is, ArgsT>>>(
@@ -25,6 +27,7 @@ int main(int argc, char *argv[]) {
     (std::make_index_sequence<N>{});
 
     std::shared_ptr<typename Main::Fn> main = Main::G;
+    // Run main program.
     auto result = std::apply(
         [&main](auto &...args) { return WorkManager::run(main, args...); },
         args);

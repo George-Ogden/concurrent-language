@@ -18,6 +18,7 @@ type Graph = HashMap<Node, Vec<Node>>;
 type Translation = HashMap<Memory, (Memory, Name)>;
 
 #[derive(Debug, Clone, PartialEq)]
+/// Structure for storing information about cyclic closures.
 struct ClosureCycles {
     fn_translation: Translation,
     cycles: Cycles,
@@ -40,12 +41,15 @@ impl ClosureCycles {
 pub struct Weakener {}
 
 impl Weakener {
+    /// Add weak fn types and allocators to a program with recursive closures.
     pub fn weaken(program: Program) -> Program {
         let Program { type_defs, fn_defs } = program;
+        // Find all cyclic closures in the program.
         let mut closure_cycles = ClosureCycles::new();
         for fn_def in &fn_defs {
             closure_cycles.update(Self::detect_closure_cycles(&fn_def.statements));
         }
+        // Add allocators.
         let (fn_defs, weak_fns): (Vec<_>, Vec<_>) = fn_defs
             .into_iter()
             .map(
@@ -74,6 +78,7 @@ impl Weakener {
                 },
             )
             .collect();
+        // Replace fns with weak fns.
         let weak_fns = weak_fns.into_iter().flatten().collect();
         let fn_defs = fn_defs
             .into_iter()
@@ -81,6 +86,7 @@ impl Weakener {
             .collect();
         Program { type_defs, fn_defs }
     }
+    /// Construct graph of all references that may be cyclic.
     fn construct_graph(statements: &Vec<Statement>) -> (Graph, HashSet<Memory>, Translation) {
         let mut graph = Graph::new();
         let mut fns = HashSet::new();
@@ -110,6 +116,7 @@ impl Weakener {
                                 None => Vec::new(),
                             }
                         }
+                        // All other expressions may contain references but they won't form cycles of fn instances.
                         _ => Vec::new(),
                     };
                     let memory_values = values.iter().filter_map(|&value| match value {
@@ -148,6 +155,7 @@ impl Weakener {
         }
         (graph, fns, translation)
     }
+    /// Transpose the adjacency matrix of the reference graph.
     fn transpose(graph: &Graph) -> Graph {
         let mut transpose = Graph::new();
         for node in graph.keys() {
@@ -167,6 +175,7 @@ impl Weakener {
         (graph, fns, cycles.fn_translation) = Self::construct_graph(statements);
         let mut visited = HashSet::new();
         let mut order = Vec::new();
+        // Topologically sort nodes.
         for node in graph.keys().cloned().collect_vec() {
             if !visited.contains(&node) {
                 Self::topsort(&graph, &node, &mut visited, &mut order);
@@ -179,6 +188,7 @@ impl Weakener {
 
         for node in order {
             if !visited.contains(&node) {
+                // Any nodes that are reachable in the reverse of the topological sort must form cycles.
                 let mut nodes = Vec::new();
                 Self::topsort(&graph, &node, &mut visited, &mut nodes);
                 if nodes.len() > 1
@@ -204,6 +214,7 @@ impl Weakener {
         }
         cycles
     }
+    /// Topologically sort nodes, storing the result into `order`.
     fn topsort(graph: &Graph, node: &Node, visited: &mut HashSet<Node>, order: &mut Vec<Node>) {
         visited.insert(node.clone());
         for neighbor in graph.get(&node).cloned().unwrap_or_default() {
@@ -214,6 +225,7 @@ impl Weakener {
         order.push(node.clone());
     }
 
+    /// Insert allocators for cyclic references into the statements, returning any fns that need weak ptrs.
     fn add_allocations(
         statements: Vec<Statement>,
         closure_cycles: &ClosureCycles,
@@ -263,6 +275,7 @@ impl Weakener {
                                 .iter()
                                 .map(|memory| (memory.clone(), name_translation[&memory].clone()))
                                 .collect_vec();
+                            // Include all names in the allocator to ensure uniqueness.
                             let name = iter::once(Name::from("Allocator"))
                                 .chain(cycle.into_iter().map(|Memory(id)| id))
                                 .join("_");
@@ -328,6 +341,7 @@ impl Weakener {
         (statements, weak_fns)
     }
 
+    /// Update the signature of the function's closure to contain a weak ptr to the fn.
     fn weaken_fn_def(fn_def: FnDef, weak_fns: &HashSet<(Name, usize)>) -> FnDef {
         let FnDef {
             name,

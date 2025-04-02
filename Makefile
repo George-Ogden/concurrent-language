@@ -1,15 +1,16 @@
+# Include Makefile in dependencies.
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
 
 PARSER := parsing
 GRAMMAR := parsing/grammar
 TYPE_CHECKER := type-checker/target/release/libtype_checker.d
 TYPE_CHECKER_MANIFEST := type-checker/Cargo.toml
-TRANSLATOR := translation/target/release/libtranslation.d
-TRANSLATOR_MANIFEST := translation/Cargo.toml
+EMITTER := emission/target/release/libemission.d
+EMITTER_MANIFEST := emission/Cargo.toml
 LOWERER := lowering/target/release/liblowering.d
 LOWERER_MANIFEST := lowering/Cargo.toml
-COMPILER := compilation/target/release/libcompilation.d
-COMPILER_MANIFEST := compilation/Cargo.toml
+TRANSLATOR := translation/target/release/libtranslation.d
+TRANSLATOR_MANIFEST := translation/Cargo.toml
 OPTIMIZER := optimization/target/release/optimization
 OPTIMIZER_MANIFEST := optimization/Cargo.toml
 PIPELINE := pipeline/target/release/pipeline
@@ -24,10 +25,13 @@ FLAGS_HASH := $(shell echo '$(FRONTEND_FLAGS) / $(BACKEND_FLAGS)' | sha256sum - 
 FILE := samples/main.txt
 LAST_FILE_PREFIX := .last-file-hash-
 LAST_FILE_HASH = $(shell sha256sum '$(FILE)' 2>/dev/null | cut -d' ' -f1)
+# Create file containing flags and rebuild if it changes.
 LAST_FILE := $(LAST_FILE_PREFIX)$(LAST_FILE_HASH)$(FLAGS_HASH)
 
 all: $(PIPELINE) $(BACKEND)
 
+# USER_FLAG = 1 compiles with no priorities.
+# USER_FLAG = -1 compiles with the max priority minus one (for benchmarking).
 USER_FLAG := 0
 
 $(LAST_FILE):
@@ -35,6 +39,7 @@ $(LAST_FILE):
 	touch $@
 
 run: build
+	# Check if sudo is needed to make (USER_FLAG != 1).
 	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend EXTRA_FLAGS='$(BACKEND_FLAGS)' run --quiet INPUT='$(INPUT)'
 
 build: $(TARGET)
@@ -51,19 +56,19 @@ $(LOWERER): $(wildcard lowering/src/*) $(TYPE_CHECKER)
 	cargo build --manifest-path $(LOWERER_MANIFEST) --release
 	touch $@
 
-$(COMPILER): $(wildcard compilation/src/*) $(LOWERER)
-	cargo build --manifest-path $(COMPILER_MANIFEST) --release
+$(TRANSLATOR): $(wildcard translation/src/*) $(LOWERER)
+	cargo build --manifest-path $(TRANSLATOR_MANIFEST) --release
 	touch $@
 
-$(TRANSLATOR): $(wildcard translation/src/*) $(COMPILER)
-	cargo build --manifest-path $(TRANSLATOR_MANIFEST) --release
+$(EMITTER): $(wildcard emission/src/*) $(TRANSLATOR)
+	cargo build --manifest-path $(EMITTER_MANIFEST) --release
 	touch $@
 
 $(OPTIMIZER): $(wildcard optimization/src/*) $(LOWERER)
 	cargo build --manifest-path $(OPTIMIZER_MANIFEST) --release
 	touch $@
 
-$(PIPELINE): $(wildcard pipeline/src/*) $(TRANSLATOR) $(OPTIMIZER)
+$(PIPELINE): $(wildcard pipeline/src/*) $(EMITTER) $(OPTIMIZER)
 	cargo build --manifest-path $(PIPELINE_MANIFEST) --release
 	touch $@
 
@@ -80,26 +85,30 @@ $(GRAMMAR): Grammar.g4
 	touch $@
 
 test: build
+	# Build stages are tested in order.
 	pytest parsing -vv
 	cargo test --manifest-path $(TYPE_CHECKER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(LOWERER_MANIFEST) -vv --lib
-	cargo test --manifest-path $(COMPILER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(TRANSLATOR_MANIFEST) -vv --lib
+	cargo test --manifest-path $(EMITTER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(OPTIMIZER_MANIFEST) -vv --lib
 	cargo test --manifest-path $(PIPELINE_MANIFEST) -vv
 	make -C backend bin/test
 	./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
+	# Build all samples.
 	for sample in samples/*; do \
 		if [ "$$sample" != "samples/grammar.txt" ]; then \
 			make build FILE=$$sample || exit 1; \
 		fi \
 	done;
+	# Build all benchmark programs and run 10 times with the smallest input.
 	for sample in benchmark/**; do \
 		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
 		for i in `seq 1 10`; do \
 			cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
 		done; \
 	done;
+	# Run any script tests.
 	pytest scripts -vv
 
 clean:
@@ -124,6 +133,7 @@ benchmark: | $(LOG_DIR)
 	touch $(LOG_DIR)/title.txt
 
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
+	# Run each program repeatedly with all inputs, writing timing information into the log file.
 	for program in benchmark/**; do \
 		for i in `seq 1 $(REPEATS)`; do \
 			make build FILE=$$program/main.txt USER_FLAG=-1; \
@@ -141,6 +151,7 @@ benchmark: | $(LOG_DIR)
 python_benchmark: | $(LOG_DIR)
 	echo "python benchmark" > $(LOG_DIR)/title.txt
 
+	# Run the python programs repeatedly with all inputs, writing timing information into the log file.
 	echo "name\targs\tduration" > $(LOG_DIR)/log.tsv
 	for i in `seq 1 $(REPEATS)`; do \
 		for program in benchmark/**; do \
@@ -158,9 +169,11 @@ python_benchmark: | $(LOG_DIR)
 
 $(VECTOR_FILE): | $(LOG_DIR)
 	make $(TARGET) FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"
+	# Copy the header of the vector file.
 	head -1 $(TEMPFILE) | sed 's/$$/\ttime/' | sed 's/^/sample\t/' > $@
 
 timings: $(VECTOR_FILE)
+	# Build and run the timing files multiple times with multiple inputs, writing times and vectors into the log file.
 	for program in timing/**; do \
 		for i in `seq 1 $(REPEATS)`; do \
 			export program_name=`echo $$program | sed 's/.*\///'`; \
@@ -176,6 +189,7 @@ timings: $(VECTOR_FILE)
 
 LIMIT := 60
 time: build
+	# Run with a higher priority timeout if there is a limit.
 	if [ "$(LIMIT)" = "0" ]; then \
 		sudo ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
 	else \
@@ -185,6 +199,7 @@ time: build
 	| grep -E '$(PATTERN)' \
 	| sed -E 's/$(PATTERN)/\1/' \
 	| grep . \
-	|| echo nan \
+	|| echo nan
+	# Parse the error message to determine the time or display nan if there is no output.
 
 .PHONY: all benchmark build clean run time timings

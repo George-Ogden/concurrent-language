@@ -11,6 +11,8 @@ use std::{
 use from_variants::FromVariants;
 use type_checker::{AtomicTypeEnum, Boolean, Id, Integer};
 
+use crate::type_equality_checker::TypeEqualityChecker;
+
 #[derive(Clone, FromVariants, Eq)]
 pub enum IntermediateType {
     AtomicType(AtomicType),
@@ -60,65 +62,6 @@ impl PartialEq for IntermediateType {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AtomicType(pub AtomicTypeEnum);
 
-struct TypeEqualityChecker {
-    equal_references: HashMap<*mut IntermediateType, *mut IntermediateType>,
-}
-
-impl TypeEqualityChecker {
-    fn new() -> Self {
-        TypeEqualityChecker {
-            equal_references: HashMap::new(),
-        }
-    }
-    fn equal_type(&mut self, t1: &IntermediateType, t2: &IntermediateType) -> bool {
-        match (t1, t2) {
-            (IntermediateType::AtomicType(a1), IntermediateType::AtomicType(a2)) => a1 == a2,
-            (
-                IntermediateType::IntermediateTupleType(IntermediateTupleType(t1)),
-                IntermediateType::IntermediateTupleType(IntermediateTupleType(t2)),
-            ) => self.equal_types(t1, t2),
-            (
-                IntermediateType::IntermediateFnType(IntermediateFnType(a1, r1)),
-                IntermediateType::IntermediateFnType(IntermediateFnType(a2, r2)),
-            ) => self.equal_types(a1, a2) && self.equal_type(r1, r2),
-            (
-                IntermediateType::IntermediateUnionType(IntermediateUnionType(t1)),
-                IntermediateType::IntermediateUnionType(IntermediateUnionType(t2)),
-            ) => {
-                t1.len() == t2.len()
-                    && t1.iter().zip_eq(t2.iter()).all(|(t1, t2)| match (t1, t2) {
-                        (None, None) => true,
-                        (Some(t1), Some(t2)) => self.equal_type(t1, t2),
-                        _ => false,
-                    })
-            }
-            (IntermediateType::Reference(r1), IntermediateType::Reference(r2)) => {
-                let p1 = r1.as_ptr();
-                let p2 = r2.as_ptr();
-                if self.equal_references.get(&p1) == Some(&p2) {
-                    true
-                } else if matches!(self.equal_references.get(&p1), Some(_))
-                    || matches!(self.equal_references.get(&p2), Some(_))
-                {
-                    false
-                } else {
-                    self.equal_references.insert(p1, p2);
-                    self.equal_references.insert(p2, p1);
-                    self.equal_type(&r1.borrow().clone(), &r2.borrow().clone())
-                }
-            }
-            _ => false,
-        }
-    }
-    fn equal_types(&mut self, t1: &Vec<IntermediateType>, t2: &Vec<IntermediateType>) -> bool {
-        t1.len() == t2.len()
-            && t1
-                .iter()
-                .zip_eq(t2.iter())
-                .all(|(t1, t2)| self.equal_type(t1, t2))
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateTupleType(pub Vec<IntermediateType>);
 
@@ -128,17 +71,17 @@ pub struct IntermediateFnType(pub Vec<IntermediateType>, pub Box<IntermediateTyp
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateUnionType(pub Vec<Option<IntermediateType>>);
 
-static LOCATION_ID: AtomicUsize = AtomicUsize::new(0);
+static REGISTER_ID: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Ord, Hash, Eq, PartialEq, PartialOrd)]
-pub struct Location(usize);
+pub struct Register(usize);
 
-impl Location {
+impl Register {
     pub fn new() -> Self {
-        Self(LOCATION_ID.fetch_add(1, Ordering::Relaxed))
+        Self(REGISTER_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
-impl fmt::Debug for Location {
+impl fmt::Debug for Register {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -150,16 +93,16 @@ impl IntermediateValue {
             IntermediateValue::IntermediateBuiltIn(built_in) => built_in.clone().into(),
             IntermediateValue::IntermediateMemory(memory) => IntermediateMemory {
                 type_: memory.type_.clone(),
-                location: substitution
-                    .get(&memory.location)
-                    .unwrap_or(&memory.location)
+                register: substitution
+                    .get(&memory.register)
+                    .unwrap_or(&memory.register)
                     .clone(),
             }
             .into(),
-            IntermediateValue::IntermediateArg(arg) => match substitution.get(&arg.location) {
+            IntermediateValue::IntermediateArg(arg) => match substitution.get(&arg.register) {
                 None => arg.clone().into(),
-                Some(location) => IntermediateMemory {
-                    location: location.clone(),
+                Some(register) => IntermediateMemory {
+                    register: register.clone(),
                     type_: arg.type_.clone(),
                 }
                 .into(),
@@ -178,21 +121,21 @@ impl IntermediateValue {
             IntermediateValue::IntermediateArg(arg) => arg.type_(),
         }
     }
-    pub fn location(&self) -> Option<Location> {
+    pub fn register(&self) -> Option<Register> {
         match self {
             IntermediateValue::IntermediateBuiltIn(_) => None,
-            IntermediateValue::IntermediateMemory(memory) => Some(memory.location.clone()),
-            IntermediateValue::IntermediateArg(arg) => Some(arg.location.clone()),
+            IntermediateValue::IntermediateMemory(memory) => Some(memory.register.clone()),
+            IntermediateValue::IntermediateArg(arg) => Some(arg.register.clone()),
         }
     }
     fn types(values: &Vec<Self>) -> Vec<IntermediateType> {
         values.iter().map(Self::type_).collect()
     }
-    pub fn filter_memory_location(&self) -> Option<Location> {
-        if let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, location }) =
+    pub fn filter_memory_register(&self) -> Option<Register> {
+        if let IntermediateValue::IntermediateMemory(IntermediateMemory { type_: _, register }) =
             self
         {
-            Some(location.clone())
+            Some(register.clone())
         } else {
             None
         }
@@ -220,7 +163,7 @@ impl From<BuiltInFn> for IntermediateValue {
 impl From<IntermediateAssignment> for IntermediateValue {
     fn from(value: IntermediateAssignment) -> IntermediateValue {
         IntermediateMemory {
-            location: value.location,
+            register: value.register,
             type_: value.expression.type_(),
         }
         .into()
@@ -260,14 +203,14 @@ pub struct BuiltInFn(pub Id, pub IntermediateFnType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntermediateAssignment {
     pub expression: IntermediateExpression,
-    pub location: Location,
+    pub register: Register,
 }
 
 impl From<IntermediateExpression> for IntermediateAssignment {
     fn from(value: IntermediateExpression) -> Self {
         IntermediateAssignment {
             expression: value,
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
@@ -276,7 +219,7 @@ impl From<IntermediateValue> for IntermediateAssignment {
     fn from(value: IntermediateValue) -> Self {
         IntermediateAssignment {
             expression: value.into(),
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
@@ -302,14 +245,14 @@ impl fmt::Debug for IntermediateExpression {
             Self::IntermediateFnCall(fn_call) => fn_call.fmt(f),
             Self::IntermediateCtorCall(ctor_call) => ctor_call.fmt(f),
             Self::IntermediateLambda(lambda) => lambda.fmt(f),
-            IntermediateExpression::IntermediateIf(if_) => if_.fmt(f),
-            IntermediateExpression::IntermediateMatch(match_) => match_.fmt(f),
+            Self::IntermediateIf(if_) => if_.fmt(f),
+            Self::IntermediateMatch(match_) => match_.fmt(f),
         }
     }
 }
 
 impl IntermediateExpression {
-    pub fn targets(&self) -> Vec<Location> {
+    pub fn targets(&self) -> Vec<Register> {
         match self {
             IntermediateExpression::IntermediateLambda(IntermediateLambda { block, args: _ }) => {
                 block.targets()
@@ -451,284 +394,6 @@ impl From<IntermediateBuiltIn> for IntermediateExpression {
     }
 }
 
-pub struct ExpressionEqualityChecker {
-    left_true_history: HashMap<Location, Location>,
-    right_true_history: HashMap<Location, Location>,
-    left_history: HashMap<Location, Location>,
-    right_history: HashMap<Location, Location>,
-}
-
-impl ExpressionEqualityChecker {
-    pub fn assert_equal(e1: &IntermediateExpression, e2: &IntermediateExpression) {
-        let mut expression_equality_checker = Self::new();
-        expression_equality_checker.assert_equal_expression(e1, e2)
-    }
-    fn new() -> Self {
-        ExpressionEqualityChecker {
-            left_true_history: HashMap::new(),
-            right_true_history: HashMap::new(),
-            left_history: HashMap::new(),
-            right_history: HashMap::new(),
-        }
-    }
-    fn assert_equal_memory(&mut self, m1: &IntermediateMemory, m2: &IntermediateMemory) {
-        let IntermediateMemory {
-            location: l1,
-            type_: _,
-        } = m1;
-        let IntermediateMemory {
-            location: l2,
-            type_: _,
-        } = m2;
-        self.assert_equal_locations(l1, l2)
-    }
-    fn assert_equal_arg(&mut self, a1: &IntermediateArg, a2: &IntermediateArg) {
-        let IntermediateArg {
-            location: l1,
-            type_: _,
-        } = a1;
-        let IntermediateArg {
-            location: l2,
-            type_: _,
-        } = a2;
-        self.assert_equal_locations(l1, l2)
-    }
-    fn assert_equal_args(&mut self, a1: &Vec<IntermediateArg>, a2: &Vec<IntermediateArg>) {
-        assert_eq!(a1.len(), a2.len());
-        for (a1, a2) in a1.iter().zip_eq(a2.iter()) {
-            self.assert_equal_arg(a1, a2)
-        }
-    }
-    fn assert_equal_locations(&mut self, l1: &Location, l2: &Location) {
-        if self.left_history.get(&l1) == Some(&l2) {
-            return;
-        }
-        assert!(!matches!(self.left_history.get(&l1), Some(_)));
-        assert!(!matches!(self.right_history.get(&l2), Some(_)));
-        self.left_history.insert(l1.clone(), l2.clone());
-        self.right_history.insert(l2.clone(), l1.clone());
-    }
-    fn assert_equal_assignment(
-        &mut self,
-        m1: &IntermediateAssignment,
-        m2: &IntermediateAssignment,
-    ) {
-        let IntermediateAssignment {
-            expression: e1,
-            location: l1,
-        } = m1;
-        let IntermediateAssignment {
-            expression: e2,
-            location: l2,
-        } = m2;
-        if self.left_true_history.get(&l1) == Some(&l2) {
-            return;
-        }
-        if self.left_history.get(&l1) == Some(&l2) {
-            self.left_true_history.insert(l1.clone(), l2.clone());
-            self.right_true_history.insert(l2.clone(), l1.clone());
-            self.assert_equal_expression(&e1, &e2)
-        } else {
-            assert!(!matches!(self.left_true_history.get(&l1), Some(_)));
-            assert!(!matches!(self.right_true_history.get(&l2), Some(_)));
-            assert!(!matches!(self.left_history.get(&l1), Some(_)));
-            assert!(!matches!(self.right_history.get(&l2), Some(_)));
-            self.left_history.insert(l1.clone(), l2.clone());
-            self.right_history.insert(l2.clone(), l1.clone());
-            self.left_true_history.insert(l1.clone(), l2.clone());
-            self.right_true_history.insert(l2.clone(), l1.clone());
-            self.assert_equal_expression(&e1, &e2)
-        }
-    }
-    fn assert_equal_expression(
-        &mut self,
-        e1: &IntermediateExpression,
-        e2: &IntermediateExpression,
-    ) {
-        match (e1, e2) {
-            (
-                IntermediateExpression::IntermediateValue(v1),
-                IntermediateExpression::IntermediateValue(v2),
-            ) => self.assert_equal_value(&v1, &v2),
-            (
-                IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
-                    value: v1,
-                    idx: i1,
-                }),
-                IntermediateExpression::IntermediateElementAccess(IntermediateElementAccess {
-                    value: v2,
-                    idx: i2,
-                }),
-            ) => {
-                assert_eq!(i1, i2);
-                self.assert_equal_value(&v1, &v2)
-            }
-            (
-                IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-                    values1,
-                )),
-                IntermediateExpression::IntermediateTupleExpression(IntermediateTupleExpression(
-                    values2,
-                )),
-            ) => self.assert_equal_values(&values1, &values2),
-            (
-                IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
-                    fn_: v1,
-                    args: a1,
-                }),
-                IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
-                    fn_: v2,
-                    args: a2,
-                }),
-            ) => {
-                self.assert_equal_values(&a1, &a2);
-                self.assert_equal_value(&v1, &v2)
-            }
-            (
-                IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
-                    idx: i1,
-                    data: d1,
-                    type_: t1,
-                }),
-                IntermediateExpression::IntermediateCtorCall(IntermediateCtorCall {
-                    idx: i2,
-                    data: d2,
-                    type_: t2,
-                }),
-            ) => {
-                assert_eq!(i1, i2);
-                match (d1, d2) {
-                    (None, None) => {}
-                    (Some(d1), Some(d2)) => self.assert_equal_value(d1, d2),
-                    _ => assert!(false),
-                }
-                assert_eq!(t1, t2)
-            }
-            (
-                IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                    args: a1,
-                    block: b1,
-                }),
-                IntermediateExpression::IntermediateLambda(IntermediateLambda {
-                    args: a2,
-                    block: b2,
-                }),
-            ) => {
-                self.assert_equal_args(a1, a2);
-                self.assert_equal_block(&b1, &b2);
-            }
-            (
-                IntermediateExpression::IntermediateIf(IntermediateIf {
-                    condition: c1,
-                    branches: b1,
-                }),
-                IntermediateExpression::IntermediateIf(IntermediateIf {
-                    condition: c2,
-                    branches: b2,
-                }),
-            ) => {
-                self.assert_equal_value(c1, c2);
-                self.assert_equal_block(&b1.0, &b2.0);
-                self.assert_equal_block(&b1.1, &b2.1);
-            }
-            (
-                IntermediateExpression::IntermediateMatch(IntermediateMatch {
-                    subject: s1,
-                    branches: b1,
-                }),
-                IntermediateExpression::IntermediateMatch(IntermediateMatch {
-                    subject: s2,
-                    branches: b2,
-                }),
-            ) => {
-                self.assert_equal_value(s1, s2);
-                self.assert_equal_branches(b1, b2);
-            }
-            _ => assert!(false),
-        }
-    }
-    fn assert_equal_block(&mut self, b1: &IntermediateBlock, b2: &IntermediateBlock) {
-        self.assert_equal_statements(&b1.statements, &b2.statements);
-        self.assert_equal_value(&b1.ret, &b2.ret)
-    }
-    fn assert_equal_value(&mut self, v1: &IntermediateValue, v2: &IntermediateValue) {
-        match (v1, v2) {
-            (
-                IntermediateValue::IntermediateBuiltIn(b1),
-                IntermediateValue::IntermediateBuiltIn(b2),
-            ) => assert_eq!(b1, b2),
-            (IntermediateValue::IntermediateArg(a1), IntermediateValue::IntermediateArg(a2)) => {
-                self.assert_equal_arg(a1, a2);
-            }
-            (
-                IntermediateValue::IntermediateMemory(m1),
-                IntermediateValue::IntermediateMemory(m2),
-            ) => self.assert_equal_memory(m1, m2),
-            _ => {
-                assert!(false);
-            }
-        }
-    }
-    fn assert_equal_values(
-        &mut self,
-        values1: &Vec<IntermediateValue>,
-        values2: &Vec<IntermediateValue>,
-    ) {
-        assert_eq!(values1.len(), values2.len());
-        for (v1, v2) in values1.iter().zip_eq(values2.iter()) {
-            self.assert_equal_value(v1, v2)
-        }
-    }
-    fn assert_equal_statements(
-        &mut self,
-        statements1: &Vec<IntermediateStatement>,
-        statements2: &Vec<IntermediateStatement>,
-    ) {
-        assert_eq!(statements1.len(), statements2.len());
-        for (s1, s2) in statements1.iter().zip_eq(statements2.iter()) {
-            self.assert_equal_statement(s1, s2)
-        }
-    }
-    fn assert_equal_statement(&mut self, s1: &IntermediateStatement, s2: &IntermediateStatement) {
-        match (s1, s2) {
-            (
-                IntermediateStatement::IntermediateAssignment(m1),
-                IntermediateStatement::IntermediateAssignment(m2),
-            ) => self.assert_equal_assignment(m1, m2),
-        }
-    }
-    fn assert_equal_branch(
-        &mut self,
-        branch1: &IntermediateMatchBranch,
-        branch2: &IntermediateMatchBranch,
-    ) {
-        let IntermediateMatchBranch {
-            target: t1,
-            block: b1,
-        } = branch1;
-        let IntermediateMatchBranch {
-            target: t2,
-            block: b2,
-        } = branch2;
-        (match (t1, t2) {
-            (None, None) => {}
-            (Some(a1), Some(a2)) => self.assert_equal_arg(a1, a2),
-            _ => assert!(false),
-        });
-        self.assert_equal_block(b1, b2)
-    }
-    fn assert_equal_branches(
-        &mut self,
-        branches1: &Vec<IntermediateMatchBranch>,
-        branches2: &Vec<IntermediateMatchBranch>,
-    ) {
-        assert_eq!(branches1.len(), branches2.len());
-        for (b1, b2) in branches1.iter().zip_eq(branches2.iter()) {
-            self.assert_equal_branch(b1, b2)
-        }
-    }
-}
-
 #[derive(Clone, FromVariants, PartialEq, Eq, Debug, Hash)]
 pub enum IntermediateValue {
     IntermediateBuiltIn(IntermediateBuiltIn),
@@ -739,12 +404,12 @@ pub enum IntermediateValue {
 #[derive(Clone, Eq)]
 pub struct IntermediateMemory {
     pub type_: IntermediateType,
-    pub location: Location,
+    pub register: Register,
 }
 
 impl fmt::Debug for IntermediateMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Memory").field(&self.location).finish()
+        f.debug_tuple("Memory").field(&self.register).finish()
     }
 }
 
@@ -756,13 +421,13 @@ impl IntermediateMemory {
 
 impl PartialEq for IntermediateMemory {
     fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
+        self.register == other.register
     }
 }
 
 impl Hash for IntermediateMemory {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.location.hash(state);
+        self.register.hash(state);
     }
 }
 
@@ -770,7 +435,7 @@ impl From<IntermediateType> for IntermediateMemory {
     fn from(value: IntermediateType) -> Self {
         IntermediateMemory {
             type_: value,
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
@@ -778,12 +443,12 @@ impl From<IntermediateType> for IntermediateMemory {
 #[derive(Clone, Eq)]
 pub struct IntermediateArg {
     pub type_: IntermediateType,
-    pub location: Location,
+    pub register: Register,
 }
 
 impl fmt::Debug for IntermediateArg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Arg").field(&self.location).finish()
+        f.debug_tuple("Arg").field(&self.register).finish()
     }
 }
 
@@ -795,7 +460,7 @@ impl IntermediateArg {
 
 impl PartialEq for IntermediateArg {
     fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
+        self.register == other.register
     }
 }
 
@@ -803,14 +468,14 @@ impl From<IntermediateType> for IntermediateArg {
     fn from(value: IntermediateType) -> Self {
         IntermediateArg {
             type_: value,
-            location: Location::new(),
+            register: Register::new(),
         }
     }
 }
 
 impl Hash for IntermediateArg {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.location.hash(state);
+        self.register.hash(state);
     }
 }
 
@@ -876,7 +541,7 @@ pub struct IntermediateBlock {
 }
 
 impl IntermediateBlock {
-    fn targets(&self) -> Vec<Location> {
+    fn targets(&self) -> Vec<Register> {
         IntermediateStatement::all_targets(&self.statements)
     }
 
@@ -918,7 +583,8 @@ pub struct IntermediateLambda {
     pub block: IntermediateBlock,
 }
 
-type Substitution = HashMap<Location, Location>;
+/// Typealias for a register substitution.
+type Substitution = HashMap<Register, Register>;
 
 impl IntermediateLambda {
     pub fn type_(&self) -> IntermediateFnType {
@@ -936,8 +602,8 @@ impl IntermediateLambda {
     }
 
     pub fn find_open_vars(&self) -> Vec<IntermediateValue> {
-        let mut targets: HashSet<Location> = HashSet::from_iter(self.block.targets());
-        targets.extend(self.args.iter().map(|arg| arg.location.clone()));
+        let mut targets: HashSet<Register> = HashSet::from_iter(self.block.targets());
+        targets.extend(self.args.iter().map(|arg| arg.register.clone()));
         let values = self.block.values();
         values
             .into_iter()
@@ -945,14 +611,14 @@ impl IntermediateLambda {
             .filter_map(|value| match value {
                 IntermediateValue::IntermediateBuiltIn(_) => None,
                 IntermediateValue::IntermediateMemory(memory) => {
-                    if !targets.contains(&memory.location) {
+                    if !targets.contains(&memory.register) {
                         Some(memory.into())
                     } else {
                         None
                     }
                 }
                 IntermediateValue::IntermediateArg(arg) => {
-                    if !targets.contains(&arg.location) {
+                    if !targets.contains(&arg.register) {
                         Some(arg.into())
                     } else {
                         None
@@ -980,51 +646,57 @@ impl fmt::Debug for IntermediateStatement {
 }
 
 impl IntermediateStatement {
+    /// Find all values used in a statement.
     pub fn values(&self) -> Vec<IntermediateValue> {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location: _,
+                register: _,
             }) => expression.values(),
         }
     }
+    /// Find all values used in multiple statements.
     fn all_values(statements: &Vec<Self>) -> Vec<IntermediateValue> {
         statements
             .iter()
             .flat_map(|statement| statement.values())
             .collect()
     }
-    fn targets(&self) -> Vec<Location> {
+    /// Find all targets assigned to in a statement.
+    fn targets(&self) -> Vec<Register> {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location,
+                register,
             }) => {
                 let mut targets = expression.targets();
-                targets.push(location.clone());
+                targets.push(register.clone());
                 targets
             }
         }
     }
-    pub fn all_targets(statements: &Vec<Self>) -> Vec<Location> {
+    /// Find all targets assigned to in multiple statements.
+    pub fn all_targets(statements: &Vec<Self>) -> Vec<Register> {
         statements
             .iter()
             .flat_map(|statement| statement.targets())
             .collect()
     }
+    /// Perform a substitution on a statement.
     fn substitute(&mut self, substitution: &Substitution) {
         match self {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location,
+                register,
             }) => {
-                if let Some(new_location) = substitution.get(location) {
-                    *location = new_location.clone();
+                if let Some(new_register) = substitution.get(register) {
+                    *register = new_register.clone();
                 }
                 expression.substitute(substitution);
             }
         }
     }
+    /// Perform a substitution on multiple statements.
     fn substitute_all(statements: &mut Vec<Self>, substitution: &Substitution) {
         for statement in statements {
             statement.substitute(substitution)

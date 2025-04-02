@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from sklearn import linear_model
 
+# Group similar operators.
 GROUPS = [
     ["<", ">", "<=", ">=", "==", "!="],
     ["&", "|", "^", "+", "-", "<<", ">>"],
@@ -18,6 +19,7 @@ def load_data(filename: str) -> pd.DataFrame:
 
 
 def group_data(df: pd.DataFrame, groups: list[list[str]]) -> pd.DataFrame:
+    """Group similar coefficients into the same "bin" for fitting."""
     df = df.copy()
     for i, group in enumerate(groups):
         combined_values = df[group].sum(axis=1)
@@ -32,6 +34,7 @@ def fit(df: pd.DataFrame) -> dict[str, float]:
     reg = linear_model.LinearRegression(positive=True)
     reg.fit(df.values, target.values)
 
+    # Extract the coefficients.
     coefficients = {column: coef for column, coef in zip(df.columns, reg.coef_, strict=True)}
     coefficients["_constant"] = reg.intercept_
 
@@ -44,10 +47,13 @@ def get_final_coefficients(
     final_coefficients = {}
     for k, v in coefficients.items():
         try:
+            # Use the group idx if possible.
             idx = int(k)
         except ValueError:
+            # Set non-group value.
             final_coefficients[k] = v
         else:
+            # Set value for all coefficients in a group.
             for k in groups[idx]:
                 final_coefficients[k] = v
     return final_coefficients

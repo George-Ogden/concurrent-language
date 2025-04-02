@@ -7,17 +7,16 @@ use lowering::{
 };
 use std::convert::identity;
 
-use crate::{
-    equivalent_expression_elimination::EquivalentExpressionEliminator, refresher::Refresher,
-};
-use compilation::CodeSizeEstimator;
+use crate::{redundancy_elimination::RedundancyEliminator, refresher::Refresher};
 use itertools::Either::{Left, Right};
+use translation::CodeSizeEstimator;
 
 pub struct Inliner {
     fn_defs: FnDefs,
     size_limit: usize,
 }
 
+// Define exit limit in case of fns that are repeatedly inlined but do not increase in size.
 const MAX_INLINING_ITERATIONS: usize = 1000;
 
 impl Inliner {
@@ -30,7 +29,8 @@ impl Inliner {
         let mut i = 0;
         while should_continue && i < MAX_INLINING_ITERATIONS {
             (program.main, should_continue) = Inliner::inline_iteration(program.main, size_limit);
-            program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+            // Clean up with equivalent expression elimination after each iteration.
+            program = RedundancyEliminator::eliminate_redundancy(program);
             i += 1;
         }
         program
@@ -42,11 +42,13 @@ impl Inliner {
         }
     }
 
+    /// Inline a function, generating statements and a value.
     fn inline(
         &self,
         mut lambda: IntermediateLambda,
         args: Vec<IntermediateValue>,
     ) -> IntermediateBlock {
+        // Refresh the lambda to maintain SSA.
         Refresher::refresh_for_inlining(&mut lambda);
         let assignments = lambda
             .args
@@ -54,7 +56,7 @@ impl Inliner {
             .zip_eq(args.into_iter())
             .map(|(arg, v)| {
                 IntermediateAssignment {
-                    location: arg.location.clone(),
+                    register: arg.register.clone(),
                     expression: v.into(),
                 }
                 .into()
@@ -69,6 +71,7 @@ impl Inliner {
         lambda: IntermediateLambda,
         size_limit: Option<usize>,
     ) -> (IntermediateLambda, bool) {
+        // If the lambda is already too big, do nothing.
         let bounds = CodeSizeEstimator::estimate_size(&lambda);
         if let Some(size) = size_limit {
             if bounds.1 >= size {
@@ -79,11 +82,13 @@ impl Inliner {
             args,
             block: IntermediateBlock { statements, ret },
         } = lambda;
+        // Register statements and set size limit.
         let mut inliner = Inliner::from(&statements);
         if let Some(size) = size_limit {
             inliner.size_limit = size;
         }
         let inliner = inliner;
+        // Inline statements that are below a certain size.
         let (statements, should_continue) = inliner.inline_statements(statements);
         (
             IntermediateLambda {
@@ -117,17 +122,17 @@ impl Inliner {
         &self,
         IntermediateAssignment {
             expression,
-            location,
+            register,
         }: IntermediateAssignment,
     ) -> (Vec<IntermediateStatement>, bool) {
         let mut should_continue = false;
         let mut statements = Vec::new();
         let expression = match expression {
             IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
-                fn_: IntermediateValue::IntermediateMemory(IntermediateMemory { type_, location }),
+                fn_: IntermediateValue::IntermediateMemory(IntermediateMemory { type_, register }),
                 args,
-            }) if self.fn_defs.contains_key(&location) => {
-                match FnInst::get_root_fn(&self.fn_defs, &location) {
+            }) if self.fn_defs.contains_key(&register) => {
+                match FnInst::get_root_fn(&self.fn_defs, &register) {
                     Some(Left(lambda))
                         if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
                     {
@@ -145,7 +150,7 @@ impl Inliner {
                     }
                     .into(),
                     _ => IntermediateFnCall {
-                        fn_: IntermediateMemory { type_, location }.into(),
+                        fn_: IntermediateMemory { type_, register }.into(),
                         args,
                     }
                     .into(),
@@ -154,6 +159,7 @@ impl Inliner {
             IntermediateExpression::IntermediateLambda(lambda)
                 if CodeSizeEstimator::estimate_size(&lambda).1 < self.size_limit =>
             {
+                // Inline lambda if it is below the size limit.
                 let IntermediateLambda {
                     args,
                     block: IntermediateBlock { statements, ret },
@@ -208,7 +214,7 @@ impl Inliner {
         statements.push(
             IntermediateAssignment {
                 expression,
-                location,
+                register,
             }
             .into(),
         );
@@ -216,6 +222,7 @@ impl Inliner {
     }
 }
 
+/// Inliner::from(statements)
 impl From<&Vec<IntermediateStatement>> for Inliner {
     fn from(statements: &Vec<IntermediateStatement>) -> Self {
         let mut inliner = Inliner::new();
@@ -234,7 +241,7 @@ mod tests {
         AtomicTypeEnum, Boolean, BuiltInFn, ExpressionEqualityChecker, Id, Integer,
         IntermediateArg, IntermediateAssignment, IntermediateBuiltIn, IntermediateFnCall,
         IntermediateFnType, IntermediateIf, IntermediateMatch, IntermediateMatchBranch,
-        IntermediateMemory, IntermediateType, IntermediateUnionType, IntermediateValue, Location,
+        IntermediateMemory, IntermediateType, IntermediateUnionType, IntermediateValue, Register,
     };
     use test_case::test_case;
 
@@ -259,11 +266,11 @@ mod tests {
         {
             let arg = IntermediateArg{
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let value = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             (
                 IntermediateLambda {
@@ -277,7 +284,7 @@ mod tests {
                 (
                     vec![
                         IntermediateAssignment{
-                            location: value.location.clone(),
+                            register: value.register.clone(),
                             expression: IntermediateValue::from(Integer{value: 22}).into()
                         }.into()
                     ],
@@ -292,20 +299,20 @@ mod tests {
             let args = vec![
                 IntermediateArg{
                     type_: AtomicTypeEnum::INT.into(),
-                    location: Location::new(),
+                    register: Register::new(),
                 },
                 IntermediateArg{
                     type_: AtomicTypeEnum::INT.into(),
-                    location: Location::new(),
+                    register: Register::new(),
                 },
             ];
             let mem = args.iter().map(|arg| IntermediateMemory {
-                location: Location::new(),
+                register: Register::new(),
                 type_: arg.type_.clone()
             }).collect_vec();
             let ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             (
                 IntermediateLambda {
@@ -323,7 +330,7 @@ mod tests {
                                     )).into(),
                                     args: args.clone().into_iter().map(|arg| arg.into()).collect_vec(),
                                 }.into(),
-                                location: ret.location.clone()
+                                register: ret.register.clone()
                             }.into()
                         ],
                         ret: ret.clone().into()
@@ -334,11 +341,11 @@ mod tests {
                     vec![
                         IntermediateAssignment {
                             expression: IntermediateValue::from(Integer{value: 11}).into(),
-                            location: mem[0].location.clone()
+                            register: mem[0].register.clone()
                         }.into(),
                         IntermediateAssignment {
                             expression: IntermediateValue::from(Integer{value: -11}).into(),
-                            location: mem[1].location.clone()
+                            register: mem[1].register.clone()
                         }.into(),
                         IntermediateAssignment {
                             expression: IntermediateFnCall {
@@ -351,7 +358,7 @@ mod tests {
                                 )).into(),
                                 args: mem.clone().into_iter().map(|mem| mem.into()).collect_vec(),
                             }.into(),
-                            location: ret.location.clone()
+                            register: ret.register.clone()
                         }.into()
                     ],
                     ret.clone().into()
@@ -370,7 +377,7 @@ mod tests {
         let (lambda, args, expected) = lambda_args_expected;
         let inliner = Inliner::new();
         let mut fn_targets = IntermediateStatement::all_targets(&lambda.block.statements);
-        fn_targets.extend(lambda.args.iter().map(|arg| arg.location.clone()));
+        fn_targets.extend(lambda.args.iter().map(|arg| arg.register.clone()));
         let result = inliner.inline(lambda, args);
         let targets = IntermediateStatement::all_targets(&result.statements);
 
@@ -390,7 +397,7 @@ mod tests {
             }
             .into(),
         );
-        assert!(HashSet::<Location>::from_iter(fn_targets)
+        assert!(HashSet::<Register>::from_iter(fn_targets)
             .intersection(&HashSet::from_iter(targets))
             .collect_vec()
             .is_empty())
@@ -400,7 +407,7 @@ mod tests {
     fn test_fn_refresh() {
         let id_arg = IntermediateArg {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let id = IntermediateLambda {
             args: vec![id_arg.clone()],
@@ -415,28 +422,28 @@ mod tests {
                 Box::new(AtomicTypeEnum::INT.into()),
             )
             .into(),
-            location: Location::new(),
+            register: Register::new(),
         };
 
         let idea_arg = IntermediateArg {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let idea_ret = IntermediateMemory {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let idea = IntermediateLambda {
             args: vec![idea_arg.clone()],
             block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
-                        location: id_fn.location.clone(),
+                        register: id_fn.register.clone(),
                         expression: id.clone().into(),
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: idea_ret.location.clone(),
+                        register: idea_ret.register.clone(),
                         expression: IntermediateFnCall {
                             fn_: id_fn.clone().into(),
                             args: vec![idea_arg.clone().into()],
@@ -454,22 +461,22 @@ mod tests {
         let expected = (
             vec![
                 IntermediateAssignment {
-                    location: idea_arg.location.clone(),
+                    register: idea_arg.register.clone(),
                     expression: IntermediateValue::from(Integer { value: 0 }).into(),
                 }
                 .into(),
                 IntermediateAssignment {
-                    location: id_fn.location.clone(),
+                    register: id_fn.register.clone(),
                     expression: id.clone().into(),
                 }
                 .into(),
                 IntermediateAssignment {
-                    location: idea_ret.location.clone(),
+                    register: idea_ret.register.clone(),
                     expression: IntermediateFnCall {
                         fn_: id_fn.clone().into(),
                         args: vec![IntermediateMemory {
                             type_: idea_arg.type_.clone(),
-                            location: idea_arg.location.clone(),
+                            register: idea_arg.register.clone(),
                         }
                         .into()],
                     }
@@ -500,7 +507,7 @@ mod tests {
         let IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
             expression:
                 IntermediateExpression::IntermediateLambda(IntermediateLambda { args, block: _ }),
-            location: _,
+            register: _,
         }) = &result.statements[1]
         else {
             panic!()
@@ -511,13 +518,13 @@ mod tests {
     #[test_case(
         {
             let fn_ = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateFnType(
                     Vec::new(),
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into()
             };
-            let ret_location = Location::new();
+            let ret_register = Register::new();
             let lambda = IntermediateLambda {
                 args: Vec::new(),
                 block: IntermediateBlock{
@@ -528,11 +535,11 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: fn_.location.clone(),
+                        register: fn_.register.clone(),
                         expression: lambda.clone().into()
                     }.into(),
                     IntermediateAssignment {
-                        location: ret_location.clone(),
+                        register: ret_register.clone(),
                         expression: IntermediateFnCall{
                             fn_: fn_.clone().into(),
                             args: Vec::new()
@@ -541,11 +548,11 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment {
-                        location: fn_.location.clone(),
+                        register: fn_.register.clone(),
                         expression: lambda.clone().into()
                     }.into(),
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                         expression: IntermediateValue::from(Integer{value: 1}).into()
                     }.into(),
                 ]
@@ -557,13 +564,13 @@ mod tests {
     #[test_case(
         {
             let fn_ = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateFnType(
                     Vec::new(),
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into()
             };
-            let ret_location = Location::new();
+            let ret_register = Register::new();
             let op = IntermediateValue::from(BuiltInFn(
                 Id::from("++"),
                 IntermediateFnType(
@@ -574,11 +581,11 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: fn_.location.clone(),
+                        register: fn_.register.clone(),
                         expression: op.clone().into()
                     }.into(),
                     IntermediateAssignment {
-                        location: ret_location.clone(),
+                        register: ret_register.clone(),
                         expression: IntermediateFnCall{
                             fn_: fn_.clone().into(),
                             args: vec![Integer{value: 3}.into()]
@@ -587,11 +594,11 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment {
-                        location: fn_.location.clone(),
+                        register: fn_.register.clone(),
                         expression: op.clone().into()
                     }.into(),
                     IntermediateAssignment {
-                        location: ret_location.clone(),
+                        register: ret_register.clone(),
                         expression: IntermediateFnCall{
                             fn_: op.clone(),
                             args: vec![Integer{value: 3}.into()]
@@ -607,7 +614,7 @@ mod tests {
         {
             let id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
@@ -618,28 +625,28 @@ mod tests {
             };
             let id_fn = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
 
             let idea_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea = IntermediateLambda {
                 args: vec![idea_arg.clone()],
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
-                            location: id_fn.location.clone(),
+                            register: id_fn.register.clone(),
                             expression: id.clone().into(),
                         }
                         .into(),
                         IntermediateAssignment {
-                            location: idea_ret.location.clone(),
+                            register: idea_ret.register.clone(),
                             expression: IntermediateFnCall {
                                 fn_: id_fn.clone().into(),
                                 args: vec![idea_arg.clone().into()],
@@ -653,34 +660,34 @@ mod tests {
             };
             let idea_fn = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
-            let ret = Location::new();
+            let ret = Register::new();
 
             let inner_arg = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let outer_res = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let outer_arg = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let fresh_id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             (
                 vec![
                     IntermediateAssignment{
-                        location: idea_fn.location.clone(),
+                        register: idea_fn.register.clone(),
                         expression: idea.clone().into()
                     }.into(),
                     IntermediateAssignment{
-                        location: ret.clone(),
+                        register: ret.clone(),
                         expression: IntermediateFnCall{
                             fn_: idea_fn.clone().into(),
                             args: vec![Integer{value: 5}.into()]
@@ -689,23 +696,23 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment{
-                        location: idea_fn.location.clone(),
+                        register: idea_fn.register.clone(),
                         expression: IntermediateLambda {
                             args: vec![idea_arg.clone()],
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment {
-                                        location: Location::new(),
+                                        register: Register::new(),
                                         expression: id.clone().into(),
                                     }.into(),
                                     IntermediateAssignment{
-                                        location: inner_arg.location.clone(),
+                                        register: inner_arg.register.clone(),
                                         expression: IntermediateValue::from(
                                             idea_arg.clone()
                                         ).into()
                                     }.into(),
                                     IntermediateAssignment{
-                                        location: idea_ret.location.clone(),
+                                        register: idea_ret.register.clone(),
                                         expression: IntermediateValue::from(
                                             inner_arg.clone()
                                         ).into()
@@ -716,13 +723,13 @@ mod tests {
                         }.into()
                     }.into(),
                     IntermediateAssignment{
-                        location: outer_arg.location.clone(),
+                        register: outer_arg.register.clone(),
                         expression: IntermediateValue::from(
                             Integer{value: 5}
                         ).into()
                     }.into(),
                     IntermediateAssignment{
-                        location: id_fn.location.clone(),
+                        register: id_fn.register.clone(),
                         expression: IntermediateLambda {
                             args: vec![fresh_id_arg.clone()],
                             block: IntermediateBlock{
@@ -732,14 +739,14 @@ mod tests {
                         }.into()
                     }.into(),
                     IntermediateAssignment{
-                        location: outer_res.location.clone(),
+                        register: outer_res.register.clone(),
                         expression: IntermediateFnCall{
                             fn_: id_fn.clone().into(),
                             args: vec![outer_arg.clone().into()]
                         }.into()
                     }.into(),
                     IntermediateAssignment{
-                        location: ret.clone(),
+                        register: ret.clone(),
                         expression: IntermediateValue::from(
                             outer_res
                         ).into()
@@ -768,20 +775,20 @@ mod tests {
             ));
             let op = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let t0 = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let t1 = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
 
             let id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
@@ -792,33 +799,33 @@ mod tests {
             };
             let id_fn = IntermediateMemory {
                 type_: IntermediateFnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let extra = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
 
-            let ret_location = Location::new();
+            let ret_register = Register::new();
             let condition = IntermediateArg{
                 type_: AtomicTypeEnum::BOOL.into(),
-                location: Location::new()
+                register: Register::new()
             };
             (
                 vec![
                     IntermediateAssignment {
-                        location: op.location.clone(),
+                        register: op.register.clone(),
                         expression: IntermediateIf {
                             condition: condition.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment {
-                                            location: id_fn.location.clone(),
+                                            register: id_fn.register.clone(),
                                             expression: id.clone().into()
                                         }.into(),
                                         IntermediateAssignment {
-                                            location: Location::new(),
+                                            register: Register::new(),
                                             expression: IntermediateFnCall{
                                                 fn_: id_fn.clone().into(),
                                                 args: vec![
@@ -827,7 +834,7 @@ mod tests {
                                             }.into()
                                         }.into(),
                                         IntermediateAssignment {
-                                            location: t0.location.clone(),
+                                            register: t0.register.clone(),
                                             expression: inc.clone().into()
                                         }.into(),
                                     ],
@@ -836,7 +843,7 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment {
-                                            location: t1.location.clone(),
+                                            register: t1.register.clone(),
                                             expression: dec.clone().into()
                                         }.into(),
                                     ],
@@ -846,7 +853,7 @@ mod tests {
                         }.into(),
                     }.into(),
                     IntermediateAssignment {
-                        location: ret_location.clone(),
+                        register: ret_register.clone(),
                         expression: IntermediateFnCall{
                             fn_: op.clone().into(),
                             args: vec![
@@ -857,30 +864,30 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment {
-                        location: op.location.clone(),
+                        register: op.register.clone(),
                         expression: IntermediateIf {
                             condition: condition.clone().into(),
                             branches: (
                                 (
                                     vec![
                                         IntermediateAssignment {
-                                            location: Location::new(),
+                                            register: Register::new(),
                                             expression: id.clone().into(),
                                         }.into(),
                                         IntermediateAssignment{
-                                            location: extra.location.clone(),
+                                            register: extra.register.clone(),
                                             expression: IntermediateValue::from(
                                                 Integer{value: -7}
                                             ).into()
                                         }.into(),
                                         IntermediateAssignment{
-                                            location: Location::new(),
+                                            register: Register::new(),
                                             expression: IntermediateValue::from(
                                                 extra.clone()
                                             ).into()
                                         }.into(),
                                         IntermediateAssignment {
-                                            location: t0.location.clone(),
+                                            register: t0.register.clone(),
                                             expression: inc.clone().into()
                                         }.into(),
                                     ],
@@ -889,7 +896,7 @@ mod tests {
                                 (
                                     vec![
                                         IntermediateAssignment {
-                                            location: t1.location.clone(),
+                                            register: t1.register.clone(),
                                             expression: dec.clone().into()
                                         }.into(),
                                     ],
@@ -899,7 +906,7 @@ mod tests {
                         }.into(),
                     }.into(),
                     IntermediateAssignment {
-                        location: ret_location.clone(),
+                        register: ret_register.clone(),
                         expression: IntermediateFnCall{
                             fn_: op.clone().into(),
                             args: vec![
@@ -927,18 +934,18 @@ mod tests {
                     Vec::new(),
                     Box::new(AtomicTypeEnum::BOOL.into())
                 ).into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let target = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::BOOL));
 
             let subject = IntermediateArg{
                 type_: IntermediateUnionType(vec![None]).into(),
-                location: Location::new()
+                register: Register::new()
             };
             (
                 vec![
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                             expression: IntermediateMatch {
                             subject: subject.clone().into(),
                             branches: vec![
@@ -947,11 +954,11 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment {
-                                                location: memory.location.clone(),
+                                                register: memory.register.clone(),
                                                 expression: lambda.clone().into()
                                             }.into(),
                                             IntermediateAssignment {
-                                                location: target.location.clone(),
+                                                register: target.register.clone(),
                                                 expression: IntermediateFnCall{
                                                     fn_: memory.clone().into(),
                                                     args: Vec::new()
@@ -967,7 +974,7 @@ mod tests {
                 ],
                 vec![
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                             expression: IntermediateMatch {
                             subject: subject.clone().into(),
                             branches: vec![
@@ -976,11 +983,11 @@ mod tests {
                                     block: (
                                         vec![
                                             IntermediateAssignment {
-                                                location: memory.location.clone(),
+                                                register: memory.register.clone(),
                                                 expression: lambda.clone().into()
                                             }.into(),
                                             IntermediateAssignment {
-                                                location: target.location.clone(),
+                                                register: target.register.clone(),
                                                 expression: IntermediateValue::from(
                                                     Boolean{value: false}
                                                 ).into()
@@ -1027,11 +1034,11 @@ mod tests {
     #[test]
     fn test_main_inlining() {
         let premain = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
         };
         let call = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
         let simplified = IntermediateLambda {
@@ -1047,11 +1054,11 @@ mod tests {
                 statements: vec![
                     IntermediateAssignment {
                         expression: simplified.clone().into(),
-                        location: premain.location.clone(),
+                        register: premain.register.clone(),
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: call.location.clone().into(),
+                        register: call.register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: premain.clone().into(),
                             args: Vec::new(),
@@ -1081,11 +1088,11 @@ mod tests {
     #[test]
     fn test_size_limited_inlining() {
         let premain = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
         };
         let call = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
         let simplified = IntermediateLambda {
@@ -1101,11 +1108,11 @@ mod tests {
                 statements: vec![
                     IntermediateAssignment {
                         expression: simplified.clone().into(),
-                        location: premain.location.clone(),
+                        register: premain.register.clone(),
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: call.location.clone().into(),
+                        register: call.register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: premain.clone().into(),
                             args: Vec::new(),
@@ -1151,7 +1158,7 @@ mod tests {
                                 block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
-                                            location: foo_call.location.clone(),
+                                            register: foo_call.register.clone(),
                                             expression: IntermediateFnCall{
                                                 fn_: foo.clone().into(),
                                                 args: Vec::new()
@@ -1161,10 +1168,10 @@ mod tests {
                                     ret: foo_call.clone().into()
                                 },
                             }.into(),
-                            location: foo.location.clone()
+                            register: foo.register.clone()
                         }.into(),
                         IntermediateAssignment{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             expression: IntermediateFnCall{
                                 fn_: foo.clone().into(),
                                 args: Vec::new()
@@ -1204,7 +1211,7 @@ mod tests {
                                 block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
-                                            location: bar_call.location.clone(),
+                                            register: bar_call.register.clone(),
                                             expression: IntermediateFnCall{
                                                 fn_: bar.clone().into(),
                                                 args: Vec::new()
@@ -1214,7 +1221,7 @@ mod tests {
                                     ret: bar_call.clone().into()
                                 },
                             }.into(),
-                            location: foo.location.clone()
+                            register: foo.register.clone()
                         }.into(),
                         IntermediateAssignment{
                             expression: IntermediateLambda{
@@ -1222,7 +1229,7 @@ mod tests {
                                 block: IntermediateBlock {
                                     statements: vec![
                                         IntermediateAssignment{
-                                            location: foo_call.location.clone(),
+                                            register: foo_call.register.clone(),
                                             expression: IntermediateFnCall{
                                                 fn_: foo.clone().into(),
                                                 args: Vec::new()
@@ -1232,10 +1239,10 @@ mod tests {
                                     ret: foo_call.clone().into()
                                 },
                             }.into(),
-                            location: bar.location.clone()
+                            register: bar.register.clone()
                         }.into(),
                         IntermediateAssignment{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             expression: IntermediateFnCall{
                                 fn_: foo.clone().into(),
                                 args: Vec::new()
@@ -1264,7 +1271,7 @@ mod tests {
     #[test]
     fn test_recursive_inlining() {
         let premain = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: IntermediateFnType(
                 vec![AtomicTypeEnum::INT.into()],
                 Box::new(AtomicTypeEnum::INT.into()),
@@ -1272,25 +1279,25 @@ mod tests {
             .into(),
         };
         let call = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
 
         let arg = IntermediateArg {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let ret = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
         let calls = [
             IntermediateMemory {
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::INT.into(),
             },
             IntermediateMemory {
-                location: Location::new(),
+                register: Register::new(),
                 type_: AtomicTypeEnum::INT.into(),
             },
         ];
@@ -1299,7 +1306,7 @@ mod tests {
             block: IntermediateBlock {
                 statements: vec![
                     IntermediateAssignment {
-                        location: calls[0].location.clone().into(),
+                        register: calls[0].register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: premain.clone().into(),
                             args: vec![arg.clone().into()],
@@ -1308,7 +1315,7 @@ mod tests {
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: calls[1].location.clone().into(),
+                        register: calls[1].register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: premain.clone().into(),
                             args: vec![arg.clone().into()],
@@ -1317,7 +1324,7 @@ mod tests {
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: ret.location.clone().into(),
+                        register: ret.register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: BuiltInFn(
                                 Id::from("+"),
@@ -1343,11 +1350,11 @@ mod tests {
                 statements: vec![
                     IntermediateAssignment {
                         expression: recursive.clone().into(),
-                        location: premain.location.clone(),
+                        register: premain.register.clone(),
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: call.location.clone().into(),
+                        register: call.register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: premain.clone().into(),
                             args: vec![Integer { value: 10 }.into()],
@@ -1376,27 +1383,27 @@ mod tests {
     #[test]
     fn test_self_recursive_inlining() {
         let premain = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
         };
         let arg = IntermediateArg {
             type_: AtomicTypeEnum::INT.into(),
-            location: Location::new(),
+            register: Register::new(),
         };
         let call = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
 
         let ret = IntermediateMemory {
-            location: Location::new(),
+            register: Register::new(),
             type_: AtomicTypeEnum::INT.into(),
         };
         let recursive = IntermediateLambda {
             args: vec![arg.clone()],
             block: IntermediateBlock {
                 statements: vec![IntermediateAssignment {
-                    location: ret.location.clone().into(),
+                    register: ret.register.clone().into(),
                     expression: IntermediateFnCall {
                         fn_: premain.clone().into(),
                         args: vec![arg.clone().into()],
@@ -1413,11 +1420,11 @@ mod tests {
                 statements: vec![
                     IntermediateAssignment {
                         expression: recursive.clone().into(),
-                        location: premain.location.clone(),
+                        register: premain.register.clone(),
                     }
                     .into(),
                     IntermediateAssignment {
-                        location: call.location.clone().into(),
+                        register: call.register.clone().into(),
                         expression: IntermediateFnCall {
                             fn_: premain.clone().into(),
                             args: vec![Integer { value: -10 }.into()],

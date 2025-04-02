@@ -4,14 +4,15 @@ use itertools::Either::{self, Left, Right};
 
 use crate::{
     BuiltInFn, IntermediateAssignment, IntermediateBuiltIn, IntermediateExpression,
-    IntermediateLambda, IntermediateStatement, IntermediateValue, Location,
+    IntermediateLambda, IntermediateStatement, IntermediateValue, Register,
 };
 
 #[derive(Debug, PartialEq, Clone)]
+/// FnInst stores all ways of identifying a function.
 pub enum FnInst {
     Lambda(IntermediateLambda),
     BuiltIn(BuiltInFn),
-    Ref(Location),
+    Ref(Register),
 }
 
 impl From<IntermediateLambda> for FnInst {
@@ -26,11 +27,13 @@ impl From<BuiltInFn> for FnInst {
     }
 }
 
-impl From<Location> for FnInst {
-    fn from(value: Location) -> Self {
+impl From<Register> for FnInst {
+    fn from(value: Register) -> Self {
         FnInst::Ref(value)
     }
 }
+
+pub type FnDefs = HashMap<Register, FnInst>;
 
 impl FnInst {
     fn collect_fn_defs_from_statement(statement: &IntermediateStatement, fn_defs: &mut FnDefs) {
@@ -43,24 +46,24 @@ impl FnInst {
     fn collect_fns_defs_from_assignment(
         IntermediateAssignment {
             expression,
-            location,
+            register,
         }: &IntermediateAssignment,
         fn_defs: &mut FnDefs,
     ) {
         match expression {
             IntermediateExpression::IntermediateLambda(lambda) => {
-                fn_defs.insert(location.clone(), lambda.clone().into());
+                fn_defs.insert(register.clone(), lambda.clone().into());
                 Self::collect_fn_defs_from_statements(&lambda.block.statements, fn_defs);
             }
             IntermediateExpression::IntermediateValue(IntermediateValue::IntermediateBuiltIn(
                 IntermediateBuiltIn::BuiltInFn(fn_),
             )) => {
-                fn_defs.insert(location.clone(), fn_.clone().into());
+                fn_defs.insert(register.clone(), fn_.clone().into());
             }
             IntermediateExpression::IntermediateValue(IntermediateValue::IntermediateMemory(
                 memory,
-            )) if fn_defs.contains_key(&memory.location) => {
-                fn_defs.insert(location.clone(), memory.location.clone().into());
+            )) if fn_defs.contains_key(&memory.register) => {
+                fn_defs.insert(register.clone(), memory.register.clone().into());
             }
             IntermediateExpression::IntermediateIf(if_) => {
                 Self::collect_fn_defs_from_statements(&if_.branches.0.statements, fn_defs);
@@ -83,21 +86,20 @@ impl FnInst {
         }
     }
 
+    /// Translate a register into a lambda or built-in function, if it can be traced.
     pub fn get_root_fn(
         fn_defs: &FnDefs,
-        location: &Location,
+        register: &Register,
     ) -> Option<Either<IntermediateLambda, BuiltInFn>> {
-        let fn_def = fn_defs.get(&location);
+        let fn_def = fn_defs.get(&register);
         match fn_def {
             Some(FnInst::Lambda(lambda)) => Some(Left(lambda.clone())),
             Some(FnInst::BuiltIn(built_in_fn)) => Some(Right(built_in_fn.clone())),
-            Some(FnInst::Ref(location)) => Self::get_root_fn(fn_defs, location),
+            Some(FnInst::Ref(register)) => Self::get_root_fn(fn_defs, register),
             None => None,
         }
     }
 }
-
-pub type FnDefs = HashMap<Location, FnInst>;
 
 #[cfg(test)]
 mod tests {
@@ -117,7 +119,7 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                         expression: IntermediateFnCall {
                             fn_: IntermediateBuiltIn::from(BuiltInFn(
                                 Id::from("++"),
@@ -127,7 +129,7 @@ mod tests {
                                 )
                             )).into(),
                             args: vec![IntermediateMemory{
-                                location: Location::new(),
+                                register: Register::new(),
                                 type_: AtomicTypeEnum::INT.into()
                             }.into()]
                         }.into()
@@ -140,7 +142,7 @@ mod tests {
     )]
     #[test_case(
         {
-            let location = Location::new();
+            let register = Register::new();
             let lambda = IntermediateLambda {
                 args: Vec::new(),
                 block: IntermediateBlock{
@@ -151,12 +153,12 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: location.clone(),
+                        register: register.clone(),
                         expression: lambda.clone().into()
                     }.into()
                 ],
                 FnDefs::from([
-                    (location, lambda.into())
+                    (register, lambda.into())
                 ])
             )
         };
@@ -164,8 +166,8 @@ mod tests {
     )]
     #[test_case(
         {
-            let location_a = Location::new();
-            let location_b = Location::new();
+            let register_a = Register::new();
+            let register_b = Register::new();
             let lambda_a = IntermediateLambda {
                 args: Vec::new(),
                 block: IntermediateBlock{
@@ -175,7 +177,7 @@ mod tests {
             };
             let arg = IntermediateArg{
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
             let lambda_b = IntermediateLambda {
                 args: vec![arg.clone()],
@@ -187,17 +189,17 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: location_a.clone(),
+                        register: register_a.clone(),
                         expression: lambda_a.clone().into()
                     }.into(),
                     IntermediateAssignment {
-                        location: location_b.clone(),
+                        register: register_b.clone(),
                         expression: lambda_b.clone().into()
                     }.into(),
                 ],
                 FnDefs::from([
-                    (location_a, lambda_a.into()),
-                    (location_b, lambda_b.into()),
+                    (register_a, lambda_a.into()),
+                    (register_b, lambda_b.into()),
                 ])
             )
         };
@@ -205,7 +207,7 @@ mod tests {
     )]
     #[test_case(
         {
-            let location = Location::new();
+            let register = Register::new();
             let fn_ = BuiltInFn(
                 Id::from("<=>"),
                 IntermediateFnType(
@@ -216,12 +218,12 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: location.clone(),
+                        register: register.clone(),
                         expression: IntermediateValue::from(fn_.clone()).into()
                     }.into()
                 ],
                 FnDefs::from([
-                    (location, fn_.into())
+                    (register, fn_.into())
                 ])
             )
         };
@@ -230,13 +232,13 @@ mod tests {
     #[test_case(
         {
             let memory = IntermediateMemory{
-                location: Location::new(),
+                register: Register::new(),
                 type_: IntermediateFnType(
                     Vec::new(),
                     Box::new(AtomicTypeEnum::INT.into())
                 ).into()
             };
-            let location = Location::new();
+            let register = Register::new();
             let lambda = IntermediateLambda {
                 args: Vec::new(),
                 block: IntermediateBlock{
@@ -247,17 +249,17 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: memory.location.clone(),
+                        register: memory.register.clone(),
                         expression: lambda.clone().into()
                     }.into(),
                     IntermediateAssignment {
-                        location: location.clone(),
+                        register: register.clone(),
                         expression: IntermediateValue::from(memory.clone()).into()
                     }.into()
                 ],
                 FnDefs::from([
-                    (memory.location.clone(), lambda.into()),
-                    (location, memory.location.into()),
+                    (memory.register.clone(), lambda.into()),
+                    (register, memory.register.into()),
                 ])
             )
         };
@@ -274,7 +276,7 @@ mod tests {
             };
             let assignment_0 = IntermediateAssignment {
                 expression: lambda_0.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             let lambda_1 = IntermediateLambda {
                 args: Vec::new(),
@@ -285,15 +287,15 @@ mod tests {
             };
             let assignment_1 = IntermediateAssignment {
                 expression: lambda_1.clone().into(),
-                location: Location::new()
+                register: Register::new()
             };
             (
                 vec![
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                         expression: IntermediateIf {
                             condition: IntermediateArg{
-                                location: Location::new(),
+                                register: Register::new(),
                                 type_: AtomicTypeEnum::BOOL.into()
                             }.into(),
                             branches: (
@@ -314,8 +316,8 @@ mod tests {
                     }.into()
                 ],
                 FnDefs::from([
-                    (assignment_0.location, lambda_0.into()),
-                    (assignment_1.location, lambda_1.into()),
+                    (assignment_0.register, lambda_0.into()),
+                    (assignment_1.register, lambda_1.into()),
                 ])
             )
         };
@@ -345,24 +347,24 @@ mod tests {
                 },
             };
             let assignment_0 = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda_0.clone().into(),
             };
             let assignment_1 = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda_1.clone().into(),
             };
             let assignment_2 = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda_2.clone().into(),
             };
             (
                 vec![
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                         expression: IntermediateMatch {
                             subject: IntermediateArg{
-                                location: Location::new(),
+                                register: Register::new(),
                                 type_: IntermediateUnionType(vec![None,None,None]).into()
                             }.into(),
                             branches: vec![
@@ -392,9 +394,9 @@ mod tests {
                     }.into()
                 ],
                 FnDefs::from([
-                    (assignment_0.location, lambda_0.into()),
-                    (assignment_1.location, lambda_1.into()),
-                    (assignment_2.location, lambda_2.into()),
+                    (assignment_0.register, lambda_0.into()),
+                    (assignment_1.register, lambda_1.into()),
+                    (assignment_2.register, lambda_2.into()),
                 ])
             )
         };
@@ -424,25 +426,25 @@ mod tests {
                 },
             };
             let assignment_0 = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda_0.clone().into(),
             };
             let assignment_1 = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda_1.clone().into(),
             };
             let assignment_2 = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda_2.clone().into(),
             };
             (
                 vec![
                     assignment_0.clone().into(),
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                         expression: IntermediateMatch {
                             subject: IntermediateArg{
-                                location: Location::new(),
+                                register: Register::new(),
                                 type_: IntermediateUnionType(vec![None,None,None]).into()
                             }.into(),
                             branches: vec![
@@ -465,9 +467,9 @@ mod tests {
                     }.into()
                 ],
                 FnDefs::from([
-                    (assignment_0.location, lambda_0.into()),
-                    (assignment_1.location, lambda_1.into()),
-                    (assignment_2.location, lambda_2.into()),
+                    (assignment_0.register, lambda_0.into()),
+                    (assignment_1.register, lambda_1.into()),
+                    (assignment_2.register, lambda_2.into()),
                 ])
             )
         };
@@ -484,16 +486,16 @@ mod tests {
                 },
             };
             let assignment = IntermediateAssignment {
-                location: Location::new(),
+                register: Register::new(),
                 expression: lambda.clone().into(),
             };
             (
                 vec![
                     IntermediateAssignment {
-                        location: Location::new(),
+                        register: Register::new(),
                         expression: IntermediateMatch {
                             subject: IntermediateArg{
-                                location: Location::new(),
+                                register: Register::new(),
                                 type_: IntermediateUnionType(vec![None,None,None]).into()
                             }.into(),
                             branches: vec![
@@ -509,7 +511,7 @@ mod tests {
                     }.into()
                 ],
                 FnDefs::from([
-                    (assignment.location, lambda.into()),
+                    (assignment.register, lambda.into()),
                 ])
             )
         };
@@ -517,9 +519,9 @@ mod tests {
     )]
     #[test_case(
         {
-            let internal_location = Location::new();
-            let external_location = Location::new();
-            let ret_loc = Location::new();
+            let internal_register = Register::new();
+            let external_register = Register::new();
+            let ret_reg = Register::new();
             let internal_lambda = IntermediateLambda {
                 args: Vec::new(),
                 block: IntermediateBlock{
@@ -532,14 +534,14 @@ mod tests {
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
-                            location: internal_location.clone(),
+                            register: internal_register.clone(),
                             expression: internal_lambda.clone().into()
                         }.into(),
                         IntermediateAssignment {
-                            location: ret_loc.clone(),
+                            register: ret_reg.clone(),
                             expression: IntermediateFnCall{
                                 fn_: IntermediateMemory {
-                                    location: internal_location.clone(),
+                                    register: internal_register.clone(),
                                     type_: IntermediateFnType(
                                         Vec::new(),
                                         Box::new(AtomicTypeEnum::INT.into())
@@ -550,7 +552,7 @@ mod tests {
                         }.into(),
                     ],
                     ret: IntermediateMemory {
-                        location: ret_loc,
+                        register: ret_reg,
                         type_: AtomicTypeEnum::INT.into()
                     }.into(),
                 }
@@ -558,13 +560,13 @@ mod tests {
             (
                 vec![
                     IntermediateAssignment {
-                        location: external_location.clone(),
+                        register: external_register.clone(),
                         expression: external_lambda.clone().into()
                     }.into(),
                 ],
                 FnDefs::from([
-                    (internal_location, internal_lambda.into()),
-                    (external_location, external_lambda.into()),
+                    (internal_register, internal_lambda.into()),
+                    (external_register, external_lambda.into()),
                 ])
             )
         };

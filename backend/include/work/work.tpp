@@ -30,9 +30,13 @@ requires (std::is_same_v<Args,remove_lazy_t<std::decay_t<ArgsT>>> && ...)
 std::pair<std::shared_ptr<Work>, LazyT<Ret>>
 Work::fn_call(const FnT<Ret, Args...> &f, const ArgsT&... args) {
     std::shared_ptr<TypedWork<Ret, Args...>> work = std::make_shared<TypedWork<Ret, Args...>>();
+    // Make placeholders to store result.
     auto placeholders = make_lazy_placeholders<LazyT<Ret>>(work);
+    // Setup the work targets with references to these placeholders.
     work->targets = lazy_map([](const auto &t) { return std::weak_ptr(t); }, placeholders);
+    // Initialize with arguments.
     work->fn = f->init(ensure_lazy(args)...);
+    // Set the work's fn to avoid closures collapsing.
     work->fn->set_fn(f);
     return std::make_pair(work, placeholders);
 }
@@ -64,5 +68,6 @@ void TypedWork<Ret, Args...>::await_all() {
 
 template <typename Ret, typename... Args>
 bool TypedWork<Ret, Args...>::can_respond() const {
+    /// Determine that the function is moderately large and currently available.
     return (fn->lower_size_bound() > 200 || fn->is_recursive()) && work_status.load<0>(std::memory_order_acquire) == WorkStatus::AVAILABLE;
 }

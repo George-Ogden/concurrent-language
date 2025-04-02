@@ -1,11 +1,14 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{
+        hash_map::{Entry, HashMap},
+        BTreeMap, HashSet,
+    },
     rc::Rc,
 };
 
 use crate::{
-    allocations::{AllocationOptimizer, MemoryMap},
+    copy_propagation::{CopyPropagator, MemoryMap},
     intermediate_nodes::*,
 };
 use itertools::{zip_eq, Itertools};
@@ -35,6 +38,7 @@ impl Lowerer {
             statements: Vec::new(),
             memory: MemoryMap::new(),
         };
+        // Add default context to scope.
         let scope = DEFAULT_CONTEXT.with(|context| {
             Scope::from_iter(context.iter().map(|(id, var)| {
                 let IntermediateType::IntermediateFnType(type_) =
@@ -49,18 +53,21 @@ impl Lowerer {
         lowerer.scope = scope;
         lowerer
     }
-    fn update_memory(&mut self, location: Location, expression: IntermediateExpression) {
-        self.memory.insert(location, expression);
+    fn update_memory(&mut self, register: Register, expression: IntermediateExpression) {
+        self.memory.insert(register, expression);
     }
+    /// Get a value that is equal to an expression.
     fn get_cached_value(
         &mut self,
         intermediate_expression: IntermediateExpression,
     ) -> IntermediateValue {
         if let Some(cached) = self.history.get(&intermediate_expression) {
+            // If such a value exists, return it.
             return cached.clone();
         }
+        // If not, create a value and add a statement with the assignment.
         let assignment: IntermediateAssignment = intermediate_expression.clone().into();
-        self.update_memory(assignment.location.clone(), assignment.expression.clone());
+        self.update_memory(assignment.register.clone(), assignment.expression.clone());
         self.statements.push(assignment.clone().into());
         let value: IntermediateValue = assignment.into();
         self.history.insert(intermediate_expression, value.clone());
@@ -170,7 +177,7 @@ impl Lowerer {
             .map(|variable| IntermediateArg::from(self.lower_type(&variable.type_.type_)))
             .collect::<Vec<_>>();
         for (variable, arg) in zip_eq(&variables, &args) {
-            self.update_memory(arg.location.clone(), arg.clone().into());
+            self.update_memory(arg.register.clone(), arg.clone().into());
             self.scope
                 .insert((variable.clone(), Vec::new()), arg.clone().into());
         }
@@ -237,7 +244,7 @@ impl Lowerer {
         let args: HashMap<Variable, IntermediateArg> =
             HashMap::from_iter(all_assignees.into_iter().map(|(variable, type_)| {
                 let arg = IntermediateArg::from(self.lower_type(&type_.type_));
-                self.update_memory(arg.location.clone(), arg.clone().into());
+                self.update_memory(arg.register.clone(), arg.clone().into());
                 self.scope
                     .insert((variable.clone(), Vec::new()), arg.clone().into());
                 (variable, arg)
@@ -315,6 +322,7 @@ impl Lowerer {
         }
     }
     pub fn lower_type(&mut self, type_: &Type) -> IntermediateType {
+        // Remove names from the type to override union equality (different from type checking).
         let type_ = self.clear_names(type_);
         let lower_type = self.lower_type_internal(&type_, HashSet::new());
         lower_type
@@ -346,16 +354,18 @@ impl Lowerer {
                         .into()
                     };
                 match self.type_defs.entry(type_.clone()) {
-                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                    Entry::Occupied(occupied_entry) => {
                         visited_references.insert(occupied_entry.get().as_ptr());
                         lower_type(self, visited_references)
                     }
-                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                    Entry::Vacant(vacant_entry) => {
+                        // Generate new, empty reference.
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
                         visited_references.insert(reference.as_ptr());
                         let lower_type = lower_type(self, visited_references);
+                        // Update the reference with the lowered type.
                         *reference.clone().borrow_mut() = lower_type.clone();
                         lower_type
                     }
@@ -365,9 +375,10 @@ impl Lowerer {
                 reference: type_,
                 instances: params,
             }) => {
+                // Monomorphize types by instantiating.
                 let instantiation = self.clear_names(&type_.borrow().instantiate(params));
                 match self.type_defs.entry(instantiation.clone()) {
-                    std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                    Entry::Occupied(occupied_entry) => {
                         if visited_references.contains(&occupied_entry.get().as_ptr()) {
                             IntermediateType::Reference(occupied_entry.get().clone())
                         } else {
@@ -375,7 +386,7 @@ impl Lowerer {
                             occupied_entry.get().borrow().clone()
                         }
                     }
-                    std::collections::hash_map::Entry::Vacant(vacant_entry) => {
+                    Entry::Vacant(vacant_entry) => {
                         let reference =
                             Rc::new(RefCell::new(IntermediateUnionType(Vec::new()).into()));
                         vacant_entry.insert(reference.clone());
@@ -415,6 +426,7 @@ impl Lowerer {
     ) -> Option<(IntermediateMemory, TypedExpression)> {
         let variable = statement.variable();
         if parameters.is_none() && variable.type_.parameters.len() > 0 {
+            // Record uninstantiated expressions, but do not generate yet.
             self.uninstantiated.insert(variable.variable, statement);
             return None;
         }
@@ -436,6 +448,7 @@ impl Lowerer {
                 expression.instantiate(&parameters)
             }
         };
+        // Assign to a dummy memory register.
         let placeholder = IntermediateMemory::from(self.lower_type(&expression.type_()));
         self.scope.insert(
             (variable.variable.clone(), parameters.clone()),
@@ -445,9 +458,11 @@ impl Lowerer {
     }
     fn perform_assignment(&mut self, placeholder: IntermediateMemory, expression: TypedExpression) {
         let value = self.lower_expression(expression);
-        self.update_memory(placeholder.location, value.into());
+        self.update_memory(placeholder.register, value.into());
     }
     fn lower_statements(&mut self, statements: Vec<TypedStatement>) {
+        // Add placeholders for assignments, then insert the actual expression.
+        // Necessary for recursive fn definitions.
         let expressions = statements
             .into_iter()
             .filter_map(|statement| self.add_placeholder_assignment(statement, None))
@@ -458,9 +473,9 @@ impl Lowerer {
     }
     fn lower_program(&mut self, program: TypedProgram) -> IntermediateProgram {
         let main = self.lower_lambda_def(program.main);
-        let allocation_optimizer = AllocationOptimizer::from_memory_map(self.memory.clone());
+        let copy_propagator = CopyPropagator::from_memory_map(self.memory.clone());
         let IntermediateExpression::IntermediateLambda(main) =
-            allocation_optimizer.remove_wasted_allocations_from_expression(main.into())
+            copy_propagator.propagate_copies_in_expression(main.into())
         else {
             panic!("Main fn changed form in allocation removal.")
         };
@@ -477,6 +492,8 @@ impl Lowerer {
 
 #[cfg(test)]
 mod tests {
+
+    use crate::expression_equality_checker::ExpressionEqualityChecker;
 
     use super::*;
 
@@ -937,7 +954,7 @@ mod tests {
                 block: IntermediateBlock{
                     statements: vec![
                         IntermediateAssignment{
-                            location: return_address.location.clone(),
+                            register: return_address.register.clone(),
                             expression: IntermediateIf{
                                 condition: arg.into(),
                                 branches: (
@@ -1105,7 +1122,7 @@ mod tests {
                         y.clone().into(),
                         c.clone().into(),
                         IntermediateAssignment{
-                            location: return_address.location.clone(),
+                            register: return_address.register.clone(),
                             expression: IntermediateIf{
                                 condition: c.into(),
                                 branches: (
@@ -1189,7 +1206,7 @@ mod tests {
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment{
-                            location: return_address.location.clone(),
+                            register: return_address.register.clone(),
                             expression: IntermediateMatch{
                                 subject: arg.into(),
                                 branches: vec![
@@ -1267,7 +1284,7 @@ mod tests {
                 block: IntermediateBlock{
                     statements: vec![
                         IntermediateAssignment{
-                            location: return_address.location.clone(),
+                            register: return_address.register.clone(),
                             expression: IntermediateMatch{
                                 subject: arg.into(),
                                 branches: vec![
@@ -1355,7 +1372,7 @@ mod tests {
                 block: IntermediateBlock{
                     statements: vec![
                         IntermediateAssignment{
-                            location: return_address.location.clone(),
+                            register: return_address.register.clone(),
                             expression: IntermediateMatch{
                                 subject: arg.into(),
                                 branches: vec![
@@ -1396,10 +1413,10 @@ mod tests {
         .into();
         let mut lowerer = Lowerer::new();
         let value = lowerer.lower_expression(expression);
-        let allocation_optimizer = AllocationOptimizer::from_memory_map(lowerer.memory.clone());
-        let efficient_value = allocation_optimizer.remove_wasted_allocations_from_value(value);
-        let efficient_statements = allocation_optimizer
-            .remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        let copy_propagator = CopyPropagator::from_memory_map(lowerer.memory.clone());
+        let efficient_value = copy_propagator.propagate_copies_in_value(value);
+        let efficient_statements =
+            copy_propagator.propagate_copies_in_statements(lowerer.statements.clone());
         let efficient_fn = IntermediateLambda {
             args: Vec::new(),
             block: IntermediateBlock {
@@ -2457,9 +2474,9 @@ mod tests {
         let (statements, expected_scope) = statements_scope;
         let mut lowerer = Lowerer::new();
         lowerer.lower_statements(statements);
-        let allocation_optimizer = AllocationOptimizer::from_memory_map(lowerer.memory.clone());
-        lowerer.statements = allocation_optimizer
-            .remove_wasted_allocations_from_statements(lowerer.statements.clone());
+        let copy_propagator = CopyPropagator::from_memory_map(lowerer.memory.clone());
+        lowerer.statements =
+            copy_propagator.propagate_copies_in_statements(lowerer.statements.clone());
         let flat_scope: HashMap<(Variable, Vec<Type>), IntermediateValue> = lowerer
             .scope
             .clone()
@@ -2468,13 +2485,11 @@ mod tests {
             .collect::<HashMap<_, _>>();
         let mut tuples = (Vec::new(), Vec::new());
         for (k, e) in expected_scope {
-            let value = allocation_optimizer
-                .remove_wasted_allocations_from_value(flat_scope[&(k, Vec::new())].clone());
+            let value =
+                copy_propagator.propagate_copies_in_value(flat_scope[&(k, Vec::new())].clone());
             let expression = match value {
-                IntermediateValue::IntermediateMemory(memory) => allocation_optimizer
-                    .remove_wasted_allocations_from_expression(
-                        lowerer.memory[&memory.location].clone(),
-                    ),
+                IntermediateValue::IntermediateMemory(memory) => copy_propagator
+                    .propagate_copies_in_expression(lowerer.memory[&memory.register].clone()),
                 v => v.into(),
             };
             dbg!(&expression, &e);
@@ -2558,7 +2573,7 @@ mod tests {
             let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                 args: Vec::new(),
                 fn_: IntermediateMemory{
-                    location: main.location.clone(),
+                    register: main.register.clone(),
                     type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
                 }.into()
             }).into();
@@ -2571,7 +2586,7 @@ mod tests {
                             main_call.clone().into()
                         ],
                         ret: IntermediateMemory{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             type_: AtomicTypeEnum::INT.into()
                         }.into()
                     }.into()
@@ -2648,7 +2663,7 @@ mod tests {
             let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                 args: vec![arg.clone().into()],
                 fn_: IntermediateMemory{
-                    location: main.location.clone(),
+                    register: main.register.clone(),
                     type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
                 }.into()
             }).into();
@@ -2661,7 +2676,7 @@ mod tests {
                             main_call.clone().into()
                         ],
                         ret: IntermediateMemory{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             type_: AtomicTypeEnum::INT.into()
                         }.into()
                     }
@@ -2800,7 +2815,7 @@ mod tests {
             let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                 args: Vec::new(),
                 fn_: IntermediateMemory{
-                    location: main.location.clone(),
+                    register: main.register.clone(),
                     type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
                 }.into()
             }).into();
@@ -2811,7 +2826,7 @@ mod tests {
                         statements: vec![
                             ctor.clone().into(),
                             IntermediateAssignment{
-                                location: memory.location.clone(),
+                                register: memory.register.clone(),
                                 expression: IntermediateMatch {
                                     subject: ctor.into(),
                                     branches: vec![
@@ -2830,7 +2845,7 @@ mod tests {
                             main_call.clone().into()
                         ],
                         ret: IntermediateMemory{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             type_: AtomicTypeEnum::INT.into()
                         }.into()
                     }
@@ -2945,7 +2960,7 @@ mod tests {
             let main_call: IntermediateAssignment = IntermediateExpression::IntermediateFnCall(IntermediateFnCall {
                 args: Vec::new(),
                 fn_: IntermediateMemory{
-                    location: main.location.clone(),
+                    register: main.register.clone(),
                     type_: IntermediateFnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into()
                 }.into()
             }).into();
@@ -2958,7 +2973,7 @@ mod tests {
                             main_call.clone().into()
                         ],
                         ret: IntermediateMemory{
-                            location: main_call.location.clone(),
+                            register: main_call.register.clone(),
                             type_: AtomicTypeEnum::INT.into()
                         }.into()
                     }

@@ -10,6 +10,7 @@
 
 template <typename... Ts> using TupleT = std::tuple<Ts...>;
 
+/// Store a variant as a tag and then a  union.
 template <typename... Types> struct VariantT {
     static_assert(sizeof...(Types) > 0, "VariantT must have at least one type");
 
@@ -24,6 +25,7 @@ template <typename... Types> struct VariantT {
     requires(Index < sizeof...(Types)) explicit constexpr VariantT(
         std::integral_constant<std::size_t, Index>);
 
+    /// Constructor from an `integral_constant` tag and the relevant type.
     template <std::size_t Index, typename T>
     requires(Index < sizeof...(Types)) &&
         std::is_same_v<

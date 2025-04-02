@@ -1,8 +1,8 @@
 use lowering::IntermediateProgram;
 
 use crate::{
-    args::OptimizationArgs, dead_code_analysis::DeadCodeAnalyzer,
-    equivalent_expression_elimination::EquivalentExpressionEliminator, inlining::Inliner,
+    args::OptimizationArgs, dead_code_analysis::DeadCodeAnalyzer, inlining::Inliner,
+    redundancy_elimination::RedundancyEliminator,
 };
 
 pub struct Optimizer {}
@@ -20,7 +20,7 @@ impl Optimizer {
             .equivalent_elimination_args
             .no_equivalent_expression_elimination
         {
-            program = EquivalentExpressionEliminator::eliminate_equivalent_expressions(program);
+            program = RedundancyEliminator::eliminate_redundancy(program);
         }
         program = Inliner::inline_up_to_size(program, Some(args.inlining_args.inlining_depth));
         program

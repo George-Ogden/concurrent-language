@@ -14,6 +14,7 @@ pub struct RecursiveFnFinder {
 }
 
 impl RecursiveFnFinder {
+    /// Find whether all functions in a program are recursive or not.
     pub fn recursive_fns(program: &IntermediateProgram) -> RecursiveFns {
         let lambda = &program.main;
         let mut finder = RecursiveFnFinder {
@@ -28,15 +29,19 @@ impl RecursiveFnFinder {
         }
         recursive_fns
     }
+    /// Find out whether a lambda is recursive.
     fn find(&self, lambda: &IntermediateLambda, recursive_fns: &mut RecursiveFns) -> bool {
         if recursive_fns.contains_key(lambda) {
             return recursive_fns[lambda];
         }
+        // Assume that it is recursive, in case it is found.
         recursive_fns.insert(lambda.clone(), true);
         let is_recursive = self.check(&lambda.block.statements, recursive_fns);
+        // Update based on result.
         recursive_fns.insert(lambda.clone(), is_recursive);
         is_recursive
     }
+    /// Check for calls to recursive functions within the body.
     fn check(
         &self,
         statements: &Vec<IntermediateStatement>,
@@ -45,15 +50,15 @@ impl RecursiveFnFinder {
         statements.iter().any(|statement| match statement {
             IntermediateStatement::IntermediateAssignment(IntermediateAssignment {
                 expression,
-                location: _,
+                register: _,
             }) => match expression {
                 IntermediateExpression::IntermediateFnCall(IntermediateFnCall { fn_, args: _ }) => {
                     match fn_ {
                         IntermediateValue::IntermediateBuiltIn(_) => false,
                         IntermediateValue::IntermediateMemory(IntermediateMemory {
                             type_: _,
-                            location,
-                        }) => match FnInst::get_root_fn(&self.fn_defs, location) {
+                            register,
+                        }) => match FnInst::get_root_fn(&self.fn_defs, register) {
                             Some(Left(lambda)) => self.find(&lambda, recursive_fns),
                             Some(Right(_)) => false,
                             None => true,
@@ -80,7 +85,7 @@ mod tests {
     use crate::{
         IntermediateArg, IntermediateAssignment, IntermediateBlock, IntermediateFnCall,
         IntermediateFnType, IntermediateIf, IntermediateLambda, IntermediateMemory,
-        IntermediateStatement, IntermediateType, Location,
+        IntermediateStatement, IntermediateType, Register,
     };
 
     use super::*;
@@ -99,12 +104,12 @@ mod tests {
     )]
     #[test_case(
         {
-            let identity = Location::new();
+            let identity = Register::new();
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::BOOL).into();
             (
                 vec![
                     IntermediateAssignment{
-                        location: identity.clone(),
+                        register: identity.clone(),
                         expression: IntermediateLambda {
                             args: vec![arg.clone()],
                             block: IntermediateBlock {
@@ -125,18 +130,18 @@ mod tests {
         {
             let call = IntermediateMemory{
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new()
+                register: Register::new()
             };
-            let fn_ = Location::new();
+            let fn_ = Register::new();
             (
                 vec![
                     IntermediateAssignment{
-                        location: fn_.clone(),
+                        register: fn_.clone(),
                         expression: IntermediateLambda {
                             block: IntermediateBlock{
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: call.location.clone(),
+                                        register: call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: IntermediateArg::from(
                                                 IntermediateType::from(IntermediateFnType(
@@ -171,7 +176,7 @@ mod tests {
         {
             let id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
@@ -186,28 +191,28 @@ mod tests {
                     Box::new(AtomicTypeEnum::INT.into()),
                 )
                 .into(),
-                location: Location::new(),
+                register: Register::new(),
             };
 
             let idea_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_fn = IntermediateLambda {
                 args: vec![idea_arg.clone()],
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
-                            location: id_fn.location.clone(),
+                            register: id_fn.register.clone(),
                             expression: id.clone().into(),
                         }
                         .into(),
                         IntermediateAssignment {
-                            location: idea_ret.location.clone(),
+                            register: idea_ret.register.clone(),
                             expression: IntermediateFnCall {
                                 fn_: id_fn.clone().into(),
                                 args: vec![idea_arg.clone().into()],
@@ -219,17 +224,17 @@ mod tests {
                     ret: idea_ret.clone().into(),
                 },
             };
-            let idea = Location::new();
+            let idea = Register::new();
             (
                 vec![
                     IntermediateAssignment{
-                        location: idea.clone(),
+                        register: idea.clone(),
                         expression: idea_fn.into()
                     }.into()
                 ],
                 HashMap::from([
                     (idea.clone(), false),
-                    (id_fn.location.clone(), false)
+                    (id_fn.register.clone(), false)
                 ])
             )
         };
@@ -239,7 +244,7 @@ mod tests {
         {
             let id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
@@ -254,23 +259,23 @@ mod tests {
                     Box::new(AtomicTypeEnum::INT.into()),
                 )
                 .into(),
-                location: Location::new(),
+                register: Register::new(),
             };
 
             let idea_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_fn = IntermediateLambda {
                 args: vec![idea_arg.clone()],
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
-                            location: idea_ret.location.clone(),
+                            register: idea_ret.register.clone(),
                             expression: IntermediateFnCall {
                                 fn_: id_fn.clone().into(),
                                 args: vec![idea_arg.clone().into()],
@@ -282,22 +287,22 @@ mod tests {
                     ret: idea_ret.clone().into(),
                 },
             };
-            let idea = Location::new();
+            let idea = Register::new();
             (
                 vec![
                     IntermediateAssignment {
-                        location: id_fn.location.clone(),
+                        register: id_fn.register.clone(),
                         expression: id.clone().into(),
                     }
                     .into(),
                     IntermediateAssignment{
-                        location: idea.clone(),
+                        register: idea.clone(),
                         expression: idea_fn.into()
                     }.into()
                 ],
                 HashMap::from([
                     (idea.clone(), false),
-                    (id_fn.location.clone(), false)
+                    (id_fn.register.clone(), false)
                 ])
             )
         };
@@ -320,7 +325,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: foo_call.location.clone(),
+                                        register: foo_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: foo.clone().into(),
                                             args: Vec::new()
@@ -330,11 +335,11 @@ mod tests {
                                 ret: foo_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                 ],
                 HashMap::from([
-                    (foo.location.clone(), true)
+                    (foo.register.clone(), true)
                 ])
             )
         };
@@ -364,7 +369,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: bar_call.location.clone(),
+                                        register: bar_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: bar.clone().into(),
                                             args: Vec::new()
@@ -374,7 +379,7 @@ mod tests {
                                 ret: bar_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
@@ -382,7 +387,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: foo_call.location.clone(),
+                                        register: foo_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: foo.clone().into(),
                                             args: Vec::new()
@@ -392,12 +397,12 @@ mod tests {
                                 ret: foo_call.clone().into()
                             },
                         }.into(),
-                        location: bar.location.clone()
+                        register: bar.register.clone()
                     }.into(),
                 ],
                 HashMap::from([
-                    (foo.location.clone(), true),
-                    (bar.location.clone(), true)
+                    (foo.register.clone(), true),
+                    (bar.register.clone(), true)
                 ])
             )
         };
@@ -415,18 +420,18 @@ mod tests {
 
             let idea_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_fn = IntermediateLambda {
                 args: vec![idea_arg.clone()],
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
-                            location: idea_ret.location.clone(),
+                            register: idea_ret.register.clone(),
                             expression: IntermediateFnCall {
                                 fn_: foo.clone().into(),
                                 args: Vec::new(),
@@ -438,7 +443,7 @@ mod tests {
                     ret: idea_ret.clone().into(),
                 },
             };
-            let idea = Location::new();
+            let idea = Register::new();
             (
                 vec![
                     IntermediateAssignment{
@@ -447,7 +452,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: foo_call.location.clone(),
+                                        register: foo_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: foo.clone().into(),
                                             args: Vec::new()
@@ -457,16 +462,16 @@ mod tests {
                                 ret: foo_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
-                        location: idea.clone(),
+                        register: idea.clone(),
                         expression: idea_fn.into()
                     }.into()
                 ],
                 HashMap::from([
                     (idea.clone(), true),
-                    (foo.location.clone(), true)
+                    (foo.register.clone(), true)
                 ])
             )
         };
@@ -476,7 +481,7 @@ mod tests {
         {
             let id_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let id = IntermediateLambda {
                 args: vec![id_arg.clone()],
@@ -491,7 +496,7 @@ mod tests {
                     Box::new(AtomicTypeEnum::INT.into()),
                 )
                 .into(),
-                location: Location::new(),
+                register: Register::new(),
             };
 
             let foo = IntermediateMemory::from(
@@ -504,33 +509,33 @@ mod tests {
 
             let idea_arg = IntermediateArg {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_ret = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let call_a = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let call_b = IntermediateMemory {
                 type_: AtomicTypeEnum::INT.into(),
-                location: Location::new(),
+                register: Register::new(),
             };
             let idea_fn = IntermediateLambda {
                 args: vec![idea_arg.clone()],
                 block: IntermediateBlock {
                     statements: vec![
                         IntermediateAssignment {
-                            location: idea_ret.location.clone(),
+                            register: idea_ret.register.clone(),
                             expression: IntermediateIf {
                                 condition: Boolean{value: true}.into(),
                                 branches: (
                                     IntermediateBlock{
                                         statements: vec![
                                             IntermediateAssignment{
-                                                location: call_a.location.clone(),
+                                                register: call_a.register.clone(),
                                                 expression: IntermediateFnCall{
                                                     fn_: foo.clone().into(),
                                                     args: Vec::new()
@@ -542,7 +547,7 @@ mod tests {
                                     IntermediateBlock{
                                         statements: vec![
                                             IntermediateAssignment{
-                                                location: call_b.location.clone(),
+                                                register: call_b.register.clone(),
                                                 expression: IntermediateFnCall{
                                                     fn_: id_fn.clone().into(),
                                                     args: vec![
@@ -561,12 +566,12 @@ mod tests {
                     ret: idea_ret.clone().into(),
                 },
             };
-            let idea = Location::new();
+            let idea = Register::new();
             (
                 vec![
                     IntermediateAssignment{
                         expression: id.clone().into(),
-                        location: id_fn.location.clone(),
+                        register: id_fn.register.clone(),
                     }.into(),
                     IntermediateAssignment{
                         expression: IntermediateLambda{
@@ -574,7 +579,7 @@ mod tests {
                             block: IntermediateBlock {
                                 statements: vec![
                                     IntermediateAssignment{
-                                        location: foo_call.location.clone(),
+                                        register: foo_call.register.clone(),
                                         expression: IntermediateFnCall{
                                             fn_: foo.clone().into(),
                                             args: Vec::new()
@@ -584,30 +589,30 @@ mod tests {
                                 ret: foo_call.clone().into()
                             },
                         }.into(),
-                        location: foo.location.clone()
+                        register: foo.register.clone()
                     }.into(),
                     IntermediateAssignment{
-                        location: idea.clone(),
+                        register: idea.clone(),
                         expression: idea_fn.into()
                     }.into()
                 ],
                 HashMap::from([
                     (idea.clone(), true),
-                    (id_fn.location.clone(),false),
-                    (foo.location.clone(), true)
+                    (id_fn.register.clone(),false),
+                    (foo.register.clone(), true)
                 ])
             )
         };
         "mixed fn call"
     )]
-    fn test_recursive_fn_finder(fns: (Vec<IntermediateStatement>, HashMap<Location, bool>)) {
+    fn test_recursive_fn_finder(fns: (Vec<IntermediateStatement>, HashMap<Register, bool>)) {
         let (statements, recursive) = fns;
         let mut fn_defs = HashMap::new();
         FnInst::collect_fn_defs_from_statements(&statements, &mut fn_defs);
         let expected = recursive
             .into_iter()
             .map(
-                |(location, recursive)| match FnInst::get_root_fn(&fn_defs, &location) {
+                |(register, recursive)| match FnInst::get_root_fn(&fn_defs, &register) {
                     Some(Left(lambda)) => (lambda, recursive),
                     _ => panic!(),
                 },

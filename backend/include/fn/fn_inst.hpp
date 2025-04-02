@@ -22,6 +22,7 @@ static const inline std::size_t IMMEDIATE_EXECUTION_THRESHOLD = 50;
 using MapVariantT = std::variant<Int, void *>;
 
 template <typename Ret, typename... Args> struct TypedFnG;
+/// Function instance with arguments.
 template <typename Ret, typename... Args> class TypedFnI {
 
   protected:
@@ -52,6 +53,7 @@ template <typename Ret, typename... Args> class TypedFnI {
     constexpr bool execute_immediately() const;
 };
 
+/// Function instance containing an environment.
 template <typename E, typename Ret, typename... Args>
 struct TypedClosureI : public TypedFnI<Ret, Args...> {
     using typename TypedFnI<Ret, Args...>::ArgsT;
@@ -67,6 +69,7 @@ struct TypedClosureI : public TypedFnI<Ret, Args...> {
     void set_fn(const std::shared_ptr<TypedFnG<Ret, Args...>> &fn) override;
 };
 
+/// Specialization of the function instance containing an empty environment.
 template <typename Ret, typename... Args>
 struct TypedClosureI<Empty, Ret, Args...> : public TypedFnI<Ret, Args...> {
     using typename TypedFnI<Ret, Args...>::ArgsT;

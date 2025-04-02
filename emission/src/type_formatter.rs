@@ -1,7 +1,8 @@
 use std::fmt::{self, Formatter};
 
-use compilation::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, UnionType};
+use translation::{AtomicType, AtomicTypeEnum, FnType, MachineType, TupleType, UnionType};
 
+/// Convert type to C++ code.
 pub struct TypeFormatter<'a>(pub &'a MachineType);
 impl fmt::Display for TypeFormatter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
@@ -37,6 +38,7 @@ impl fmt::Display for TypeFormatter<'_> {
     }
 }
 
+/// Convert list of types to C++ code.
 struct TypesFormatter<'a>(&'a Vec<MachineType>);
 impl fmt::Display for TypesFormatter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {

@@ -25,6 +25,7 @@ def load_directory(directory: str) -> pd.DataFrame:
     df = pd.read_csv(
         log_filename, sep="\t", index_col=False, converters={"duration": convert_float_or_nan}
     )
+    # Write function as though it is a function call.
     df["function"] = df.name + "(" + df.args + ")"
 
     with open(title_filename) as f:
@@ -39,6 +40,7 @@ def merge_logs(*logs: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize by dividing by the geometric mean of timings fo r a given function."""
     df["log_duration"] = np.log10(df.duration)
     grouped_df = df.groupby("function").log_duration
     mean = grouped_df.transform("mean")

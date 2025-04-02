@@ -50,6 +50,7 @@ class VisitorError(Exception): ...
 
 class Visitor(GrammarVisitor):
     def visitList(self, ctx: ParserRuleContext) -> list:
+        """Utility to visit a list of parse nodes (no type specified)."""
         children = (self.visit(child) for child in ctx.getChildren())
         return [child for child in children if child is not None]
 
@@ -61,6 +62,7 @@ class Visitor(GrammarVisitor):
 
     def visitAtomic_type(self, ctx: GrammarParser.Atomic_typeContext) -> AtomicType:
         type_name = ctx.getText().upper()
+        # Convert to `AtomicTypeEnum`
         type = AtomicTypeEnum[type_name]
         return AtomicType(type)
 
@@ -147,6 +149,7 @@ class Visitor(GrammarVisitor):
 
     def visitInfix_call(self, ctx: GrammarParser.Infix_callContext, carry=None) -> FunctionCall:
         if carry is None:
+            # Use a variable (highest precedence) as root (will eventually be ignored).
             carry = ("id", lambda x: x)
 
         left = self.visit(ctx.infix_free_expr())
@@ -165,20 +168,26 @@ class Visitor(GrammarVisitor):
             operator == parent_operator
             and OperatorManager.get_associativity(operator) == Associativity.RIGHT
         ):
+            # This operator has higher precedence, so make it the root of the new tree
+            # and rotate the left subtree.
             carry = (
                 operator,
                 lambda x: FunctionCall(GenericVariable(operator, []), [tree(left), x]),
             )
         else:
+            # This operator has lower precedence, so keep the parent as the root
+            # and place at the base with the next argument.
             carry = (
                 parent_operator,
                 lambda x: tree(FunctionCall(GenericVariable(operator, []), [left, x])),
             )
         if ctx.expr().infix_call() is None:
             _, function = carry
+            # Use the right node as the second argument.
             right = self.visit(ctx.expr())
             return function(right)
         else:
+            # Continue parsing in the right subtree.
             return self.visitInfix_call(ctx.expr().infix_call(), carry=carry)
 
     def visitPrefix_call(self, ctx: GrammarParser.Prefix_callContext) -> FunctionCall:
@@ -239,6 +248,7 @@ class Visitor(GrammarVisitor):
             id = self.visit(ctx.operator_id())
             return ParametricAssignee(Assignee(id), [])
         elif ctx.getText() == "__":
+            # Handle edge case of the variable `__`.
             return ParametricAssignee(Assignee("__"), [])
         return super().visit(ctx.generic_assignee())
 
@@ -367,10 +377,12 @@ class Parser:
         parser = GrammarParser(stream)
         if target in parser.ruleNames:
             tree = getattr(parser, target).__call__()
+            # Require no errors and at the end of the file.
             if parser.getNumberOfSyntaxErrors() > 0 or stream.LA(1) != Token.EOF:
                 return None
             visitor = Visitor()
             try:
+                # Fail if there are any errors converting parse tree to AST.
                 return visitor.visit(tree)
             except VisitorError:
                 return None

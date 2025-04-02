@@ -75,6 +75,7 @@ std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
     if (lazy == nullptr){
         return current_reference;
     } else {
+        // Shorten path to reference if possible.
         reference.compare_exchange_weak(current_reference, lazy, std::memory_order_relaxed);
         return lazy;
     }

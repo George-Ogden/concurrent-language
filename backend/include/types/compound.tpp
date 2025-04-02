@@ -46,10 +46,12 @@ template <typename... Types>
 void VariantT<Types...>::copy(VariantT &target, const VariantT &source) {
     using CopyFn = void (*)(std::aligned_union_t<0, Types...> &, const std::aligned_union_t<0, Types...> &);
 
+    // Define copies for all variants.
     static constexpr CopyFn copiers[sizeof...(Types)] = { &copy_impl<Types>... };
 
     target.tag = source.tag;
     if (source.tag < sizeof...(Types)) {
+        // Perform the necessary copy.
         CopyFn copier = copiers[source.tag];
         copier(target.value, source.value);
     }
@@ -65,9 +67,11 @@ template <typename... Types>
 void VariantT<Types...>::destroy() {
     using DestructorFn = void (*)(std::aligned_union_t<0, Types...> &);
 
+    // Define  destructors for all variants.
     static constexpr DestructorFn destructors[sizeof...(Types)] = { &destroy_impl<Types>... };
 
     if (tag < sizeof...(Types)) {
+        // Call the necessary destructor.
         DestructorFn destructor = destructors[tag];
         destructor(value);
         tag = sizeof...(Types);
