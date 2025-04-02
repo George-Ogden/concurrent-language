@@ -19,7 +19,7 @@ sudo apt-get install -y build-essential libgtest-dev librange-v3-dev
 ```
 # Build and Run
 ## Compile
-To compile a program,
+To compile a program:
 ```bash
 make build FILE=$filename
 ```
@@ -28,9 +28,9 @@ Then
 ```bash
 sudo ./backend/bin/main [ARGS]...
 ```
-`sudo` is required to set the priorities and avoid interruption (you can still interrupt on a non real-time kernel).
+`sudo` is required to set the priorities and avoid interruption (you can still interrupt on a non-real-time kernel).
 ## Run
-Alternatively, compile and run in one step.
+Alternatively, compile and run in one step:
 ```bash
 make run FILE=$filename INPUT="$input"
 ```
@@ -82,10 +82,10 @@ Both benchmarks will create directories with the following structure:
 `log.tsv` contains the headers `name`, `args` and `duration` where `duration` is the runtime in nanoseconds.
 
 _The benchmarking scripts were modified for the multi-core benchmarking to ensure the correct CPUs were used.
-The Python script was also slightly modified to include the extra time to setup multiple cores._
+The Python script was also slightly modified to include the extra time to set up multiple cores._
 # Scripts
 The main script is `./scripts/benchmark_visualization.py`.
-All other scripts are used for generating the code size coefficients.
+All other scripts are used to generate the code size coefficients.
 ## Benchmark Visualization
 `./scripts/benchmark_visualization.py` allows comparing the outputs of multiple runs.
 It takes in a list of directories and options for the output.
@@ -116,7 +116,7 @@ Therefore, remove the outliers by running:
 ```bash
 python scripts/clean_outliers.py logs/$timing_folder
 ```
-This will generate a new file `clean_vector.tsv` in the same file.
+This will generate a new file `clean_vector.tsv` in the same folder.
 You can preview this folder with:
 ```bash
 python scripts/timings_visualization.py logs/$timing_folder/clean_vector.tsv
@@ -135,9 +135,9 @@ python scripts/timings_visualization.py logs/$timing_folder/clean_vector.tsv log
 This will display the predicted times, as well as the recorded times for each model.
 
 Getting good predictions takes some playing around.
-Some of the coefficients should be zero but are assigned a positive value and these should be deleted.
+Some of the coefficients should be zero but are assigned a positive value, and these should be deleted.
 For example, `element_access` (tuple access) is usually free as the compiler inlines it.
-However, this coefficient will often be positive and may manually need setting to zero.
+However, this coefficient will often be positive and may need manually setting to zero.
 
 # Repository Overview
 ## Frontend
@@ -155,7 +155,7 @@ Throughout the process, I use a pattern where enum fields have the same name as 
 The `./from_variants` crate defines the directive `FromVariants` so that the types can be converted into the enum with `.into()`.
 ### Pipeline
 `./pipeline` contains the orchestration code for the full compiler.
-It performs argument parsing then runs all the stages, displaying any errors that occur during type-checking.
+It performs argument parsing, then runs all the stages, displaying any errors that occur during type-checking.
 ### Grammar
 - `Grammar.g4` specifies an ANTLR grammar with specifications for tokens and a parse tree.
 It also contains comments with potential language extensions.
@@ -205,7 +205,7 @@ The emission stage generates C++ code that can be compiled, linked and run.
 
 ## Backend
 The backend is written as a header-only library with template definitions.
-The heavy use of template-metaprogramming means that files are split into header declarations (`.hpp`) and template implementations (`.tpp`). In the list below, I only include the `.hpp` files but the `.tpp` files are also included.
+The heavy use of template-metaprogramming means that files are split into header declarations (`.hpp`) and template implementations (`.tpp`). In the list below, I only include the `.hpp` files, but the `.tpp` files are also included.
 ### Lazy Values
 - `./backend/include/lazy/lazy.hpp` defines type-specific `Lazy<T>` for calculating values.
 - `./backend/include/lazy/types.hpp` contains utilities for handling and manipulating types with lazy instances.
