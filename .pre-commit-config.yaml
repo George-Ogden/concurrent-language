@@ -40,33 +40,33 @@ repos:
     rev: v1.0
     hooks:
     -   id: fmt
-        args: ['--manifest-path', 'from_variants/Cargo.toml', '--']
+        args: ["--manifest-path", "from_variants/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'from_variants/Cargo.toml']
+        args: ["--manifest-path", "from_variants/Cargo.toml"]
     -   id: fmt
-        args: ['--manifest-path', 'type-checker/Cargo.toml', '--']
+        args: ["--manifest-path", "type-checker/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'type-checker/Cargo.toml']
+        args: ["--manifest-path", "type-checker/Cargo.toml"]
     -   id: fmt
-        args: ['--manifest-path', 'lowering/Cargo.toml', '--']
+        args: ["--manifest-path", "lowering/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'lowering/Cargo.toml']
+        args: ["--manifest-path", "lowering/Cargo.toml"]
     -   id: fmt
-        args: ['--manifest-path', 'optimization/Cargo.toml', '--']
+        args: ["--manifest-path", "optimization/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'optimization/Cargo.toml']
+        args: ["--manifest-path", "optimization/Cargo.toml"]
     -   id: fmt
-        args: ['--manifest-path', 'translation/Cargo.toml', '--']
+        args: ["--manifest-path", "translation/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'translation/Cargo.toml']
+        args: ["--manifest-path", "translation/Cargo.toml"]
     -   id: fmt
-        args: ['--manifest-path', 'emission/Cargo.toml', '--']
+        args: ["--manifest-path", "emission/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'emission/Cargo.toml']
+        args: ["--manifest-path", "emission/Cargo.toml"]
     -   id: fmt
-        args: ['--manifest-path', 'pipeline/Cargo.toml', '--']
+        args: ["--manifest-path", "pipeline/Cargo.toml", "--"]
     -   id: cargo-check
-        args: ['--manifest-path', 'pipeline/Cargo.toml']
+        args: ["--manifest-path", "pipeline/Cargo.toml"]
 
   - repo: https://github.com/pocc/pre-commit-hooks
     rev: v1.3.5
