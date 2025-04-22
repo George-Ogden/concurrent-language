@@ -40,7 +40,7 @@ $(LAST_FILE):
 
 run: build
 	# Check if sudo is needed to make (USER_FLAG != 1).
-	$(if $(filter 1,$(USER_FLAG)), , sudo) make -C backend EXTRA_FLAGS='$(BACKEND_FLAGS)' run --quiet INPUT='$(INPUT)'
+	$(if $(filter 1,$(USER_FLAG)), , sudo -E) make -C backend EXTRA_FLAGS='$(BACKEND_FLAGS)' run --quiet INPUT='$(INPUT)'
 
 build: $(TARGET)
 	make -C backend build EXTRA_FLAGS='$(BACKEND_FLAGS)'
@@ -157,7 +157,8 @@ python_benchmark: | $(LOG_DIR)
 		for program in benchmark/**; do \
 			while read input; do \
 				echo $$program $$input; \
-				sudo chrt -f $(MAX_PRIORITY) python scripts/benchmark.py $$program/main.py "$$input" \
+				export PYTHON=`which python`; \
+				sudo -E chrt -f $(MAX_PRIORITY) timeout $(LIMIT) chrt -f 1 sudo -E $$PYTHON scripts/benchmark.py $$program/main.py "$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
@@ -191,9 +192,9 @@ LIMIT := 60
 time: build
 	# Run with a higher priority timeout if there is a limit.
 	if [ "$(LIMIT)" = "0" ]; then \
-		sudo ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
+		sudo -E ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
 	else \
-		sudo chrt -f $(MAX_PRIORITY) timeout $(LIMIT) chrt -f 1 ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
+		sudo -E chrt -f $(MAX_PRIORITY) timeout $(LIMIT) chrt -f 1 ./$(BACKEND) $(INPUT) 2>&1 > /dev/null; \
 	fi \
 	| { if read -r output; then echo "$$output"; else echo; fi; } \
 	| grep -E '$(PATTERN)' \
