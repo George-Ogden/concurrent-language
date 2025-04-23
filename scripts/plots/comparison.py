@@ -3,6 +3,7 @@ import os.path
 import re
 import sys
 import warnings
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -21,7 +22,7 @@ def convert_float_or_nan(x: str) -> float:
         return float("nan")
 
 
-def load_directory(directory: str) -> pd.DataFrame:
+def load_directory(directory: str, extra_cols: Optional[list[str]] = None) -> pd.DataFrame:
     log_filename = os.path.join(directory, "log.tsv")
     title_filename = os.path.join(directory, "title.txt")
 
@@ -41,7 +42,9 @@ def load_directory(directory: str) -> pd.DataFrame:
         basename = os.path.basename(dirname)
     df["directory"] = basename
 
-    return df[["function", "duration", "title", "directory"]]
+    if extra_cols is None:
+        extra_cols = []
+    return df[["function", "duration", "title", "directory", *extra_cols]]
 
 
 def merge_logs(*logs: pd.DataFrame) -> pd.DataFrame:
@@ -189,8 +192,8 @@ def plot(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def save_plot(fig: go.Figure, directory: str) -> str:
-    filepath = os.path.join(directory, "plot.pdf")
+def save_plot(fig: go.Figure, directory: str, filename: str = "plot.pdf") -> str:
+    filepath = os.path.join(directory, filename)
     os.makedirs(directory, exist_ok=True)
     fig.write_image(file=filepath, height=1080, width=1920, format="pdf")
     with open(os.path.join(directory, "args"), "w") as f:

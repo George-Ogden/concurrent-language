@@ -5,13 +5,6 @@ import re
 import pandas as pd
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("folders", nargs="+", help="Folders with optimization results.")
-    parser.add_argument("--output-folder", required=True, help="Folder to save combined results.")
-    return parser.parse_args()
-
-
 def load_folder(folder: str) -> pd.DataFrame:
     log_filename = os.path.join(folder, "log.tsv")
     title_filename = os.path.join(folder, "title.txt")
@@ -32,17 +25,30 @@ def merge_folders(folders: list[str]) -> pd.DataFrame:
     return pd.concat(data, ignore_index=True)
 
 
-def save_df(df: pd.DataFrame, output_folder: str) -> None:
-    output_filename = os.path.join(output_folder, "log.tsv")
+def save(df: pd.DataFrame, output_folder: str) -> None:
+    log_filename = os.path.join(output_folder, "log.tsv")
     os.makedirs(output_folder, exist_ok=True)
-    df.to_csv(output_filename, sep="\t", index=False)
+    df.to_csv(log_filename, sep="\t", index=False)
+
+    title_filename = os.path.join(output_folder, "title.txt")
+    with open(title_filename, "w") as f:
+        ...
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("folders", nargs="+", help="Folders with optimization results.")
+    parser.add_argument(
+        "--output-folder", "-o", required=True, help="Folder to save combined results."
+    )
+    return parser.parse_args()
 
 
 def main(args: argparse.Namespace) -> None:
     folders = args.folders
     output_folder = args.output_folder
     df = merge_folders(folders)
-    save_df(df, output_folder)
+    save(df, output_folder)
 
 
 if __name__ == "__main__":
