@@ -62,18 +62,32 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     return filtered_df.reset_index(drop=True)
 
 
-def normalize(df: pd.DataFrame) -> pd.DataFrame:
+def normalize(df: pd.DataFrame, normalize_first_directory: bool = False) -> pd.DataFrame:
     grouped_df = df.groupby(["function", "title", "directory"], group_keys=False).agg(
         {"duration": ["mean", "std"], "function": "count"}
     )
     grouped_df.columns = ["_".join(column) for column in grouped_df.columns.to_flat_index()]
-    mean_duration = grouped_df.groupby("function").duration_mean.transform("mean")
-    grouped_df["normalized_performance"] = mean_duration / grouped_df.duration_mean
-    grouped_df["performance_lower"] = grouped_df.normalized_performance - mean_duration / (
+    if normalize_first_directory:
+        # Use first column as baseline.
+        first_directory = df.loc[0, "directory"]
+        reindexed_grouped_df = grouped_df.reset_index()
+        baseline_map = (
+            reindexed_grouped_df[reindexed_grouped_df.directory == first_directory]
+            .set_index("function")
+            .duration_mean.to_dict()
+        )
+        baseline_duration = reindexed_grouped_df.function.map(baseline_map)
+        baseline_duration.index = grouped_df.index
+    else:
+        # Use mean duration as baseline.
+        baseline_duration = grouped_df.groupby("function").duration_mean.transform("mean")
+
+    grouped_df["normalized_performance"] = baseline_duration / grouped_df.duration_mean
+    grouped_df["performance_lower"] = grouped_df.normalized_performance - baseline_duration / (
         grouped_df.duration_mean + grouped_df.duration_std / np.sqrt(grouped_df.function_count)
     )
     grouped_df["performance_upper"] = (
-        mean_duration
+        baseline_duration
         / (grouped_df.duration_mean - grouped_df.duration_std / np.sqrt(grouped_df.function_count))
         - grouped_df.normalized_performance
     )
@@ -206,6 +220,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("directories", nargs="+")
     parser.add_argument("--output-folder", "-o", required=False)
     parser.add_argument("--show-web-version", "-w", action="store_true")
+    parser.add_argument("--normalize-first-directory", "-n", action="store_true")
     return parser.parse_args()
 
 
@@ -213,13 +228,17 @@ def main(args: argparse.Namespace):
     directories = args.directories
     show_web_version = args.show_web_version
     output_folder = args.output_folder
+    normalize_first_directory = args.normalize_first_directory
 
     if output_folder is None and not show_web_version:
         warnings.warn(
             "--output-folder and --show-web-version are False - this script will produce no output"
         )
 
-    data = normalize(clean(merge_logs(*(load_directory(directory) for directory in directories))))
+    data = normalize(
+        clean(merge_logs(*(load_directory(directory) for directory in directories))),
+        normalize_first_directory=normalize_first_directory,
+    )
 
     fig = plot(data)
     if show_web_version:
