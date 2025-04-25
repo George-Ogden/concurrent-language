@@ -3,6 +3,7 @@
 #include "data_structures/cyclic_queue.hpp"
 #include "data_structures/lock.hpp"
 #include "system/thread_manager.tpp"
+#include "work/finished.hpp"
 #include "work/work.hpp"
 #include "work/work_request.hpp"
 
@@ -19,7 +20,6 @@ struct WorkRunner {
 
     static inline unsigned num_cpus;
     ThreadManager::ThreadId id;
-    static std::atomic<bool> done_flag;
     static CyclicQueue<unsigned> work_request_queue;
     static std::vector<std::unique_ptr<WorkRequest>> work_requests;
 
@@ -57,4 +57,3 @@ struct stack_inversion : public std::exception {
     stack_inversion() = default;
     const char *what() const noexcept override { return "Stack inversion"; }
 };
-struct finished : public std::exception {};

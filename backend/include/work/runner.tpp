@@ -5,13 +5,13 @@
 #include "system/work_manager.tpp"
 #include "work/runner.hpp"
 #include "work/work_request.tpp"
+#include "work/finished.tpp"
 
 #include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
 
-std::atomic<bool> WorkRunner::done_flag{false};
 CyclicQueue<unsigned> WorkRunner::work_request_queue;
 std::vector<std::unique_ptr<WorkRequest>> WorkRunner::work_requests;
 
@@ -23,10 +23,13 @@ void WorkRunner::main(std::atomic<WorkT> *ref) {
     if (work != nullptr) {
         work->run();
         work->await_all();
-        done_flag.store(true, std::memory_order_relaxed);
+        unsigned remaining = num_cpus - 1;
+        while (remaining > 0){
+            remaining -= respond(FinishedWork::finished_work);
+        }
     } else {
         // All other threads busy wait.
-        while (!done_flag.load(std::memory_order_relaxed)) {
+        while (1) {
             try {
                 active_wait(std::function<bool()>([](){return false;}));
             } catch (finished &f) {
@@ -134,7 +137,7 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
             if (all_done(vs...)) {
                 return;
             }
-        } while (!done_flag.load(std::memory_order_relaxed));
+        } while (1);
         throw finished{};
     };
 }
@@ -153,9 +156,6 @@ bool WorkRunner::active_wait(std::function<bool()> predicate) {
     while (!predicate()) {
         if (work_request.full()){
             work_request.fulfill();
-        }
-        if (done_flag.load(std::memory_order_relaxed)) {
-            throw finished{};
         }
     }
     if (!work_request.cancel()){
@@ -181,7 +181,6 @@ template <typename... Vs> bool WorkRunner::all_done(Vs &&...vs) {
 
 void WorkRunner::setup(unsigned num_cpus) {
     WorkRunner::num_cpus = num_cpus;
-    WorkRunner::done_flag.store(false);
     WorkRunner::work_request_queue = CyclicQueue<unsigned>{num_cpus};
     WorkRunner::work_requests.clear();
     for (unsigned i = 0; i < num_cpus; i++){
