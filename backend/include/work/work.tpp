@@ -18,7 +18,13 @@ Work::Work() = default;
 Work::~Work() = default;
 
 bool Work::done() const {
-    return static_cast<WorkStatus>(work_status.load<0>(std::memory_order_acquire)) == WorkStatus::DONE;
+    bool is_done = static_cast<WorkStatus>(work_status.load<0>(std::memory_order_relaxed)) == WorkStatus::DONE;
+    if (is_done){
+        std::atomic_thread_fence(std::memory_order_acquire);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 void Work::finish() {
@@ -69,5 +75,11 @@ void TypedWork<Ret, Args...>::await_all() {
 template <typename Ret, typename... Args>
 bool TypedWork<Ret, Args...>::can_respond() const {
     /// Determine that the function is moderately large and currently available.
-    return (fn->lower_size_bound() > 200 || fn->is_recursive()) && work_status.load<0>(std::memory_order_acquire) == WorkStatus::AVAILABLE;
+    if (fn->lower_size_bound() > 200 || fn->is_recursive()) {
+        if (work_status.load<0>(std::memory_order_relaxed) == WorkStatus::AVAILABLE){
+            std::atomic_thread_fence(std::memory_order_acquire);
+            return true;
+        }
+    }
+    return false;
 }

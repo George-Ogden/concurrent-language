@@ -20,6 +20,8 @@ void WorkRequest::fulfill() {
         work = this->work.load(std::memory_order_relaxed);
     } while (work == nullptr);
     work->run();
+    this->work.store(nullptr, std::memory_order_relaxed);
+    status.complete();
 }
 
 bool WorkRequest::full() const {
@@ -30,7 +32,7 @@ bool WorkRequest::cancel() {
     return status.cancel();
 }
 
-bool WorkRequest::fill(WorkT &work) {
+bool WorkRequest::fill(const WorkT &work) {
     if (status.fill()){
         this->work.store(work, std::memory_order_relaxed);
         return true;
