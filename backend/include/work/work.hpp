@@ -17,7 +17,7 @@
 /// Work class for executing a function and assigning its values.
 class Work {
   protected:
-    enum WorkStatus { AVAILABLE, ACTIVE, DONE, MAX };
+    enum WorkStatus { AVAILABLE, QUEUED, ACTIVE, DONE, MAX };
     template <typename T, typename U> static void assign(T &targets, U &result);
     constexpr static inline unsigned ATOMIC_WIDTH = 2;
     AtomicSharedEnum<ATOMIC_WIDTH> work_status;
