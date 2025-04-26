@@ -66,7 +66,7 @@ void Work::assign(T &targets, U &results) {
 
 template <typename Ret, typename... Args>
 void TypedWork<Ret, Args...>::run() {
-    if (work_status.compare_exchange<0>(WorkStatus::AVAILABLE, WorkStatus::ACTIVE, std::memory_order_acq_rel)){
+    if (work_status.compare_exchange<0>(WorkStatus::QUEUED, WorkStatus::ACTIVE, std::memory_order_acq_rel)){
         LazyT<Ret> results = fn->run();
         assign(targets, results);
         finish();
@@ -85,7 +85,7 @@ bool TypedWork<Ret, Args...>::can_respond() const {
     /// Determine that the function is moderately large and currently available.
     if (fn->lower_size_bound() > 200 || fn->is_recursive()) {
         WorkStatus status = static_cast<WorkStatus>(work_status.load<0>(std::memory_order_relaxed));
-        if (status == WorkStatus::AVAILABLE || status == WorkStatus::QUEUED){
+        if (status == WorkStatus::QUEUED){
             std::atomic_thread_fence(std::memory_order_acquire);
             return true;
         }

@@ -117,25 +117,19 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                     if (all_done(vs...)) {
                         return true;
                     }
-                    (vs->get_work(extra_works), ...);
-                    if (extra_works.size() > 0) {
-                        return true;
-                    } else {
-                        return false;
-                    }
+                    bool enqueued = false;
+                    auto add_extra_work = [&](const auto & v){
+                        std::optional<WorkT> extra_work = v->get_work();
+                        if (extra_work.has_value()){
+                            enqueued |= enqueue(extra_work.value());
+                        }
+                    };
+                    (add_extra_work(vs),...);
+                    return enqueued;
                 };
                 // If there is still no work, perform an active wait.
-                if (predicate() ||
-                    active_wait(std::function<bool()>(predicate))) {
-                    for (WorkT &work : extra_works) {
-                        // When extra work is found, start processing it.
-                        if (work->can_respond()) {
-                            large_works.emplace_back(std::move(work));
-                        } else {
-                            small_works.emplace_back(std::move(work));
-                        }
-                    }
-                    extra_works.clear();
+                if (!predicate()) {
+                    active_wait(std::function<bool()>(predicate));
                 }
             }
 
@@ -147,7 +141,7 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
     };
 }
 
-void WorkRunner::enqueue(const WorkT &work) {
+bool WorkRunner::enqueue(const WorkT &work) {
     // Place in queue based on size.
     if (work->enqueue()) {
         if (work->can_respond()) {
@@ -155,6 +149,9 @@ void WorkRunner::enqueue(const WorkT &work) {
         } else {
             small_works.emplace_back(std::move(work));
         }
+        return true;
+    } else {
+        return false;
     }
 }
 

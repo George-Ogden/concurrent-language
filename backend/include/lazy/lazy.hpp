@@ -8,12 +8,11 @@
 #include <memory>
 #include <optional>
 #include <utility>
-#include <vector>
 
 class Work;
 // Unspecialized value.
 struct LazyValue {
-    virtual void get_work(std::vector<std::shared_ptr<Work>> &work) = 0;
+    virtual std::optional<std::shared_ptr<Work>> get_work() = 0;
     virtual ~LazyValue();
 };
 
@@ -22,8 +21,7 @@ template <typename T> struct Lazy : LazyValue {
     virtual bool done() = 0;
     virtual T value() = 0;
     virtual T &lvalue() = 0;
-    // Store any necessary work in the vector `work`.
-    virtual void get_work(std::vector<std::shared_ptr<Work>> &work) override;
+    virtual std::optional<std::shared_ptr<Work>> get_work() override;
     // Return a reference to an equivalent value.
     virtual std::shared_ptr<Lazy<T>> as_ref();
 };
@@ -51,7 +49,7 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     bool done() override;
     T value() override;
     T &lvalue() override;
-    virtual void get_work(std::vector<std::shared_ptr<Work>> &work) override;
+    virtual std::optional<std::shared_ptr<Work>> get_work() override;
     std::shared_ptr<Lazy<T>> as_ref() override;
 };
 

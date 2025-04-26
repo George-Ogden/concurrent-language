@@ -18,7 +18,7 @@ struct PublicWorkRunner : WorkRunner {
     using WorkRunner::WorkRunner;
     std::vector<WorkT> get_small_works() const { return small_works; }
     std::vector<WorkT> get_large_works() const { return large_works; }
-    void enqueue(const WorkT &work) { WorkRunner::enqueue(work); }
+    bool enqueue(const WorkT &work) { return WorkRunner::enqueue(work); }
 };
 
 class RunnerTest : public ::testing::Test {
@@ -53,13 +53,13 @@ TEST_F(RunnerTest, RunnerEnqueueSmallWork) {
     ASSERT_FALSE(small_work->queued());
 
     // Add work + update status.
-    runner->enqueue(small_work);
+    ASSERT_TRUE(runner->enqueue(small_work));
     ASSERT_TRUE(small_work->queued());
     ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{small_work});
     ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
 
     // No change.
-    runner->enqueue(small_work);
+    ASSERT_FALSE(runner->enqueue(small_work));
     ASSERT_TRUE(small_work->queued());
     ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{small_work});
     ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
@@ -74,13 +74,13 @@ TEST_F(RunnerTest, RunnerEnqueueBigWork) {
     ASSERT_FALSE(large_work->queued());
 
     // Add work + update status.
-    runner->enqueue(large_work);
+    ASSERT_TRUE(runner->enqueue(large_work));
     ASSERT_TRUE(large_work->queued());
     ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
     ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});
 
     // No change.
-    runner->enqueue(large_work);
+    ASSERT_FALSE(runner->enqueue(large_work));
     ASSERT_TRUE(large_work->queued());
     ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
     ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});

@@ -7,7 +7,6 @@
 
 #include <optional>
 #include <memory>
-#include <vector>
 
 LazyValue::~LazyValue() = default;
 
@@ -18,7 +17,9 @@ std::shared_ptr<Lazy<T>> Lazy<T>::as_ref() {
 }
 
 template <typename T>
-void Lazy<T>::get_work(std::vector<WorkT> &work) {}
+std::optional<WorkT> Lazy<T>::get_work() {
+    return std::nullopt;
+}
 
 template <typename T>
 template <typename ...Args>
@@ -82,14 +83,15 @@ std::shared_ptr<Lazy<T>> LazyPlaceholder<T>::as_ref() {
 }
 
 template <typename T>
-void LazyPlaceholder<T>::get_work(std::vector<WorkT> &work) {
+std::optional<WorkT> LazyPlaceholder<T>::get_work() {
     auto current_reference = this->as_ref();
     if (current_reference == nullptr) {
         WorkT current_work = this->work.load(std::memory_order_relaxed);
         if (current_work != nullptr && !current_work->done()){
-            work.emplace_back(current_work);
+            return current_work;
         }
     } else {
-        current_reference->get_work(work);
+        return current_reference->get_work();
     }
+    return std::nullopt;
 }

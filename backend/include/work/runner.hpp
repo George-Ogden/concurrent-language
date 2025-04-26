@@ -27,7 +27,7 @@ struct WorkRunner {
     static void setup(unsigned num_cpus);
 
   protected:
-    std::vector<WorkT> extra_works, small_works, large_works;
+    std::vector<WorkT> small_works, large_works;
 
     void main(std::atomic<WorkT> *ref);
     /// Active wait, performing any other tasks and exiting if predicate is
@@ -38,7 +38,7 @@ struct WorkRunner {
     /// Respond to a request with work, returning true if the request succeeds.
     bool respond(const WorkT &work) const;
     /// Add work to small or large work queue.
-    void enqueue(const WorkT &work);
+    bool enqueue(const WorkT &work);
 
     /// Wait for exactly the values given as arguments.
     template <typename... Vs> void await_restricted(Vs &...vs);

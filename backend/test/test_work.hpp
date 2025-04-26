@@ -19,8 +19,8 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <tuple>
-#include <vector>
 
 class WorkTest : public ::testing::Test {
   protected:
@@ -40,12 +40,14 @@ class WorkTest : public ::testing::Test {
 TEST_F(WorkTest, DoneLater) {
     ASSERT_FALSE(work->done());
     ASSERT_FALSE(result->done());
+    work->enqueue();
     work->run();
     ASSERT_TRUE(result->done());
     ASSERT_TRUE(work->done());
 }
 
 TEST_F(WorkTest, CorrectValue) {
+    work->enqueue();
     work->run();
     ASSERT_EQ(result->value(), 5);
 }
@@ -53,24 +55,23 @@ TEST_F(WorkTest, CorrectValue) {
 struct LazyWorkTest : WorkTest {};
 
 TEST_F(LazyWorkTest, GetLazyConstantWork) {
-    std::vector<WorkT> works;
     auto y = LazyConstant<Int>(10);
-    y.get_work(works);
-    ASSERT_EQ(works.size(), 0);
+    ASSERT_EQ(y.get_work(), std::nullopt);
 }
 
 TEST_F(LazyWorkTest, GetLazyRequiredWork) {
-    std::vector<WorkT> works;
-    result->get_work(works);
-    ASSERT_EQ(works.size(), 1);
-    ASSERT_EQ(works.front(), work);
+    ASSERT_EQ(result->get_work(), work);
+}
+
+TEST_F(LazyWorkTest, GetLazyQueuedWork) {
+    work->enqueue();
+    ASSERT_EQ(result->get_work(), work);
 }
 
 TEST_F(LazyWorkTest, GetLazyDoneWork) {
-    std::vector<WorkT> works;
+    work->enqueue();
     work->run();
-    result->get_work(works);
-    ASSERT_EQ(works.size(), 0);
+    ASSERT_EQ(result->get_work(), std::nullopt);
 }
 
 struct SmallFn : TypedClosureI<Empty, Int> {
@@ -117,6 +118,7 @@ TEST(TupleWorkTest, CorrectValue) {
             PairFn::init);
     std::tie(work, results) =
         Work::fn_call(pair_fn, make_lazy<Int>(4), make_lazy<Int>(-4));
+    work->enqueue();
     work->run();
     ASSERT_TRUE(work->done());
     ASSERT_EQ(std::get<0>(results)->value(), 4);
