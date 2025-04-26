@@ -36,7 +36,7 @@ struct WorkRunner {
     /// Determine whether there are any requests from other workers.
     bool any_requests() const;
     /// Respond to a request with work, returning true if the request succeeds.
-    bool respond(WorkT &work) const;
+    bool respond(const WorkT &work) const;
 
     /// Wait for exactly the values given as arguments.
     template <typename... Vs> void await_restricted(Vs &...vs);

@@ -13,5 +13,3 @@ void FinishedWork::await_all() {};
 bool FinishedWork::can_respond() const {
     return true;
 };
-
-WorkT FinishedWork::finished_work = std::make_shared<FinishedWork>();

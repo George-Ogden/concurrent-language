@@ -15,6 +15,6 @@ struct WorkRequest {
     bool enqueue();
     void fulfill();
     bool full() const;
-    bool fill(WorkT &work);
+    bool fill(const WorkT &work);
     bool cancel();
 };

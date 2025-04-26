@@ -6,6 +6,7 @@
 #include "work/runner.hpp"
 #include "work/work_request.tpp"
 #include "work/finished.tpp"
+#include "work/work.tpp"
 
 #include <atomic>
 #include <functional>
@@ -25,7 +26,9 @@ void WorkRunner::main(std::atomic<WorkT> *ref) {
         work->await_all();
         unsigned remaining = num_cpus - 1;
         while (remaining > 0){
-            remaining -= respond(FinishedWork::finished_work);
+            WorkT finished_work = std::make_shared<FinishedWork>();
+            while (!respond(finished_work)){ }
+            remaining--;
         }
     } else {
         // All other threads busy wait.
@@ -153,9 +156,11 @@ bool WorkRunner::active_wait(std::function<bool()> predicate) {
         work_request.fulfill();
         return false;
     }
+    assert(work_request.status.queued());
     while (!predicate()) {
         if (work_request.full()){
             work_request.fulfill();
+            return false;
         }
     }
     if (!work_request.cancel()){
@@ -165,7 +170,7 @@ bool WorkRunner::active_wait(std::function<bool()> predicate) {
     return true;
 }
 
-bool WorkRunner::respond(WorkT &work) const {
+bool WorkRunner::respond(const WorkT &work) const {
     auto idx = work_request_queue.pop();
     if (idx.has_value()) {
         WorkRequest &work_request = *work_requests[*idx];
