@@ -14,6 +14,7 @@
 #include <sched.h>
 #include <stdexcept>
 #include <thread>
+#include <cstdlib>
 
 std::mutex ThreadManager::m;
 std::optional<unsigned int> ThreadManager::num_cpus_override;
@@ -23,7 +24,12 @@ unsigned ThreadManager::hardware_concurrency() {
 }
 
 unsigned ThreadManager::available_concurrency() {
-    return num_cpus_override.value_or(hardware_concurrency());
+    const char * num_cpus_env_var = std::getenv("NUM_CPUS");
+    if (num_cpus_env_var == nullptr){
+        return num_cpus_override.value_or(hardware_concurrency());
+    } else {
+        return std::stoi(num_cpus_env_var);
+    }
 }
 
 void ThreadManager::override_concurrency(unsigned num_cpus) {

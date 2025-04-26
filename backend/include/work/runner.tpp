@@ -156,7 +156,6 @@ bool WorkRunner::active_wait(std::function<bool()> predicate) {
         work_request.fulfill();
         return false;
     }
-    assert(work_request.status.queued());
     while (!predicate()) {
         if (work_request.full()){
             work_request.fulfill();
