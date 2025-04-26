@@ -37,6 +37,8 @@ struct WorkRunner {
     bool any_requests() const;
     /// Respond to a request with work, returning true if the request succeeds.
     bool respond(const WorkT &work) const;
+    /// Add work to small or large work queue.
+    void enqueue(const WorkT &work);
 
     /// Wait for exactly the values given as arguments.
     template <typename... Vs> void await_restricted(Vs &...vs);

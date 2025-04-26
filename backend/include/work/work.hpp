@@ -30,6 +30,8 @@ class Work {
     virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
+    bool enqueue();
+    bool queued() const;
     /// Transition to done state.
     void finish();
     /// Call a fn - execute eagerly if it is small.
