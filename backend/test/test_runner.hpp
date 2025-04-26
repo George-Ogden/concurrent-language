@@ -23,11 +23,16 @@ struct PublicWorkRunner : WorkRunner {
 
 class RunnerTest : public ::testing::Test {
   protected:
-    std::unique_ptr<PublicWorkRunner> runner;
+    PublicWorkRunner *runner;
     void SetUp() override {
         ThreadManager::override_concurrency(1);
         ThreadManager::register_self(0);
-        runner = std::make_unique<PublicWorkRunner>(0);
+        WorkManager::runners.clear();
+        std::unique_ptr<PublicWorkRunner> public_runner =
+            std::make_unique<PublicWorkRunner>(0);
+        // cppcheck-suppress danglingLifetime
+        runner = public_runner.get();
+        WorkManager::runners.emplace_back(std::move(public_runner));
     }
     void TearDown() override { ThreadManager::reset_concurrency_override(); }
 };
@@ -81,6 +86,20 @@ TEST_F(RunnerTest, RunnerEnqueueBigWork) {
 
     // No change.
     ASSERT_FALSE(runner->enqueue(large_work));
+    ASSERT_TRUE(large_work->queued());
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});
+}
+
+TEST_F(RunnerTest, WorkManagerEnqueue) {
+    FnT<Int> large_fn =
+        std::make_shared<TypedClosureG<Empty, Int>>(LargeWork::init);
+    auto [large_work, result] = Work::fn_call(large_fn);
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
+    ASSERT_FALSE(large_work->queued());
+
+    WorkManager::enqueue(large_work);
     ASSERT_TRUE(large_work->queued());
     ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
     ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});

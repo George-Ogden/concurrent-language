@@ -36,6 +36,10 @@ std::monostate WorkManager::main(std::atomic<WorkT> *ref) {
     return std::monostate{};
 }
 
+void WorkManager::enqueue(const WorkT &work) {
+    runners[ThreadManager::get_id()]->enqueue(work);
+}
+
 template <typename... Vs>
 auto WorkManager::await(Vs &...vs) {
     return runners[ThreadManager::get_id()]->await(vs...);
