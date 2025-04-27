@@ -5,9 +5,9 @@ use std::convert::identity;
 
 use translation::{
     Allocation, Assignment, Await, Boolean, BuiltIn, ClosureInstantiation, ConstructorCall,
-    Declaration, ElementAccess, Expression, FnCall, FnDef, Id, IfStatement, Integer, MachineType,
-    MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
-    UnionType, Value,
+    Declaration, ElementAccess, Enqueue, Expression, FnCall, FnDef, Id, IfStatement, Integer,
+    MachineType, MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType,
+    TypeDef, UnionType, Value,
 };
 
 use crate::type_formatter::TypeFormatter;
@@ -295,6 +295,10 @@ impl Emitter {
             .join("\n");
         format!("{extraction} switch ({subject}.tag) {{ {branches_code} }}")
     }
+    fn emit_enqueue(&self, enqueue: Enqueue) -> Code {
+        let Enqueue(memory) = enqueue;
+        format!("{}->enqueue();", self.emit_memory(memory))
+    }
     fn emit_statement(&self, statement: Statement, declared: &mut HashSet<Memory>) -> Code {
         match statement {
             Statement::Await(await_) => self.emit_await(await_),
@@ -307,6 +311,7 @@ impl Emitter {
             Statement::MatchStatement(match_statement) => {
                 self.emit_match_statement(match_statement, declared.clone())
             }
+            Statement::Enqueue(enqueue) => self.emit_enqueue(enqueue),
         }
     }
     fn emit_statements(&self, statements: Vec<Statement>, mut declared: HashSet<Memory>) -> Code {
@@ -458,7 +463,9 @@ mod tests {
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
-    use translation::{Allocation, AtomicType, AtomicTypeEnum, FnType, Id, MatchBranch, Name};
+    use translation::{
+        Allocation, AtomicType, AtomicTypeEnum, Enqueue, FnType, Id, MatchBranch, Name,
+    };
 
     const EMITTER: Lazy<Emitter> = Lazy::new(|| Emitter {});
 
@@ -1027,6 +1034,11 @@ mod tests {
         "await for multiple memory"
     )]
     #[test_case(
+        vec![Enqueue(Memory(Id::from("y"))).into()],
+        "y->enqueue();";
+        "enqueue emission"
+    )]
+    #[test_case(
         vec![
             Await(vec![Memory(Id::from("z"))]).into(),
             Declaration {
@@ -1525,12 +1537,13 @@ mod tests {
                         ]
                     }.into(),
                 }.into(),
+                Enqueue(Memory(Id::from("inner_res"))).into()
             ],
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             size_bounds: (50, 80),
             is_recursive: false
         },
-        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(x, y); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(x, y); inner_res->enqueue(); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
         "adder closure"
     )]
     #[test_case(

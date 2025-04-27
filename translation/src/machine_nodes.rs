@@ -191,10 +191,14 @@ pub enum Statement {
     Assignment(Assignment),
     IfStatement(IfStatement),
     MatchStatement(MatchStatement),
+    Enqueue(Enqueue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Await(pub Vec<Memory>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Enqueue(pub Memory);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Declaration {
