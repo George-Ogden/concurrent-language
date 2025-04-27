@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use itertools::Either::{self, Left, Right};
 use itertools::Itertools;
@@ -12,13 +13,47 @@ struct StatementReorderer {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Node {
-    dependencies: Vec<Memory>,
+    dependencies: HashSet<Memory>,
     dependents: Vec<Memory>,
     is_fn: bool,
     awaits: Vec<Memory>,
+    memory: Memory,
     expression: Expression,
     fn_dependents: Option<usize>,
     fns_used: Option<usize>,
+}
+
+impl Node {
+    fn project_heuristic(&self) -> (bool, usize, bool) {
+        (
+            !self.is_fn,
+            self.fn_dependents.unwrap(),
+            self.fns_used.unwrap() == 0,
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HeuristicNode(pub Node);
+
+impl PartialEq for HeuristicNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for HeuristicNode {}
+
+impl PartialOrd for HeuristicNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HeuristicNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.project_heuristic().cmp(&other.0.project_heuristic())
+    }
 }
 
 type Graph = HashMap<Memory, Node>;
@@ -125,7 +160,7 @@ impl StatementReorderer {
                             .values()
                             .iter()
                             .filter_map(Value::filter_memory)
-                            .collect_vec(),
+                            .collect(),
                         dependents: Vec::new(),
                         is_fn: self.fn_calls.contains(&target),
                         awaits: {
@@ -136,6 +171,7 @@ impl StatementReorderer {
                                 Vec::new()
                             }
                         },
+                        memory: target.clone(),
                         expression: value,
                         fn_dependents: None,
                         fns_used: None,
@@ -198,6 +234,35 @@ impl StatementReorderer {
             );
         }
         graph
+    }
+
+    fn find_order(&self, graph: Graph) -> Vec<Node> {
+        let keys = HashSet::<Memory>::from_iter(graph.keys().cloned());
+        let mut graph = graph;
+        let mut free_nodes = BinaryHeap::new();
+        for node in graph.values_mut() {
+            node.dependencies = node
+                .dependencies
+                .iter()
+                .filter(|&dependency| keys.contains(dependency))
+                .cloned()
+                .collect();
+            if node.dependencies.len() == 0 {
+                free_nodes.push(HeuristicNode(node.clone()));
+            }
+        }
+        let mut order = Vec::new();
+        while let Some(HeuristicNode(node)) = free_nodes.pop() {
+            for dependent in &node.dependents {
+                let neighbor = graph.get_mut(dependent).unwrap();
+                neighbor.dependencies.remove(&node.memory);
+                if neighbor.dependencies.len() == 0 {
+                    free_nodes.push(HeuristicNode(neighbor.clone()));
+                }
+            }
+            order.push(node);
+        }
+        order
     }
 }
 
@@ -478,7 +543,7 @@ mod tests {
             (
                 Memory(Id::from("t1")),
                 Node{
-                    dependencies: vec![Memory(Id::from("f")),Memory(Id::from("m1"))],
+                    dependencies: HashSet::from([Memory(Id::from("f")),Memory(Id::from("m1"))]),
                     dependents: vec![Memory(Id::from("t3"))],
                     expression: FnCall{
                         fn_: Memory(Id::from("f")).into(),
@@ -494,12 +559,13 @@ mod tests {
                     awaits: vec![Memory(Id::from("f"))],
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("t1")),
                 }
             ),
             (
                 Memory(Id::from("t2")),
                 Node{
-                    dependencies: vec![Memory(Id::from("f")),Memory(Id::from("m2"))],
+                    dependencies: HashSet::from([Memory(Id::from("f")),Memory(Id::from("m2"))]),
                     dependents: vec![Memory(Id::from("t3"))],
                     expression: FnCall {
                         fn_: Memory(Id::from("f")).into(),
@@ -515,12 +581,13 @@ mod tests {
                     awaits: vec![Memory(Id::from("f"))],
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("t2")),
                 }
             ),
             (
                 Memory(Id::from("t3")),
                 Node{
-                    dependencies: vec![Memory(Id::from("t1")),Memory(Id::from("t2"))],
+                    dependencies: HashSet::from([Memory(Id::from("t1")),Memory(Id::from("t2"))]),
                     dependents: Vec::new(),
                     expression: FnCall {
                         fn_: BuiltIn::BuiltInFn(Name::from("Plus__BuiltIn")).into(),
@@ -537,6 +604,7 @@ mod tests {
                     awaits: vec![Memory(Id::from("t1")),Memory(Id::from("t2"))],
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("t3")),
                 }
             ),
         ]);
@@ -872,7 +940,7 @@ mod tests {
             (
                 Memory(Id::from("a")),
                 Node {
-                    dependencies: Vec::new(),
+                    dependencies: HashSet::new(),
                     dependents: vec![
                         Memory(Id::from("f")),
                         Memory(Id::from("g")),
@@ -882,14 +950,15 @@ mod tests {
                     expression: Value::from(Integer {value: 0}).into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("a")),
                 }
             ),
             (
                 Memory(Id::from("f")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("a")),
-                    ],
+                    ]),
                     dependents: vec![
                         Memory(Id::from("p")),
                         Memory(Id::from("m")),
@@ -908,14 +977,15 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("f")),
                 }
             ),
             (
                 Memory(Id::from("g")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("a")),
-                    ],
+                    ]),
                     dependents: vec![
                         Memory(Id::from("p")),
                         Memory(Id::from("m")),
@@ -934,15 +1004,16 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("g")),
                 }
             ),
             (
                 Memory(Id::from("p")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("f")),
                         Memory(Id::from("g")),
-                    ],
+                    ]),
                     dependents: Vec::new(),
                     is_fn: false,
                     awaits: vec![Memory(Id::from("f")),Memory(Id::from("g"))],
@@ -962,15 +1033,16 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("p")),
                 }
             ),
             (
                 Memory(Id::from("m")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("f")),
                         Memory(Id::from("g")),
-                    ],
+                    ]),
                     dependents: Vec::new(),
                     is_fn: false,
                     awaits: vec![Memory(Id::from("f")),Memory(Id::from("g"))],
@@ -990,6 +1062,7 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("m")),
                 }
             ),
         ]),
@@ -1007,10 +1080,10 @@ mod tests {
             (
                 Memory(Id::from("a")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("p")),
                         Memory(Id::from("A")),
-                    ],
+                    ]),
                     dependents: vec![
                         Memory(Id::from("f")),
                     ],
@@ -1028,15 +1101,16 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("a")),
                 }
             ),
             (
                 Memory(Id::from("f")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("a")),
                         Memory(Id::from("F")),
-                    ],
+                    ]),
                     dependents: vec![
                         Memory(Id::from("g")),
                     ],
@@ -1054,14 +1128,15 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("f")),
                 }
             ),
             (
                 Memory(Id::from("g")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("a")),
-                    ],
+                    ]),
                     dependents: Vec::new(),
                     is_fn: true,
                     awaits: vec![Memory(Id::from("G"))],
@@ -1077,6 +1152,7 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("g")),
                 }
             ),
         ]),
@@ -1105,10 +1181,10 @@ mod tests {
             (
                 Memory(Id::from("a")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("p")),
                         Memory(Id::from("A")),
-                    ],
+                    ]),
                     dependents: vec![
                         Memory(Id::from("f")),
                     ],
@@ -1126,15 +1202,16 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("a")),
                 }
             ),
             (
                 Memory(Id::from("f")),
                 Node {
-                    dependencies: vec![
+                    dependencies: HashSet::from([
                         Memory(Id::from("a")),
                         Memory(Id::from("F")),
-                    ],
+                    ]),
                     dependents: vec![
                         Memory(Id::from("g")),
                     ],
@@ -1152,6 +1229,7 @@ mod tests {
                     }.into(),
                     fn_dependents: None,
                     fns_used: None,
+                    memory: Memory(Id::from("f")),
                 }
             ),
         ]),
@@ -1167,10 +1245,11 @@ mod tests {
             (
                 Memory(Id::from("r")),
                 Node {
-                    dependencies: vec![
+                    memory: Memory(Id::from("r")),
+                    dependencies: HashSet::from([
                         Memory(Id::from("a")),
                         Memory(Id::from("b")),
-                    ],
+                    ]),
                     dependents: Vec::new(),
                     is_fn: false,
                     awaits: vec![Memory(Id::from("A"))],
@@ -1209,5 +1288,329 @@ mod tests {
                 .map(|(Memory(id), node)| (id, node.fns_used.unwrap()))
                 .collect()
         );
+    }
+
+    #[test_case(
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    memory: Memory(Id::from("a")),
+                    dependencies: HashSet::from([
+                        Memory(Id::from("x")),
+                        Memory(Id::from("F")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("x")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(0),
+                    fns_used: Some(1),
+                }
+            ),
+            (
+                Memory(Id::from("b")),
+                Node {
+                    memory: Memory(Id::from("b")),
+                    dependencies: HashSet::from([
+                        Memory(Id::from("y")),
+                        Memory(Id::from("F")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("y")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(1),
+                    fns_used: Some(1),
+                }
+            ),
+        ]),
+        vec![vec!["b","a"]];
+        "dependents preference"
+    )]
+    #[test_case(
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    memory: Memory(Id::from("a")),
+                    dependencies: HashSet::from([
+                        Memory(Id::from("x")),
+                        Memory(Id::from("F")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("x")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(1),
+                    fns_used: Some(1),
+                }
+            ),
+            (
+                Memory(Id::from("b")),
+                Node {
+                    memory: Memory(Id::from("b")),
+                    dependencies: HashSet::from([
+                        Memory(Id::from("y")),
+                        Memory(Id::from("F")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("y")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(1),
+                    fns_used: Some(0),
+                }
+            ),
+        ]),
+        vec![vec!["b","a"]];
+        "fn used preference tie breaker"
+    )]
+    #[test_case(
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    memory: Memory(Id::from("a")),
+                    dependencies: HashSet::from([
+                        Memory(Id::from("x")),
+                    ]),
+                    dependents: vec![
+                        Memory(Id::from("b"))
+                    ],
+                    is_fn: true,
+                    awaits: Vec::new(),
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("++")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("x")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(0),
+                    fns_used: Some(0),
+                }
+            ),
+            (
+                Memory(Id::from("b")),
+                Node {
+                    memory: Memory(Id::from("b")),
+                    dependencies: HashSet::from([
+                        Memory(Id::from("a")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: true,
+                    awaits: Vec::new(),
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("++")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(0),
+                    fns_used: Some(0),
+                }
+            ),
+        ]),
+        vec![vec!["a","b"]];
+        "dependency respected"
+    )]
+    #[test_case(
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    dependencies: HashSet::new(),
+                    dependents: vec![
+                        Memory(Id::from("f")),
+                        Memory(Id::from("g")),
+                    ],
+                    is_fn: false,
+                    awaits: Vec::new(),
+                    expression: Value::from(Integer {value: 0}).into(),
+                    fn_dependents: Some(2),
+                    fns_used: Some(0),
+                    memory: Memory(Id::from("a")),
+                }
+            ),
+            (
+                Memory(Id::from("f")),
+                Node {
+                    dependencies: HashSet::from([
+                        Memory(Id::from("a")),
+                    ]),
+                    dependents: vec![
+                        Memory(Id::from("p")),
+                        Memory(Id::from("m")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(1),
+                    fns_used: Some(0),
+                    memory: Memory(Id::from("f")),
+                }
+            ),
+            (
+                Memory(Id::from("g")),
+                Node {
+                    dependencies: HashSet::from([
+                        Memory(Id::from("a")),
+                    ]),
+                    dependents: vec![
+                        Memory(Id::from("p")),
+                        Memory(Id::from("m")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("G"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("G")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(1),
+                    fns_used: Some(0),
+                    memory: Memory(Id::from("g")),
+                }
+            ),
+            (
+                Memory(Id::from("p")),
+                Node {
+                    dependencies: HashSet::from([
+                        Memory(Id::from("f")),
+                        Memory(Id::from("g")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("f")),Memory(Id::from("g"))],
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("+")).into(),
+                        fn_type: FnType(
+                            vec![
+                                AtomicTypeEnum::INT.into(),
+                                AtomicTypeEnum::INT.into(),
+                            ],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("f")).into(),
+                            Memory(Id::from("g")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(0),
+                    fns_used: Some(2),
+                    memory: Memory(Id::from("p")),
+                }
+            ),
+            (
+                Memory(Id::from("m")),
+                Node {
+                    dependencies: HashSet::from([
+                        Memory(Id::from("f")),
+                        Memory(Id::from("g")),
+                    ]),
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("f")),Memory(Id::from("g"))],
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("-")).into(),
+                        fn_type: FnType(
+                            vec![
+                                AtomicTypeEnum::INT.into(),
+                                AtomicTypeEnum::INT.into(),
+                            ],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("f")).into(),
+                            Memory(Id::from("g")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: Some(0),
+                    fns_used: Some(2),
+                    memory: Memory(Id::from("m")),
+                }
+            ),
+        ]),
+        vec![
+            vec!["a","f","g","p","m"],
+            vec!["a","f","g","m","p"],
+            vec!["a","g","f","p","m"],
+            vec!["a","g","f","m","p"],
+        ];
+        "two independent fns"
+    )]
+    fn test_node_reorder(graph: Graph, possible_orderings: Vec<Vec<&str>>) {
+        let reorderer = StatementReorderer::new();
+        let ordering = reorderer.find_order(graph);
+        let possible_orderings = possible_orderings
+            .into_iter()
+            .map(|ordering| {
+                ordering
+                    .into_iter()
+                    .map(|id| Memory(Id::from(id)))
+                    .collect_vec()
+            })
+            .collect::<HashSet<Vec<Memory>>>();
+        let ordering = ordering.into_iter().map(|node| node.memory).collect_vec();
+        dbg!(&ordering);
+        assert!(possible_orderings.contains(&ordering));
     }
 }

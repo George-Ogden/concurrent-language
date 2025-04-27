@@ -70,7 +70,7 @@ impl TypeDef {
     }
 }
 
-#[derive(Clone, Debug, FromVariants, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq, Eq)]
 pub enum Value {
     BuiltIn(BuiltIn),
     Memory(Memory),
@@ -100,14 +100,14 @@ impl From<Boolean> for Value {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Memory(pub Id);
 
-#[derive(Clone, Debug, FromVariants, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq, Eq)]
 pub enum BuiltIn {
     Integer(Integer),
     Boolean(Boolean),
     BuiltInFn(Name),
 }
 
-#[derive(Clone, Debug, FromVariants, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq, Eq)]
 pub enum Expression {
     Value(Value),
     ElementAccess(ElementAccess),
@@ -154,30 +154,30 @@ impl From<Memory> for Expression {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ElementAccess {
     pub value: Value,
     pub idx: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TupleExpression(pub Vec<Value>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FnCall {
     pub fn_: Value,
     pub fn_type: FnType,
     pub args: Vec<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConstructorCall {
     pub type_: Name,
     pub idx: usize,
     pub data: Option<(Name, Value)>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClosureInstantiation {
     pub name: Name,
     pub env: Option<Value>,
