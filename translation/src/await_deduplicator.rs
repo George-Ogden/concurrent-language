@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 
-use crate::{Await, IfStatement, MatchBranch, MatchStatement, Memory, Statement};
+use crate::{Await, FnDef, IfStatement, MatchBranch, MatchStatement, Memory, Program, Statement};
 
 #[derive(Clone, Debug)]
 struct AwaitDeduplicator {
@@ -13,6 +13,37 @@ impl AwaitDeduplicator {
     fn new() -> Self {
         Self {
             awaited_ids: HashSet::new(),
+        }
+    }
+    /// Remove duplicate awaits from a program.
+    fn deduplicate(program: Program) -> Program {
+        let Program { type_defs, fn_defs } = program;
+        let fn_defs = fn_defs
+            .into_iter()
+            .map(|fn_def| AwaitDeduplicator::new().deduplicate_fn_def(fn_def))
+            .collect_vec();
+        Program { type_defs, fn_defs }
+    }
+    fn deduplicate_fn_def(
+        &mut self,
+        FnDef {
+            name,
+            arguments,
+            statements,
+            ret,
+            env,
+            is_recursive,
+            size_bounds,
+        }: FnDef,
+    ) -> FnDef {
+        FnDef {
+            name,
+            arguments,
+            statements: self.deduplicate_statements(statements),
+            ret,
+            env,
+            is_recursive,
+            size_bounds,
         }
     }
     fn deduplicate_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
@@ -99,8 +130,8 @@ impl AwaitDeduplicator {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Assignment, Await, Declaration, FnCall, FnType, Id, IfStatement, MatchBranch,
-        MatchStatement, Memory, Name, Statement, UnionType, Value,
+        Assignment, Await, Declaration, FnCall, FnDef, FnType, Id, IfStatement, MatchBranch,
+        MatchStatement, Memory, Name, Program, Statement, TypeDef, UnionType, Value,
     };
 
     use super::*;
@@ -1065,5 +1096,225 @@ mod tests {
         let mut deduplicator = AwaitDeduplicator::new();
         let deduplicated_statements = deduplicator.deduplicate_statements(duplicated_statements);
         assert_eq!(expected_statements, deduplicated_statements)
+    }
+
+    #[test_case(
+        Program{
+            type_defs: vec![
+                TypeDef{
+                    name: Name::from("Empty"),
+                    constructors: vec![(Name::from("empty"), None)]
+                }
+            ],
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::BOOL.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (30, 30),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("m0"))]).into(),
+                        Assignment{
+                            target: Memory(Id::from("m2")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m0")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::BOOL.into())
+                                ),
+                                args: vec![
+                                    Memory(Id::from("m1")).into(),
+                                ]
+                            }.into(),
+                        }.into(),
+                        Await(vec![Memory(Id::from("m0"))]).into(),
+                        Assignment{
+                            target: Memory(Id::from("m4")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m0")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::BOOL.into())
+                                ),
+                                args: vec![
+                                    Memory(Id::from("m3")).into(),
+                                ]
+                            }.into(),
+                        }.into()
+                    ],
+                },
+                FnDef {
+                    name: Name::from("F1"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::BOOL.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (10, 50),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("m0"))]).into(),
+                        Assignment{
+                            target: Memory(Id::from("n2")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m0")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::BOOL.into())
+                                ),
+                                args: vec![
+                                    Memory(Id::from("n1")).into(),
+                                ]
+                            }.into(),
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("n3")),
+                            type_: AtomicTypeEnum::BOOL.into()
+                        }.into(),
+                        IfStatement{
+                            condition: Value::from(Boolean{value: false}).into(),
+                            branches: (
+                                vec![
+                                    Await(vec![Memory(Id::from("m0"))]).into(),
+                                    Assignment{
+                                        target: Memory(Id::from("n5")),
+                                        value: FnCall {
+                                            fn_: Memory(Id::from("m0")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::BOOL.into())
+                                            ),
+                                            args: vec![
+                                                Memory(Id::from("n4")).into(),
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                    Assignment{
+                                        target: Memory(Id::from("n3")),
+                                        value: Memory(Id::from("n5")).into(),
+                                    }.into()
+                                ],
+                                vec![
+                                    Assignment{
+                                        target: Memory(Id::from("n3")),
+                                        value: Value::from(Boolean{value: true}).into(),
+                                    }.into(),
+                                ]
+                            )
+                        }.into(),
+                    ],
+                }
+            ]
+        },
+        Program{
+            type_defs: vec![
+                TypeDef{
+                    name: Name::from("Empty"),
+                    constructors: vec![(Name::from("empty"), None)]
+                }
+            ],
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::BOOL.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (30, 30),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("m0"))]).into(),
+                        Assignment{
+                            target: Memory(Id::from("m2")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m0")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::BOOL.into())
+                                ),
+                                args: vec![
+                                    Memory(Id::from("m1")).into(),
+                                ]
+                            }.into(),
+                        }.into(),
+                        Assignment{
+                            target: Memory(Id::from("m4")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m0")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::BOOL.into())
+                                ),
+                                args: vec![
+                                    Memory(Id::from("m3")).into(),
+                                ]
+                            }.into(),
+                        }.into()
+                    ],
+                },
+                FnDef {
+                    name: Name::from("F1"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::BOOL.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (10, 50),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("m0"))]).into(),
+                        Assignment{
+                            target: Memory(Id::from("n2")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m0")).into(),
+                                fn_type: FnType(
+                                    vec![AtomicTypeEnum::INT.into()],
+                                    Box::new(AtomicTypeEnum::BOOL.into())
+                                ),
+                                args: vec![
+                                    Memory(Id::from("n1")).into(),
+                                ]
+                            }.into(),
+                        }.into(),
+                        Declaration{
+                            memory: Memory(Id::from("n3")),
+                            type_: AtomicTypeEnum::BOOL.into()
+                        }.into(),
+                        IfStatement{
+                            condition: Value::from(Boolean{value: false}).into(),
+                            branches: (
+                                vec![
+                                    Assignment{
+                                        target: Memory(Id::from("n5")),
+                                        value: FnCall {
+                                            fn_: Memory(Id::from("m0")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::BOOL.into())
+                                            ),
+                                            args: vec![
+                                                Memory(Id::from("n4")).into(),
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                    Assignment{
+                                        target: Memory(Id::from("n3")),
+                                        value: Memory(Id::from("n5")).into(),
+                                    }.into()
+                                ],
+                                vec![
+                                    Assignment{
+                                        target: Memory(Id::from("n3")),
+                                        value: Value::from(Boolean{value: true}).into(),
+                                    }.into(),
+                                ]
+                            )
+                        }.into(),
+                    ],
+                }
+            ]
+        };
+        "program"
+    )]
+    fn test_deduplicate_program(program: Program, expected_program: Program) {
+        let deduplicated_program = AwaitDeduplicator::deduplicate(program);
+        assert_eq!(expected_program, deduplicated_program)
     }
 }
