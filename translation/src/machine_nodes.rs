@@ -76,6 +76,15 @@ pub enum Value {
     Memory(Memory),
 }
 
+impl Value {
+    pub fn filter_memory(&self) -> Option<Memory> {
+        match self {
+            Value::BuiltIn(_) => None,
+            Value::Memory(memory) => Some(memory.clone()),
+        }
+    }
+}
+
 impl From<Integer> for Value {
     fn from(value: Integer) -> Self {
         BuiltIn::from(value).into()
@@ -106,6 +115,37 @@ pub enum Expression {
     FnCall(FnCall),
     ConstructorCall(ConstructorCall),
     ClosureInstantiation(ClosureInstantiation),
+}
+
+impl Expression {
+    pub fn values(&self) -> Vec<Value> {
+        match self {
+            Expression::Value(value) => vec![value.clone()],
+            Expression::ElementAccess(ElementAccess { value, idx: _ }) => vec![value.clone()],
+            Expression::TupleExpression(TupleExpression(values)) => values.clone(),
+            Expression::FnCall(FnCall {
+                fn_,
+                fn_type: _,
+                args,
+            }) => {
+                let mut values = vec![fn_.clone()];
+                values.extend(args.clone());
+                values
+            }
+            Expression::ConstructorCall(ConstructorCall {
+                type_: _,
+                idx: _,
+                data,
+            }) => data
+                .as_ref()
+                .map(|(_, value)| vec![value.clone()])
+                .unwrap_or_default(),
+            Expression::ClosureInstantiation(ClosureInstantiation { name: _, env }) => env
+                .as_ref()
+                .map(|value| vec![value.clone()])
+                .unwrap_or_default(),
+        }
+    }
 }
 
 impl From<Memory> for Expression {
