@@ -4,7 +4,10 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use itertools::Either::{self, Left, Right};
 use itertools::Itertools;
 
-use crate::{Assignment, Await, Expression, FnCall, Memory, Statement, Value};
+use crate::{
+    Assignment, Await, Expression, FnCall, IfStatement, MatchBranch, MatchStatement, Memory,
+    Program, Statement, Value,
+};
 
 #[derive(Debug, Clone)]
 struct StatementReorderer {
@@ -24,12 +27,26 @@ struct Node {
 }
 
 impl Node {
+    /// Comparable heuristics for determining order (higher is better).
     fn project_heuristic(&self) -> (bool, usize, bool) {
         (
-            !self.is_fn,
+            self.is_fn,
             self.fn_dependents.unwrap(),
             self.fns_used.unwrap() == 0,
         )
+    }
+    /// Convert back to statements.
+    fn to_statements(self) -> Vec<Statement> {
+        let assignment = Assignment {
+            value: self.expression,
+            target: self.memory,
+        };
+        if self.awaits.len() == 0 {
+            vec![assignment.into()]
+        } else {
+            let await_ = Await(self.awaits);
+            vec![await_.into(), assignment.into()]
+        }
     }
 }
 
@@ -134,6 +151,11 @@ impl StatementReorderer {
                             let batch = next_batch.clone();
                             next_batch = Some(Left(statement));
                             if batch.is_some() {
+                                if let Some(Right(statements)) = &batch {
+                                    if statements.len() == 1 {
+                                        return Some(Left(statements[0].clone()));
+                                    }
+                                }
                                 return batch;
                             }
                         }
@@ -236,10 +258,12 @@ impl StatementReorderer {
         graph
     }
 
+    /// Order nodes in the graph based on heuristics.
     fn find_order(&self, graph: Graph) -> Vec<Node> {
         let keys = HashSet::<Memory>::from_iter(graph.keys().cloned());
         let mut graph = graph;
         let mut free_nodes = BinaryHeap::new();
+        // Only keep dependencies from the graph.
         for node in graph.values_mut() {
             node.dependencies = node
                 .dependencies
@@ -252,6 +276,7 @@ impl StatementReorderer {
             }
         }
         let mut order = Vec::new();
+        // Pick next best statement.
         while let Some(HeuristicNode(node)) = free_nodes.pop() {
             for dependent in &node.dependents {
                 let neighbor = graph.get_mut(dependent).unwrap();
@@ -264,13 +289,73 @@ impl StatementReorderer {
         }
         order
     }
+
+    fn reorder_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
+        self.collect_fn_calls(&statements);
+        let statements = self
+            .batch_statements(statements)
+            .flat_map(|batch| match batch {
+                Left(Statement::IfStatement(IfStatement {
+                    condition,
+                    branches: (true_branch, false_branch),
+                })) => {
+                    vec![IfStatement {
+                        condition,
+                        branches: (
+                            self.reorder_statements(true_branch),
+                            self.reorder_statements(false_branch),
+                        ),
+                    }
+                    .into()]
+                }
+                Left(Statement::MatchStatement(MatchStatement {
+                    expression,
+                    branches,
+                    auxiliary_memory,
+                })) => {
+                    vec![MatchStatement {
+                        expression,
+                        branches: branches
+                            .into_iter()
+                            .map(|MatchBranch { target, statements }| MatchBranch {
+                                target,
+                                statements: self.reorder_statements(statements),
+                            })
+                            .collect_vec(),
+                        auxiliary_memory,
+                    }
+                    .into()]
+                }
+                Left(statement) => vec![statement],
+                Right(statements) => {
+                    let graph = self.construct_graph(statements);
+                    let graph = self.compute_fn_dependents(graph);
+                    let graph = self.compute_fns_used(graph);
+                    let order = self.find_order(graph);
+                    order
+                        .into_iter()
+                        .flat_map(Node::to_statements)
+                        .collect_vec()
+                }
+            })
+            .collect_vec();
+        statements
+    }
+    fn reorder(mut program: Program) -> Program {
+        for fn_def in program.fn_defs.iter_mut() {
+            fn_def.statements =
+                StatementReorderer::new().reorder_statements(fn_def.statements.clone());
+        }
+        program
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Assignment, Await, BuiltIn, ClosureInstantiation, Declaration, FnCall, FnType, Id,
-        IfStatement, MatchBranch, MatchStatement, Name, Statement, TupleExpression, UnionType,
+        Assignment, Await, BuiltIn, ClosureInstantiation, Declaration, FnCall, FnDef, FnType, Id,
+        IfStatement, MatchBranch, MatchStatement, Name, Statement, TupleExpression, TypeDef,
+        UnionType,
     };
 
     use super::*;
@@ -740,9 +825,9 @@ mod tests {
                     type_: AtomicTypeEnum::BOOL.into()
                 }.into(),
             ),
-            Right(vec![
+            Left(
                 Await(vec![Memory(Id::from("condition"))]).into(),
-            ]),
+            ),
             Left(IfStatement{
                 condition: Memory(Id::from("condition")).into(),
                 branches: (
@@ -890,12 +975,12 @@ mod tests {
                 target: Memory(Id::from("m1")),
                 value: ClosureInstantiation { name: Name::from("F0"), env: None }.into(),
             }.into()),
-            Right(vec![
+            Left(
                 Assignment {
                     target: Memory(Id::from("m4")),
                     value: TupleExpression(vec![Memory(Id::from("m1")).into()]).into(),
                 }.into()
-            ]),
+            ),
             Left(Declaration {
                 type_: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
                 memory: Memory(Id::from("m5"))
@@ -1612,5 +1697,316 @@ mod tests {
         let ordering = ordering.into_iter().map(|node| node.memory).collect_vec();
         dbg!(&ordering);
         assert!(possible_orderings.contains(&ordering));
+    }
+
+    #[test_case(
+        Program{
+            type_defs: Vec::new(),
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("result")).into(), AtomicTypeEnum::INT.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (30, 50),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("condition"))]).into(),
+                        Declaration{
+                            memory: Memory(Id::from("result")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }.into(),
+                        IfStatement{
+                            condition: Memory(Id::from("condition")).into(),
+                            branches: (
+                                vec![
+                                    Await(vec![Memory(Id::from("f"))]).into(),
+                                    Assignment{
+                                        target: Memory(Id::from("y")),
+                                        value: FnCall {
+                                            fn_: Memory(Id::from("f")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::INT.into())
+                                            ),
+                                            args: vec![
+                                                Integer{value: 5}.into()
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                    Assignment{
+                                        target: Memory(Id::from("result")),
+                                        value: FnCall {
+                                            fn_: BuiltIn::BuiltInFn(Name::from("++")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::INT.into())
+                                            ),
+                                            args: vec![
+                                                Memory(Id::from("y")).into()
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                    Await(vec![Memory(Id::from("f"))]).into(),
+                                    Assignment{
+                                        target: Memory(Id::from("_")),
+                                        value: FnCall {
+                                            fn_: Memory(Id::from("f")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::INT.into())
+                                            ),
+                                            args: vec![
+                                                Memory(Id::from("y")).into()
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                ],
+                                vec![
+                                    Assignment{
+                                        target: Memory(Id::from("result")),
+                                        value: Value::from(Integer{value: 0}).into(),
+                                    }.into(),
+                                ]
+                            )
+                        }.into(),
+                    ]
+                }
+            ]
+        },
+        Program{
+            type_defs: Vec::new(),
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("result")).into(), AtomicTypeEnum::INT.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (30, 50),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("condition"))]).into(),
+                        Declaration{
+                            memory: Memory(Id::from("result")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }.into(),
+                        IfStatement{
+                            condition: Memory(Id::from("condition")).into(),
+                            branches: (
+                                vec![
+                                    Await(vec![Memory(Id::from("f"))]).into(),
+                                    Assignment{
+                                        target: Memory(Id::from("y")),
+                                        value: FnCall {
+                                            fn_: Memory(Id::from("f")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::INT.into())
+                                            ),
+                                            args: vec![
+                                                Integer{value: 5}.into()
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                    Await(vec![Memory(Id::from("f"))]).into(),
+                                    Assignment{
+                                        target: Memory(Id::from("_")),
+                                        value: FnCall {
+                                            fn_: Memory(Id::from("f")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::INT.into())
+                                            ),
+                                            args: vec![
+                                                Memory(Id::from("y")).into()
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                    Assignment{
+                                        target: Memory(Id::from("result")),
+                                        value: FnCall {
+                                            fn_: BuiltIn::BuiltInFn(Name::from("++")).into(),
+                                            fn_type: FnType(
+                                                vec![AtomicTypeEnum::INT.into()],
+                                                Box::new(AtomicTypeEnum::INT.into())
+                                            ),
+                                            args: vec![
+                                                Memory(Id::from("y")).into()
+                                            ]
+                                        }.into(),
+                                    }.into(),
+                                ],
+                                vec![
+                                    Assignment{
+                                        target: Memory(Id::from("result")),
+                                        value: Value::from(Integer{value: 0}).into(),
+                                    }.into(),
+                                ]
+                            )
+                        }.into(),
+                    ]
+                }
+            ]
+        };
+        "program with if"
+    )]
+    #[test_case(
+        Program{
+            type_defs: vec![
+                TypeDef{
+                    name: Name::from("Empty"),
+                    constructors: vec![(Name::from("empty"), None)]
+                }
+            ],
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("result")).into(), AtomicTypeEnum::INT.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (30, 50),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("subject"))]).into(),
+                        Declaration{
+                            memory: Memory(Id::from("result")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }.into(),
+                        MatchStatement{
+                            expression: (Memory(Id::from("subject")).into(), UnionType(vec![Name::from("empty")])),
+                            auxiliary_memory: Memory(Id::from("aux")),
+                            branches: vec![
+                                MatchBranch {
+                                    target: None,
+                                    statements: vec![
+                                        Await(vec![Memory(Id::from("f"))]).into(),
+                                        Assignment{
+                                            target: Memory(Id::from("y")),
+                                            value: FnCall {
+                                                fn_: Memory(Id::from("f")).into(),
+                                                fn_type: FnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ),
+                                                args: vec![
+                                                    Integer{value: 5}.into()
+                                                ]
+                                            }.into(),
+                                        }.into(),
+                                        Assignment{
+                                            target: Memory(Id::from("result")),
+                                            value: FnCall {
+                                                fn_: BuiltIn::BuiltInFn(Name::from("++")).into(),
+                                                fn_type: FnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ),
+                                                args: vec![
+                                                    Memory(Id::from("y")).into()
+                                                ]
+                                            }.into(),
+                                        }.into(),
+                                        Assignment{
+                                            target: Memory(Id::from("_")),
+                                            value: FnCall {
+                                                fn_: BuiltIn::BuiltInFn(Name::from("--")).into(),
+                                                fn_type: FnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ),
+                                                args: vec![
+                                                    Integer{value: 4}.into()
+                                                ]
+                                            }.into(),
+                                        }.into(),
+                                    ],
+                                }
+                            ]
+                        }.into(),
+                    ]
+                }
+            ]
+        },
+        Program{
+            type_defs: vec![
+                TypeDef{
+                    name: Name::from("Empty"),
+                    constructors: vec![(Name::from("empty"), None)]
+                }
+            ],
+            fn_defs: vec![
+                FnDef {
+                    name: Name::from("F0"),
+                    arguments: Vec::new(),
+                    ret: (Memory(Id::from("result")).into(), AtomicTypeEnum::INT.into()),
+                    env: Vec::new(),
+                    is_recursive: false,
+                    size_bounds: (30, 50),
+                    statements: vec![
+                        Await(vec![Memory(Id::from("subject"))]).into(),
+                        Declaration{
+                            memory: Memory(Id::from("result")),
+                            type_: AtomicTypeEnum::INT.into()
+                        }.into(),
+                        MatchStatement{
+                            expression: (Memory(Id::from("subject")).into(), UnionType(vec![Name::from("empty")])),
+                            auxiliary_memory: Memory(Id::from("aux")),
+                            branches: vec![
+                                MatchBranch {
+                                    target: None,
+                                    statements: vec![
+                                        Await(vec![Memory(Id::from("f"))]).into(),
+                                        Assignment{
+                                            target: Memory(Id::from("y")),
+                                            value: FnCall {
+                                                fn_: Memory(Id::from("f")).into(),
+                                                fn_type: FnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ),
+                                                args: vec![
+                                                    Integer{value: 5}.into()
+                                                ]
+                                            }.into(),
+                                        }.into(),
+                                        Assignment{
+                                            target: Memory(Id::from("_")),
+                                            value: FnCall {
+                                                fn_: BuiltIn::BuiltInFn(Name::from("--")).into(),
+                                                fn_type: FnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ),
+                                                args: vec![
+                                                    Integer{value: 4}.into()
+                                                ]
+                                            }.into(),
+                                        }.into(),
+                                        Assignment{
+                                            target: Memory(Id::from("result")),
+                                            value: FnCall {
+                                                fn_: BuiltIn::BuiltInFn(Name::from("++")).into(),
+                                                fn_type: FnType(
+                                                    vec![AtomicTypeEnum::INT.into()],
+                                                    Box::new(AtomicTypeEnum::INT.into())
+                                                ),
+                                                args: vec![
+                                                    Memory(Id::from("y")).into()
+                                                ]
+                                            }.into(),
+                                        }.into(),
+                                    ],
+                                }
+                            ]
+                        }.into(),
+                    ]
+                }
+            ]
+        };
+        "program with match"
+    )]
+    fn test_reorder_program(program: Program, expected_program: Program) {
+        let reordered_program = StatementReorderer::reorder(program);
+        assert_eq!(expected_program, reordered_program)
     }
 }
