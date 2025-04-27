@@ -18,6 +18,7 @@ struct Node {
     awaits: Vec<Memory>,
     expression: Expression,
     fn_dependents: Option<usize>,
+    fns_used: Option<usize>,
 }
 
 type Graph = HashMap<Memory, Node>;
@@ -137,6 +138,7 @@ impl StatementReorderer {
                         },
                         expression: value,
                         fn_dependents: None,
+                        fns_used: None,
                     };
                     graph.insert(target, node);
                 }
@@ -178,6 +180,24 @@ impl StatementReorderer {
 
         graph.get_mut(memory).unwrap().fn_dependents = Some(fn_dependents);
         fn_dependents
+    }
+
+    fn compute_fns_used(&self, mut graph: Graph) -> Graph {
+        for node in graph.values_mut() {
+            node.fns_used = Some(
+                node.dependencies
+                    .iter()
+                    .map(|dependency| {
+                        if self.fn_calls.contains(dependency) {
+                            1
+                        } else {
+                            0
+                        }
+                    })
+                    .sum(),
+            );
+        }
+        graph
     }
 }
 
@@ -473,6 +493,7 @@ mod tests {
                     is_fn: true,
                     awaits: vec![Memory(Id::from("f"))],
                     fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -493,6 +514,7 @@ mod tests {
                     is_fn: true,
                     awaits: vec![Memory(Id::from("f"))],
                     fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -514,6 +536,7 @@ mod tests {
                     is_fn: false,
                     awaits: vec![Memory(Id::from("t1")),Memory(Id::from("t2"))],
                     fn_dependents: None,
+                    fns_used: None,
                 }
             ),
         ]);
@@ -857,7 +880,8 @@ mod tests {
                     is_fn: false,
                     awaits: Vec::new(),
                     expression: Value::from(Integer {value: 0}).into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -882,7 +906,8 @@ mod tests {
                             Memory(Id::from("a")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -907,7 +932,8 @@ mod tests {
                             Memory(Id::from("a")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -934,7 +960,8 @@ mod tests {
                             Memory(Id::from("g")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -961,7 +988,8 @@ mod tests {
                             Memory(Id::from("g")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
         ]),
@@ -998,7 +1026,8 @@ mod tests {
                             Memory(Id::from("p")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -1023,7 +1052,8 @@ mod tests {
                             Memory(Id::from("a")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
             (
@@ -1045,7 +1075,8 @@ mod tests {
                             Memory(Id::from("f")).into(),
                         ]
                     }.into(),
-                    fn_dependents: None
+                    fn_dependents: None,
+                    fns_used: None,
                 }
             ),
         ]),
@@ -1064,6 +1095,118 @@ mod tests {
             graph
                 .into_iter()
                 .map(|(Memory(id), node)| (id, node.fn_dependents.unwrap()))
+                .collect()
+        );
+    }
+
+    #[test_case(
+        vec!["p", "a", "f"],
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("p")),
+                        Memory(Id::from("A")),
+                    ],
+                    dependents: vec![
+                        Memory(Id::from("f")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("A"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("A")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("p")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None,
+                    fns_used: None,
+                }
+            ),
+            (
+                Memory(Id::from("f")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("a")),
+                        Memory(Id::from("F")),
+                    ],
+                    dependents: vec![
+                        Memory(Id::from("g")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None,
+                    fns_used: None,
+                }
+            ),
+        ]),
+        HashMap::from([
+            (Id::from("a"), 1),
+            (Id::from("f"), 1),
+        ]);
+        "consecutive fn use"
+    )]
+    #[test_case(
+        vec!["a", "b"],
+        HashMap::from([
+            (
+                Memory(Id::from("r")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("a")),
+                        Memory(Id::from("b")),
+                    ],
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("A"))],
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("*")).into(),
+                        fn_type: FnType(
+                            vec![
+                                AtomicTypeEnum::INT.into(),
+                                AtomicTypeEnum::INT.into(),
+                            ],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                            Memory(Id::from("b")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None,
+                    fns_used: None,
+                }
+            ),
+        ]),
+        HashMap::from([
+            (Id::from("r"), 2),
+        ]);
+        "double fn use"
+    )]
+    fn test_compute_fns_used(fns: Vec<&str>, graph: Graph, expected_fns_used: HashMap<Id, usize>) {
+        let mut reorderer = StatementReorderer::new();
+        reorderer.fn_calls = HashSet::from_iter(fns.into_iter().map(|id| Memory(Id::from(id))));
+        let graph = reorderer.compute_fns_used(graph);
+        assert_eq!(
+            expected_fns_used,
+            graph
+                .into_iter()
+                .map(|(Memory(id), node)| (id, node.fns_used.unwrap()))
                 .collect()
         );
     }
