@@ -17,6 +17,7 @@ struct Node {
     is_fn: bool,
     awaits: Vec<Memory>,
     expression: Expression,
+    fn_dependents: Option<usize>,
 }
 
 type Graph = HashMap<Memory, Node>;
@@ -135,6 +136,7 @@ impl StatementReorderer {
                             }
                         },
                         expression: value,
+                        fn_dependents: None,
                     };
                     graph.insert(target, node);
                 }
@@ -150,6 +152,33 @@ impl StatementReorderer {
         }
         graph
     }
+
+    fn compute_fn_dependents(&self, mut graph: Graph) -> Graph {
+        for memory in graph.clone().keys() {
+            self.compute_node_fn_dependents(&memory, &mut graph);
+        }
+        graph
+    }
+    fn compute_node_fn_dependents(&self, memory: &Memory, graph: &mut Graph) -> usize {
+        if let Some(count) = graph.get(memory).unwrap().fn_dependents {
+            return count;
+        }
+
+        let dependents = graph.get(memory).unwrap().dependents.clone();
+        let is_fn = graph.get(memory).unwrap().is_fn;
+
+        let mut fn_dependents = dependents
+            .iter()
+            .map(|memory| self.compute_node_fn_dependents(memory, graph))
+            .sum();
+
+        if is_fn {
+            fn_dependents += 1;
+        }
+
+        graph.get_mut(memory).unwrap().fn_dependents = Some(fn_dependents);
+        fn_dependents
+    }
 }
 
 #[cfg(test)]
@@ -162,7 +191,7 @@ mod tests {
     use super::*;
 
     use itertools::Either;
-    use lowering::{AtomicTypeEnum, Boolean};
+    use lowering::{AtomicTypeEnum, Boolean, Integer};
     use test_case::test_case;
 
     #[test_case(
@@ -443,6 +472,7 @@ mod tests {
                     }.into(),
                     is_fn: true,
                     awaits: vec![Memory(Id::from("f"))],
+                    fn_dependents: None,
                 }
             ),
             (
@@ -462,6 +492,7 @@ mod tests {
                     }.into(),
                     is_fn: true,
                     awaits: vec![Memory(Id::from("f"))],
+                    fn_dependents: None,
                 }
             ),
             (
@@ -482,6 +513,7 @@ mod tests {
                     }.into(),
                     is_fn: false,
                     awaits: vec![Memory(Id::from("t1")),Memory(Id::from("t2"))],
+                    fn_dependents: None,
                 }
             ),
         ]);
@@ -810,5 +842,229 @@ mod tests {
                 reorderer.construct_graph(statements);
             }
         }
+    }
+
+    #[test_case(
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    dependencies: Vec::new(),
+                    dependents: vec![
+                        Memory(Id::from("f")),
+                        Memory(Id::from("g")),
+                    ],
+                    is_fn: false,
+                    awaits: Vec::new(),
+                    expression: Value::from(Integer {value: 0}).into(),
+                    fn_dependents: None
+                }
+            ),
+            (
+                Memory(Id::from("f")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("a")),
+                    ],
+                    dependents: vec![
+                        Memory(Id::from("p")),
+                        Memory(Id::from("m")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+            (
+                Memory(Id::from("g")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("a")),
+                    ],
+                    dependents: vec![
+                        Memory(Id::from("p")),
+                        Memory(Id::from("m")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("G"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("G")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+            (
+                Memory(Id::from("p")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("f")),
+                        Memory(Id::from("g")),
+                    ],
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("f")),Memory(Id::from("g"))],
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("+")).into(),
+                        fn_type: FnType(
+                            vec![
+                                AtomicTypeEnum::INT.into(),
+                                AtomicTypeEnum::INT.into(),
+                            ],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("f")).into(),
+                            Memory(Id::from("g")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+            (
+                Memory(Id::from("m")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("f")),
+                        Memory(Id::from("g")),
+                    ],
+                    dependents: Vec::new(),
+                    is_fn: false,
+                    awaits: vec![Memory(Id::from("f")),Memory(Id::from("g"))],
+                    expression: FnCall {
+                        fn_: BuiltIn::BuiltInFn(Name::from("-")).into(),
+                        fn_type: FnType(
+                            vec![
+                                AtomicTypeEnum::INT.into(),
+                                AtomicTypeEnum::INT.into(),
+                            ],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("f")).into(),
+                            Memory(Id::from("g")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+        ]),
+        HashMap::from([
+            (Id::from("a"), 2),
+            (Id::from("f"), 1),
+            (Id::from("g"), 1),
+            (Id::from("p"), 0),
+            (Id::from("m"), 0),
+        ]);
+        "two independent fns"
+    )]
+    #[test_case(
+        HashMap::from([
+            (
+                Memory(Id::from("a")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("p")),
+                        Memory(Id::from("A")),
+                    ],
+                    dependents: vec![
+                        Memory(Id::from("f")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("A"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("A")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("p")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+            (
+                Memory(Id::from("f")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("a")),
+                        Memory(Id::from("F")),
+                    ],
+                    dependents: vec![
+                        Memory(Id::from("g")),
+                    ],
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("F"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("F")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("a")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+            (
+                Memory(Id::from("g")),
+                Node {
+                    dependencies: vec![
+                        Memory(Id::from("a")),
+                    ],
+                    dependents: Vec::new(),
+                    is_fn: true,
+                    awaits: vec![Memory(Id::from("G"))],
+                    expression: FnCall {
+                        fn_: Memory(Id::from("G")).into(),
+                        fn_type: FnType(
+                            vec![AtomicTypeEnum::INT.into()],
+                            Box::new(AtomicTypeEnum::INT.into())
+                        ),
+                        args: vec![
+                            Memory(Id::from("f")).into(),
+                        ]
+                    }.into(),
+                    fn_dependents: None
+                }
+            ),
+        ]),
+        HashMap::from([
+            (Id::from("a"), 3),
+            (Id::from("f"), 2),
+            (Id::from("g"), 1),
+        ]);
+        "line dependencies"
+    )]
+    fn test_compute_fn_dependents(graph: Graph, expected_dependents: HashMap<Id, usize>) {
+        let reorderer = StatementReorderer::new();
+        let graph = reorderer.compute_fn_dependents(graph);
+        assert_eq!(
+            expected_dependents,
+            graph
+                .into_iter()
+                .map(|(Memory(id), node)| (id, node.fn_dependents.unwrap()))
+                .collect()
+        );
     }
 }
