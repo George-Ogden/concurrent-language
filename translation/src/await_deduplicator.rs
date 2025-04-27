@@ -5,7 +5,7 @@ use itertools::Itertools;
 use crate::{Await, FnDef, IfStatement, MatchBranch, MatchStatement, Memory, Program, Statement};
 
 #[derive(Clone, Debug)]
-struct AwaitDeduplicator {
+pub struct AwaitDeduplicator {
     awaited_ids: HashSet<Memory>,
 }
 
@@ -16,7 +16,7 @@ impl AwaitDeduplicator {
         }
     }
     /// Remove duplicate awaits from a program.
-    fn deduplicate(program: Program) -> Program {
+    pub fn deduplicate(program: Program) -> Program {
         let Program { type_defs, fn_defs } = program;
         let fn_defs = fn_defs
             .into_iter()
