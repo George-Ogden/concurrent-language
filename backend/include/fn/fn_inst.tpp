@@ -30,7 +30,7 @@ typename TypedFnI<Ret, Args...>::RetT TypedFnI<Ret, Args...>::run() {
 
 template <typename Ret, typename... Args>
 void TypedFnI<Ret, Args...>::process(WorkT &work) const {
-    if (execute_immediately()) {
+    if (work->execute_immediately()) {
         work->run();
     }
 }

@@ -81,9 +81,14 @@ void TypedWork<Ret, Args...>::await_all() {
 }
 
 template <typename Ret, typename... Args>
+bool TypedWork<Ret, Args...>::execute_immediately() const {
+    return fn->execute_immediately();
+}
+
+template <typename Ret, typename... Args>
 bool TypedWork<Ret, Args...>::can_respond() const {
     /// Determine that the function is moderately large and currently available.
-    if (fn->lower_size_bound() > 200 || fn->is_recursive()) {
+    if (fn->lower_size_bound() > 2000 || fn->is_recursive()) {
         WorkStatus status = static_cast<WorkStatus>(work_status.load<0>(std::memory_order_relaxed));
         if (status == WorkStatus::QUEUED){
             std::atomic_thread_fence(std::memory_order_acquire);

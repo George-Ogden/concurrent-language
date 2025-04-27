@@ -42,6 +42,7 @@ class Work {
             const FnT<Ret, Args...> &f, const ArgsT &...args);
     /// Determines if a work item is large enough to be shared across threads.
     virtual bool can_respond() const = 0;
+    virtual bool execute_immediately() const = 0;
 };
 
 using WorkT = std::shared_ptr<Work>;
@@ -58,4 +59,5 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
     void run() override;
     void await_all() override;
     bool can_respond() const override;
+    bool execute_immediately() const override;
 };

@@ -41,6 +41,9 @@ T& LazyConstant<T>::lvalue() {
 }
 
 template <typename T>
+void LazyConstant<T>::enqueue() {}
+
+template <typename T>
 LazyPlaceholder<T>::LazyPlaceholder(std::shared_ptr<Work> work)
     : work(work) {}
 
@@ -94,4 +97,12 @@ std::optional<WorkT> LazyPlaceholder<T>::get_work() {
         return current_reference->get_work();
     }
     return std::nullopt;
+}
+
+template <typename T>
+void LazyPlaceholder<T>::enqueue() {
+    std::optional<WorkT> work = get_work();
+    if (work.has_value()){
+        WorkManager::enqueue(work.value());
+    }
 }

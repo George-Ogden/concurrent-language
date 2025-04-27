@@ -24,6 +24,7 @@ template <typename T> struct Lazy : LazyValue {
     virtual std::optional<std::shared_ptr<Work>> get_work() override;
     // Return a reference to an equivalent value.
     virtual std::shared_ptr<Lazy<T>> as_ref();
+    virtual void enqueue() = 0;
 };
 
 // Lazy value with a defined value.
@@ -35,6 +36,7 @@ template <typename T> class LazyConstant : public Lazy<T> {
     bool done() override;
     T value() override;
     T &lvalue() override;
+    void enqueue() override;
 };
 
 // Lazy placeholder with work and reference to another value that still needs
@@ -50,6 +52,7 @@ template <typename T> class LazyPlaceholder : public Lazy<T> {
     T value() override;
     T &lvalue() override;
     virtual std::optional<std::shared_ptr<Work>> get_work() override;
+    void enqueue() override;
     std::shared_ptr<Lazy<T>> as_ref() override;
 };
 
