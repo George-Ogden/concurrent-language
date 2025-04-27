@@ -1,11 +1,12 @@
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
-    await_deduplicator::AwaitDeduplicator, code_vector::CodeVectorCalculator, weakener::Weakener,
-    Assignment, Await, BuiltIn, ClosureInstantiation, CodeSizeEstimator, ConstructorCall,
-    Declaration, ElementAccess, Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType,
-    MatchBranch, MatchStatement, Memory, Name, Program, Statement, TranslationArgs,
-    TupleExpression, TupleType, TypeDef, UnionType, Value,
+    await_deduplicator::AwaitDeduplicator, code_vector::CodeVectorCalculator,
+    statement_reorderer::StatementReorderer, weakener::Weakener, Assignment, Await, BuiltIn,
+    ClosureInstantiation, CodeSizeEstimator, ConstructorCall, Declaration, ElementAccess,
+    Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement,
+    Memory, Name, Program, Statement, TranslationArgs, TupleExpression, TupleType, TypeDef,
+    UnionType, Value,
 };
 use itertools::Itertools;
 use lowering::*;
@@ -291,22 +292,18 @@ impl Translator {
             condition,
             branches: (true_block, false_block),
         } = if_;
-        let condition = self.translate_value(condition);
-        let mut statements = if let Value::Memory(mem) = &condition {
-            vec![Await(vec![mem.clone()]).into()]
-        } else {
-            Vec::new()
-        };
         let target = IntermediateMemory::from(true_block.type_());
         let memory = self.translate_memory(&target);
         // Add declaration for shared result.
-        statements.push(
-            Declaration {
-                memory: memory.clone(),
-                type_: self.translate_type(&target.type_()),
-            }
-            .into(),
-        );
+        let mut statements = vec![Declaration {
+            memory: memory.clone(),
+            type_: self.translate_type(&target.type_()),
+        }
+        .into()];
+        let condition = self.translate_value(condition);
+        if let Value::Memory(mem) = &condition {
+            statements.push(Await(vec![mem.clone()]).into())
+        };
         let (mut true_statements, true_value) = self.translate_block(true_block);
         true_statements.push(
             Assignment {
@@ -338,22 +335,18 @@ impl Translator {
         let MachineType::UnionType(union_type) = self.translate_type(&type_) else {
             panic!("Match expression subject has non-union type.")
         };
-        let subject = self.translate_value(subject);
-        let mut statements = if let Value::Memory(mem) = &subject {
-            vec![Await(vec![mem.clone()]).into()]
-        } else {
-            Vec::new()
-        };
         let result = IntermediateMemory::from(branches[0].block.type_());
         let memory = self.translate_memory(&result);
         // Add declaration for shared result.
-        statements.push(
-            Declaration {
-                memory: memory.clone(),
-                type_: self.translate_type(&result.type_()),
-            }
-            .into(),
-        );
+        let mut statements = vec![Declaration {
+            memory: memory.clone(),
+            type_: self.translate_type(&result.type_()),
+        }
+        .into()];
+        let subject = self.translate_value(subject);
+        if let Value::Memory(mem) = &subject {
+            statements.push(Await(vec![mem.clone()]).into());
+        };
         let branches = branches
             .into_iter()
             .map(|IntermediateMatchBranch { target, block }| {
@@ -559,6 +552,7 @@ impl Translator {
             type_defs,
         };
         let program = Weakener::weaken(program);
+        let program = StatementReorderer::reorder(program);
         let program = AwaitDeduplicator::deduplicate(program);
         program
     }
@@ -1110,17 +1104,17 @@ mod tests {
             ]
         },
         vec![
-            Await(vec![Memory(Id::from("m0"))]).into(),
             Declaration {
-                memory: Memory(Id::from("m1")),
+                memory: Memory(Id::from("m0")),
                 type_: AtomicTypeEnum::INT.into()
             }.into(),
+            Await(vec![Memory(Id::from("m1"))]).into(),
             IfStatement {
-                condition: Memory(Id::from("m0")).into(),
+                condition: Memory(Id::from("m1")).into(),
                 branches: (
                     vec![
                         Assignment {
-                            target: Memory(Id::from("m1")),
+                            target: Memory(Id::from("m0")),
                             value: Expression::Value(
                                 BuiltIn::from(Integer{value: 1}).into()
                             ),
@@ -1128,7 +1122,7 @@ mod tests {
                     ],
                     vec![
                         Assignment {
-                            target: Memory(Id::from("m1")),
+                            target: Memory(Id::from("m0")),
                             value: Expression::Value(
                                 BuiltIn::from(Integer{value: 0}).into()
                             ),
@@ -1138,7 +1132,7 @@ mod tests {
             }.into(),
             Assignment {
                 target: Memory(Id::from("m2")),
-                value: Expression::Value(Memory(Id::from("m1")).into()),
+                value: Expression::Value(Memory(Id::from("m0")).into()),
             }.into(),
         ];
         "if statement awaited argument"
@@ -1340,15 +1334,15 @@ mod tests {
             )
         },
         vec![
-            Await(vec![Memory(Id::from("m0"))]).into(),
             Declaration {
-                memory: Memory(Id::from("m1")),
+                memory: Memory(Id::from("m0")),
                 type_: AtomicTypeEnum::INT.into()
             }.into(),
+            Await(vec![Memory(Id::from("m1"))]).into(),
             MatchStatement {
                 auxiliary_memory: Memory(Id::from("m2")),
                 expression: (
-                    Memory(Id::from("m0")).into(),
+                    Memory(Id::from("m1")).into(),
                     UnionType(vec![Name::from("T0C0"),Name::from("T0C1")])
                 ),
                 branches: vec![
@@ -1356,7 +1350,7 @@ mod tests {
                         target: None,
                         statements: vec![
                             Assignment {
-                                target: Memory(Id::from("m1")),
+                                target: Memory(Id::from("m0")),
                                 value: Expression::Value(
                                     BuiltIn::from(Integer{value: 1}).into()
                                 ),
@@ -1367,7 +1361,7 @@ mod tests {
                         target: None,
                         statements: vec![
                             Assignment {
-                                target: Memory(Id::from("m1")),
+                                target: Memory(Id::from("m0")),
                                 value: Expression::Value(
                                     BuiltIn::from(Integer{value: 0}).into()
                                 ),
@@ -1378,7 +1372,7 @@ mod tests {
             }.into(),
             Assignment {
                 target: Memory(Id::from("m3")),
-                value: Expression::Value(Memory(Id::from("m1")).into()),
+                value: Expression::Value(Memory(Id::from("m0")).into()),
             }.into(),
         ];
         "match statement no targets"
@@ -1448,14 +1442,14 @@ mod tests {
             )
         },
         vec![
-            Await(vec![Memory(Id::from("m0"))]).into(),
             Declaration{
-                memory: Memory(Id::from("m1")),
+                memory: Memory(Id::from("m0")),
                 type_: AtomicTypeEnum::BOOL.into()
             }.into(),
+            Await(vec![Memory(Id::from("m1"))]).into(),
             MatchStatement {
                 expression: (
-                    Memory(Id::from("m0")).into(),
+                    Memory(Id::from("m1")).into(),
                     UnionType(vec![Name::from("T0C0"),Name::from("T0C1")])
                 ),
                 auxiliary_memory: Memory(Id::from("m5")),
@@ -1483,7 +1477,7 @@ mod tests {
                                 }.into(),
                             }.into(),
                             Assignment {
-                                target: Memory(Id::from("m1")),
+                                target: Memory(Id::from("m0")),
                                 value: Expression::Value(
                                     Memory(Id::from("m3")).into(),
                                 ),
@@ -1494,7 +1488,7 @@ mod tests {
                         target: Some(Memory(Id::from("m4"))),
                         statements: vec![
                             Assignment {
-                                target: Memory(Id::from("m1")),
+                                target: Memory(Id::from("m0")),
                                 value: Expression::Value(
                                     Memory(Id::from("m4")).into(),
                                 ),
@@ -1505,7 +1499,7 @@ mod tests {
             }.into(),
             Assignment {
                 target: Memory(Id::from("m6")),
-                value: Value::from(Memory(Id::from("m1"))).into()
+                value: Value::from(Memory(Id::from("m0"))).into()
             }.into(),
             Assignment {
                 target: Memory(Id::from("m7")),
@@ -1990,7 +1984,7 @@ mod tests {
             );
             let main = IntermediateMemory::from(
                 IntermediateType::from(IntermediateFnType(
-                    Vec::new(),
+                    vec![AtomicTypeEnum::INT.into()],
                     Box::new(AtomicTypeEnum::INT.into()),
                 ))
             );
@@ -1998,6 +1992,7 @@ mod tests {
                 IntermediateType::from(AtomicTypeEnum::INT),
             );
             let y = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
+            let z = IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT));
             let arg: IntermediateArg = IntermediateType::from(AtomicTypeEnum::INT).into();
             IntermediateProgram {
                 main: IntermediateLambda{
@@ -2019,7 +2014,7 @@ mod tests {
                                 register: main.register.clone(),
                                 expression:
                                     IntermediateLambda{
-                                        args: Vec::new(),
+                                        args: vec![IntermediateArg::from(IntermediateType::from(AtomicTypeEnum::INT))],
                                         block: IntermediateBlock{
                                             statements: vec![
                                                 IntermediateAssignment{
@@ -2035,11 +2030,11 @@ mod tests {
                                     }.into()
                             }.into(),
                             IntermediateAssignment{
-                                register: Register::new(),
+                                register: z.register.clone(),
                                 expression:
                                     IntermediateFnCall{
                                         fn_: main.clone().into(),
-                                        args: Vec::new()
+                                        args: vec![Integer{value: 0}.into()]
                                     }.into()
                             }.into(),
                             IntermediateAssignment{
@@ -2047,7 +2042,7 @@ mod tests {
                                 expression:
                                     IntermediateFnCall{
                                         fn_: main.clone().into(),
-                                        args: Vec::new()
+                                        args: vec![z.clone().into()]
                                     }.into()
                             }.into(),
                         ],
@@ -2070,20 +2065,20 @@ mod tests {
                 },
                 FnDef {
                     name: Name::from("F1"),
-                    arguments: Vec::new(),
+                    arguments: vec![(Memory(Id::from("m2")), AtomicTypeEnum::INT.into())],
                     statements: vec![
                         Assignment {
-                            target: Memory(Id::from("m2")),
+                            target: Memory(Id::from("m3")),
                             value: ElementAccess {
                                 value: Memory(Id::from("env")).into(),
                                 idx: 0
                             }.into(),
                         }.into(),
-                        Await(vec![Memory(Id::from("m2"))]).into(),
+                        Await(vec![Memory(Id::from("m3"))]).into(),
                         Assignment {
-                            target: Memory(Id::from("m3")),
+                            target: Memory(Id::from("m4")),
                             value: FnCall {
-                                fn_: Memory(Id::from("m2")).into(),
+                                fn_: Memory(Id::from("m3")).into(),
                                 fn_type: FnType(
                                     vec![AtomicTypeEnum::INT.into()],
                                     Box::new(AtomicTypeEnum::INT.into())
@@ -2092,7 +2087,7 @@ mod tests {
                             }.into(),
                         }.into()
                     ],
-                    ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
+                    ret: (Memory(Id::from("m4")).into(), AtomicTypeEnum::INT.into()),
                     env: vec![
                         FnType(
                             vec![AtomicTypeEnum::INT.into()],
@@ -2118,39 +2113,39 @@ mod tests {
                             value: ClosureInstantiation { name: Name::from("F0"), env: None }.into(),
                         }.into(),
                         Assignment {
-                            target: Memory(Id::from("m4")),
+                            target: Memory(Id::from("m5")),
                             value: TupleExpression(vec![Memory(Id::from("m1")).into()]).into(),
                         }.into(),
                         Declaration {
-                            type_: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
-                            memory: Memory(Id::from("m5"))
+                            type_: FnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
+                            memory: Memory(Id::from("m6"))
                         }.into(),
-                        Assignment {
-                            target: Memory(Id::from("m5")),
-                            value: ClosureInstantiation {
-                                name: Name::from("F1"),
-                                env: Some(Memory(Id::from("m4")).into())
-                            }.into(),
-                        }.into(),
-                        Await(vec![Memory(Id::from("m5"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
-                            value: FnCall {
-                                fn_: Memory(Id::from("m5")).into(),
-                                fn_type: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
-                                args: Vec::new()
+                            value: ClosureInstantiation {
+                                name: Name::from("F1"),
+                                env: Some(Memory(Id::from("m5")).into())
                             }.into(),
                         }.into(),
+                        Await(vec![Memory(Id::from("m6"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m7")),
                             value: FnCall {
-                                fn_: Memory(Id::from("m5")).into(),
-                                fn_type: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
-                                args: Vec::new()
+                                fn_: Memory(Id::from("m6")).into(),
+                                fn_type: FnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
+                                args: vec![Integer{value: 0}.into()]
+                            }.into(),
+                        }.into(),
+                        Assignment {
+                            target: Memory(Id::from("m8")),
+                            value: FnCall {
+                                fn_: Memory(Id::from("m6")).into(),
+                                fn_type: FnType(vec![AtomicTypeEnum::INT.into()], Box::new(AtomicTypeEnum::INT.into())).into(),
+                                args: vec![Memory(Id::from("m7")).into()]
                             }.into(),
                         }.into(),
                     ],
-                    ret: (Memory(Id::from("m7")).into(), AtomicTypeEnum::INT.into()),
+                    ret: (Memory(Id::from("m8")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
                     size_bounds: (0, 0),
                     is_recursive: false
@@ -2351,11 +2346,11 @@ mod tests {
                             target: Memory(Id::from("m0")),
                             value: ConstructorCall { idx: 0, data: None, type_: Name::from("T0"), }.into(),
                         }.into(),
-                        Await(vec![Memory(Id::from("m0"))]).into(),
                         Declaration {
                             type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m1"))
                         }.into(),
+                        Await(vec![Memory(Id::from("m0"))]).into(),
                         MatchStatement {
                             expression: (Memory(Id::from("m0")).into(), UnionType(vec![Name::from("T0C0"), Name::from("T0C1")])),
                             auxiliary_memory: Memory(Id::from("m2")),
@@ -2571,7 +2566,7 @@ mod tests {
         let mut translator = Translator::new();
         let main_size = CodeSizeEstimator::estimate_size(&program.main);
         let translated_program = translator.translate_program(program);
-        assert_eq!(translated_program, expected_program);
+        assert_eq!(expected_program, translated_program);
         let main = translated_program.fn_defs.last().unwrap();
         assert_eq!(main.size_bounds, main_size);
     }

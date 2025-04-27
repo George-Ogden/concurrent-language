@@ -9,11 +9,6 @@ use crate::{
     Program, Statement, Value,
 };
 
-#[derive(Debug, Clone)]
-struct StatementReorderer {
-    fn_calls: HashSet<Memory>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct Node {
     dependencies: HashSet<Memory>,
@@ -74,6 +69,11 @@ impl Ord for HeuristicNode {
 }
 
 type Graph = HashMap<Memory, Node>;
+
+#[derive(Debug, Clone)]
+pub struct StatementReorderer {
+    fn_calls: HashSet<Memory>,
+}
 
 impl StatementReorderer {
     fn new() -> Self {
@@ -341,7 +341,8 @@ impl StatementReorderer {
             .collect_vec();
         statements
     }
-    fn reorder(mut program: Program) -> Program {
+    /// Reorder statements in a program.
+    pub fn reorder(mut program: Program) -> Program {
         for fn_def in program.fn_defs.iter_mut() {
             fn_def.statements =
                 StatementReorderer::new().reorder_statements(fn_def.statements.clone());
