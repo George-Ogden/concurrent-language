@@ -4,6 +4,7 @@ mod code_size;
 mod code_vector;
 mod machine_nodes;
 mod named_vector;
+mod statement_reorderer;
 mod translator;
 mod weakener;
 
