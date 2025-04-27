@@ -76,6 +76,18 @@ pub enum Value {
     Memory(Memory),
 }
 
+impl From<Integer> for Value {
+    fn from(value: Integer) -> Self {
+        BuiltIn::from(value).into()
+    }
+}
+
+impl From<Boolean> for Value {
+    fn from(value: Boolean) -> Self {
+        BuiltIn::from(value).into()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Memory(pub Id);
 
@@ -94,6 +106,12 @@ pub enum Expression {
     FnCall(FnCall),
     ConstructorCall(ConstructorCall),
     ClosureInstantiation(ClosureInstantiation),
+}
+
+impl From<Memory> for Expression {
+    fn from(value: Memory) -> Self {
+        Value::from(value).into()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

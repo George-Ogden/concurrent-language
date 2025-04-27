@@ -1,4 +1,5 @@
 mod args;
+mod await_deduplicator;
 mod code_size;
 mod code_vector;
 mod machine_nodes;
