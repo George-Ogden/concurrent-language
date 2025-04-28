@@ -130,10 +130,10 @@ TEST_F(RunnerTest, WorkManagerEnqueueTuple) {
     ASSERT_FALSE(large_work->queued());
 
     WorkManager::enqueue(std::tuple(large_result, small_result));
-    ASSERT_TRUE(large_work->queued());
-    ASSERT_TRUE(small_work->queued());
-    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{small_work});
-    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});
+    ASSERT_FALSE(large_work->queued());
+    ASSERT_FALSE(small_work->queued());
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
 }
 
 TEST_F(RunnerTest, WorkManagerEnqueuePrimitiveValue) {

@@ -44,11 +44,6 @@ void WorkManager::enqueue(const T &value) {
     }
 }
 
-template<typename...Ts>
-void WorkManager::enqueue(const TupleT<Ts...> &tuple) {
-    lazy_map([](const auto& x){WorkManager::enqueue(x);}, tuple);
-}
-
 void WorkManager::enqueue(const WorkT &work) {
     runners[ThreadManager::get_id()]->enqueue(work);
 }
