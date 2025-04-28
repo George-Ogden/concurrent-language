@@ -7,7 +7,7 @@ use crate::{
     Memory, Program, Statement, Value,
 };
 
-struct Enqueuer {}
+pub struct Enqueuer {}
 
 impl Enqueuer {
     fn new() -> Self {
@@ -157,7 +157,7 @@ impl Enqueuer {
         }
     }
     /// Update program with enqueue statements.
-    fn enqueue(program: Program) -> Program {
+    pub fn enqueue(program: Program) -> Program {
         let Program { type_defs, fn_defs } = program;
         let enqueuer = Enqueuer::new();
         let fn_defs = fn_defs

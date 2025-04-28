@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 use crate::{
-    await_deduplicator::AwaitDeduplicator, code_vector::CodeVectorCalculator,
+    await_deduplicator::AwaitDeduplicator, code_vector::CodeVectorCalculator, enqueuer::Enqueuer,
     statement_reorderer::StatementReorderer, weakener::Weakener, Assignment, Await, BuiltIn,
     ClosureInstantiation, CodeSizeEstimator, ConstructorCall, Declaration, ElementAccess,
     Expression, FnCall, FnDef, FnType, Id, IfStatement, MachineType, MatchBranch, MatchStatement,
@@ -554,6 +554,7 @@ impl Translator {
         let program = Weakener::weaken(program);
         let program = StatementReorderer::reorder(program);
         let program = AwaitDeduplicator::deduplicate(program);
+        let program = Enqueuer::enqueue(program);
         program
     }
     pub fn translate(program: IntermediateProgram, args: TranslationArgs) -> Program {
@@ -577,7 +578,7 @@ mod tests {
 
     use std::{fs, path::PathBuf};
 
-    use crate::CodeSizeEstimator;
+    use crate::{CodeSizeEstimator, Enqueue};
 
     use super::*;
 
@@ -1885,7 +1886,9 @@ mod tests {
                 FnDef {
                     name: Name::from("F0"),
                     arguments: vec![(Memory(Id::from("m0")), AtomicTypeEnum::INT.into())],
-                    statements: Vec::new(),
+                    statements: vec![
+                        Enqueue(Memory(Id::from("m0"))).into(),
+                    ],
                     ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
                     size_bounds: (0, 0),
@@ -1902,6 +1905,7 @@ mod tests {
                                 idx: 0
                             }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m2"))).into(),
                         Await(vec![Memory(Id::from("m2"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
@@ -1913,7 +1917,8 @@ mod tests {
                                 ),
                                 args: vec![BuiltIn::from(Integer { value: 0 }).into()]
                             }.into(),
-                        }.into()
+                        }.into(),
+                        Enqueue(Memory(Id::from("m3"))).into(),
                     ],
                     ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
                     env: vec![
@@ -1955,6 +1960,7 @@ mod tests {
                                 env: Some(Memory(Id::from("m4")).into())
                             }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m5"))).into(),
                         Await(vec![Memory(Id::from("m5"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
@@ -1963,7 +1969,8 @@ mod tests {
                                 fn_type: FnType(Vec::new(), Box::new(AtomicTypeEnum::INT.into())).into(),
                                 args: Vec::new()
                             }.into(),
-                        }.into()
+                        }.into(),
+                        Enqueue(Memory(Id::from("m6"))).into(),
                     ],
                     ret: (Memory(Id::from("m6")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
@@ -2057,7 +2064,9 @@ mod tests {
                 FnDef {
                     name: Name::from("F0"),
                     arguments: vec![(Memory(Id::from("m0")), AtomicTypeEnum::INT.into())],
-                    statements: Vec::new(),
+                    statements: vec![
+                        Enqueue(Memory(Id::from("m0"))).into(),
+                    ],
                     ret: (Memory(Id::from("m0")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
                     size_bounds: (0, 0),
@@ -2074,6 +2083,7 @@ mod tests {
                                 idx: 0
                             }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m3"))).into(),
                         Await(vec![Memory(Id::from("m3"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m4")),
@@ -2085,7 +2095,8 @@ mod tests {
                                 ),
                                 args: vec![BuiltIn::from(Integer { value: 0 }).into()]
                             }.into(),
-                        }.into()
+                        }.into(),
+                        Enqueue(Memory(Id::from("m4"))).into(),
                     ],
                     ret: (Memory(Id::from("m4")).into(), AtomicTypeEnum::INT.into()),
                     env: vec![
@@ -2127,6 +2138,7 @@ mod tests {
                                 env: Some(Memory(Id::from("m5")).into())
                             }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m6"))).into(),
                         Await(vec![Memory(Id::from("m6"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m7")),
@@ -2144,6 +2156,7 @@ mod tests {
                                 args: vec![Memory(Id::from("m7")).into()]
                             }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m8"))).into(),
                     ],
                     ret: (Memory(Id::from("m8")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
@@ -2225,7 +2238,8 @@ mod tests {
                                 value: Memory(Id::from("env")).into(),
                                 idx: 0
                             }.into()
-                        }.into()
+                        }.into(),
+                        Enqueue(Memory(Id::from("m2"))).into(),
                     ],
                     ret: (Memory(Id::from("m2")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
                     env: vec![TupleType(vec![TupleType(Vec::new()).into()]).into()].into(),
@@ -2259,6 +2273,7 @@ mod tests {
                                 env: Some(Memory(Id::from("m3")).into())
                             }.into()
                         }.into(),
+                        Enqueue(Memory(Id::from("m4"))).into(),
                         Await(vec![Memory(Id::from("m4"))]).into(),
                         Assignment {
                             target: Memory(Id::from("m5")),
@@ -2271,6 +2286,7 @@ mod tests {
                                 args: Vec::new()
                             }.into()
                         }.into(),
+                        Enqueue(Memory(Id::from("m5"))).into(),
                     ],
                     ret: (Memory(Id::from("m5")).into(), TupleType(vec![TupleType(Vec::new()).into()]).into()),
                     env: Vec::new(),
@@ -2346,6 +2362,7 @@ mod tests {
                             target: Memory(Id::from("m0")),
                             value: ConstructorCall { idx: 0, data: None, type_: Name::from("T0"), }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m0"))).into(),
                         Declaration {
                             type_: AtomicTypeEnum::INT.into(),
                             memory: Memory(Id::from("m1"))
@@ -2378,7 +2395,7 @@ mod tests {
                         Assignment {
                             target: Memory(Id::from("m3")),
                             value: Value::from(Memory(Id::from("m1"))).into(),
-                        }.into()
+                        }.into(),
                     ],
                     ret: (Memory(Id::from("m3")).into(),AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
@@ -2413,7 +2430,9 @@ mod tests {
                         (Memory(Id::from("m0")), AtomicTypeEnum::INT.into()),
                         (Memory(Id::from("m1")), AtomicTypeEnum::INT.into()),
                     ],
-                    statements: Vec::new(),
+                    statements: vec![
+                        Enqueue(Memory(Id::from("m1"))).into(),
+                    ],
                     ret: (Memory(Id::from("m1")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
                     size_bounds: (0,0),
@@ -2491,6 +2510,7 @@ mod tests {
                                 idx: 0
                             }.into()
                         }.into(),
+                        Enqueue(Memory(Id::from("m2"))).into(),
                         Await(vec![Memory(Id::from("m2")).into()]).into(),
                         Assignment {
                             target: Memory(Id::from("m3")),
@@ -2503,6 +2523,7 @@ mod tests {
                                 ).into()
                             }.into()
                         }.into(),
+                        Enqueue(Memory(Id::from("m3"))).into(),
                     ],
                     ret: (Memory(Id::from("m3")).into(), AtomicTypeEnum::INT.into()),
                     env: vec![
@@ -2540,6 +2561,7 @@ mod tests {
                                 env: Some(Memory(Id::from("m4")).into())
                             }.into(),
                         }.into(),
+                        Enqueue(Memory(Id::from("m5"))).into(),
                         Await(vec![Memory(Id::from("m5")).into()]).into(),
                         Assignment {
                             target: Memory(Id::from("m6")),
@@ -2552,6 +2574,7 @@ mod tests {
                                 ).into()
                             }.into()
                         }.into(),
+                        Enqueue(Memory(Id::from("m6"))).into(),
                     ],
                     ret: (Memory(Id::from("m6")).into(), AtomicTypeEnum::INT.into()),
                     env: Vec::new(),
