@@ -297,7 +297,7 @@ impl Emitter {
     }
     fn emit_enqueue(&self, enqueue: Enqueue) -> Code {
         let Enqueue(memory) = enqueue;
-        format!("{}->enqueue();", self.emit_memory(memory))
+        format!("WorkManager::enqueue({});", self.emit_memory(memory))
     }
     fn emit_statement(&self, statement: Statement, declared: &mut HashSet<Memory>) -> Code {
         match statement {
@@ -1035,7 +1035,7 @@ mod tests {
     )]
     #[test_case(
         vec![Enqueue(Memory(Id::from("y"))).into()],
-        "y->enqueue();";
+        "WorkManager::enqueue(y);";
         "enqueue emission"
     )]
     #[test_case(
@@ -1543,7 +1543,7 @@ mod tests {
             size_bounds: (50, 80),
             is_recursive: false
         },
-        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(x, y); inner_res->enqueue(); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(x, y); WorkManager::enqueue(inner_res); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
         "adder closure"
     )]
     #[test_case(
