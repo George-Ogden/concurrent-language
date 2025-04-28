@@ -104,3 +104,44 @@ TEST_F(RunnerTest, WorkManagerEnqueue) {
     ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
     ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});
 }
+
+TEST_F(RunnerTest, WorkManagerEnqueueLazyValue) {
+    FnT<Int> large_fn =
+        std::make_shared<TypedClosureG<Empty, Int>>(LargeWork::init);
+    auto [large_work, result] = Work::fn_call(large_fn);
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
+    ASSERT_FALSE(large_work->queued());
+
+    WorkManager::enqueue(result);
+    ASSERT_TRUE(large_work->queued());
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});
+}
+
+TEST_F(RunnerTest, WorkManagerEnqueueTuple) {
+    FnT<Int> large_fn =
+        std::make_shared<TypedClosureG<Empty, Int>>(LargeWork::init);
+    auto [large_work, large_result] = Work::fn_call(large_fn);
+    auto [small_work, small_result] =
+        Work::fn_call(Increment__BuiltIn_G, make_lazy<Int>(4));
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
+    ASSERT_FALSE(large_work->queued());
+
+    WorkManager::enqueue(std::tuple(large_result, small_result));
+    ASSERT_TRUE(large_work->queued());
+    ASSERT_TRUE(small_work->queued());
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{small_work});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{large_work});
+}
+
+TEST_F(RunnerTest, WorkManagerEnqueuePrimitiveValue) {
+    Int x = 5;
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
+
+    WorkManager::enqueue(x);
+    ASSERT_EQ(runner->get_small_works(), std::vector<WorkT>{});
+    ASSERT_EQ(runner->get_large_works(), std::vector<WorkT>{});
+}

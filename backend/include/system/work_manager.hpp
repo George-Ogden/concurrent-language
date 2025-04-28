@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fn/types.hpp"
+#include "types/compound.hpp"
 #include "work/runner.hpp"
 #include "work/work.hpp"
 
@@ -17,6 +18,8 @@ struct WorkManager {
     // Main function for threads to execute.
     static std::monostate main(std::atomic<WorkT> *ref);
     // Enqueue work to be executed in the future.
+    template <typename T> static void enqueue(const T &values);
+    template <typename... Ts> static void enqueue(const TupleT<Ts...> &tuple);
     static void enqueue(const WorkT &work);
     // Wait for values to be computed.
     template <typename... Vs> static auto await(Vs &...vs);
