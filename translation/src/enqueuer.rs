@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use crate::{
-    Assignment, Await, Enqueue, FnDef, IfStatement, MatchBranch, MatchStatement, Memory, Program,
-    Statement, Value,
+    Assignment, Await, Enqueue, Expression, FnDef, IfStatement, MatchBranch, MatchStatement,
+    Memory, Program, Statement, Value,
 };
 
 struct Enqueuer {}
@@ -35,6 +35,17 @@ impl Enqueuer {
             .flat_map(|statement| match statement {
                 Statement::Await(Await(ref memory)) => {
                     required.extend(memory.clone());
+                    vec![statement]
+                }
+                Statement::Assignment(Assignment {
+                    ref target,
+                    value: Expression::Value(ref value),
+                }) => {
+                    if required.remove(target) {
+                        if let Value::Memory(memory) = value {
+                            required.insert(memory.clone());
+                        }
+                    }
                     vec![statement]
                 }
                 Statement::Assignment(Assignment {
@@ -496,6 +507,101 @@ mod tests {
         vec!["f","s"];
         "match multiple branches"
     )]
+    #[test_case(
+        vec![
+            Declaration{
+                memory: Memory(Id::from("x")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
+            Await(vec![Memory(Id::from("s"))]).into(),
+            MatchStatement {
+                expression: (Memory(Id::from("s")).into(), UnionType(vec![Name::from("b1"), Name::from("b2")])),
+                auxiliary_memory: Memory(Id::from("aux")).into(),
+                branches: vec![
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("x")),
+                                value: Value::from(Integer{value: 0}).into()
+                            }.into()
+                        ]
+                    },
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("x")),
+                                value: FnCall {
+                                    fn_: BuiltIn::BuiltInFn(Name::from("Increment__BuiltIn")).into(),
+                                    fn_type: FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::BOOL.into())
+                                    ),
+                                    args: vec![
+                                        Integer{value: 0}.into()
+                                    ]
+                                }.into()
+                            }.into()
+                        ]
+                    },
+                ]
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("y")),
+                value: Memory(Id::from("x")).into()
+            }.into(),
+            Await(vec![Memory(Id::from("y"))]).into()
+        ],
+        vec![
+            Declaration{
+                memory: Memory(Id::from("x")),
+                type_: AtomicTypeEnum::INT.into()
+            }.into(),
+            Await(vec![Memory(Id::from("s"))]).into(),
+            MatchStatement {
+                expression: (Memory(Id::from("s")).into(), UnionType(vec![Name::from("b1"), Name::from("b2")])),
+                auxiliary_memory: Memory(Id::from("aux")).into(),
+                branches: vec![
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("x")),
+                                value: Value::from(Integer{value: 0}).into()
+                            }.into()
+                        ]
+                    },
+                    MatchBranch {
+                        target: None,
+                        statements: vec![
+                            Assignment {
+                                target: Memory(Id::from("x")),
+                                value: FnCall {
+                                    fn_: BuiltIn::BuiltInFn(Name::from("Increment__BuiltIn")).into(),
+                                    fn_type: FnType(
+                                        vec![AtomicTypeEnum::INT.into()],
+                                        Box::new(AtomicTypeEnum::BOOL.into())
+                                    ),
+                                    args: vec![
+                                        Integer{value: 0}.into()
+                                    ]
+                                }.into()
+                            }.into(),
+                            Enqueue(Memory(Id::from("x"))).into(),
+                        ]
+                    },
+                ]
+            }.into(),
+            Assignment {
+                target: Memory(Id::from("y")),
+                value: Memory(Id::from("x")).into()
+            }.into(),
+            Await(vec![Memory(Id::from("y"))]).into()
+        ],
+        vec!["s"];
+        "indirect requirement"
+    )]
     fn test_enqueue_statements(
         statements: Vec<Statement>,
         expected_statements: Vec<Statement>,
@@ -673,16 +779,15 @@ mod tests {
                                         Assignment {
                                             target: Memory(Id::from("x")),
                                             value: Value::from(Integer{value: 0}).into()
-                                        }.into()
+                                        }.into(),
                                     ]
-                                }
+                                },
                             ]
                         }.into(),
                         Assignment {
                             target: Memory(Id::from("y")),
                             value: Memory(Id::from("x")).into()
                         }.into(),
-                        Enqueue(Memory(Id::from("y"))).into()
                     ],
                     env: Vec::new(),
                     is_recursive: true,
