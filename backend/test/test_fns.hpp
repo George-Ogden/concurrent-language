@@ -109,10 +109,10 @@ struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
         WorkManager::await(res1);
         if (res1->value()) {
             res2 = fn_call(Plus__BuiltIn_G, y, Int(1));
-            res2->enqueue();
+            WorkManager::enqueue(res2);
         } else {
             res2 = fn_call(Plus__BuiltIn_G, z, Int(1));
-            res2->enqueue();
+            WorkManager::enqueue(res2);
         }
         res3 = fn_call(Minus__BuiltIn_G, res2, Int(2));
         return res3;
