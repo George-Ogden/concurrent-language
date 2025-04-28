@@ -235,7 +235,15 @@ impl Translator {
                         // Ensure fn is calculated before call.
                         vec![Await(vec![mem.clone()]).into()]
                     } else {
-                        Vec::new()
+                        let memory = args_values
+                            .iter()
+                            .filter_map(Value::filter_memory)
+                            .collect_vec();
+                        if memory.len() > 0 {
+                            vec![Await(memory).into()]
+                        } else {
+                            Vec::new()
+                        }
                     },
                     FnCall {
                         fn_: fn_value,
@@ -880,6 +888,46 @@ mod tests {
     )]
     #[test_case(
         IntermediateFnCall{
+            fn_: BuiltInFn(
+                Name::from("**"),
+                IntermediateFnType(
+                    vec![
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::INT.into(),
+                    ],
+                    Box::new(AtomicTypeEnum::INT.into())
+                ).into()
+            ).into(),
+            args: vec![
+                IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT)).into(),
+                IntermediateMemory::from(IntermediateType::from(AtomicTypeEnum::INT)).into(),
+            ]
+        }.into(),
+        (
+            vec![
+                Await(vec![Memory(Id::from("m0")), Memory(Id::from("m1"))]).into()
+            ],
+            FnCall{
+                args: vec![
+                    Memory(Id::from("m0")).into(),
+                    Memory(Id::from("m1")).into(),
+                ],
+                fn_: BuiltIn::BuiltInFn(
+                    Name::from("Exponentiate__BuiltIn"),
+                ).into(),
+                fn_type: FnType(
+                    vec![
+                        AtomicTypeEnum::INT.into(),
+                        AtomicTypeEnum::INT.into(),
+                    ],
+                    Box::new(AtomicTypeEnum::INT.into())
+                )
+            }.into()
+        );
+        "built-in fn call await"
+    )]
+    #[test_case(
+        IntermediateFnCall{
             fn_: IntermediateArg::from(
                 IntermediateType::from(IntermediateFnType(
                     vec![AtomicTypeEnum::INT.into()],
@@ -1458,6 +1506,7 @@ mod tests {
                     MatchBranch {
                         target: Some(Memory(Id::from("m2"))),
                         statements: vec![
+                            Await(vec![Memory(Id::from("m2"))]).into(),
                             Assignment {
                                 target: Memory(Id::from("m3")),
                                 value: FnCall{
@@ -1582,6 +1631,7 @@ mod tests {
                 ],
                 env: Vec::new(),
                 statements: vec![
+                    Await(vec![Memory(Id::from("m0")),Memory(Id::from("m1"))]).into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
@@ -1679,6 +1729,7 @@ mod tests {
                             idx: 1
                         }.into()
                     }.into(),
+                    Await(vec![Memory(Id::from("m0")),Memory(Id::from("m1"))]).into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
@@ -1767,6 +1818,7 @@ mod tests {
                             idx: 0
                         }.into()
                     }.into(),
+                    Await(vec![Memory(Id::from("m1")),Memory(Id::from("m0"))]).into(),
                     Assignment{
                         target: Memory(Id::from("m2")),
                         value: FnCall{
