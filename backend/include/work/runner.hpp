@@ -8,6 +8,7 @@
 #include "work/work_request.hpp"
 
 #include <atomic>
+#include <deque>
 #include <exception>
 #include <functional>
 #include <optional>
@@ -27,7 +28,8 @@ struct WorkRunner {
     static void setup(unsigned num_cpus);
 
   protected:
-    std::vector<WorkT> small_works, large_works;
+    std::vector<WorkT> small_works;
+    std::deque<WorkT> large_works;
 
     void main(std::atomic<WorkT> *ref);
     /// Active wait, performing any other tasks and exiting if predicate is
@@ -37,6 +39,8 @@ struct WorkRunner {
     bool any_requests() const;
     /// Respond to a request with work, returning true if the request succeeds.
     bool respond(const WorkT &work) const;
+    /// Identify requests and respond.
+    void respond_to_requests();
     /// Add work to small or large work queue.
     bool enqueue(const WorkT &work);
 

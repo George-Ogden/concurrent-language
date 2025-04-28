@@ -96,12 +96,7 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
             return;
         }
         do {
-            while (large_works.size() > 1 && any_requests()) {
-                // Give large work to another thread.
-                if (respond(large_works.back())) {
-                    large_works.pop_back();
-                }
-            }
+            respond_to_requests();
             if (!small_works.empty()) {
                 // Run small work first.
                 WorkT work = small_works.back();
@@ -118,13 +113,13 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                         return true;
                     }
                     bool enqueued = false;
-                    auto add_extra_work = [&](const auto & v){
+                    auto add_extra_work = [&](const auto &v) {
                         std::optional<WorkT> extra_work = v->get_work();
-                        if (extra_work.has_value()){
+                        if (extra_work.has_value()) {
                             enqueued |= enqueue(extra_work.value());
                         }
                     };
-                    (add_extra_work(vs),...);
+                    (add_extra_work(vs), ...);
                     return enqueued;
                 };
                 // If there is still no work, perform an active wait.
@@ -146,6 +141,7 @@ bool WorkRunner::enqueue(const WorkT &work) {
     if (work->enqueue()) {
         if (work->can_respond()) {
             large_works.emplace_back(std::move(work));
+            respond_to_requests();
         } else {
             small_works.emplace_back(std::move(work));
         }
@@ -186,6 +182,15 @@ bool WorkRunner::respond(const WorkT &work) const {
         return work_request.fill(work);
     } else {
         return false;
+    }
+}
+
+void WorkRunner::respond_to_requests() {
+    while (large_works.size() > 1 && any_requests()) {
+        // Give large work to another thread.
+        if (respond(large_works.front())) {
+            large_works.pop_front();
+        }
     }
 }
 
