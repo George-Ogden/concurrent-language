@@ -57,7 +57,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     def trim_group(group: pd.Series) -> pd.Series:
         return group.sort_values("duration").iloc[1:-1]
 
-    grouped_df = df.groupby(["function", "title", "directory"], group_keys=False)
+    grouped_df = df.groupby(["function", "title", "directory"], group_keys=False, sort=False)
     filtered_df = grouped_df.apply(trim_group)
     return filtered_df.reset_index(drop=True)
 
