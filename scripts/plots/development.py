@@ -36,7 +36,8 @@ def plot(df: pd.DataFrame) -> go.Figure:
         functions.append(filtered_df.function.loc[filtered_df.index[-1]])
 
     df = df.loc[df.function.isin(functions)].copy()
-    base = df.groupby("function").normalized_performance.transform(np.nanmin)
+    df.sort_values(by="directory", ignore_index=True, ascending=False, inplace=True)
+    base = df.groupby("function", sort=False).normalized_performance.transform("first")
     df.normalized_performance /= base
     df.performance_upper /= base
     df.performance_lower /= base
