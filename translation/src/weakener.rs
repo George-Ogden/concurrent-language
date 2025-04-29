@@ -93,7 +93,10 @@ impl Weakener {
         let mut translation = Translation::new();
         for statement in statements {
             match statement {
-                Statement::Allocation(_) | Statement::Await(_) | Statement::Declaration(_) => {}
+                Statement::Allocation(_)
+                | Statement::Await(_)
+                | Statement::Declaration(_)
+                | Statement::Enqueue(_) => {}
                 Statement::Assignment(Assignment {
                     target,
                     value: expression,
@@ -242,6 +245,7 @@ impl Weakener {
             .flat_map(|statement| match statement {
                 Statement::Await(await_) => vec![await_.into()],
                 Statement::Allocation(allocation) => vec![allocation.into()],
+                Statement::Enqueue(enqueue) => vec![enqueue.into()],
                 Statement::Assignment(assignment) => {
                     if let Assignment {
                         target,

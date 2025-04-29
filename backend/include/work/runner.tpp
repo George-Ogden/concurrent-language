@@ -3,10 +3,10 @@
 #include "data_structures/cyclic_queue.tpp"
 #include "lazy/fns.hpp"
 #include "system/work_manager.tpp"
-#include "work/runner.hpp"
-#include "work/work_request.tpp"
 #include "work/finished.tpp"
+#include "work/runner.hpp"
 #include "work/work.tpp"
+#include "work/work_request.tpp"
 
 #include <atomic>
 #include <functional>
@@ -25,16 +25,17 @@ void WorkRunner::main(std::atomic<WorkT> *ref) {
         work->run();
         work->await_all();
         unsigned remaining = num_cpus - 1;
-        while (remaining > 0){
+        while (remaining > 0) {
             WorkT finished_work = std::make_shared<FinishedWork>();
-            while (!respond(finished_work)){ }
+            while (!respond(finished_work)) {
+            }
             remaining--;
         }
     } else {
         // All other threads busy wait.
         while (1) {
             try {
-                active_wait(std::function<bool()>([](){return false;}));
+                active_wait(std::function<bool()>([]() { return false; }));
             } catch (finished &f) {
                 break;
             }
@@ -95,12 +96,7 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
             return;
         }
         do {
-            while (large_works.size() > 1 && any_requests()) {
-                // Give large work to another thread.
-                if (respond(large_works.back())) {
-                    large_works.pop_back();
-                }
-            }
+            respond_to_requests();
             if (!small_works.empty()) {
                 // Run small work first.
                 WorkT work = small_works.back();
@@ -112,28 +108,23 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
                 large_works.pop_back();
                 work->run();
             } else {
-                auto predicate = [&](){
-                    if (all_done(vs...)){
+                auto predicate = [&]() {
+                    if (all_done(vs...)) {
                         return true;
                     }
-                    (vs->get_work(extra_works), ...);
-                    if (extra_works.size() > 0) {
-                        return true;
-                    } else {
-                        return false;
-                    }
+                    bool enqueued = false;
+                    auto add_extra_work = [&](const auto &v) {
+                        std::optional<WorkT> extra_work = v->get_work();
+                        if (extra_work.has_value()) {
+                            enqueued |= enqueue(extra_work.value());
+                        }
+                    };
+                    (add_extra_work(vs), ...);
+                    return enqueued;
                 };
                 // If there is still no work, perform an active wait.
-                if (predicate() || active_wait(std::function<bool()>(predicate))) {
-                    for (WorkT &work : extra_works) {
-                        // When extra work is found, start processing it.
-                        if (work->can_respond()) {
-                            large_works.emplace_back(std::move(work));
-                        } else {
-                            small_works.emplace_back(std::move(work));
-                        }
-                    }
-                    extra_works.clear();
+                if (!predicate()) {
+                    active_wait(std::function<bool()>(predicate));
                 }
             }
 
@@ -145,6 +136,21 @@ template <typename... Vs> void WorkRunner::await_restricted(Vs &...vs) {
     };
 }
 
+bool WorkRunner::enqueue(const WorkT &work) {
+    // Place in queue based on size.
+    if (work->enqueue()) {
+        if (work->can_respond()) {
+            large_works.emplace_back(std::move(work));
+            respond_to_requests();
+        } else {
+            small_works.emplace_back(std::move(work));
+        }
+        return true;
+    } else {
+        return false;
+    }
+}
+
 bool WorkRunner::any_requests() const { return !work_request_queue.empty(); }
 
 bool WorkRunner::active_wait(std::function<bool()> predicate) {
@@ -152,17 +158,17 @@ bool WorkRunner::active_wait(std::function<bool()> predicate) {
     work_request.request();
     if (work_request.enqueue()) {
         work_request_queue.push(id);
-    } else if (work_request.full()){
+    } else if (work_request.full()) {
         work_request.fulfill();
         return false;
     }
     while (!predicate()) {
-        if (work_request.full()){
+        if (work_request.full()) {
             work_request.fulfill();
             return false;
         }
     }
-    if (!work_request.cancel()){
+    if (!work_request.cancel()) {
         assert(work_request.full());
         work_request.fulfill();
     }
@@ -179,6 +185,15 @@ bool WorkRunner::respond(const WorkT &work) const {
     }
 }
 
+void WorkRunner::respond_to_requests() {
+    while (large_works.size() > 1 && any_requests()) {
+        // Give large work to another thread.
+        if (respond(large_works.front())) {
+            large_works.pop_front();
+        }
+    }
+}
+
 template <typename... Vs> bool WorkRunner::all_done(Vs &&...vs) {
     return (... && vs->done());
 }
@@ -187,7 +202,7 @@ void WorkRunner::setup(unsigned num_cpus) {
     WorkRunner::num_cpus = num_cpus;
     WorkRunner::work_request_queue = CyclicQueue<unsigned>{num_cpus};
     WorkRunner::work_requests.clear();
-    for (unsigned i = 0; i < num_cpus; i++){
+    for (unsigned i = 0; i < num_cpus; i++) {
         work_requests.emplace_back(std::make_unique<WorkRequest>());
     }
     WorkRunner::work_requests.resize(num_cpus);

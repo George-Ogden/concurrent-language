@@ -12,15 +12,13 @@
 
 // Macros to turn functions into function generators.
 #define Binary_Int_Int_Int_Op__BuiltIn(fn, size)                               \
-    template <typename T, typename U> Int fn(T t, U u) {                       \
-        auto [x, y] = WorkManager::await(t, u);                                \
-        return fn(x, y);                                                       \
-    }                                                                          \
-                                                                               \
     class fn##_I : public TypedFnI<Int, Int, Int> {                            \
       protected:                                                               \
         LazyT<Int> body(LazyT<Int> &x, LazyT<Int> &y) override {               \
-            return make_lazy<Int>(fn(x, y));                                   \
+            WorkManager::enqueue(x);                                           \
+            WorkManager::enqueue(y);                                           \
+            WorkManager::await(x, y);                                          \
+            return make_lazy<Int>(fn(x->value(), y->value()));                 \
         }                                                                      \
                                                                                \
       public:                                                                  \
@@ -41,15 +39,12 @@
         std::make_shared<TypedClosureG<Empty, Int, Int, Int>>(fn##_I::init);
 
 #define Unary_Int_Int_Op__BuiltIn(fn, size)                                    \
-    template <typename T> Int fn(T t) {                                        \
-        auto [x] = WorkManager::await(t);                                      \
-        return fn(x);                                                          \
-    }                                                                          \
-                                                                               \
     class fn##_I : public TypedFnI<Int, Int> {                                 \
       protected:                                                               \
         LazyT<Int> body(LazyT<Int> &x) override {                              \
-            return make_lazy<Int>(fn(x));                                      \
+            WorkManager::enqueue(x);                                           \
+            WorkManager::await(x);                                             \
+            return make_lazy<Int>(fn(x->value()));                             \
         }                                                                      \
                                                                                \
       public:                                                                  \
@@ -69,15 +64,12 @@
         std::make_shared<TypedClosureG<Empty, Int, Int>>(fn##_I::init);
 
 #define Unary_Bool_Bool_Op__BuiltIn(fn, size)                                  \
-    template <typename T> Bool fn(T t) {                                       \
-        auto [x] = WorkManager::await(t);                                      \
-        return fn(x);                                                          \
-    }                                                                          \
-                                                                               \
     class fn##_I : public TypedFnI<Bool, Bool> {                               \
       protected:                                                               \
         LazyT<Bool> body(LazyT<Bool> &x) override {                            \
-            return make_lazy<Bool>(fn(x));                                     \
+            WorkManager::enqueue(x);                                           \
+            WorkManager::await(x);                                             \
+            return make_lazy<Bool>(fn(x->value()));                            \
         }                                                                      \
                                                                                \
       public:                                                                  \
@@ -97,15 +89,13 @@
         std::make_shared<TypedClosureG<Empty, Bool, Bool>>(fn##_I::init);
 
 #define Binary_Int_Int_Bool_Op__BuiltIn(fn, size)                              \
-    template <typename T, typename U> Bool fn(T t, U u) {                      \
-        auto [x, y] = WorkManager::await(t, u);                                \
-        return fn(x, y);                                                       \
-    }                                                                          \
-                                                                               \
     class fn##_I : public TypedFnI<Bool, Int, Int> {                           \
       protected:                                                               \
         LazyT<Bool> body(LazyT<Int> &x, LazyT<Int> &y) override {              \
-            return make_lazy<Bool>(fn(x, y));                                  \
+            WorkManager::enqueue(x);                                           \
+            WorkManager::enqueue(y);                                           \
+            WorkManager::await(x, y);                                          \
+            return make_lazy<Bool>(fn(x->value(), y->value()));                \
         }                                                                      \
                                                                                \
       public:                                                                  \

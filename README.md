@@ -198,6 +198,9 @@ The outputs from this stage are machine nodes, which contain all the information
 - `./translation/src/code_size.rs` defines a `CodeSizeEstimator` to generate approximate bounds on the size of a function definition.
 - `./translation/src/weakener.rs` defines a `Weakener` to introduce weak pointers and allocators to manage recursive cycles in functions.
 - `./translation/src/translator.rs` defines the `Translator` to convert from the intermediate representation into the machine nodes.
+- `./translation/src/statement_reorderer.rs` defines a `StatementReorderer` to reorder statements for higher levels of parallelism.
+- `./translation/src/enqueuer.rs` defines an `Enqueuer` to insert `Enqueue` statements to run work in parallel.
+- `./translation/src/await_deduplicator.rs` defines an `AwaitDeduplicator`, which removes unnecessary waiting in the generated code.
 ### Emission
 The emission stage generates C++ code that can be compiled, linked and run.
 - `./emission/src/type_formatter.rs` contains a `TypeFormatter` and a `TypesFormatter` to convert machine node types into C++ types.

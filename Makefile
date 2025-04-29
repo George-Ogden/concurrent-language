@@ -20,7 +20,7 @@ TARGET := backend/include/main/main.hpp
 
 FRONTEND_FLAGS :=
 BACKEND_FLAGS :=
-FLAGS_HASH := $(shell echo '$(FRONTEND_FLAGS) / $(BACKEND_FLAGS)' | sha256sum - 2> /dev/null | cut -d' ' -f1)
+FLAGS_HASH := $(shell echo '$(FRONTEND_FLAGS)' | sha256sum - 2> /dev/null | cut -d' ' -f1)
 
 FILE := samples/main.txt
 LAST_FILE_PREFIX := .last-file-hash-

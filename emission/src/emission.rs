@@ -5,9 +5,9 @@ use std::convert::identity;
 
 use translation::{
     Allocation, Assignment, Await, Boolean, BuiltIn, ClosureInstantiation, ConstructorCall,
-    Declaration, ElementAccess, Expression, FnCall, FnDef, Id, IfStatement, Integer, MachineType,
-    MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType, TypeDef,
-    UnionType, Value,
+    Declaration, ElementAccess, Enqueue, Expression, FnCall, FnDef, Id, IfStatement, Integer,
+    MachineType, MatchStatement, Memory, Name, Program, Statement, TupleExpression, TupleType,
+    TypeDef, UnionType, Value,
 };
 
 use crate::type_formatter::TypeFormatter;
@@ -173,15 +173,20 @@ impl Emitter {
         format!("WorkManager::await({arguments});")
     }
     fn emit_fn_call(&self, fn_call: FnCall) -> Code {
-        let args_code = self.emit_value_list(fn_call.args);
         match fn_call.fn_ {
             Value::BuiltIn(built_in) => {
                 let BuiltIn::BuiltInFn(name) = built_in else {
                     panic!("Attempt to call non-fn built-in.")
                 };
+                let args_code = fn_call
+                    .args
+                    .into_iter()
+                    .map(|arg| format!("extract_lazy({})", self.emit_value(arg)))
+                    .join(",");
                 format!("{name}({args_code})",)
             }
             Value::Memory(memory) => {
+                let args_code = self.emit_value_list(fn_call.args);
                 let id = self.emit_memory(memory);
                 let call_code = if args_code.len() == 0 {
                     format!("extract_lazy({})", id)
@@ -295,6 +300,10 @@ impl Emitter {
             .join("\n");
         format!("{extraction} switch ({subject}.tag) {{ {branches_code} }}")
     }
+    fn emit_enqueue(&self, enqueue: Enqueue) -> Code {
+        let Enqueue(memory) = enqueue;
+        format!("WorkManager::enqueue({});", self.emit_memory(memory))
+    }
     fn emit_statement(&self, statement: Statement, declared: &mut HashSet<Memory>) -> Code {
         match statement {
             Statement::Await(await_) => self.emit_await(await_),
@@ -307,6 +316,7 @@ impl Emitter {
             Statement::MatchStatement(match_statement) => {
                 self.emit_match_statement(match_statement, declared.clone())
             }
+            Statement::Enqueue(enqueue) => self.emit_enqueue(enqueue),
         }
     }
     fn emit_statements(&self, statements: Vec<Statement>, mut declared: HashSet<Memory>) -> Code {
@@ -458,7 +468,9 @@ mod tests {
     use once_cell::sync::Lazy;
     use regex::Regex;
     use test_case::test_case;
-    use translation::{Allocation, AtomicType, AtomicTypeEnum, FnType, Id, MatchBranch, Name};
+    use translation::{
+        Allocation, AtomicType, AtomicTypeEnum, Enqueue, FnType, Id, MatchBranch, Name,
+    };
 
     const EMITTER: Lazy<Emitter> = Lazy::new(|| Emitter {});
 
@@ -913,7 +925,7 @@ mod tests {
                 ]
             }.into(),
         },
-        "auto call = Plus__BuiltIn(arg1, arg2);";
+        "auto call = Plus__BuiltIn(extract_lazy(arg1), extract_lazy(arg2));";
         "built-in fn call"
     )]
     #[test_case(
@@ -1025,6 +1037,11 @@ mod tests {
         ],
         "WorkManager::await(z,x);";
         "await for multiple memory"
+    )]
+    #[test_case(
+        vec![Enqueue(Memory(Id::from("y"))).into()],
+        "WorkManager::enqueue(y);";
+        "enqueue emission"
     )]
     #[test_case(
         vec![
@@ -1361,7 +1378,7 @@ mod tests {
                 ]
             }.into(),
         ],
-        "LazyT<Int> call; auto tmp = extract_lazy(either); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = ensure_lazy(Comparison_GE__BuiltIn(x,y)); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = ensure_lazy(x); break; }}";
+        "LazyT<Int> call; auto tmp = extract_lazy(either); switch (tmp.tag) {case 0ULL: { LazyT<Left::type> x = reinterpret_cast<Left*>(&tmp.value)->value; call = ensure_lazy(Comparison_GE__BuiltIn(extract_lazy(x),extract_lazy(y))); break; } case 1ULL:{ LazyT<Right::type> x = reinterpret_cast<Right*>(&tmp.value)->value; call = ensure_lazy(x); break; }}";
         "match statement read values"
     )]
     #[test_case(
@@ -1428,6 +1445,7 @@ mod tests {
                 (Memory(Id::from("d")), AtomicType(AtomicTypeEnum::INT).into()),
             ],
             statements: vec![
+                Await(vec![Memory(Id::from("a")),Memory(Id::from("b"))]).into(),
                 Assignment {
                     target: Memory(Id::from("res1")),
                     value: FnCall{
@@ -1447,6 +1465,8 @@ mod tests {
                         ]
                     }.into()
                 }.into(),
+                Enqueue(Memory(Id::from("res1"))).into(),
+                Await(vec![Memory(Id::from("c")),Memory(Id::from("d"))]).into(),
                 Assignment {
                     target: Memory(Id::from("res2")),
                     value: FnCall{
@@ -1466,6 +1486,8 @@ mod tests {
                         ]
                     }.into()
                 }.into(),
+                Enqueue(Memory(Id::from("res2"))).into(),
+                Await(vec![Memory(Id::from("res1")),Memory(Id::from("res2"))]).into(),
                 Assignment {
                     target: Memory(Id::from("res3")),
                     value: FnCall{
@@ -1490,7 +1512,7 @@ mod tests {
             size_bounds: (90, 90),
             is_recursive: false
         },
-        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { auto res1 = Plus__BuiltIn(a, b); auto res2 = Plus__BuiltIn(c, d); auto res3 = Plus__BuiltIn(res1, res2); return ensure_lazy(res3); } constexpr std::size_t lower_size_bound() const override { return 90; }; constexpr std::size_t upper_size_bound() const override { return 90; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
+        "struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> { using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c, LazyT<Int> &d) override { WorkManager::await(a, b); auto res1 = Plus__BuiltIn(extract_lazy(a), extract_lazy(b)); WorkManager::enqueue(res1); WorkManager::await(c, d); auto res2 = Plus__BuiltIn(extract_lazy(c), extract_lazy(d)); WorkManager::enqueue(res2); WorkManager::await(res1, res2); auto res3 = Plus__BuiltIn(extract_lazy(res1), extract_lazy(res2)); return ensure_lazy(res3);} constexpr std::size_t lower_size_bound() const override { return 90; }; constexpr std::size_t upper_size_bound() const override { return 90; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int, Int, Int, Int>> init(const ArgsT &args) { return std::make_unique<FourWayPlus>(args); } static inline FnT<Int,Int,Int,Int,Int>G = std::make_shared<TypedClosureG<Empty,Int,Int,Int,Int,Int>>(init);};";
         "four way plus"
     )]
     #[test_case(
@@ -1525,12 +1547,13 @@ mod tests {
                         ]
                     }.into(),
                 }.into(),
+                Enqueue(Memory(Id::from("inner_res"))).into()
             ],
             ret: (Memory(Id::from("inner_res")).into(), AtomicType(AtomicTypeEnum::INT).into()),
             size_bounds: (50, 80),
             is_recursive: false
         },
-        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(x, y); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
+        "struct Adder : TypedClosureI<TupleT<Int>, Int, Int> { using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI; LazyT<Int> body(LazyT<Int> &x) override { auto y = load_env(std::get<0ULL>(env)); auto inner_res = Plus__BuiltIn(extract_lazy(x), extract_lazy(y)); WorkManager::enqueue(inner_res); return ensure_lazy(inner_res); } constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 80; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int, Int>> init(const ArgsT &args, const EnvT &env) { return std::make_unique<Adder>(args, env); }};";
         "adder closure"
     )]
     #[test_case(
@@ -1645,7 +1668,7 @@ mod tests {
                 }
             ],
         },
-        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto call = Plus__BuiltIn(x,y); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; auto main = fn_call(extract_lazy(Main)); return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
+        "#include \"main/include.hpp\" struct Twoo; struct Faws; typedef VariantT<Twoo,Faws>Bull; struct Twoo {Empty value;}; struct Faws {Empty value;}; struct Main : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto call = Plus__BuiltIn(extract_lazy(x),extract_lazy(y)); return ensure_lazy(call);} constexpr std::size_t lower_size_bound() const override { return 50; }; constexpr std::size_t upper_size_bound() const override { return 50; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>> init(const ArgsT &args) {return std::make_unique<Main>(args);} static inline FnT<Int>G = std::make_shared<TypedClosureG<Empty,Int>>(init);}; struct PreMain : TypedClosureI<Empty,Int> {using TypedClosureI<Empty,Int>::TypedClosureI; LazyT<Int> body() override { auto x = Int{9LL}; auto y = Int{5LL}; auto main = fn_call(extract_lazy(Main)); return ensure_lazy(main); } constexpr std::size_t lower_size_bound() const override { return 40; }; constexpr std::size_t upper_size_bound() const override { return 60; }; constexpr bool is_recursive() const override { return false; }; static std::unique_ptr<TypedFnI<Int>>init(const ArgsT&args) {return std::make_unique<PreMain>(args);} static inline FnT<Int> G = std::make_shared<TypedClosureG<Empty,Int>>(init);};";
         "main program"
     )]
     fn test_program_emission(program: Program, expected: &str) {

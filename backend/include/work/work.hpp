@@ -17,7 +17,7 @@
 /// Work class for executing a function and assigning its values.
 class Work {
   protected:
-    enum WorkStatus { AVAILABLE, ACTIVE, DONE, MAX };
+    enum WorkStatus { AVAILABLE, QUEUED, ACTIVE, DONE, MAX };
     template <typename T, typename U> static void assign(T &targets, U &result);
     constexpr static inline unsigned ATOMIC_WIDTH = 2;
     AtomicSharedEnum<ATOMIC_WIDTH> work_status;
@@ -30,6 +30,8 @@ class Work {
     virtual void run() = 0;
     virtual void await_all() = 0;
     bool done() const;
+    bool enqueue();
+    bool queued() const;
     /// Transition to done state.
     void finish();
     /// Call a fn - execute eagerly if it is small.
@@ -40,6 +42,7 @@ class Work {
             const FnT<Ret, Args...> &f, const ArgsT &...args);
     /// Determines if a work item is large enough to be shared across threads.
     virtual bool can_respond() const = 0;
+    virtual bool execute_immediately() const = 0;
 };
 
 using WorkT = std::shared_ptr<Work>;
@@ -56,4 +59,5 @@ template <typename Ret, typename... Args> class TypedWork : public Work {
     void run() override;
     void await_all() override;
     bool can_respond() const override;
+    bool execute_immediately() const override;
 };

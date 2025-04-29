@@ -56,9 +56,14 @@ struct FourWayPlus : TypedClosureI<Empty, Int, Int, Int, Int, Int> {
     using TypedClosureI<Empty, Int, Int, Int, Int, Int>::TypedClosureI;
     LazyT<Int> body(LazyT<Int> &a, LazyT<Int> &b, LazyT<Int> &c,
                     LazyT<Int> &d) override {
-        auto res1 = Plus__BuiltIn(a, b);
-        auto res2 = Plus__BuiltIn(c, d);
-        auto res3 = Plus__BuiltIn(res1, res2);
+        WorkManager::await(a, b);
+        auto res1 = Plus__BuiltIn(extract_lazy(a), extract_lazy(b));
+        WorkManager::enqueue(res1);
+        WorkManager::await(c, d);
+        auto res2 = Plus__BuiltIn(extract_lazy(c), extract_lazy(d));
+        WorkManager::enqueue(res2);
+        WorkManager::await(res1, res2);
+        auto res3 = Plus__BuiltIn(extract_lazy(res1), extract_lazy(res2));
         return ensure_lazy(res3);
     }
     constexpr std::size_t lower_size_bound() const override { return 50; };
@@ -109,8 +114,10 @@ struct BranchingExample : public TypedClosureI<Empty, Int, Int, Int, Int> {
         WorkManager::await(res1);
         if (res1->value()) {
             res2 = fn_call(Plus__BuiltIn_G, y, Int(1));
+            WorkManager::enqueue(res2);
         } else {
             res2 = fn_call(Plus__BuiltIn_G, z, Int(1));
+            WorkManager::enqueue(res2);
         }
         res3 = fn_call(Minus__BuiltIn_G, res2, Int(2));
         return res3;
@@ -180,7 +187,7 @@ struct RecursiveDouble : public TypedClosureI<Empty, Int, Int> {
     LazyT<Int> body(LazyT<Int> &x) override {
         WorkManager::await(x);
         if (x->value() > 0) {
-            auto arg = Decrement__BuiltIn(x);
+            auto arg = Decrement__BuiltIn(extract_lazy(x));
             WorkT call1, call2;
             FnT<Int, Int> fn = std::make_shared<TypedClosureG<Empty, Int, Int>>(
                 RecursiveDouble::init);
@@ -253,7 +260,10 @@ class MultiplyFn : public TypedClosureI<TupleT<Int>, Int, Int> {
     using TypedClosureI<TupleT<Int>, Int, Int>::TypedClosureI;
     LazyT<Int> body(LazyT<Int> &a) override {
         auto b = std::get<0>(env);
-        auto c = Multiply__BuiltIn(a, b);
+        WorkManager::enqueue(a);
+        WorkManager::enqueue(b);
+        WorkManager::await(a, b);
+        auto c = Multiply__BuiltIn(extract_lazy(a), extract_lazy(b));
         return ensure_lazy(c);
     }
 
@@ -394,7 +404,8 @@ struct EitherIntBoolEdgeCaseFn
         case 0ULL: {
             LazyT<Left::type> i = reinterpret_cast<Left *>(&x.value)->value;
             LazyT<Int> z = make_lazy<Int>(0);
-            y = ensure_lazy(Comparison_GT__BuiltIn(i, z));
+            y = ensure_lazy(
+                Comparison_GT__BuiltIn(extract_lazy(i), extract_lazy(z)));
             break;
         }
         case 1ULL: {
@@ -526,9 +537,10 @@ struct ListIntDec : public TypedClosureI<Empty, ListInt, ListInt> {
                     ListIntDec::init);
             auto res = fn_call(fn, tail);
 
-            return make_lazy<ListInt>(std::integral_constant<std::size_t, 0>(),
-                                      Cons{ensure_lazy(std::make_tuple(
-                                          Decrement__BuiltIn(head), res))});
+            return make_lazy<ListInt>(
+                std::integral_constant<std::size_t, 0>(),
+                Cons{ensure_lazy(std::make_tuple(
+                    Decrement__BuiltIn(extract_lazy(head)), res))});
         }
         case 1:
             return make_lazy<ListInt>(std::integral_constant<std::size_t, 1>(),
@@ -639,10 +651,10 @@ struct RecursiveFn : public TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int> {
     using TypedClosureI<TupleT<WeakFnT<Int, Int>>, Int, Int>::TypedClosureI;
     LazyT<Int> res;
     LazyT<Int> body(LazyT<Int> &x) override {
-        auto y = Comparison_GT__BuiltIn(x, Int{0});
+        auto y = Comparison_GT__BuiltIn(extract_lazy(x), extract_lazy(Int{0}));
         WorkManager::await(y);
         if (extract_lazy(y)) {
-            auto arg = Decrement__BuiltIn(x);
+            auto arg = Decrement__BuiltIn(extract_lazy(x));
             WorkT work;
             LazyT<FnT<Int, Int>> call_fn = load_env(std::get<0>(env));
             res = fn_call(call_fn->value(), arg);
@@ -685,10 +697,10 @@ TEST_P(FnCorrectnessTest, SelfRecursiveFnTest) {
 struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     using TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int>::TypedClosureI;
     LazyT<Bool> body(LazyT<Int> &x) override {
-        auto c = Comparison_GT__BuiltIn(x, Int{0});
+        auto c = Comparison_GT__BuiltIn(extract_lazy(x), extract_lazy(Int{0}));
         WorkManager::await(c);
         if (extract_lazy(c)) {
-            auto y = Decrement__BuiltIn(x);
+            auto y = Decrement__BuiltIn(extract_lazy(x));
             auto res = fn_call(load_env(std::get<0>(env))->value(), y);
             return res;
         } else {
@@ -710,10 +722,10 @@ struct IsEven : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
 struct IsOdd : public TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int> {
     using TypedClosureI<TupleT<WeakFnT<Bool, Int>>, Bool, Int>::TypedClosureI;
     LazyT<Bool> body(LazyT<Int> &x) override {
-        auto c = Comparison_GT__BuiltIn(x, Int{0});
+        auto c = Comparison_GT__BuiltIn(extract_lazy(x), extract_lazy(Int{0}));
         WorkManager::await(c);
         if (extract_lazy(c)) {
-            auto y = Decrement__BuiltIn(x);
+            auto y = Decrement__BuiltIn(extract_lazy(x));
             auto res = fn_call(load_env(std::get<0>(env))->value(), y);
             return res;
         } else {

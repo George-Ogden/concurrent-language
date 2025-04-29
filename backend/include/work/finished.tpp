@@ -13,3 +13,7 @@ void FinishedWork::await_all() {};
 bool FinishedWork::can_respond() const {
     return true;
 };
+
+bool FinishedWork::execute_immediately() const {
+    return true;
+}

@@ -16,6 +16,9 @@ struct WorkManager {
     static LazyT<Ret> run(FnT<Ret, Args...> fn, Args... args);
     // Main function for threads to execute.
     static std::monostate main(std::atomic<WorkT> *ref);
+    // Enqueue work to be executed in the future.
+    template <typename T> static void enqueue(const T &values);
+    static void enqueue(const WorkT &work);
     // Wait for values to be computed.
     template <typename... Vs> static auto await(Vs &...vs);
     // Recursively wait for all values to be computed (useful for recursive

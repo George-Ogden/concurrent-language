@@ -70,23 +70,44 @@ impl TypeDef {
     }
 }
 
-#[derive(Clone, Debug, FromVariants, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq, Eq)]
 pub enum Value {
     BuiltIn(BuiltIn),
     Memory(Memory),
 }
 
+impl Value {
+    pub fn filter_memory(&self) -> Option<Memory> {
+        match self {
+            Value::BuiltIn(_) => None,
+            Value::Memory(memory) => Some(memory.clone()),
+        }
+    }
+}
+
+impl From<Integer> for Value {
+    fn from(value: Integer) -> Self {
+        BuiltIn::from(value).into()
+    }
+}
+
+impl From<Boolean> for Value {
+    fn from(value: Boolean) -> Self {
+        BuiltIn::from(value).into()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Memory(pub Id);
 
-#[derive(Clone, Debug, FromVariants, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq, Eq)]
 pub enum BuiltIn {
     Integer(Integer),
     Boolean(Boolean),
     BuiltInFn(Name),
 }
 
-#[derive(Clone, Debug, FromVariants, PartialEq)]
+#[derive(Clone, Debug, FromVariants, PartialEq, Eq)]
 pub enum Expression {
     Value(Value),
     ElementAccess(ElementAccess),
@@ -96,30 +117,67 @@ pub enum Expression {
     ClosureInstantiation(ClosureInstantiation),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl Expression {
+    pub fn values(&self) -> Vec<Value> {
+        match self {
+            Expression::Value(value) => vec![value.clone()],
+            Expression::ElementAccess(ElementAccess { value, idx: _ }) => vec![value.clone()],
+            Expression::TupleExpression(TupleExpression(values)) => values.clone(),
+            Expression::FnCall(FnCall {
+                fn_,
+                fn_type: _,
+                args,
+            }) => {
+                let mut values = vec![fn_.clone()];
+                values.extend(args.clone());
+                values
+            }
+            Expression::ConstructorCall(ConstructorCall {
+                type_: _,
+                idx: _,
+                data,
+            }) => data
+                .as_ref()
+                .map(|(_, value)| vec![value.clone()])
+                .unwrap_or_default(),
+            Expression::ClosureInstantiation(ClosureInstantiation { name: _, env }) => env
+                .as_ref()
+                .map(|value| vec![value.clone()])
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl From<Memory> for Expression {
+    fn from(value: Memory) -> Self {
+        Value::from(value).into()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ElementAccess {
     pub value: Value,
     pub idx: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TupleExpression(pub Vec<Value>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FnCall {
     pub fn_: Value,
     pub fn_type: FnType,
     pub args: Vec<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConstructorCall {
     pub type_: Name,
     pub idx: usize,
     pub data: Option<(Name, Value)>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClosureInstantiation {
     pub name: Name,
     pub env: Option<Value>,
@@ -133,10 +191,14 @@ pub enum Statement {
     Assignment(Assignment),
     IfStatement(IfStatement),
     MatchStatement(MatchStatement),
+    Enqueue(Enqueue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Await(pub Vec<Memory>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Enqueue(pub Memory);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Declaration {

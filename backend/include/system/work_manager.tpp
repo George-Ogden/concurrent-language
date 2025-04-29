@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fn/types.hpp"
+#include "types/compound.hpp"
 #include "system/thread_manager.tpp"
 #include "system/work_manager.hpp"
 #include "work/work.tpp"
@@ -34,6 +35,17 @@ LazyT<Ret> WorkManager::run(FnT<Ret, Args...> fn, Args...args) {
 std::monostate WorkManager::main(std::atomic<WorkT> *ref) {
     runners[ThreadManager::get_id()]->main(ref);
     return std::monostate{};
+}
+
+template<typename T>
+void WorkManager::enqueue(const T &value) {
+    if constexpr (is_lazy_v<T>){
+        value->enqueue();
+    }
+}
+
+void WorkManager::enqueue(const WorkT &work) {
+    runners[ThreadManager::get_id()]->enqueue(work);
 }
 
 template <typename... Vs>
