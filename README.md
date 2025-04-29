@@ -49,6 +49,12 @@ or
 NUM_CPUS=1 make run # single threaded
 ```
 If this variable is more than the total number of CPUs, the program will crash.
+## Running with local memoisation
+Memoisation is disabled by default.
+Enable it by compiling with the `FN_CACHING` flag.
+```bash
+make build/run BACKEND_FLAGS=-DFN_CACHING
+```
 # Test
 To run Python tests, install the development dependencies.
 ```bash
