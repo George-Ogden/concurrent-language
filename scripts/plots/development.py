@@ -50,8 +50,8 @@ def plot(df: pd.DataFrame) -> go.Figure:
         log_y=True,
         labels={
             "function": "Function and Arguments",
-            "normalized_performance": "Normalized Performance",
-            "iteration": "Update",
+            "normalized_performance": "Relative Performance",
+            "iteration": "Feature",
         },
         markers=True,
     )
