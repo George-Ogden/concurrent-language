@@ -63,7 +63,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize(df: pd.DataFrame, normalize_first_directory: bool = False) -> pd.DataFrame:
-    grouped_df = df.groupby(["function", "title", "directory"], group_keys=False).agg(
+    grouped_df = df.groupby(["function", "title", "directory"], group_keys=False, sort=False).agg(
         {"duration": ["mean", "std"], "function": "count"}
     )
     grouped_df.columns = ["_".join(column) for column in grouped_df.columns.to_flat_index()]
