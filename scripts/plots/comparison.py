@@ -91,6 +91,7 @@ def normalize(df: pd.DataFrame, normalize_first_directory: bool = False) -> pd.D
         / (grouped_df.duration_mean - grouped_df.duration_std / np.sqrt(grouped_df.function_count))
         - grouped_df.normalized_performance
     )
+    grouped_df.dropna(axis=0, how="any", inplace=True)
     df = grouped_df.reset_index()
     df["function_name"] = df["function"].str.extract(r"^([a-z\-]+)")
     columns = []
