@@ -1,4 +1,4 @@
-Concurrent Language
+Automatically Parallelized Functional Language (APFLang)
 ===================
 # Setup/Install
 This project requires installing Python, GCC, Java and Rust.
