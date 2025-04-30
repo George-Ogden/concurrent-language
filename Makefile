@@ -22,7 +22,7 @@ FRONTEND_FLAGS :=
 BACKEND_FLAGS :=
 FLAGS_HASH := $(shell echo '$(FRONTEND_FLAGS)' | sha256sum - 2> /dev/null | cut -d' ' -f1)
 
-FILE := samples/main.txt
+FILE := samples/main.apfl
 LAST_FILE_PREFIX := .last-file-hash-
 LAST_FILE_HASH = $(shell sha256sum '$(FILE)' 2>/dev/null | cut -d' ' -f1)
 # Create file containing flags and rebuild if it changes.
@@ -97,13 +97,13 @@ test: build
 	./backend/bin/test --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=10 --gtest_brief=0 --gtest_print_time=1
 	# Build all samples.
 	for sample in samples/*; do \
-		if [ "$$sample" != "samples/grammar.txt" ]; then \
+		if [ "$$sample" != "samples/grammar.apfl" ]; then \
 			make build FILE=$$sample || exit 1; \
 		fi \
 	done;
 	# Build all benchmark programs and run 10 times with the smallest input.
 	for sample in benchmark/**; do \
-		make build FILE=$$sample/main.txt USER_FLAG=1 || exit 1; \
+		make build FILE=$$sample/main.apfl USER_FLAG=1 || exit 1; \
 		for i in `seq 1 10`; do \
 			cat $$sample/input.txt | head -1 | xargs ./$(BACKEND) || exit 1; \
 		done; \
@@ -136,10 +136,10 @@ benchmark: | $(LOG_DIR)
 	# Run each program repeatedly with all inputs, writing timing information into the log file.
 	for program in benchmark/**; do \
 		for i in `seq 1 $(REPEATS)`; do \
-			make build FILE=$$program/main.txt USER_FLAG=-1; \
+			make build FILE=$$program/main.apfl USER_FLAG=-1; \
 			while read input; do \
 				echo $$program $$input; \
-				make time --silent FILE=$$program/main.txt USER_FLAG=-1 INPUT="$$input" \
+				make time --silent FILE=$$program/main.apfl USER_FLAG=-1 INPUT="$$input" \
 				| xargs printf '%s\t' \
 					`echo $$program | sed 's/benchmark\///'| sed 's/\///g'` \
 					`echo $$input | xargs printf '%s,' | sed 's/,$$//'` \
@@ -178,10 +178,10 @@ timings: $(VECTOR_FILE)
 	for program in timing/**; do \
 		for i in `seq 1 $(REPEATS)`; do \
 			export program_name=`echo $$program | sed 's/.*\///'`; \
-			make build FILE=$$program/main.txt FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"; \
+			make build FILE=$$program/main.apfl FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)"; \
 			for input in `seq 0 64`; do \
 				echo $$program $$input; \
-				make time --silent FILE=$$program/main.txt INPUT="$$input" LIMIT=0 FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)" \
+				make time --silent FILE=$$program/main.apfl INPUT="$$input" LIMIT=0 FRONTEND_FLAGS="--export-vector-file $(TEMPFILE)" \
 				| sed "s/^/$$program_name\t`tail -1 $(TEMPFILE)`\t/" \
 				>> $(VECTOR_FILE); \
 			done; \
