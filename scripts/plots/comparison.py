@@ -52,7 +52,7 @@ def merge_logs(*logs: pd.DataFrame) -> pd.DataFrame:
 
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
-    df.dropna(subset=["duration"], inplace=True, ignore_index=True)
+    df = df[df.groupby("function")["duration"].transform(lambda x: ~x.isna().all())]
 
     def trim_group(group: pd.Series) -> pd.Series:
         return group.sort_values("duration").iloc[1:-1]
@@ -91,7 +91,6 @@ def normalize(df: pd.DataFrame, normalize_first_directory: bool = False) -> pd.D
         / (grouped_df.duration_mean - grouped_df.duration_std / np.sqrt(grouped_df.function_count))
         - grouped_df.normalized_performance
     )
-    grouped_df.dropna(axis=0, how="any", inplace=True)
     df = grouped_df.reset_index()
     df["function_name"] = df["function"].str.extract(r"^([a-z\-]+)")
     columns = []
@@ -115,13 +114,13 @@ def neaten(fig: go.Figure) -> go.Figure:
     fig.update_layout(
         legend=dict(
             itemsizing="constant",
-            font=dict(size=24),
+            font=dict(size=40),
         )
     )
     for update in [fig.update_xaxes, fig.update_yaxes]:
         update(
-            tickfont=dict(size=20),
-            title_font=dict(size=24),
+            tickfont=dict(size=32),
+            title_font=dict(size=40),
             showline=True,
             linewidth=1,
             linecolor="black",
@@ -129,11 +128,11 @@ def neaten(fig: go.Figure) -> go.Figure:
         )
 
     for annotation in fig.layout.annotations:
-        annotation.font.size = 30
+        annotation.font.size = 40
 
     for trace in fig.data:
-        trace.marker.size = 10
-        trace.line.width = 5
+        trace.marker.size = 20
+        trace.line.width = 10
 
     return fig
 
@@ -189,7 +188,10 @@ def plot(df: pd.DataFrame) -> go.Figure:
                 matches=None,
                 tickmode="array",
                 tickvals=list(function_map.values()),
-                ticktext=list(function_map.keys()),
+                ticktext=[
+                    re.match(r".*((\(.*,.*\))|((?<=\()\d+(?=\))))", name).group(1)
+                    for name in function_map.keys()
+                ],
                 tickangle=45,
             )
 
