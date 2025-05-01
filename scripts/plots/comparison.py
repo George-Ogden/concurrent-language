@@ -119,7 +119,7 @@ def neaten(fig: go.Figure) -> go.Figure:
     )
     for update in [fig.update_xaxes, fig.update_yaxes]:
         update(
-            tickfont=dict(size=32),
+            tickfont=dict(size=28),
             title_font=dict(size=40),
             showline=True,
             linewidth=1,
@@ -133,6 +133,8 @@ def neaten(fig: go.Figure) -> go.Figure:
     for trace in fig.data:
         trace.marker.size = 20
         trace.line.width = 10
+
+    fig.update_layout(margin=dict(l=150))
 
     return fig
 
@@ -204,6 +206,29 @@ def plot(df: pd.DataFrame) -> go.Figure:
             x=0.5,
         )
     )
+    fig.add_annotation(
+        text="Arguments",
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=-0.12,
+        showarrow=False,
+        xanchor="center",
+        yanchor="top",
+    )
+
+    fig.add_annotation(
+        text="Relative Performance",
+        xref="paper",
+        yref="paper",
+        x=-0.05,
+        y=0.5,
+        showarrow=False,
+        textangle=-90,
+        xanchor="right",
+        yanchor="middle",
+    )
+
     fig = neaten(fig)
 
     return fig
