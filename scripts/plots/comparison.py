@@ -115,7 +115,8 @@ def neaten(fig: go.Figure) -> go.Figure:
         legend=dict(
             itemsizing="constant",
             font=dict(size=40),
-        )
+        ),
+        margin=dict(l=150),
     )
     for update in [fig.update_xaxes, fig.update_yaxes]:
         update(
@@ -133,8 +134,6 @@ def neaten(fig: go.Figure) -> go.Figure:
     for trace in fig.data:
         trace.marker.size = 20
         trace.line.width = 10
-
-    fig.update_layout(margin=dict(l=150))
 
     return fig
 
