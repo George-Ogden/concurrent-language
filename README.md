@@ -1,4 +1,4 @@
-Concurrent Language
+Automatically Parallelized Functional Language (APFLang)
 ===================
 # Setup/Install
 This project requires installing Python, GCC, Java and Rust.
@@ -37,6 +37,24 @@ make run FILE=$filename INPUT="$input"
 ## Running without `sudo`
 It is possible to build/run without `sudo`.
 To do this, set `USER_FLAG=1` as a Makefile argument.
+## Running with specific number of CPUs
+By default, code will run on the maximum number of CPUs (result of `nproc`).
+Change this by overriding the `NUM_CPUS` environment variable:
+```bash
+export NUM_CPUS=1 # single threaded
+make run
+```
+or
+```bash
+NUM_CPUS=1 make run # single threaded
+```
+If this variable is more than the total number of CPUs, the program will crash.
+## Running with local memoisation
+Memoisation is disabled by default.
+Enable it by compiling with the `FN_CACHING` flag.
+```bash
+make build/run BACKEND_FLAGS=-DFN_CACHING
+```
 # Test
 To run Python tests, install the development dependencies.
 ```bash
