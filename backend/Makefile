@@ -1,7 +1,7 @@
 CXX := g++
-EXTRA_FLAGS :=
-CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors $(EXTRA_FLAGS)
-OPTIMIZATION := -O3
+EXTRA_FLAGS := 
+CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors $(EXTRA_FLAGS) -DFN_CACHING
+OPTIMIZATION := -Ofast
 LIBS :=
 INCLUDE := -Iinclude
 
