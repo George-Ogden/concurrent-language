@@ -3,6 +3,7 @@
 #include "data_structures/cyclic_queue.tpp"
 #include "data_structures/lock.tpp"
 #include "system/thread_manager.tpp"
+#include "time/utils.hpp"
 
 #include <gtest/gtest.h>
 
@@ -11,8 +12,6 @@
 #include <mutex>
 #include <optional>
 #include <pthread.h>
-
-using namespace std::chrono_literals;
 
 class QueueTest : public ::testing::TestWithParam<unsigned> {
   protected:
