@@ -46,7 +46,7 @@ build: $(TARGET)
 	make -C backend build EXTRA_FLAGS='$(BACKEND_FLAGS)'
 
 $(TARGET): $(PIPELINE) $(FILE) $(LAST_FILE)
-	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) $(FRONTEND_FLAGS) > $(TARGET)
+	cat $(FILE) | xargs -0 python $(PARSER) | ./$(PIPELINE) $(FRONTEND_FLAGS) > $(TEMPFILE) && mv $(TEMPFILE) $(TARGET)
 
 $(TYPE_CHECKER): $(wildcard type-checker/src/*) $(PARSER)
 	cargo build --manifest-path $(TYPE_CHECKER_MANIFEST) --release

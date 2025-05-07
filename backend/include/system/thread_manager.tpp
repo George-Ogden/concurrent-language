@@ -24,9 +24,12 @@ unsigned ThreadManager::hardware_concurrency() {
 }
 
 unsigned ThreadManager::available_concurrency() {
+    if (num_cpus_override.has_value()){
+        return num_cpus_override.value();
+    }
     const char * num_cpus_env_var = std::getenv("NUM_CPUS");
     if (num_cpus_env_var == nullptr){
-        return num_cpus_override.value_or(hardware_concurrency());
+        return hardware_concurrency();
     } else {
         return std::stoi(num_cpus_env_var);
     }

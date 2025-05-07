@@ -3,6 +3,8 @@
 #include <chrono>
 #include <type_traits>
 
+using namespace std::chrono_literals;
+
 typedef std::chrono::duration<std::chrono::nanoseconds::rep,
                               std::chrono::nanoseconds::period>
     Duration;
