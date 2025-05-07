@@ -35,7 +35,7 @@ void WorkRunner::main(std::atomic<WorkT> *ref) {
         // All other threads busy wait.
         while (1) {
             try {
-                active_wait(std::function<bool()>([]() { return false; }));
+                active_wait();
             } catch (finished &f) {
                 break;
             }
@@ -172,6 +172,19 @@ bool WorkRunner::active_wait(std::function<bool()> predicate) {
         assert(work_request.full());
         work_request.fulfill();
     }
+    return true;
+}
+
+bool WorkRunner::active_wait() {
+    WorkRequest &work_request = *work_requests[id];
+    work_request.request();
+    if (work_request.enqueue()) {
+        work_request_queue.push(id);
+    } else if (work_request.full()) {
+        work_request.fulfill();
+        return false;
+    }
+    work_request.fulfill();
     return true;
 }
 
