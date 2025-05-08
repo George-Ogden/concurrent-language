@@ -5,8 +5,6 @@
 #include <chrono>
 #include <variant>
 
-using namespace std::chrono_literals;
-
 template <typename Rep, typename Period>
 void sleep(const std::chrono::duration<Rep, Period> &duration) {
     auto start = time_utils::now();

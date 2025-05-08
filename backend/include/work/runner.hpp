@@ -35,6 +35,8 @@ struct WorkRunner {
     /// Active wait, performing any other tasks and exiting if predicate is
     /// true.
     bool active_wait(std::function<bool()> predicate);
+    /// Active wait until next work item.
+    bool active_wait();
     /// Determine whether there are any requests from other workers.
     bool any_requests() const;
     /// Respond to a request with work, returning true if the request succeeds.
