@@ -17,6 +17,9 @@ pip install -r requirements.txt
 ```bash
 sudo apt-get install -y build-essential libgtest-dev librange-v3-dev
 ```
+# Language
+The language is pure and functional - you write serial code and the compiler automatically runs it in parallel.
+Samples for the language are given in the `samples/` folder or the `benchmark/` folder.
 # Build and Run
 ## Compile
 To compile a program:
