@@ -1,5 +1,5 @@
 CXX := g++
-EXTRA_FLAGS := 
+EXTRA_FLAGS :=
 CXXFLAGS := -Wall -pedantic -std=c++20 -Wfatal-errors $(EXTRA_FLAGS)
 OPTIMIZATION := -Ofast
 LIBS :=
