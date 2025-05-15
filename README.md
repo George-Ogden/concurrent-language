@@ -18,8 +18,8 @@ pip install -r requirements.txt
 sudo apt-get install -y build-essential libgtest-dev librange-v3-dev
 ```
 # Language
-The language is pure and functional - you write serial code and the compiler automatically runs it in parallel.
-Samples for the language are given in the `samples/` folder or the `benchmark/` folder.
+APFLang is pure and functional - you write serial code and the compiler automatically runs it in parallel.
+Samples are given in the `samples/` folder or the `benchmark/` folder.
 # Build and Run
 ## Compile
 To compile a program:
@@ -83,7 +83,7 @@ cargo test --manifest-path $directory/Cargo.toml
 # Benchmarking
 Benchmarking requires access to `sudo`.
 You will be prompted to enter the password when the first program is run.
-To benchmark programs:
+To benchmark APFLang programs:
 ```bash
 make benchmark
 ```
@@ -102,8 +102,6 @@ Both benchmarks will create directories with the following structure:
 ```
 `log.tsv` contains the headers `name`, `args` and `duration` where `duration` is the runtime in nanoseconds.
 
-_The benchmarking scripts were modified for the multi-core benchmarking to ensure the correct CPUs were used.
-The Python script was also slightly modified to include the extra time to set up multiple cores._
 # Scripts
 The main script is `./scripts/benchmark_visualization.py`.
 All other scripts are used to generate the code size coefficients.
@@ -273,7 +271,6 @@ The heavy use of template-metaprogramming means that files are split into header
 - `./timing/` contains code for estimating the coefficients of code vectors.
 ### Scripts
 - The scripts are descripted in [__Scripts__](#Scripts).
-- `./scripts/plots/` contains files for generating the plots in the dissertation.
 ### CICD
 - `.pre-commit-config.yaml` has pre-commit hooks for automatic linting and formatting on commit.
 - `.github/workflows` contains scripts for building and testing on the remote server.
