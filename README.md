@@ -40,7 +40,7 @@ make run FILE=$filename INPUT="$input"
 ## Running without `sudo`
 It is possible to build/run without `sudo`.
 To do this, set `USER_FLAG=1` as a Makefile argument.
-## Running with specific number of CPUs
+## Running with a specific number of CPUs
 By default, code will run on the maximum number of CPUs (result of `nproc`).
 Change this by overriding the `NUM_CPUS` environment variable:
 ```bash
@@ -158,7 +158,7 @@ This will display the predicted times, as well as the recorded times for each mo
 Getting good predictions takes some playing around.
 Some of the coefficients should be zero but are assigned a positive value, and these should be deleted.
 For example, `element_access` (tuple access) is usually free as the compiler inlines it.
-However, this coefficient will often be positive and may need manually setting to zero.
+However, this coefficient will often be positive and may need to be manually set to zero.
 
 # Repository Overview
 ## Frontend
@@ -194,7 +194,7 @@ The type-checker receives AST nodes in the form of JSON from the parsing stage.
 - `./type-checker/src/type_check_nodes.rs` contains definitions of annotated AST nodes that will be generated after the type-checking process.
 - `./type-checker/src/type_checker.rs` contains the `TypeChecker` to type check a program and generate a `TypedProgram` or `TypeCheckError`.
 ### Optimization
-- `./optimization/src/refresher.rs` define a `Refresher` to update functions that have duplicated variables or need variables from a new set for an optimization.
+- `./optimization/src/refresher.rs` defines a `Refresher` to update functions that have duplicated variables or need variables from a new set for an optimization.
 - `./optimization/src/dead_code_analysis.rs` contains a `DeadCodeAnalyzer` to remove dead code, including unused variables, arguments and functions.
 - `./optimization/src/equivalent_expression_elimination.rs` contains an `EquivalentExpressionOptimizer` to remove duplicated expressions.
 - `./optimization/src/inlining.rs` contains an `Inliner` to inline function calls.
@@ -202,7 +202,7 @@ The type-checker receives AST nodes in the form of JSON from the parsing stage.
 ### Lowering
 Lowering converts the annotated AST into an intermediate representation.
 - `./lowering/src/intermediate_nodes.rs` contains definitions for the intermediate representation.
-- `./lowering/src/copy_propagation.rs` defines an `CopyPropagator` to remove registers that only alias another value.
+- `./lowering/src/copy_propagation.rs` defines a `CopyPropagator` to remove registers that only alias another value.
 - `./lowering/src/lower.rs` defines the `Lowerer` to convert the program from an annotated AST into the intermediate representation.
 - `./lowering/src/expression_equality_checker.rs` defines an `ExpressionEqualityChecker` to determine if two expressions are equivalent when testing.
 The intermediate representation gives each variable a unique id so this ensures that two expressions using different sets of unique ids are the same.
