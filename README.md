@@ -6,7 +6,7 @@ This project was developed with
 - `Python=3.12`
 - `GCC=12.2`
 - `Java=21.0`
-- `Rust=1.87`
+- `Rust=1.87-nightly`
 
 Rust dependencies are managed automatically by Cargo.
 ## Python Dependencies
